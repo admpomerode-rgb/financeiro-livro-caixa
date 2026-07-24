@@ -241,6 +241,15 @@
 
   /* Comissões */
   .vendedor-mini-card{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid var(--line);border-radius:8px;margin-bottom:8px;}
+  .vendedor-avatar{
+    width:26px;height:26px;border-radius:50%;color:var(--white);font-family:'Space Grotesk';font-weight:700;
+    font-size:10.5px;display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  }
+  .vendedor-avatar.lg{width:44px;height:44px;font-size:15px;}
+  .comissao-seletor .panel-body{background:var(--bone);}
+  .comissao-vendedor-header{display:flex;align-items:center;gap:14px;padding:18px 20px;border-bottom:1px solid var(--line);}
+  .comissao-vendedor-nome{font-family:'Space Grotesk';font-weight:600;font-size:16px;}
+  .comissao-vendedor-sub{font-size:12px;color:var(--text-soft);margin-top:2px;}
   .vendedor-mini-card .nome{font-weight:600;font-size:13.5px;flex:1;}
   .pct-input-sm{width:56px;border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-size:12.5px;text-align:right;}
   .item-comissao input[type="checkbox"]{width:16px;height:16px;}
@@ -501,6 +510,10 @@ let faturaCartaoId = null;
 let faturaCompetenciaAtual = null;
 let invContaId = null;
 let categoriaTipoAtivo = 'saida';
+let comissaoVendedorSelecionado = '';
+let comissaoDataDeSelecionada = null;
+let comissaoDataAteSelecionada = null;
+let comissaoAbaSelecionada = 'pendentes';
 document.getElementById('nav').addEventListener('click', (e)=>{
   const item = e.target.closest('.nav-item');
   if(!item) return;
@@ -1520,10 +1533,15 @@ function renderCategoriaPanel(tipo){
   `;
 }
 
+function corVendedor(vendedorId){
+  const idx = state.vendedores.findIndex(v=>v.id===vendedorId);
+  return CONTA_CORES[idx>=0 ? idx % CONTA_CORES.length : 0];
+}
+
 function viewComissoes(){
   return `
     <div class="topbar">
-      <div><h1>Comissões</h1><p>Comissão de vendas por vendedor — a partir dos pedidos do VK Industrial ou lançados manualmente</p></div>
+      <div><h1>Comissões</h1><p>Escolha um vendedor e o período pra ver os pedidos e gerar o pagamento</p></div>
       <div style="display:flex;gap:8px;">
         <button class="btn ghost" id="btnNovoVendedor">+ Vendedor</button>
         <button class="btn ghost" id="btnNovaComissaoManual">+ Comissão manual</button>
@@ -1535,6 +1553,7 @@ function viewComissoes(){
       <div class="panel-body" style="padding:14px;">
         ${state.vendedores.length ? state.vendedores.map(v=>`
           <div class="vendedor-mini-card">
+            <span class="vendedor-avatar" style="background:${corVendedor(v.id)}">${initials(v.nome)}</span>
             <span class="nome">${escapeHTML(v.nome)}</span>
             <span style="font-size:11.5px;color:var(--text-soft);">Comissão padrão</span>
             <input type="text" inputmode="decimal" class="pct-input-sm vendedor-padrao-input" data-vendedor="${v.id}" value="${v.comissaoPadrao||0}">
@@ -1545,79 +1564,112 @@ function viewComissoes(){
       </div>
     </div>
 
-    <div class="panel">
-      <div class="filter-bar">
-        <span style="font-size:12.5px;color:var(--text-soft);">Período</span>
-        <input type="date" id="comissaoDataDe" value="${primeiroDiaMes()}">
-        <span style="color:var(--text-soft);font-size:12px;">até</span>
-        <input type="date" id="comissaoDataAte" value="${todayISO()}">
-        <button class="btn ghost sm" id="btnFiltrarComissoes">Filtrar</button>
+    <div class="panel comissao-seletor">
+      <div class="panel-head"><h2>Selecionar vendedor e período</h2></div>
+      <div class="panel-body" style="padding:20px;">
+        <div class="field-row">
+          <div class="field" style="flex:1.4;">
+            <label>Vendedor</label>
+            <select id="comissaoVendedorSelect">
+              <option value="">Selecione um vendedor...</option>
+              ${state.vendedores.map(v=>`<option value="${v.id}" ${comissaoVendedorSelecionado===v.id?'selected':''}>${escapeHTML(v.nome)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field"><label>De</label><input type="date" id="comissaoDataDe" value="${comissaoDataDeSelecionada || primeiroDiaMes()}"></div>
+          <div class="field"><label>Até</label><input type="date" id="comissaoDataAte" value="${comissaoDataAteSelecionada || todayISO()}"></div>
+        </div>
+        <button class="btn" id="btnFiltrarComissoes">Ver pedidos</button>
       </div>
-      <div class="panel-body" id="comissoesPorVendedor" style="padding:14px;"></div>
     </div>
 
+    <div id="comissaoResultado"></div>
+  `;
+}
+
+function renderComissaoResultado(){
+  if(!comissaoVendedorSelecionado){
+    return `<div class="panel"><div class="empty">Escolha um vendedor e um período acima, depois clique em "Ver pedidos".</div></div>`;
+  }
+  const vendedor = state.vendedores.find(v=>v.id===comissaoVendedorSelecionado);
+  if(!vendedor) return `<div class="panel"><div class="empty">Vendedor não encontrado.</div></div>`;
+  return `
     <div class="panel">
-      <div class="panel-head"><h2>Pagamentos de comissão já gerados</h2></div>
-      <div class="panel-body" id="comissoesPagasLista"></div>
+      <div class="comissao-vendedor-header">
+        <span class="vendedor-avatar lg" style="background:${corVendedor(vendedor.id)}">${initials(vendedor.nome)}</span>
+        <div>
+          <div class="comissao-vendedor-nome">${escapeHTML(vendedor.nome)}</div>
+          <div class="comissao-vendedor-sub">Comissão padrão: ${vendedor.comissaoPadrao||0}%</div>
+        </div>
+      </div>
+      <div class="toggle-row" id="comissaoAbaToggle" style="margin:0 20px 0;">
+        <button type="button" data-aba="pendentes" class="active">Pedidos pendentes</button>
+        <button type="button" data-aba="pagos">Pagamentos já feitos</button>
+      </div>
+      <div id="comissaoConteudoAba" style="padding:16px 20px 20px;"></div>
     </div>
   `;
 }
 
-function renderComissoesPendentes(dataDe, dataAte){
-  const itens = itensComissaoNoPeriodo(dataDe, dataAte).filter(it=>!itemComissaoPago(it));
-  if(!itens.length) return `<div class="empty">Nenhum pedido pendente de comissão nesse período.</div>`;
-  const porVendedor = {};
-  itens.forEach(it=>{
-    const key = it.vendedorId || '_sem_vendedor';
-    if(!porVendedor[key]) porVendedor[key] = [];
-    porVendedor[key].push(it);
-  });
-  return Object.entries(porVendedor).map(([vendedorId, lista])=>{
-    const vendedor = vendedorId!=='_sem_vendedor' ? state.vendedores.find(v=>v.id===vendedorId) : null;
-    const nome = vendedor ? vendedor.nome : 'Sem vendedor definido';
-    const padrao = vendedor ? (vendedor.comissaoPadrao||0) : 0;
-    const totalVendido = lista.reduce((s,it)=>s+it.valorBase,0);
+function renderComissaoPendenteVendedor(vendedorId, dataDe, dataAte){
+  const vendedor = state.vendedores.find(v=>v.id===vendedorId);
+  const itens = itensComissaoNoPeriodo(dataDe, dataAte).filter(it=>it.vendedorId===vendedorId && !itemComissaoPago(it));
+  const padrao = vendedor ? (vendedor.comissaoPadrao||0) : 0;
+  const totalVendido = itens.reduce((s,it)=>s+it.valorBase,0);
+  if(!itens.length){
     return `
-      <div class="categoria-item" data-vendedor="${vendedorId}">
-        <div class="categoria-head"><span class="nome">${escapeHTML(nome)}</span></div>
-        <div class="subcategoria-list" style="background:var(--white);">
-          <div class="ledger-row head" style="grid-template-columns:24px 1fr 100px 110px;padding:9px 14px;">
-            <span></span><span>Pedido</span><span>Data</span><span>Valor</span>
-          </div>
-          ${lista.map(it=>`
-            <div class="ledger-row item-comissao" data-origem="${it.origem}" data-id="${it.id}" data-valor="${it.valorBase}" data-descricao="${escapeHTML(it.descricao)}" data-data="${it.data}" style="grid-template-columns:24px 1fr 100px 110px;padding:9px 14px;">
-              <input type="checkbox" class="chk-comissao" checked ${!vendedor?'disabled':''}>
-              <div class="desc-cell"><div>${escapeHTML(it.descricao)}</div></div>
-              <span class="mono" style="font-size:12px;color:var(--text-soft);">${fmtDate(it.data)}</span>
-              <span class="mono">${brl(it.valorBase)}</span>
-            </div>
-          `).join('')}
-        </div>
-        ${vendedor ? `
-        <div style="padding:14px;border-top:1px solid var(--line);">
-          <div class="field-row">
-            <div class="field"><label>Valor total vendido (selecionado)</label><input type="text" class="valor-total-vendido-display mono" value="${brl(totalVendido)}" disabled style="background:var(--bone);"></div>
-            <div class="field"><label>% de comissão sobre o total</label><input type="text" inputmode="decimal" class="pct-comissao-total" value="${padrao}"></div>
-          </div>
-          <div class="extras-lista" data-vendedor="${vendedorId}"></div>
-          <div class="field-row" style="align-items:flex-end;">
-            <div class="field"><label>Bonificação / outro valor (opcional)</label><input type="text" class="extra-descricao" placeholder="Ex: Bonificação — meta batida"></div>
-            <div class="field" style="max-width:130px;"><label>Valor (R$)</label><input type="text" inputmode="decimal" class="extra-valor" placeholder="0,00"></div>
-            <button class="btn ghost sm btn-add-extra" type="button" style="margin-bottom:14px;">+ Adicionar</button>
-          </div>
-          <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
-            <select class="conta-pagamento-comissao" style="flex:0 0 220px;border:1px solid var(--line);border-radius:7px;padding:7px 10px;font-size:12.5px;background:var(--bone);">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select>
-            <button class="btn btn-gerar-pagamento" data-vendedor="${vendedorId}" data-nome="${escapeHTML(nome)}">Gerar pagamento (<span class="total-comissao-vendedor mono">${brl(totalVendido*padrao/100)}</span>)</button>
-          </div>
-        </div>` : `<div class="note" style="margin:12px 14px 14px;">Estes pedidos vieram sem representante definido no VK Industrial, então não entram no cálculo de comissão.</div>`}
+      <div class="empty" style="padding:24px 0;">Nenhum pedido pendente de comissão nesse período para ${escapeHTML(vendedor?.nome||'')}.</div>
+      <div class="field-row" style="align-items:flex-end;margin-top:6px;">
+        <div class="field"><label>Bonificação / outro valor (opcional)</label><input type="text" class="extra-descricao" placeholder="Ex: Bonificação — meta batida"></div>
+        <div class="field" style="max-width:130px;"><label>Valor (R$)</label><input type="text" inputmode="decimal" class="extra-valor" placeholder="0,00"></div>
+        <button class="btn ghost sm btn-add-extra" type="button" style="margin-bottom:14px;">+ Adicionar</button>
+      </div>
+      <div class="extras-lista" data-vendedor="${vendedorId}"></div>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
+        <select class="conta-pagamento-comissao" style="flex:0 0 220px;border:1px solid var(--line);border-radius:7px;padding:7px 10px;font-size:12.5px;background:var(--bone);">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select>
+        <button class="btn btn-gerar-pagamento" data-vendedor="${vendedorId}" data-nome="${escapeHTML(vendedor?.nome||'')}">Gerar pagamento (<span class="total-comissao-vendedor mono">${brl(0)}</span>)</button>
       </div>
     `;
-  }).join('');
+  }
+  return `
+    <div class="categoria-item" data-vendedor="${vendedorId}" style="border:none;">
+      <div class="subcategoria-list" style="background:var(--white);border:1px solid var(--line);border-radius:10px;">
+        <div class="ledger-row head" style="grid-template-columns:24px 1fr 100px 110px;padding:9px 14px;">
+          <span></span><span>Pedido</span><span>Data</span><span>Valor</span>
+        </div>
+        ${itens.map(it=>`
+          <div class="ledger-row item-comissao" data-origem="${it.origem}" data-id="${it.id}" data-valor="${it.valorBase}" data-descricao="${escapeHTML(it.descricao)}" data-data="${it.data}" style="grid-template-columns:24px 1fr 100px 110px;padding:9px 14px;">
+            <input type="checkbox" class="chk-comissao" checked>
+            <div class="desc-cell"><div>${escapeHTML(it.descricao)}</div></div>
+            <span class="mono" style="font-size:12px;color:var(--text-soft);">${fmtDate(it.data)}</span>
+            <span class="mono">${brl(it.valorBase)}</span>
+          </div>
+        `).join('')}
+      </div>
+      <div style="padding:16px 0 0;">
+        <div class="field-row">
+          <div class="field"><label>Valor total vendido (selecionado)</label><input type="text" class="valor-total-vendido-display mono" value="${brl(totalVendido)}" disabled style="background:var(--bone);"></div>
+          <div class="field"><label>% de comissão sobre o total</label><input type="text" inputmode="decimal" class="pct-comissao-total" value="${padrao}"></div>
+        </div>
+        <div class="extras-lista" data-vendedor="${vendedorId}"></div>
+        <div class="field-row" style="align-items:flex-end;">
+          <div class="field"><label>Bonificação / outro valor (opcional)</label><input type="text" class="extra-descricao" placeholder="Ex: Bonificação — meta batida"></div>
+          <div class="field" style="max-width:130px;"><label>Valor (R$)</label><input type="text" inputmode="decimal" class="extra-valor" placeholder="0,00"></div>
+          <button class="btn ghost sm btn-add-extra" type="button" style="margin-bottom:14px;">+ Adicionar</button>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
+          <select class="conta-pagamento-comissao" style="flex:0 0 220px;border:1px solid var(--line);border-radius:7px;padding:7px 10px;font-size:12.5px;background:var(--bone);">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select>
+          <button class="btn btn-gerar-pagamento" data-vendedor="${vendedorId}" data-nome="${escapeHTML(vendedor?.nome||'')}">Gerar pagamento (<span class="total-comissao-vendedor mono">${brl(totalVendido*padrao/100)}</span>)</button>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
-function renderComissoesPagas(){
-  const lista = [...state.comissoesPagas].sort((a,b)=>b.dataGeracao.localeCompare(a.dataGeracao));
-  if(!lista.length) return `<div class="empty">Nenhum pagamento de comissão gerado ainda.</div>`;
+function renderComissoesPagas(vendedorId){
+  let lista = [...state.comissoesPagas];
+  if(vendedorId) lista = lista.filter(cp=>cp.vendedorId===vendedorId);
+  lista.sort((a,b)=>b.dataGeracao.localeCompare(a.dataGeracao));
+  if(!lista.length) return `<div class="empty">Nenhum pagamento de comissão gerado ainda para esse vendedor.</div>`;
   return lista.map(cp=>{
     const lanc = state.lancamentos.find(l=>l.id===cp.lancamentoDespesaId);
     const statusLabel = !lanc ? 'Excluído' : (lanc.status==='pendente' ? 'Pendente' : 'Pago');
@@ -1864,8 +1916,8 @@ function attachViewHandlers(){
   }
 
   // Comissões
-  const comissoesPorVendedorEl = document.getElementById('comissoesPorVendedor');
-  if(comissoesPorVendedorEl){
+  const comissaoResultadoEl = document.getElementById('comissaoResultado');
+  if(comissaoResultadoEl){
     const extraRowHTML = (descricao, valor)=>`
       <div class="extra-row" data-descricao="${escapeHTML(descricao)}" data-valor="${valor}" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);font-size:12.5px;">
         <span>${escapeHTML(descricao)}</span>
@@ -1886,7 +1938,13 @@ function attachViewHandlers(){
       const totalSpan = bloco.querySelector('.total-comissao-vendedor');
       if(totalSpan) totalSpan.textContent = brl(comissao + extras);
     };
+    const bindExtrasRemove = (bloco)=>{
+      bloco.querySelectorAll('.btn-remove-extra').forEach(btn=>{
+        btn.onclick = ()=>{ btn.closest('.extra-row').remove(); recalcBloco(bloco); };
+      });
+    };
     const bindBloco = (bloco)=>{
+      if(!bloco) return;
       bloco.querySelectorAll('.chk-comissao, .pct-comissao-total').forEach(el=>{
         el.addEventListener('input', ()=>recalcBloco(bloco));
         el.addEventListener('change', ()=>recalcBloco(bloco));
@@ -1905,80 +1963,100 @@ function attachViewHandlers(){
       });
       bindExtrasRemove(bloco);
     };
-    const bindExtrasRemove = (bloco)=>{
-      bloco.querySelectorAll('.btn-remove-extra').forEach(btn=>{
-        btn.onclick = ()=>{ btn.closest('.extra-row').remove(); recalcBloco(bloco); };
+    const bindBotaoGerarPagamento = (container)=>{
+      const btn = container.querySelector('.btn-gerar-pagamento');
+      if(!btn) return;
+      btn.addEventListener('click', ()=>{
+        const bloco = container;
+        const vendedorId = btn.dataset.vendedor;
+        const contaSelect = bloco.querySelector('.conta-pagamento-comissao');
+        if(!contaSelect){ showToast('Cadastre uma conta bancária primeiro'); return; }
+        const contaId = contaSelect.value;
+        const itensSelecionados = [];
+        let valorTotalVendido = 0;
+        bloco.querySelectorAll('.item-comissao').forEach(row=>{
+          if(!row.querySelector('.chk-comissao').checked) return;
+          const valorBase = parseFloat(row.dataset.valor);
+          valorTotalVendido += valorBase;
+          itensSelecionados.push({ origem: row.dataset.origem, id: row.dataset.id, descricao: row.dataset.descricao, data: row.dataset.data, valorBase });
+        });
+        const percentual = numBR(bloco.querySelector('.pct-comissao-total')?.value) || 0;
+        const comissaoValor = Math.round(valorTotalVendido*percentual/100*100)/100;
+        const extras = [];
+        bloco.querySelectorAll('.extra-row').forEach(r=>extras.push({ descricao: r.dataset.descricao, valor: parseFloat(r.dataset.valor) }));
+        const extrasTotal = extras.reduce((s,e)=>s+e.valor,0);
+        const total = Math.round((comissaoValor+extrasTotal)*100)/100;
+        if(!itensSelecionados.length && !extras.length){ showToast('Selecione ao menos um pedido ou adicione uma bonificação'); return; }
+        if(total<=0){ showToast('O valor total está zerado — confira o percentual e os pedidos selecionados'); return; }
+        if(!confirm(`Gerar pagamento de ${brl(total)} para ${btn.dataset.nome}?`)) return;
+        const lancId = uid();
+        state.lancamentos.push({
+          id: lancId, tipo:'saida', categoria:'Comissões',
+          descricao: `Comissão — ${btn.dataset.nome}`,
+          valor: total, contaId, status:'pendente', dataVencimento: todayISO(), dataPagamento: null,
+          origem:'comissao', criadoEm: new Date().toISOString()
+        });
+        const cp = { id: uid(), vendedorId, dataGeracao: todayISO(), dataDe: comissaoDataDeSelecionada, dataAte: comissaoDataAteSelecionada, itens: itensSelecionados, percentual, valorTotalVendido, comissaoValor, extras, valorTotal: total, contaId, lancamentoDespesaId: lancId };
+        state.comissoesPagas.push(cp);
+        persist();
+        showToast('Pagamento de comissão gerado em Contas a Pagar');
+        gerarReciboComissaoPDF(cp);
+        pintarAbaComissao();
       });
     };
-    const bindBotoesGerarPagamento = ()=>{
-      document.querySelectorAll('.btn-gerar-pagamento').forEach(btn=>{
-        btn.addEventListener('click', ()=>{
-          const bloco = btn.closest('.categoria-item');
-          const vendedorId = btn.dataset.vendedor;
-          const contaId = bloco.querySelector('.conta-pagamento-comissao').value;
-          const itensSelecionados = [];
-          let valorTotalVendido = 0;
-          bloco.querySelectorAll('.item-comissao').forEach(row=>{
-            if(!row.querySelector('.chk-comissao').checked) return;
-            const valorBase = parseFloat(row.dataset.valor);
-            valorTotalVendido += valorBase;
-            itensSelecionados.push({ origem: row.dataset.origem, id: row.dataset.id, descricao: row.dataset.descricao, data: row.dataset.data, valorBase });
+    const pintarAbaComissao = ()=>{
+      const conteudo = document.getElementById('comissaoConteudoAba');
+      if(!conteudo) return;
+      if(comissaoAbaSelecionada==='pendentes'){
+        conteudo.innerHTML = renderComissaoPendenteVendedor(comissaoVendedorSelecionado, comissaoDataDeSelecionada, comissaoDataAteSelecionada);
+        const bloco = conteudo.querySelector('.categoria-item') || conteudo;
+        bindBloco(bloco);
+        bindBotaoGerarPagamento(bloco);
+      } else {
+        conteudo.innerHTML = renderComissoesPagas(comissaoVendedorSelecionado);
+        conteudo.querySelectorAll('[data-action="excluir-pagamento-comissao"]').forEach(btn=>{
+          btn.addEventListener('click', ()=>{
+            const cp = state.comissoesPagas.find(x=>x.id===btn.dataset.id);
+            if(!cp) return;
+            if(!confirm('Excluir este pagamento de comissão? Os pedidos voltam a ficar pendentes e a conta a pagar vinculada será removida.')) return;
+            state.lancamentos = state.lancamentos.filter(l=>l.id!==cp.lancamentoDespesaId);
+            state.comissoesPagas = state.comissoesPagas.filter(x=>x.id!==cp.id);
+            persist(); pintarAbaComissao();
+            showToast('Pagamento de comissão excluído');
           });
-          const percentual = numBR(bloco.querySelector('.pct-comissao-total').value) || 0;
-          const comissaoValor = Math.round(valorTotalVendido*percentual/100*100)/100;
-          const extras = [];
-          bloco.querySelectorAll('.extra-row').forEach(r=>extras.push({ descricao: r.dataset.descricao, valor: parseFloat(r.dataset.valor) }));
-          const extrasTotal = extras.reduce((s,e)=>s+e.valor,0);
-          const total = Math.round((comissaoValor+extrasTotal)*100)/100;
-          if(!itensSelecionados.length && !extras.length){ showToast('Selecione ao menos um pedido ou adicione uma bonificação'); return; }
-          if(total<=0){ showToast('O valor total está zerado — confira o percentual e os pedidos selecionados'); return; }
-          if(!confirm(`Gerar pagamento de ${brl(total)} para ${btn.dataset.nome}?`)) return;
-          const lancId = uid();
-          state.lancamentos.push({
-            id: lancId, tipo:'saida', categoria:'Comissões',
-            descricao: `Comissão — ${btn.dataset.nome}`,
-            valor: total, contaId, status:'pendente', dataVencimento: todayISO(), dataPagamento: null,
-            origem:'comissao', criadoEm: new Date().toISOString()
+        });
+        conteudo.querySelectorAll('[data-action="recibo-comissao"]').forEach(btn=>{
+          btn.addEventListener('click', ()=>{
+            const cp = state.comissoesPagas.find(x=>x.id===btn.dataset.id);
+            if(cp) gerarReciboComissaoPDF(cp);
           });
-          const dataDe = document.getElementById('comissaoDataDe').value;
-          const dataAte = document.getElementById('comissaoDataAte').value;
-          const cp = { id: uid(), vendedorId, dataGeracao: todayISO(), dataDe, dataAte, itens: itensSelecionados, percentual, valorTotalVendido, comissaoValor, extras, valorTotal: total, contaId, lancamentoDespesaId: lancId };
-          state.comissoesPagas.push(cp);
-          persist(); render();
-          showToast('Pagamento de comissão gerado em Contas a Pagar');
-          gerarReciboComissaoPDF(cp);
         });
-      });
+      }
     };
-    const pintarComissoes = ()=>{
-      const dataDe = document.getElementById('comissaoDataDe').value;
-      const dataAte = document.getElementById('comissaoDataAte').value;
-      comissoesPorVendedorEl.innerHTML = renderComissoesPendentes(dataDe, dataAte);
-      document.getElementById('comissoesPagasLista').innerHTML = renderComissoesPagas();
-      document.querySelectorAll('.categoria-item[data-vendedor]').forEach(bloco=>{
-        if(bloco.querySelector('.pct-comissao-total')) bindBloco(bloco);
-      });
-      bindBotoesGerarPagamento();
-      document.querySelectorAll('[data-action="excluir-pagamento-comissao"]').forEach(btn=>{
-        btn.addEventListener('click', ()=>{
-          const cp = state.comissoesPagas.find(x=>x.id===btn.dataset.id);
-          if(!cp) return;
-          if(!confirm('Excluir este pagamento de comissão? Os pedidos voltam a ficar pendentes e a conta a pagar vinculada será removida.')) return;
-          state.lancamentos = state.lancamentos.filter(l=>l.id!==cp.lancamentoDespesaId);
-          state.comissoesPagas = state.comissoesPagas.filter(x=>x.id!==cp.id);
-          persist(); pintarComissoes();
-          showToast('Pagamento de comissão excluído');
+    const pintarResultado = ()=>{
+      comissaoResultadoEl.innerHTML = renderComissaoResultado();
+      const toggle = document.getElementById('comissaoAbaToggle');
+      if(toggle){
+        toggle.querySelectorAll('button').forEach(btn=>{
+          btn.classList.toggle('active', btn.dataset.aba===comissaoAbaSelecionada);
+          btn.addEventListener('click', ()=>{
+            comissaoAbaSelecionada = btn.dataset.aba;
+            toggle.querySelectorAll('button').forEach(b=>b.classList.toggle('active', b.dataset.aba===comissaoAbaSelecionada));
+            pintarAbaComissao();
+          });
         });
-      });
-      document.querySelectorAll('[data-action="recibo-comissao"]').forEach(btn=>{
-        btn.addEventListener('click', ()=>{
-          const cp = state.comissoesPagas.find(x=>x.id===btn.dataset.id);
-          if(cp) gerarReciboComissaoPDF(cp);
-        });
-      });
+        pintarAbaComissao();
+      }
     };
-    document.getElementById('btnFiltrarComissoes').addEventListener('click', pintarComissoes);
-    pintarComissoes();
+    pintarResultado();
+    document.getElementById('btnFiltrarComissoes').addEventListener('click', ()=>{
+      comissaoVendedorSelecionado = document.getElementById('comissaoVendedorSelect').value;
+      comissaoDataDeSelecionada = document.getElementById('comissaoDataDe').value;
+      comissaoDataAteSelecionada = document.getElementById('comissaoDataAte').value;
+      comissaoAbaSelecionada = 'pendentes';
+      if(!comissaoVendedorSelecionado){ showToast('Escolha um vendedor'); }
+      pintarResultado();
+    });
 
     document.getElementById('btnNovoVendedor')?.addEventListener('click', ()=>openVendedorModal());
     document.querySelectorAll('.vendedor-padrao-input').forEach(inp=>{
@@ -1993,6 +2071,7 @@ function attachViewHandlers(){
         const usado = state.lancamentos.some(l=>l.vendedorId===id) || state.comissoesManuais.some(m=>m.vendedorId===id);
         if(usado && !confirm('Esse vendedor tem pedidos vinculados. Excluir só remove o cadastro, os pedidos continuam aparecendo como "Sem vendedor definido". Continuar?')) return;
         state.vendedores = state.vendedores.filter(v=>v.id!==id);
+        if(comissaoVendedorSelecionado===id) comissaoVendedorSelecionado = '';
         persist(); render(); showToast('Vendedor excluído');
       });
     });
