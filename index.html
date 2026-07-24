@@ -1,0 +1,3218 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Livro Caixa — Administração Financeira</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0B0F14;
+    --blue-deep:#14315C;
+    --blue-accent:#3B6FE0;
+    --white:#FFFFFF;
+    --bone:#F5F7FA;
+    --line:#E3E7EE;
+    --success:#1E9E6B;
+    --danger:#D5473F;
+    --warn:#D98F2B;
+    --text-soft:#5B6472;
+    font-family:'Inter',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bone);color:var(--ink);min-height:100vh;}
+  h1,h2,h3,.display{font-family:'Space Grotesk',sans-serif;font-weight:600;letter-spacing:-0.01em;}
+  .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;}
+
+  /* Layout */
+  .app{display:flex;min-height:100vh;}
+  .sidebar{
+    width:248px;flex-shrink:0;background:var(--ink);color:var(--white);
+    display:flex;flex-direction:column;padding:24px 0;transition:width .18s ease;
+  }
+  .sidebar.collapsed{width:72px;}
+  .sidebar .brand{padding:0 24px 24px;border-bottom:1px solid rgba(255,255,255,0.08);}
+  .sidebar.collapsed .brand{padding:0 14px 16px;}
+  .brand-row{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+  .sidebar.collapsed .brand-row{justify-content:center;}
+  .sidebar.collapsed .brand .mark, .sidebar.collapsed .brand .sub{display:none;}
+  .sidebar-toggle{
+    background:transparent;border:1px solid rgba(255,255,255,0.14);color:#B7BFCC;
+    width:24px;height:24px;border-radius:6px;cursor:pointer;font-size:13px;flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;transition:transform .18s ease, color .15s, border-color .15s;
+  }
+  .sidebar-toggle:hover{border-color:var(--blue-accent);color:var(--white);}
+  .sidebar.collapsed .sidebar-toggle{transform:rotate(180deg);}
+  .sidebar .brand .mark{font-family:'Space Grotesk';font-size:20px;font-weight:700;color:var(--white);}
+  .sidebar .brand .sub{font-size:11px;color:#8A93A3;margin-top:2px;letter-spacing:0.04em;text-transform:uppercase;}
+  .nav{padding:16px 12px;flex:1;}
+  .sidebar.collapsed .nav{padding:16px 10px;}
+  .nav-item{
+    display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:8px;
+    color:#B7BFCC;font-size:14px;font-weight:500;cursor:pointer;margin-bottom:2px;
+    border-left:2px solid transparent;transition:background .15s, color .15s;
+  }
+  .sidebar.collapsed .nav-item{justify-content:center;padding:10px 6px;}
+  .nav-item:hover{background:rgba(255,255,255,0.06);color:var(--white);}
+  .nav-item.active{background:rgba(59,111,224,0.16);color:var(--white);border-left:2px solid var(--blue-accent);}
+  .sidebar.collapsed .nav-item.active{border-left:2px solid transparent;}
+  .nav-dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.5;flex-shrink:0;}
+  .sidebar.collapsed .nav-dot{display:none;}
+  .nav-abbr{
+    display:none;width:28px;height:22px;border-radius:6px;background:rgba(255,255,255,0.07);
+    color:#B7BFCC;font-size:10px;font-weight:700;align-items:center;justify-content:center;
+    letter-spacing:.02em;font-family:'Space Grotesk';flex-shrink:0;
+  }
+  .sidebar.collapsed .nav-abbr{display:flex;}
+  .nav-item.active .nav-abbr{background:var(--blue-accent);color:var(--white);}
+  .sidebar.collapsed .nav-label{display:none;}
+  .sidebar-footer{padding:12px;border-top:1px solid rgba(255,255,255,0.08);}
+  .sidebar-footer button{
+    width:100%;background:transparent;border:1px solid rgba(255,255,255,0.14);color:#B7BFCC;
+    padding:9px;border-radius:8px;font-size:12.5px;cursor:pointer;font-family:'Inter';
+    display:flex;align-items:center;justify-content:center;gap:6px;
+  }
+  .sidebar.collapsed .sidebar-footer button{padding:9px 0;}
+  .sidebar.collapsed .footer-label{display:none;}
+  .sidebar-footer button:hover{border-color:var(--blue-accent);color:var(--white);}
+
+  .main{flex:1;padding:32px 40px;max-width:1200px;}
+  .topbar{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;}
+  .topbar h1{font-size:22px;}
+  .topbar p{color:var(--text-soft);font-size:13.5px;margin-top:4px;}
+
+  /* Cards / ledger */
+  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:28px;}
+  .card{background:var(--white);border:1px solid var(--line);border-radius:10px;padding:18px 18px;}
+  .card .label{font-size:11.5px;color:var(--text-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;}
+  .card .value{font-size:24px;font-weight:600;}
+  .card.saldo .value{font-size:28px;}
+  .value.pos{color:var(--success);}
+  .value.neg{color:var(--danger);}
+
+  .panel{background:var(--white);border:1px solid var(--line);border-radius:10px;margin-bottom:22px;overflow:hidden;}
+  .panel-head{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--line);}
+  .panel-head h2{font-size:15.5px;}
+  .panel-body{padding:6px 0;}
+
+  .btn{
+    background:var(--blue-accent);color:var(--white);border:none;padding:9px 16px;
+    border-radius:7px;font-size:13.5px;font-weight:500;cursor:pointer;font-family:'Inter';
+  }
+  .btn:hover{background:var(--blue-deep);}
+  .btn.ghost{background:transparent;color:var(--blue-accent);border:1px solid var(--line);}
+  .btn.ghost:hover{border-color:var(--blue-accent);background:#F0F4FF;}
+  .btn.sm{padding:6px 10px;font-size:12px;}
+  .btn.danger-o{background:transparent;border:1px solid var(--line);color:var(--danger);}
+  .btn.danger-o:hover{background:#FDEEED;border-color:var(--danger);}
+  .btn:disabled{opacity:.45;cursor:not-allowed;}
+  .btn:disabled:hover{background:var(--blue-accent);}
+  .btn.ghost:disabled:hover{background:transparent;border-color:var(--line);}
+
+  /* Ledger rows */
+  .ledger-row{
+    display:grid;grid-template-columns:14px 90px 1fr 130px 110px 110px auto;
+    gap:12px;align-items:center;padding:11px 20px;border-bottom:1px solid var(--line);font-size:13.5px;
+  }
+  .ledger-row:last-child{border-bottom:none;}
+  .ledger-row.head{color:var(--text-soft);font-size:11px;text-transform:uppercase;letter-spacing:.04em;padding-top:9px;padding-bottom:9px;background:var(--bone);}
+  .dot{width:8px;height:8px;border-radius:50%;}
+  .dot.entrada{background:var(--success);}
+  .dot.saida{background:var(--danger);}
+  .dot.pendente{background:var(--warn);}
+  .desc-cell .cat{color:var(--text-soft);font-size:11.5px;margin-top:2px;}
+  .desc-cell[data-action="ver-detalhe"]:hover > div:first-child{color:var(--blue-accent);}
+  .status-chip{
+    font-size:11px;padding:3px 9px;border-radius:20px;font-weight:500;display:inline-block;width:fit-content;
+  }
+  .status-chip.pago{background:#E6F6EE;color:var(--success);}
+  .status-chip.recebido{background:#E6F6EE;color:var(--success);}
+  .status-chip.pendente{background:#FDF3E5;color:var(--warn);}
+  .status-chip.atrasado{background:#FDEEED;color:var(--danger);}
+  .status-chip.cancelado{background:#E8ECF3;color:var(--text-soft);text-decoration:line-through;}
+  .row-actions{display:flex;gap:6px;justify-content:flex-end;}
+  .icon-btn{
+    width:26px;height:26px;border-radius:6px;border:1px solid var(--line);background:var(--white);
+    color:var(--text-soft);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;
+  }
+  .icon-btn:hover{border-color:var(--blue-accent);color:var(--blue-accent);}
+  .empty{padding:40px 20px;text-align:center;color:var(--text-soft);font-size:13.5px;}
+
+  /* Forms */
+  .modal-overlay{
+    position:fixed;inset:0;background:rgba(11,15,20,0.5);display:none;align-items:flex-start;justify-content:center;
+    padding:60px 20px;z-index:50;overflow-y:auto;
+  }
+  .modal-overlay.open{display:flex;}
+  .modal{background:var(--white);border-radius:12px;width:100%;max-width:460px;padding:24px;}
+  .modal h3{font-size:16px;margin-bottom:18px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-size:12.5px;color:var(--text-soft);margin-bottom:5px;font-weight:500;}
+  .field input, .field select, .field textarea{
+    width:100%;border:1px solid var(--line);border-radius:7px;padding:9px 11px;font-size:13.5px;font-family:'Inter';
+    background:var(--bone);
+  }
+  .field input:focus, .field select:focus, .field textarea:focus{outline:2px solid var(--blue-accent);outline-offset:-1px;background:var(--white);}
+  .field-row{display:flex;gap:10px;}
+  .field-row .field{flex:1;}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px;}
+  .toggle-row{display:flex;gap:8px;background:var(--bone);border-radius:8px;padding:4px;margin-bottom:16px;width:fit-content;}
+  .toggle-row button{border:none;background:transparent;padding:7px 14px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;color:var(--text-soft);font-family:'Inter';}
+  .toggle-row button.active{background:var(--white);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,0.08);}
+
+  .stub{padding:60px 30px;text-align:center;color:var(--text-soft);}
+  .stub .display{font-size:17px;color:var(--ink);margin-bottom:8px;}
+  .stub p{font-size:13.5px;max-width:420px;margin:0 auto;line-height:1.5;}
+
+  .toast{
+    position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--white);
+    padding:11px 20px;border-radius:8px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s, transform .2s;
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(-6px);}
+
+  .filter-bar{display:flex;gap:8px;padding:14px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center;}
+  .filter-bar select, .filter-bar input{border:1px solid var(--line);border-radius:7px;padding:7px 10px;font-size:12.5px;font-family:'Inter';background:var(--bone);}
+
+  .integ-config{padding:20px;}
+  .grupo-ativo{display:none;}
+  .grupo-inv{display:none;}
+  .integ-config textarea{width:100%;min-height:110px;border:1px solid var(--line);border-radius:8px;padding:12px;font-family:'IBM Plex Mono',monospace;font-size:12px;background:var(--bone);}
+  .integ-status{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-soft);margin-top:10px;}
+  .integ-status .dot{width:8px;height:8px;border-radius:50%;background:#C7CCD4;}
+  .integ-status .dot.on{background:var(--success);}
+  .note{background:#F0F4FF;border:1px solid #D8E2FB;border-radius:8px;padding:12px 14px;font-size:12.5px;color:var(--blue-deep);line-height:1.5;margin-top:14px;}
+
+  .bank-logo{
+    border-radius:8px;background:var(--bone);border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;flex-shrink:0;
+  }
+  .bank-logo img{width:100%;height:100%;object-fit:contain;padding:5px;}
+  .bank-logo .fallback-initials{display:none;font-size:11px;font-weight:700;color:var(--accent-c,var(--blue-accent));font-family:'Space Grotesk';}
+  .bank-logo.fallback img{display:none;}
+  .bank-logo.fallback .fallback-initials{display:block;}
+  .conta-card .card-top{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+  .conta-card .card-top .nome-wrap .nome{margin-bottom:0;}
+  .conta-card .card-top .nome-wrap .banco{margin-bottom:0;}
+  .bank-select-preview{display:flex;align-items:center;gap:10px;margin-top:8px;}
+  .bank-select-preview span.bname{font-size:12.5px;color:var(--text-soft);}
+
+  /* Contas bancárias */
+  .conta-cards{display:grid;grid-template-columns:repeat(auto-fill, minmax(220px,1fr));gap:14px;margin-bottom:22px;}
+  .conta-card{background:var(--white);border:1px solid var(--line);border-radius:10px;padding:16px 18px;border-top:3px solid var(--accent-c, var(--blue-accent));position:relative;}
+  .conta-card .nome{font-weight:600;font-size:14px;margin-bottom:2px;}
+  .conta-card .banco{font-size:12px;color:var(--text-soft);margin-bottom:12px;}
+  .conta-card .saldo{font-size:20px;}
+  .conta-card .conta-actions{position:absolute;top:14px;right:14px;display:flex;gap:4px;}
+  .conta-tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-soft);}
+  .conta-swatch{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+  .color-pick{display:flex;gap:8px;margin-top:4px;}
+  .color-pick span{width:22px;height:22px;border-radius:50%;cursor:pointer;border:2px solid transparent;display:inline-block;}
+  .color-pick span.sel{border-color:var(--ink);}
+  .add-conta-card{
+    border:1.5px dashed var(--line);border-radius:10px;display:flex;align-items:center;justify-content:center;
+    color:var(--text-soft);font-size:13px;font-weight:500;cursor:pointer;min-height:98px;
+  }
+  .add-conta-card:hover{border-color:var(--blue-accent);color:var(--blue-accent);}
+
+  /* Cartões de crédito */
+  .cartao-card{background:linear-gradient(145deg, var(--ink), #1B2430);color:var(--white);border-radius:12px;padding:18px 20px;position:relative;overflow:hidden;border-top:3px solid var(--accent-c, var(--blue-accent));}
+  .cartao-card .card-top{display:flex;align-items:center;gap:10px;margin-bottom:16px;}
+  .cartao-card .card-top .bank-logo{background:rgba(255,255,255,0.9);}
+  .cartao-card .nome{font-weight:600;font-size:14px;}
+  .cartao-card .banco{font-size:11.5px;color:#9AA4B3;}
+  .cartao-card .conta-actions .icon-btn{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.16);color:#C7CCD4;}
+  .cartao-card .conta-actions .icon-btn:hover{border-color:var(--white);color:var(--white);}
+  .cartao-card .fatura-label{font-size:11px;color:#9AA4B3;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;}
+  .cartao-card .fatura-valor{font-size:20px;font-weight:600;margin-bottom:12px;}
+  .limit-bar{height:6px;background:rgba(255,255,255,0.12);border-radius:4px;overflow:hidden;margin-bottom:6px;}
+  .limit-bar-fill{height:100%;background:var(--accent-c, var(--blue-accent));border-radius:4px;}
+  .cartao-card .limit-info{display:flex;justify-content:space-between;font-size:11px;color:#9AA4B3;margin-bottom:14px;}
+  .cartao-card .cartao-actions-row{display:flex;gap:8px;}
+  .cartao-card .cartao-actions-row .btn{flex:1;font-size:12px;padding:8px;}
+  .cartao-card .btn.ghost{background:rgba(255,255,255,0.06);border-color:rgba(255,255,255,0.18);color:var(--white);}
+  .cartao-card .btn.ghost:hover{background:rgba(255,255,255,0.14);}
+  .fatura-select-wrap{display:flex;gap:10px;align-items:center;}
+  .fatura-status-badge{font-size:11px;padding:3px 10px;border-radius:20px;font-weight:500;}
+  .fatura-status-badge.aberta{background:#FDF3E5;color:var(--warn);}
+  .fatura-status-badge.fechada{background:#E8ECF3;color:var(--blue-deep);}
+  .fatura-status-badge.paga{background:#E6F6EE;color:var(--success);}
+
+  /* Comissões */
+  .vendedor-mini-card{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid var(--line);border-radius:8px;margin-bottom:8px;}
+  .vendedor-mini-card .nome{font-weight:600;font-size:13.5px;flex:1;}
+  .pct-input-sm{width:56px;border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-size:12.5px;text-align:right;}
+  .item-comissao input[type="checkbox"]{width:16px;height:16px;}
+  .comissao-historico-row{display:flex;justify-content:space-between;align-items:center;padding:11px 20px;border-bottom:1px solid var(--line);font-size:13.5px;}
+  .comissao-historico-row:last-child{border-bottom:none;}
+  .comissao-historico-row .sub{font-size:11.5px;color:var(--text-soft);margin-top:2px;}
+
+  /* Categorias */
+  .categoria-item{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden;}
+  .categoria-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--white);}
+  .categoria-head .nome{font-weight:600;font-size:14px;}
+  .categoria-head .actions{display:flex;gap:6px;}
+  .subcategoria-list{background:var(--bone);border-top:1px solid var(--line);}
+  .subcategoria-row{display:flex;align-items:center;justify-content:space-between;padding:9px 14px 9px 30px;font-size:13px;border-bottom:1px solid var(--line);}
+  .subcategoria-row:last-child{border-bottom:none;}
+  .subcategoria-row::before{content:'—';color:var(--text-soft);margin-right:8px;}
+  .subcategoria-row .actions{display:flex;gap:6px;}
+  .add-sub-row{padding:9px 14px 9px 30px;}
+  .add-sub-row button{background:none;border:none;color:var(--blue-accent);font-size:12.5px;cursor:pointer;padding:0;font-family:'Inter';}
+  .add-sub-row button:hover{text-decoration:underline;}
+
+  /* Relatórios */
+  .report-controls{display:flex;gap:10px;align-items:center;padding:14px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap;}
+  .report-controls select, .report-controls input{border:1px solid var(--line);border-radius:7px;padding:7px 10px;font-size:12.5px;font-family:'Inter';background:var(--bone);}
+  .report-block{padding:20px;}
+  .report-title{font-family:'Space Grotesk';font-size:13.5px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--blue-deep);margin:18px 0 8px;}
+  .report-title:first-child{margin-top:0;}
+  .report-line{display:flex;justify-content:space-between;padding:7px 0;font-size:13.5px;border-bottom:1px solid var(--line);}
+  .report-line.sub{padding-left:16px;color:var(--text-soft);font-size:13px;border-bottom:none;}
+  .report-line.total{font-weight:600;border-top:1.5px solid var(--ink);border-bottom:none;padding-top:10px;margin-top:4px;font-size:14.5px;}
+  .report-line.result{font-weight:700;font-size:16px;padding-top:14px;}
+  .report-line .v{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;}
+
+  @media (max-width: 900px){
+    .cards{grid-template-columns:repeat(2,1fr);}
+    .ledger-row{grid-template-columns:14px 70px 1fr 90px auto;}
+    .ledger-row .col-cat, .ledger-row .col-status{display:none;}
+  }
+
+  .login-overlay{
+    position:fixed;inset:0;background:var(--ink);display:flex;align-items:center;justify-content:center;
+    padding:20px;z-index:100;
+  }
+  .login-card{background:var(--white);border-radius:14px;padding:32px 28px;width:100%;max-width:360px;box-shadow:0 20px 60px rgba(0,0,0,0.3);}
+  .login-brand{font-family:'Space Grotesk';font-size:22px;font-weight:700;margin-bottom:4px;}
+  .login-sub{font-size:13px;color:var(--text-soft);margin-bottom:20px;}
+</style>
+</head>
+<body>
+
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-card">
+    <div class="login-brand">Livro Caixa</div>
+    <p class="login-sub">Entre para acessar a administração financeira</p>
+    <div class="field"><label>E-mail</label><input type="email" id="loginEmail" placeholder="seu@email.com"></div>
+    <div class="field"><label>Senha</label><input type="password" id="loginSenha" placeholder="senha"></div>
+    <button class="btn" id="btnEntrar" style="width:100%;margin-top:6px;">Entrar</button>
+    <div id="loginErro" style="color:var(--danger);font-size:12.5px;margin-top:10px;display:none;"></div>
+  </div>
+</div>
+
+<div class="app" id="appRoot" style="display:none;">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-row">
+        <div class="mark">Livro Caixa</div>
+        <button class="sidebar-toggle" id="btnToggleSidebar" title="Minimizar menu">‹</button>
+      </div>
+      <div class="sub">Administração Financeira</div>
+    </div>
+    <nav class="nav" id="nav">
+      <div class="nav-item active" data-view="dashboard" title="Dashboard"><span class="nav-dot"></span><span class="nav-abbr">DB</span><span class="nav-label">Dashboard</span></div>
+      <div class="nav-item" data-view="pagar" title="Contas a Pagar"><span class="nav-dot"></span><span class="nav-abbr">CP</span><span class="nav-label">Contas a Pagar</span></div>
+      <div class="nav-item" data-view="receber" title="Contas a Receber"><span class="nav-dot"></span><span class="nav-abbr">CR</span><span class="nav-label">Contas a Receber</span></div>
+      <div class="nav-item" data-view="fluxo" title="Fluxo de Caixa"><span class="nav-dot"></span><span class="nav-abbr">FC</span><span class="nav-label">Fluxo de Caixa</span></div>
+      <div class="nav-item" data-view="contas" title="Contas Bancárias"><span class="nav-dot"></span><span class="nav-abbr">CB</span><span class="nav-label">Contas Bancárias</span></div>
+      <div class="nav-item" data-view="cartoes" title="Cartões de Crédito"><span class="nav-dot"></span><span class="nav-abbr">CC</span><span class="nav-label">Cartões de Crédito</span></div>
+      <div class="nav-item" data-view="relatorios" title="Relatórios"><span class="nav-dot"></span><span class="nav-abbr">RL</span><span class="nav-label">Relatórios</span></div>
+      <div class="nav-item" data-view="categorias" title="Categorias"><span class="nav-dot"></span><span class="nav-abbr">CT</span><span class="nav-label">Categorias</span></div>
+      <div class="nav-item" data-view="comissoes" title="Comissões"><span class="nav-dot"></span><span class="nav-abbr">CM</span><span class="nav-label">Comissões</span></div>
+      <div class="nav-item" data-view="ativos" title="Ativos Patrimoniais"><span class="nav-dot"></span><span class="nav-abbr">AP</span><span class="nav-label">Ativos Patrimoniais</span></div>
+      <div class="nav-item" data-view="investimentos" title="Investimentos"><span class="nav-dot"></span><span class="nav-abbr">IV</span><span class="nav-label">Investimentos</span></div>
+      <div class="nav-item" data-view="vk" title="Integração VK Industrial"><span class="nav-dot"></span><span class="nav-abbr">VK</span><span class="nav-label">Integração VK Industrial</span></div>
+    </nav>
+    <div class="sidebar-footer">
+      <button id="btnBackup"><span class="footer-icon">⇅</span><span class="footer-label">Backup / Restaurar</span></button>
+      <button id="btnSair" style="margin-top:8px;"><span class="footer-icon">⎋</span><span class="footer-label">Sair</span></button>
+    </div>
+  </aside>
+
+  <main class="main" id="main"></main>
+</div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" id="modalContent"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<input type="file" id="fileImport" accept="application/json" style="display:none">
+
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+/* ---------------- Estado & Persistência ---------------- */
+const CATEGORIAS_SAIDA = ['Insumos', 'Fornecedores', 'Salários', 'Aluguel', 'Utilidades (água/luz/internet)', 'Impostos', 'Manutenção', 'Marketing', 'Cartão de Crédito', 'Comissões', 'Investimentos', 'Outros'];
+const CATEGORIAS_ENTRADA = ['Vendas', 'Serviços', 'Recebimento de cliente', 'Rendimentos', 'Outros'];
+
+const CONTA_CORES = ['#3B6FE0','#1E9E6B','#D98F2B','#8A5CF6','#D5473F','#0F9BB0'];
+const BANCOS_BR = [
+  { nome: 'Banco do Brasil', dominio: 'bb.com.br' },
+  { nome: 'Itaú', dominio: 'itau.com.br' },
+  { nome: 'Bradesco', dominio: 'bradesco.com.br' },
+  { nome: 'Santander', dominio: 'santander.com.br' },
+  { nome: 'Caixa Econômica Federal', dominio: 'caixa.gov.br' },
+  { nome: 'Nubank', dominio: 'nubank.com.br' },
+  { nome: 'Banco Inter', dominio: 'bancointer.com.br' },
+  { nome: 'C6 Bank', dominio: 'c6bank.com.br' },
+  { nome: 'Sicoob', dominio: 'sicoob.com.br' },
+  { nome: 'Sicredi', dominio: 'sicredi.com.br' },
+  { nome: 'BTG Pactual', dominio: 'btgpactual.com' },
+  { nome: 'Safra', dominio: 'safra.com.br' },
+  { nome: 'PagBank', dominio: 'pagbank.com.br' },
+  { nome: 'Mercado Pago', dominio: 'mercadopago.com.br' },
+  { nome: 'Banrisul', dominio: 'banrisul.com.br' },
+  { nome: 'Neon', dominio: 'neon.com.br' },
+  { nome: 'XP Investimentos', dominio: 'xpi.com.br' },
+  { nome: 'Outro / não listado', dominio: '' },
+];
+const BANDEIRAS = [
+  { nome: 'Visa', dominio: 'visa.com' },
+  { nome: 'Mastercard', dominio: 'mastercard.com' },
+  { nome: 'Elo', dominio: 'elo.com.br' },
+  { nome: 'American Express', dominio: 'americanexpress.com' },
+  { nome: 'Hipercard', dominio: 'hipercard.com.br' },
+  { nome: 'Outra / não listada', dominio: '' },
+];
+const CRIPTOS_COMUNS = [
+  { simbolo: 'BTC', nome: 'Bitcoin', id: 'bitcoin' },
+  { simbolo: 'ETH', nome: 'Ethereum', id: 'ethereum' },
+  { simbolo: 'USDT', nome: 'Tether', id: 'tether' },
+  { simbolo: 'USDC', nome: 'USD Coin', id: 'usd-coin' },
+  { simbolo: 'BNB', nome: 'BNB', id: 'binancecoin' },
+  { simbolo: 'SOL', nome: 'Solana', id: 'solana' },
+  { simbolo: 'ADA', nome: 'Cardano', id: 'cardano' },
+  { simbolo: 'XRP', nome: 'XRP', id: 'ripple' },
+  { simbolo: 'DOGE', nome: 'Dogecoin', id: 'dogecoin' },
+];
+function initials(nome){ return (nome||'?').trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase(); }
+function bankLogoHTML(conta, size){
+  size = size || 36;
+  const dom = conta.bancoDominio;
+  return `
+    <div class="bank-logo ${!dom ? 'fallback' : ''}" style="width:${size}px;height:${size}px;--accent-c:${conta.cor}">
+      ${dom ? `<img src="https://logo.clearbit.com/${dom}?size=128" alt="" onerror="this.parentElement.classList.add('fallback')">` : ''}
+      <span class="fallback-initials">${initials(conta.banco || conta.nome)}</span>
+    </div>
+  `;
+}
+
+/* ---------------- Firebase (projeto próprio do Livro Caixa) ---------------- */
+// Projeto: financeiro-livro-caixa
+const LIVRO_CAIXA_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBbSv3c_UKvhi3Qm0V0Nw3n4bU-sCKaarE",
+  authDomain: "financeiro-livro-caixa.firebaseapp.com",
+  projectId: "financeiro-livro-caixa",
+  storageBucket: "financeiro-livro-caixa.firebasestorage.app",
+  messagingSenderId: "515159506710",
+  appId: "1:515159506710:web:c41985f0febd4a717b5a37"
+};
+firebase.initializeApp(LIVRO_CAIXA_FIREBASE_CONFIG);
+const auth = firebase.auth();
+const db = firebase.firestore();
+const DOC_REF = db.collection('livro-caixa').doc('dados');
+
+function aplicarMigracoes(s){
+  if(!s) s = { lancamentos: [], ativos: [], investimentos: [], forneiraConfig: null };
+  if(!s.vkConfig){
+    s.vkConfig = {
+      firebaseConfig: {
+        apiKey: "AIzaSyCkofAYirFhxwi2TPUyEhWXhjPN7YTEJ-Q",
+        authDomain: "vk-provisorio.firebaseapp.com",
+        projectId: "vk-provisorio",
+        storageBucket: "vk-provisorio.firebasestorage.app",
+        messagingSenderId: "965749096462",
+        appId: "1:965749096462:web:f3e4f263d0311c3883bc5f"
+      },
+      email: '', senha: '', contaId: '', categoria: 'Vendas', ultimaSincronizacao: null
+    };
+  }
+  if(!s.contas) s.contas = [];
+  // Migração: garante uma conta padrão e associa lançamentos antigos sem conta
+  if(s.contas.length===0){
+    const padrao = { id: 'conta_caixa', nome: 'Caixa', banco: 'Conta padrão', tipo: 'caixa', saldoInicial: 0, cor: CONTA_CORES[0] };
+    s.contas.push(padrao);
+  }
+  const idPadrao = s.contas[0].id;
+  (s.lancamentos||[]).forEach(l=>{ if(!l.contaId) l.contaId = idPadrao; });
+  if(!s.cartoes) s.cartoes = [];
+  if(!s.comprasCartao) s.comprasCartao = [];
+  if(!s.faturasFechadas) s.faturasFechadas = [];
+  if(!s.contasInvestimento) s.contasInvestimento = [];
+  if(!s.ativosInvestimento) s.ativosInvestimento = [];
+  if(!s.categorias){
+    s.categorias = {
+      saida: CATEGORIAS_SAIDA.map(nome=>({ id: uid(), nome, subcategorias: [] })),
+      entrada: CATEGORIAS_ENTRADA.map(nome=>({ id: uid(), nome, subcategorias: [] }))
+    };
+  }
+  if(!s.vendedores) s.vendedores = [];
+  if(!s.comissoesPagas) s.comissoesPagas = [];
+  if(!s.comissoesManuais) s.comissoesManuais = [];
+  return s;
+}
+async function carregarDados(){
+  const doc = await DOC_REF.get();
+  return aplicarMigracoes(doc.exists ? doc.data() : null);
+}
+let state = aplicarMigracoes(null);
+let saveTimeout = null;
+function persist(){
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(()=>{
+    DOC_REF.set(state).catch(e=>{
+      console.error('Erro ao salvar no Firestore:', e);
+      showToast('Não foi possível salvar — verifique a internet');
+    });
+  }, 500);
+}
+
+function uid(){ return 'l' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+function brl(v){ return (v<0?'-':'') + 'R$ ' + Math.abs(v).toLocaleString('pt-BR',{minimumFractionDigits:2, maximumFractionDigits:2}); }
+function numBR(v){
+  if(v==null) return NaN;
+  let s = String(v).trim();
+  if(s==='') return NaN;
+  if(s.includes(',')){
+    s = s.replace(/\./g,'').replace(',', '.');
+  }
+  return parseFloat(s);
+}
+function fmtDate(d){ if(!d) return '—'; const [y,m,day]=d.split('-'); return day+'/'+m+'/'+y; }
+function todayISO(){ return new Date().toISOString().slice(0,10); }
+
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2200);
+}
+
+/* ---------------- Navegação ---------------- */
+let currentView = 'dashboard';
+let extratoContaId = null;
+let faturaCartaoId = null;
+let faturaCompetenciaAtual = null;
+let invContaId = null;
+let categoriaTipoAtivo = 'saida';
+document.getElementById('nav').addEventListener('click', (e)=>{
+  const item = e.target.closest('.nav-item');
+  if(!item) return;
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  item.classList.add('active');
+  currentView = item.dataset.view;
+  render();
+});
+
+/* Sidebar colapsável */
+const SIDEBAR_KEY = 'livrocaixa_sidebar_collapsed';
+const sidebarEl = document.getElementById('sidebar');
+if(localStorage.getItem(SIDEBAR_KEY) === '1') sidebarEl.classList.add('collapsed');
+document.getElementById('btnToggleSidebar').addEventListener('click', ()=>{
+  const collapsed = sidebarEl.classList.toggle('collapsed');
+  localStorage.setItem(SIDEBAR_KEY, collapsed ? '1' : '0');
+  document.getElementById('btnToggleSidebar').title = collapsed ? 'Expandir menu' : 'Minimizar menu';
+});
+
+function render(){
+  const main = document.getElementById('main');
+  if(currentView==='dashboard') main.innerHTML = viewDashboard();
+  else if(currentView==='pagar') main.innerHTML = viewLancamentos('saida');
+  else if(currentView==='receber') main.innerHTML = viewLancamentos('entrada');
+  else if(currentView==='fluxo') main.innerHTML = viewFluxo();
+  else if(currentView==='contas') main.innerHTML = viewContas();
+  else if(currentView==='extrato') main.innerHTML = viewExtrato(extratoContaId);
+  else if(currentView==='cartoes') main.innerHTML = viewCartoes();
+  else if(currentView==='fatura') main.innerHTML = viewFatura(faturaCartaoId, faturaCompetenciaAtual);
+  else if(currentView==='investimentos') main.innerHTML = viewInvestimentos();
+  else if(currentView==='ativos-inv') main.innerHTML = viewAtivosInvestimento(invContaId);
+  else if(currentView==='relatorios') main.innerHTML = viewRelatorios();
+  else if(currentView==='categorias') main.innerHTML = viewCategorias();
+  else if(currentView==='comissoes') main.innerHTML = viewComissoes();
+  else if(currentView==='ativos') main.innerHTML = viewStub('Ativos Patrimoniais', 'Cadastro e controle de bens da empresa (equipamentos, veículos, imóveis), com depreciação e valor atual. Este módulo é o próximo passo — me diga quando quiser priorizá-lo e detalhamos os campos.');
+  else if(currentView==='vk') main.innerHTML = viewVK();
+  attachViewHandlers();
+}
+
+/* ---------------- Cálculos ---------------- */
+function totaisRealizados(){
+  let entradas=0, saidas=0;
+  state.lancamentos.forEach(l=>{
+    if(l.tipo==='entrada' && l.status==='recebido') entradas += l.valor;
+    if(l.tipo==='saida' && l.status==='pago') saidas += l.valor;
+  });
+  return { entradas, saidas, saldo: entradas-saidas };
+}
+function totaisMesAtual(){
+  const now = new Date(); const ym = now.toISOString().slice(0,7);
+  let entradas=0, saidas=0;
+  state.lancamentos.forEach(l=>{
+    const ref = (l.dataPagamento || l.dataVencimento || '').slice(0,7);
+    if(ref!==ym) return;
+    if(l.tipo==='entrada' && l.status==='recebido') entradas += l.valor;
+    if(l.tipo==='saida' && l.status==='pago') saidas += l.valor;
+  });
+  return { entradas, saidas };
+}
+function saldoConta(contaId){
+  const conta = state.contas.find(c=>c.id===contaId);
+  if(!conta) return 0;
+  let saldo = conta.saldoInicial || 0;
+  state.lancamentos.forEach(l=>{
+    if(l.contaId!==contaId) return;
+    if(l.tipo==='entrada' && l.status==='recebido') saldo += l.valor;
+    if(l.tipo==='saida' && l.status==='pago') saldo -= l.valor;
+  });
+  return saldo;
+}
+function nomeConta(contaId){ return state.contas.find(c=>c.id===contaId)?.nome || 'Caixa'; }
+function corConta(contaId){ return state.contas.find(c=>c.id===contaId)?.cor || CONTA_CORES[0]; }
+
+/* --- Cartões de crédito --- */
+function competenciaFromDate(cartao, dataISO){
+  const [y,m,d] = dataISO.split('-').map(Number);
+  if(d > cartao.diaFechamento){
+    const dt = new Date(y, m-1+1, 1);
+    return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0');
+  }
+  return y + '-' + String(m).padStart(2,'0');
+}
+function addMonthsComp(comp, n){
+  const [y,m] = comp.split('-').map(Number);
+  const dt = new Date(y, m-1+n, 1);
+  return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0');
+}
+function competenciaLabel(comp){
+  const [y,m] = comp.split('-').map(Number);
+  const meses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  return meses[m-1] + '/' + y;
+}
+function competenciaAtual(cartao){ return competenciaFromDate(cartao, todayISO()); }
+function dataVencimentoFatura(cartao, competencia){
+  const mesVenc = cartao.diaVencimento > cartao.diaFechamento ? competencia : addMonthsComp(competencia, 1);
+  const [y,m] = mesVenc.split('-').map(Number);
+  const dia = String(Math.min(cartao.diaVencimento, 28)).padStart(2,'0');
+  return `${y}-${String(m).padStart(2,'0')}-${dia}`;
+}
+function faturaStatus(cartaoId, competencia){
+  const fech = state.faturasFechadas.find(f=>f.cartaoId===cartaoId && f.competencia===competencia);
+  if(!fech) return 'aberta';
+  const lanc = state.lancamentos.find(l=>l.id===fech.lancamentoId);
+  if(!lanc) return 'aberta';
+  return lanc.status==='pendente' ? 'fechada' : 'paga';
+}
+function totalCompetencia(cartaoId, competencia){
+  return state.comprasCartao.filter(p=>p.cartaoId===cartaoId && p.competencia===competencia).reduce((s,p)=>s+p.valor,0);
+}
+function dividaCartaoAberta(cartaoId){
+  const porCompetencia = {};
+  state.comprasCartao.filter(p=>p.cartaoId===cartaoId).forEach(p=>{
+    porCompetencia[p.competencia] = (porCompetencia[p.competencia]||0) + p.valor;
+  });
+  let total = 0;
+  Object.entries(porCompetencia).forEach(([comp,val])=>{
+    if(faturaStatus(cartaoId, comp) !== 'paga') total += val;
+  });
+  return total;
+}
+function limiteDisponivel(cartao){ return (cartao.limite||0) - dividaCartaoAberta(cartao.id); }
+function competenciasDoCartao(cartaoId){
+  const set = new Set(state.comprasCartao.filter(p=>p.cartaoId===cartaoId).map(p=>p.competencia));
+  set.add(competenciaAtual(state.cartoes.find(c=>c.id===cartaoId)));
+  return [...set].sort();
+}
+
+/* --- Investimentos --- */
+function valorAtivo(a){
+  if(a.tipoAtivo==='rendafixa'){
+    if(a.valorAtualManual != null) return a.valorAtualManual;
+    const dias = Math.max(0, (new Date(todayISO()) - new Date(a.dataAplicacao)) / 86400000);
+    const anos = dias/365;
+    return (a.valorAplicado||0) * Math.pow(1 + ((a.taxaAnual||0)/100), anos);
+  }
+  if(a.tipoAtivo==='interno' || a.manual){
+    return a.valorAtualManual != null ? a.valorAtualManual : (a.valorAplicado||0);
+  }
+  const preco = a.precoAtual ?? a.precoMedio ?? 0;
+  return (a.quantidade||0) * preco;
+}
+function custoAtivo(a){
+  if(a.tipoAtivo==='rendafixa' || a.tipoAtivo==='interno' || a.manual) return a.valorAplicado||0;
+  return (a.quantidade||0) * (a.precoMedio||0);
+}
+function valorContaInvestimento(contaId){ return state.ativosInvestimento.filter(a=>a.contaId===contaId).reduce((s,a)=>s+valorAtivo(a),0); }
+function custoContaInvestimento(contaId){ return state.ativosInvestimento.filter(a=>a.contaId===contaId).reduce((s,a)=>s+custoAtivo(a),0); }
+function totalInvestimentos(){ return state.ativosInvestimento.reduce((s,a)=>s+valorAtivo(a),0); }
+function rotuloTipoAtivo(a){
+  return { acao:'Ação (B3)', fii:'FII', cripto:'Criptomoeda', rendafixa:'Renda Fixa', interno:'Investimento na Empresa' }[a.tipoAtivo] || a.tipoAtivo;
+}
+async function atualizarCotacoes(){
+  const acoesFii = state.ativosInvestimento.filter(a=>(a.tipoAtivo==='acao'||a.tipoAtivo==='fii') && a.ticker);
+  const criptos = state.ativosInvestimento.filter(a=>a.tipoAtivo==='cripto' && a.criptoId);
+  if(!acoesFii.length && !criptos.length){ showToast('Nenhum ativo de renda variável cadastrado para atualizar'); return; }
+  let ok=0, falhas=0;
+  if(acoesFii.length){
+    const tickers = [...new Set(acoesFii.map(a=>a.ticker.toUpperCase()))].join(',');
+    try{
+      const resp = await fetch(`https://brapi.dev/api/quote/${tickers}`);
+      const data = await resp.json();
+      if(data && data.results){
+        data.results.forEach(r=>{
+          state.ativosInvestimento.forEach(a=>{
+            if((a.tipoAtivo==='acao'||a.tipoAtivo==='fii') && a.ticker && a.ticker.toUpperCase()===r.symbol && r.regularMarketPrice){
+              a.precoAtual = r.regularMarketPrice;
+              a.dataUltimaCotacao = new Date().toISOString();
+              ok++;
+            }
+          });
+        });
+      } else { falhas += acoesFii.length; }
+    }catch(e){ falhas += acoesFii.length; }
+  }
+  if(criptos.length){
+    const ids = [...new Set(criptos.map(a=>a.criptoId))].join(',');
+    try{
+      const resp = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=brl`);
+      const data = await resp.json();
+      criptos.forEach(a=>{
+        if(data && data[a.criptoId] && data[a.criptoId].brl){
+          a.precoAtual = data[a.criptoId].brl;
+          a.dataUltimaCotacao = new Date().toISOString();
+          ok++;
+        } else { falhas++; }
+      });
+    }catch(e){ falhas += criptos.length; }
+  }
+  persist();
+  render();
+  if(ok>0 && falhas===0) showToast(`${ok} cotação(ões) atualizada(s)`);
+  else if(ok>0 && falhas>0) showToast(`${ok} atualizadas, ${falhas} não encontradas/indisponíveis`);
+  else showToast('Não foi possível buscar cotações agora — confira a internet ou os tickers');
+}
+
+/* --- Integração VK Industrial --- */
+let vkFirebaseApp = null;
+function fmtQtdBR(n){ return (Number(n)||0).toLocaleString('pt-BR', { maximumFractionDigits: 3 }); }
+
+async function sincronizarPedidosVK(){
+  const cfg = state.vkConfig;
+  if(!cfg.firebaseConfig){ showToast('Cole a configuração do Firebase antes de sincronizar'); render(); return; }
+  if(!cfg.contaId){ showToast('Escolha a conta bancária de destino'); render(); return; }
+  if(!cfg.email || !cfg.senha){ showToast('Informe o e-mail e a senha de acesso ao VK Industrial'); render(); return; }
+  if(typeof firebase === 'undefined'){ showToast('Não foi possível carregar o Firebase — confira a internet'); render(); return; }
+
+  try{
+    if(!vkFirebaseApp){
+      vkFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'vk-industrial');
+    }
+    const auth = vkFirebaseApp.auth();
+    if(!auth.currentUser){
+      await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
+    }
+    const db = vkFirebaseApp.firestore();
+    const [pedidosSnap, clientesSnap, representantesSnap, produtosSnap] = await Promise.all([
+      db.collection('pedidos').get({ source: 'server' }),
+      db.collection('clientes').get({ source: 'server' }),
+      db.collection('representantes').get({ source: 'server' }),
+      db.collection('produtos').get({ source: 'server' })
+    ]);
+    const pedidos = pedidosSnap.docs.map(d=>({ id: d.id, ...d.data() }));
+    const clientes = clientesSnap.docs.map(d=>({ id: d.id, ...d.data() }));
+    const representantesVK = representantesSnap.docs.map(d=>({ id: d.id, ...d.data() }));
+    const produtosVK = produtosSnap.docs.map(d=>({ id: d.id, ...d.data() }));
+    let novos = 0, jaImportados = 0, cancelados = 0, marcadosCancelados = 0;
+
+    pedidos.forEach(p=>{
+      const descricaoPedido = `Pedido N° ${p.numero}`;
+      const existente = state.lancamentos.find(l=>l.origem==='vk' && (l.vkPedidoId===p.id || l.descricao===descricaoPedido));
+
+      if(p.status === 'cancelado'){
+        cancelados++;
+        if(existente){
+          if(existente.status !== 'cancelado'){ existente.status = 'cancelado'; existente.dataPagamento = null; marcadosCancelados++; }
+          return;
+        }
+        // pedido já nasceu cancelado no VK — ainda assim entra aqui, só que já marcado
+      } else if(existente){
+        jaImportados++;
+        return;
+      }
+
+      const cliente = clientes.find(c=>c.id===p.clienteId);
+      const itensTexto = (p.itens||[]).map(it=>{
+        const prod = produtosVK.find(pr=>pr.nome===it.produto);
+        const unidade = prod?.unidade || 'un';
+        return `${fmtQtdBR(it.quantidade)} ${unidade} de ${it.produto}`;
+      }).join(', ');
+      let vendedorId = null, vendedorNome = null;
+      if(p.representanteId){
+        const rep = representantesVK.find(r=>r.id===p.representanteId);
+        if(rep){
+          vendedorId = rep.id;
+          vendedorNome = rep.nome;
+          if(!state.vendedores.some(v=>v.id===vendedorId)){
+            state.vendedores.push({ id: vendedorId, nome: rep.nome, comissaoPadrao: 0 });
+          } else {
+            const vExistente = state.vendedores.find(v=>v.id===vendedorId);
+            if(vExistente) vExistente.nome = rep.nome;
+          }
+        }
+      }
+      state.lancamentos.push({
+        id: uid(), tipo:'entrada', categoria: cfg.categoria || 'Vendas',
+        descricao: descricaoPedido,
+        valor: p.valorTotal,
+        fornecedor: cliente ? cliente.nome : '',
+        observacao: `Cliente: ${cliente ? cliente.nome : '—'}\nItens: ${itensTexto || '—'}`,
+        contaId: cfg.contaId,
+        dataVencimento: p.dataEntrega || todayISO(),
+        status: p.status==='cancelado' ? 'cancelado' : 'pendente', dataPagamento: null,
+        origem: 'vk', vkPedidoId: p.id,
+        vendedorId, vendedorNome,
+        criadoEm: new Date().toISOString()
+      });
+      novos++;
+    });
+
+    cfg.ultimaSincronizacao = new Date().toISOString();
+    persist();
+    render();
+    console.log(`Sincronização VK: ${pedidos.length} pedidos no total, ${novos} novos, ${jaImportados} já importados antes, ${cancelados} cancelados (${marcadosCancelados} marcados agora como cancelado).`);
+    let msgFinal;
+    if(novos>0 || marcadosCancelados>0){
+      const partes = [];
+      if(novos>0) partes.push(`${novos} pedido(s) importado(s)`);
+      if(marcadosCancelados>0) partes.push(`${marcadosCancelados} marcado(s) como cancelado(s)`);
+      msgFinal = partes.join(' · ');
+    } else {
+      msgFinal = `Nenhuma novidade (${pedidos.length} no total no VK, ${jaImportados} já importados, ${cancelados} cancelados)`;
+    }
+    showToast(msgFinal);
+  }catch(e){
+    console.error('Erro ao sincronizar VK Industrial:', e);
+    let msg = 'Falha ao sincronizar';
+    if(e.code==='auth/wrong-password' || e.code==='auth/user-not-found' || e.code==='auth/invalid-credential') msg = 'E-mail ou senha incorretos';
+    else if(e.code==='permission-denied') msg = 'Sem permissão para ler os dados — confira o login';
+    else if(e.message) msg += ': ' + e.message;
+    showToast(msg);
+    render();
+  }
+}
+
+/* --- Categorias e subcategorias --- */
+function listaCategorias(tipo){ return state.categorias[tipo] || []; }
+function opcoesCategoriaHTML(tipo, selecionada){
+  let html = '';
+  listaCategorias(tipo).forEach(c=>{
+    html += `<option value="${escapeHTML(c.nome)}" ${selecionada===c.nome?'selected':''}>${escapeHTML(c.nome)}</option>`;
+    (c.subcategorias||[]).forEach(sub=>{
+      const full = `${c.nome} / ${sub.nome}`;
+      html += `<option value="${escapeHTML(full)}" ${selecionada===full?'selected':''}>&nbsp;&nbsp;— ${escapeHTML(sub.nome)}</option>`;
+    });
+  });
+  return html;
+}
+function todasCategoriasFlat(tipo){
+  const out = [];
+  listaCategorias(tipo).forEach(c=>{
+    out.push(c.nome);
+    (c.subcategorias||[]).forEach(sub=>out.push(`${c.nome} / ${sub.nome}`));
+  });
+  return out;
+}
+function categoriaEmUso(nomeCompleto){
+  return state.lancamentos.some(l=>l.categoria===nomeCompleto) || state.comprasCartao.some(p=>p.categoria===nomeCompleto);
+}
+
+/* --- Comissões --- */
+function primeiroDiaMes(){ const h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1).toISOString().slice(0,10); }
+function nomeVendedor(id){ return state.vendedores.find(v=>v.id===id)?.nome || null; }
+function itensComissaoNoPeriodo(dataDe, dataAte){
+  const itens = [];
+  state.lancamentos.forEach(l=>{
+    if(l.origem==='vk' && l.dataVencimento>=dataDe && l.dataVencimento<=dataAte){
+      const descricao = l.fornecedor ? `${l.descricao} — ${l.fornecedor}` : l.descricao;
+      itens.push({ origem:'vk', id:l.id, vendedorId:l.vendedorId||null, descricao, data:l.dataVencimento, valorBase:l.valor });
+    }
+  });
+  state.comissoesManuais.forEach(m=>{
+    if(m.data>=dataDe && m.data<=dataAte){
+      itens.push({ origem:'manual', id:m.id, vendedorId:m.vendedorId, descricao:m.descricao, data:m.data, valorBase:m.valorBase });
+    }
+  });
+  return itens;
+}
+function itemComissaoPago(item){
+  return state.comissoesPagas.some(cp=>
+    state.lancamentos.some(l=>l.id===cp.lancamentoDespesaId) &&
+    cp.itens.some(it=>it.origem===item.origem && it.id===item.id)
+  );
+}
+
+function gerarReciboComissaoPDF(cp){
+  if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
+  const { jsPDF } = window.jspdf;
+  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+  const M = 20, PW = 210, W = PW - M*2;
+  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107];
+  const nome = nomeVendedor(cp.vendedorId) || 'Vendedor removido';
+  let y = 25;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
+  docPdf.text('Livro Caixa Financeiro VK', M, y);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
+  docPdf.text(`Emitido em ${fmtDate(cp.dataGeracao)}`, M+W, y, { align:'right' });
+  y += 8;
+  docPdf.setDrawColor(...LINEC); docPdf.setLineWidth(0.3); docPdf.line(M, y, M+W, y);
+  y += 10;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...BLUEDEEP);
+  docPdf.text('RECIBO DE PAGAMENTO DE COMISSÃO', M, y);
+  y += 4;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 9;
+
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...SOFT);
+  docPdf.text('VENDEDOR', M, y);
+  docPdf.text('PERÍODO DE REFERÊNCIA', M+60, y);
+  docPdf.text('DATA DE EMISSÃO', M+130, y);
+  y += 5.5;
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(11); docPdf.setTextColor(...INK);
+  docPdf.text(nome, M, y);
+  docPdf.text(`${fmtDate(cp.dataDe)} a ${fmtDate(cp.dataAte)}`, M+60, y);
+  docPdf.text(fmtDate(cp.dataGeracao), M+130, y);
+  y += 10;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(8.5); docPdf.setTextColor(...SOFT);
+  docPdf.text('PEDIDO', M, y);
+  docPdf.text('DATA', M+100, y);
+  docPdf.text('VALOR', M+W, y, { align:'right' });
+  y += 2;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 6;
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...INK);
+  if(cp.itens.length){
+    cp.itens.forEach(it=>{
+      docPdf.text(it.descricao, M, y, { maxWidth: 95 });
+      docPdf.text(fmtDate(it.data), M+100, y);
+      docPdf.text(brl(it.valorBase), M+W, y, { align:'right' });
+      y += 6;
+      docPdf.setDrawColor(...LINEC); docPdf.line(M, y-2.2, M+W, y-2.2);
+    });
+  } else {
+    docPdf.setTextColor(...SOFT);
+    docPdf.text('Nenhum pedido — pagamento apenas de bonificação/outros valores.', M, y);
+    y += 6;
+  }
+  y += 3;
+
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5);
+  docPdf.setTextColor(...SOFT); docPdf.text('Valor total vendido', M, y);
+  docPdf.setTextColor(...INK); docPdf.text(brl(cp.valorTotalVendido), M+W, y, { align:'right' });
+  y += 6;
+  docPdf.setTextColor(...SOFT); docPdf.text('Percentual de comissão', M, y);
+  docPdf.setTextColor(...INK); docPdf.text(`${String(cp.percentual).replace('.',',')}%`, M+W, y, { align:'right' });
+  y += 6;
+  docPdf.setTextColor(...SOFT); docPdf.text('Comissão sobre vendas', M, y);
+  docPdf.setTextColor(...INK); docPdf.text(brl(cp.comissaoValor), M+W, y, { align:'right' });
+  y += 8;
+
+  if(cp.extras && cp.extras.length){
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(8.5); docPdf.setTextColor(...SOFT);
+    docPdf.text('BONIFICAÇÕES E OUTROS VALORES', M, y);
+    y += 5.5;
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...INK);
+    cp.extras.forEach(ex=>{
+      docPdf.text(ex.descricao, M, y, { maxWidth: 120 });
+      docPdf.text(brl(ex.valor), M+W, y, { align:'right' });
+      y += 6;
+      docPdf.setDrawColor(...LINEC); docPdf.line(M, y-2.2, M+W, y-2.2);
+    });
+    y += 3;
+  }
+
+  y += 3;
+  docPdf.setDrawColor(...INK); docPdf.setLineWidth(0.6); docPdf.line(M, y, M+W, y);
+  y += 8;
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(11.5); docPdf.setTextColor(...INK);
+  docPdf.text('VALOR TOTAL A RECEBER', M, y);
+  docPdf.setFontSize(15); docPdf.setTextColor(...SUCCESS);
+  docPdf.text(brl(cp.valorTotal), M+W, y, { align:'right' });
+  y += 24;
+
+  docPdf.setDrawColor(...LINEC); docPdf.setLineWidth(0.3); docPdf.line(M, y, M+W, y);
+  y += 8;
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(9.5); docPdf.setTextColor(...INK);
+  docPdf.text('VIERGUTZ E KRUEGER PARTICIPAÇÕES E EMPREENDIMENTOS', M+W/2, y, { align:'center' });
+
+  const nomeArquivo = `recibo-comissao-${nome.replace(/\s+/g,'-').toLowerCase()}-${cp.dataGeracao}.pdf`;
+  docPdf.save(nomeArquivo);
+}
+
+function pendentesResumo(){
+  let aPagar=0, aReceber=0, atrasados=0;
+  const hoje = todayISO();
+  state.lancamentos.forEach(l=>{
+    if(l.status==='pendente'){
+      if(l.tipo==='saida') aPagar += l.valor;
+      if(l.tipo==='entrada') aReceber += l.valor;
+      if(l.dataVencimento && l.dataVencimento < hoje) atrasados++;
+    }
+  });
+  return { aPagar, aReceber, atrasados };
+}
+
+/* ---------------- Views ---------------- */
+function viewDashboard(){
+  const t = totaisRealizados();
+  const mes = totaisMesAtual();
+  const pend = pendentesResumo();
+  const recentes = [...state.lancamentos].sort((a,b)=> (b.dataPagamento||b.dataVencimento||'').localeCompare(a.dataPagamento||a.dataVencimento||'')).slice(0,6);
+
+  return `
+    <div class="topbar">
+      <div><h1>Dashboard</h1><p>Visão geral da saúde financeira da empresa</p></div>
+      <button class="btn" id="btnNovoRapido">+ Novo lançamento</button>
+    </div>
+    <div class="cards">
+      <div class="card saldo"><div class="label">Saldo em caixa</div><div class="value mono ${t.saldo>=0?'pos':'neg'}">${brl(t.saldo)}</div></div>
+      <div class="card"><div class="label">Entradas no mês</div><div class="value mono pos">${brl(mes.entradas)}</div></div>
+      <div class="card"><div class="label">Saídas no mês</div><div class="value mono neg">${brl(mes.saidas)}</div></div>
+      <div class="card"><div class="label">Contas atrasadas</div><div class="value mono ${pend.atrasados>0?'neg':''}">${pend.atrasados}</div></div>
+    </div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;">
+      <div class="card"><div class="label">A pagar (pendente)</div><div class="value mono neg">${brl(pend.aPagar)}</div></div>
+      <div class="card"><div class="label">A receber (pendente)</div><div class="value mono pos">${brl(pend.aReceber)}</div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Últimos lançamentos</h2><span style="font-size:12px;color:var(--text-soft);cursor:pointer;" data-goto="fluxo">Ver fluxo de caixa completo →</span></div>
+      <div class="panel-body">
+        ${recentes.length? recentes.map(rowHTML).join('') : `<div class="empty">Nenhum lançamento ainda. Clique em "Novo lançamento" para começar.</div>`}
+      </div>
+    </div>
+  `;
+}
+
+function rowHTML(l){
+  const statusClass = l.status==='pendente' && l.dataVencimento && l.dataVencimento<todayISO() ? 'atrasado' : l.status;
+  const statusLabel = {pago:'Pago', recebido:'Recebido', cancelado:'Cancelado', pendente: statusClass==='atrasado' ? 'Atrasado' : 'Pendente'}[l.status];
+  return `
+    <div class="ledger-row" data-id="${l.id}">
+      <span class="dot ${l.tipo}"></span>
+      <span class="mono" style="font-size:12.5px;color:var(--text-soft)">${fmtDate(l.dataPagamento || l.dataVencimento)}</span>
+      <div class="desc-cell" data-action="ver-detalhe" data-id="${l.id}" style="cursor:pointer;">
+        <div>${escapeHTML(l.descricao)}${l.origem==='forneira' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Forneira</span>' : ''}${l.origem==='vk' ? ' <span style="color:var(--blue-accent);font-size:11px;">· VK Industrial</span>' : ''}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Investimento</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}</div>
+        <div class="cat"><span class="conta-tag"><span class="conta-swatch" style="background:${corConta(l.contaId)}"></span>${escapeHTML(nomeConta(l.contaId))}</span> · ${escapeHTML(l.categoria)}${l.fornecedor ? ' · '+escapeHTML(l.fornecedor) : ''}</div>
+      </div>
+      <span class="col-cat mono" style="font-size:11.5px;color:var(--text-soft)">${fmtDate(l.dataVencimento)}</span>
+      <span class="mono" style="font-weight:600;color:${l.tipo==='entrada'?'var(--success)':'var(--danger)'}">${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}</span>
+      <span class="col-status status-chip ${statusClass}">${statusLabel}</span>
+      <div class="row-actions">
+        ${l.status==='pendente' ? `<button class="icon-btn" data-action="quitar" data-id="${l.id}" title="Marcar como ${l.tipo==='entrada'?'recebido':'pago'}">✓</button>` : ''}
+        ${l.origem!=='transferencia' ? `<button class="icon-btn" data-action="editar" data-id="${l.id}" title="Editar">✎</button>` : ''}
+        <button class="icon-btn" data-action="excluir" data-id="${l.id}" title="Excluir">✕</button>
+      </div>
+    </div>
+  `;
+}
+
+function viewLancamentos(tipo){
+  const titulo = tipo==='saida' ? 'Contas a Pagar' : 'Contas a Receber';
+  const categorias = todasCategoriasFlat(tipo);
+  let lista = state.lancamentos.filter(l=>l.tipo===tipo && l.origem!=='transferencia');
+  lista.sort((a,b)=> (a.dataVencimento||'').localeCompare(b.dataVencimento||''));
+
+  return `
+    <div class="topbar">
+      <div><h1>${titulo}</h1><p>${tipo==='saida' ? 'Obrigações e despesas da empresa' : 'Valores a receber de clientes e outras fontes'}</p></div>
+      <button class="btn" id="btnNovoLancamento" data-tipo="${tipo}">+ Nova conta</button>
+    </div>
+    <div class="panel">
+      <div class="filter-bar">
+        <select id="filtroStatus">
+          <option value="todos">Todos os status</option>
+          <option value="pendente">Pendentes</option>
+          <option value="pago">${tipo==='saida'?'Pagos':'Recebidos'}</option>
+        </select>
+        <select id="filtroCategoria">
+          <option value="todas">Todas as categorias</option>
+          ${categorias.map(c=>`<option value="${c}">${c}</option>`).join('')}
+        </select>
+      </div>
+      <div class="ledger-row head">
+        <span></span><span>Vence</span><span>Descrição</span><span class="col-cat">Venc. orig.</span><span>Valor</span><span class="col-status">Status</span><span></span>
+      </div>
+      <div class="panel-body" id="listaLancamentos">
+        ${lista.length? lista.map(rowHTML).join('') : `<div class="empty">Nenhum lançamento em ${titulo.toLowerCase()} ainda.</div>`}
+      </div>
+    </div>
+  `;
+}
+
+function viewFluxo(){
+  let lista = state.lancamentos.filter(l=>(l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
+  lista.sort((a,b)=> (a.dataPagamento||'').localeCompare(b.dataPagamento||''));
+  let saldo = 0;
+  const rows = lista.map(l=>{
+    saldo += l.tipo==='entrada' ? l.valor : -l.valor;
+    return `
+      <div class="ledger-row" data-id="${l.id}">
+        <span class="dot ${l.tipo}"></span>
+        <span class="mono" style="font-size:12.5px;color:var(--text-soft)">${fmtDate(l.dataPagamento)}</span>
+        <div class="desc-cell" data-action="ver-detalhe" data-id="${l.id}" style="cursor:pointer;"><div>${escapeHTML(l.descricao)}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}</div><div class="cat">${escapeHTML(l.categoria)}</div></div>
+        <span class="mono" style="font-weight:600;color:${l.tipo==='entrada'?'var(--success)':'var(--danger)'}">${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}</span>
+        <span class="mono" style="font-weight:600;">${brl(saldo)}</span>
+        <span></span>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="topbar">
+      <div><h1>Fluxo de Caixa</h1><p>Lançamentos realizados, em ordem cronológica, com saldo acumulado (transferências entre contas próprias não entram aqui — veja o extrato da conta)</p></div>
+    </div>
+    <div class="panel">
+      <div class="ledger-row head">
+        <span></span><span>Data</span><span>Descrição</span><span>Valor</span><span>Saldo</span><span></span>
+      </div>
+      <div class="panel-body">
+        ${lista.length? rows : `<div class="empty">Nenhum lançamento realizado (pago/recebido) ainda.</div>`}
+      </div>
+    </div>
+  `;
+}
+
+function viewContas(){
+  const total = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+  return `
+    <div class="topbar">
+      <div><h1>Contas Bancárias</h1><p>Contas usadas para representar onde o dinheiro da empresa está — bancos, caixa físico, etc.</p></div>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <button class="btn ghost" id="btnNovaTransferencia" ${state.contas.length<2?'disabled title="Crie pelo menos 2 contas para transferir"':''}>⇄ Transferir entre contas</button>
+        <div class="card saldo" style="padding:12px 18px;"><div class="label">Saldo total</div><div class="value mono ${total>=0?'pos':'neg'}" style="font-size:20px;">${brl(total)}</div></div>
+      </div>
+    </div>
+    <div class="conta-cards">
+      ${state.contas.map(c=>`
+        <div class="conta-card" style="--accent-c:${c.cor}">
+          <div class="conta-actions">
+            <button class="icon-btn" data-action="editar-conta" data-id="${c.id}" title="Editar">✎</button>
+            ${state.contas.length>1 ? `<button class="icon-btn" data-action="excluir-conta" data-id="${c.id}" title="Excluir">✕</button>` : ''}
+          </div>
+          <div class="card-top">
+            ${bankLogoHTML(c, 38)}
+            <div class="nome-wrap">
+              <div class="nome">${escapeHTML(c.nome)}</div>
+              <div class="banco">${escapeHTML(c.banco || '—')} · ${c.tipo}</div>
+            </div>
+          </div>
+          <div class="saldo mono ${saldoConta(c.id)>=0?'pos':'neg'}">${brl(saldoConta(c.id))}</div>
+          <div style="display:flex;gap:8px;margin-top:12px;">
+            <button class="btn ghost sm" data-action="ver-extrato" data-id="${c.id}" style="flex:1;">Ver extrato</button>
+            <button class="btn sm" data-action="investir-conta" data-id="${c.id}" style="flex:1;">📈 Investir</button>
+          </div>
+        </div>
+      `).join('')}
+      <div class="add-conta-card" id="btnNovaConta">+ Adicionar conta</div>
+    </div>
+    <div class="note" style="margin-top:0;">As contas aqui são uma representação simplificada — servem para separar saldo entre bancos/caixa, sem integração bancária automática (open finance, extratos, etc).</div>
+  `;
+}
+
+function viewExtrato(contaId){
+  const conta = state.contas.find(c=>c.id===contaId);
+  if(!conta) return viewContas();
+  let lista = state.lancamentos.filter(l=>l.contaId===contaId && (l.status==='pago'||l.status==='recebido'));
+  lista.sort((a,b)=> (a.dataPagamento||'').localeCompare(b.dataPagamento||''));
+  let saldo = conta.saldoInicial || 0;
+  const rows = lista.map(l=>{
+    saldo += l.tipo==='entrada' ? l.valor : -l.valor;
+    return `
+      <div class="ledger-row" data-id="${l.id}">
+        <span class="dot ${l.tipo}"></span>
+        <span class="mono" style="font-size:12.5px;color:var(--text-soft)">${fmtDate(l.dataPagamento)}</span>
+        <div class="desc-cell" data-action="ver-detalhe" data-id="${l.id}" style="cursor:pointer;"><div>${escapeHTML(l.descricao)}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Investimento</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}</div><div class="cat">${escapeHTML(l.categoria)}</div></div>
+        <span class="mono" style="font-weight:600;color:${l.tipo==='entrada'?'var(--success)':'var(--danger)'}">${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}</span>
+        <span class="mono" style="font-weight:600;">${brl(saldo)}</span>
+        <div class="row-actions">${l.origem!=='transferencia' ? `<button class="icon-btn" data-action="editar" data-id="${l.id}" title="Editar">✎</button>` : ''}<button class="icon-btn" data-action="excluir" data-id="${l.id}" title="Excluir">✕</button></div>
+      </div>
+    `;
+  }).join('');
+  const pendentesConta = state.lancamentos.filter(l=>l.contaId===contaId && l.status==='pendente');
+
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" id="btnVoltarContas">← Contas Bancárias</span>
+        <h1 style="margin-top:6px;">Extrato — ${escapeHTML(conta.nome)}</h1>
+        <p>${escapeHTML(conta.banco||'')} · Saldo atual: <strong class="mono">${brl(saldoConta(contaId))}</strong></p>
+      </div>
+      <button class="btn" data-action="investir-conta" data-id="${contaId}">📈 Investir</button>
+    </div>
+    <div class="panel">
+      <div class="ledger-row head">
+        <span></span><span>Data</span><span>Descrição</span><span>Valor</span><span>Saldo</span><span></span>
+      </div>
+      <div class="panel-body">
+        ${lista.length? rows : `<div class="empty">Nenhuma movimentação realizada nesta conta ainda.</div>`}
+      </div>
+    </div>
+    ${pendentesConta.length ? `
+    <div class="panel">
+      <div class="panel-head"><h2>Previsto (ainda pendente) nesta conta</h2></div>
+      <div class="panel-body">${pendentesConta.map(rowHTML).join('')}</div>
+    </div>` : ''}
+  `;
+}
+
+function viewCartoes(){
+  return `
+    <div class="topbar">
+      <div><h1>Cartões de Crédito</h1><p>Cadastro de cartões, compras parceladas e controle de fatura</p></div>
+    </div>
+    <div class="conta-cards">
+      ${state.cartoes.map(c=>{
+        const comp = competenciaAtual(c);
+        const faturaAtual = totalCompetencia(c.id, comp);
+        const disponivel = limiteDisponivel(c);
+        const usoPct = c.limite>0 ? Math.min(100, Math.round(((c.limite-disponivel)/c.limite)*100)) : 0;
+        return `
+        <div class="cartao-card" style="--accent-c:${c.cor}">
+          <div class="conta-actions">
+            <button class="icon-btn" data-action="editar-cartao" data-id="${c.id}" title="Editar">✎</button>
+            <button class="icon-btn" data-action="excluir-cartao" data-id="${c.id}" title="Excluir">✕</button>
+          </div>
+          <div class="card-top">
+            ${bankLogoHTML({ cor:c.cor, banco:c.bandeira, bancoDominio:c.bandeiraDominio, nome:c.nome }, 34)}
+            <div class="nome-wrap">
+              <div class="nome">${escapeHTML(c.nome)}</div>
+              <div class="banco">${escapeHTML(c.bandeira)}${c.banco ? ' · '+escapeHTML(c.banco) : ''}</div>
+            </div>
+          </div>
+          <div class="fatura-label">Fatura atual (${competenciaLabel(comp)})</div>
+          <div class="fatura-valor mono">${brl(faturaAtual)}</div>
+          <div class="limit-bar"><div class="limit-bar-fill" style="width:${usoPct}%"></div></div>
+          <div class="limit-info"><span>Disponível: ${brl(disponivel)}</span><span>Limite: ${brl(c.limite)}</span></div>
+          <div class="cartao-actions-row">
+            <button class="btn" data-action="lancar-compra" data-id="${c.id}">+ Lançar compra</button>
+            <button class="btn ghost" data-action="ver-fatura" data-id="${c.id}">Ver fatura</button>
+          </div>
+        </div>
+      `;}).join('')}
+      <div class="add-conta-card" id="btnNovoCartao">+ Adicionar cartão</div>
+    </div>
+    ${!state.cartoes.length ? '' : `<div class="note" style="margin-top:0;">A fatura fecha no dia de fechamento configurado em cada cartão e vira uma conta a pagar quando você clicar em "Fechar fatura" dentro da tela de fatura do cartão.</div>`}
+  `;
+}
+
+function viewFatura(cartaoId, competencia){
+  const cartao = state.cartoes.find(c=>c.id===cartaoId);
+  if(!cartao) return viewCartoes();
+  const comps = competenciasDoCartao(cartaoId);
+  const compAtual = competencia && comps.includes(competencia) ? competencia : competenciaAtual(cartao);
+  faturaCompetenciaAtual = compAtual;
+  const parcelas = state.comprasCartao.filter(p=>p.cartaoId===cartaoId && p.competencia===compAtual).sort((a,b)=>(a.dataCompra||'').localeCompare(b.dataCompra||''));
+  const total = parcelas.reduce((s,p)=>s+p.valor,0);
+  const status = faturaStatus(cartaoId, compAtual);
+  const vencimento = dataVencimentoFatura(cartao, compAtual);
+
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" id="btnVoltarCartoes">← Cartões de Crédito</span>
+        <h1 style="margin-top:6px;">Fatura — ${escapeHTML(cartao.nome)}</h1>
+        <p>Vencimento previsto: ${fmtDate(vencimento)}</p>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="filter-bar">
+        <div class="fatura-select-wrap">
+          <select id="faturaCompetenciaSelect">
+            ${comps.map(c=>`<option value="${c}" ${c===compAtual?'selected':''}>${competenciaLabel(c)}</option>`).join('')}
+          </select>
+          <span class="fatura-status-badge ${status}">${status==='aberta'?'Em aberto':status==='fechada'?'Fechada — aguardando pagamento':'Paga'}</span>
+        </div>
+        <span style="margin-left:auto;font-size:14px;font-weight:600;" class="mono">Total: ${brl(total)}</span>
+      </div>
+      <div class="ledger-row head">
+        <span></span><span>Data</span><span>Descrição</span><span class="col-cat">Categoria</span><span>Valor</span><span></span>
+      </div>
+      <div class="panel-body">
+        ${parcelas.length? parcelas.map(p=>`
+          <div class="ledger-row">
+            <span class="dot saida"></span>
+            <span class="mono" style="font-size:12.5px;color:var(--text-soft)">${fmtDate(p.dataCompra)}</span>
+            <div class="desc-cell"><div>${escapeHTML(p.descricao)}${p.totalParcelas>1?` <span style="color:var(--text-soft);font-size:11.5px;">(${p.parcela}/${p.totalParcelas})</span>`:''}</div></div>
+            <span class="col-cat" style="font-size:12px;color:var(--text-soft);">${escapeHTML(p.categoria)}</span>
+            <span class="mono" style="font-weight:600;color:var(--danger);">${brl(p.valor)}</span>
+            <span></span>
+          </div>
+        `).join('') : `<div class="empty">Nenhuma compra lançada nesta fatura ainda.</div>`}
+      </div>
+    </div>
+    ${status==='aberta' && total>0 ? `
+    <div class="panel">
+      <div class="panel-body" style="padding:18px 20px;">
+        <div class="field" style="max-width:280px;">
+          <label>Conta para pagar esta fatura</label>
+          <select id="faturaContaPagamento">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select>
+        </div>
+        <button class="btn" id="btnFecharFatura">Fechar fatura e lançar como conta a pagar</button>
+      </div>
+    </div>` : ''}
+  `;
+}
+
+function viewInvestimentos(){
+  const total = totalInvestimentos();
+  const custo = state.ativosInvestimento.reduce((s,a)=>s+custoAtivo(a),0);
+  const rendimento = total - custo;
+  return `
+    <div class="topbar">
+      <div><h1>Investimentos</h1><p>Carteira de aplicações — renda fixa e renda variável</p></div>
+      <button class="btn ghost" id="btnAtualizarCotacoes">⟳ Atualizar cotações</button>
+    </div>
+    <div class="cards">
+      <div class="card saldo"><div class="label">Total investido (valor atual)</div><div class="value mono">${brl(total)}</div></div>
+      <div class="card"><div class="label">Custo de aquisição</div><div class="value mono">${brl(custo)}</div></div>
+      <div class="card"><div class="label">Rendimento acumulado</div><div class="value mono ${rendimento>=0?'pos':'neg'}">${brl(rendimento)}</div></div>
+    </div>
+    <div class="conta-cards">
+      ${state.contasInvestimento.map(c=>{
+        const v = valorContaInvestimento(c.id);
+        const cu = custoContaInvestimento(c.id);
+        const rend = v-cu;
+        return `
+        <div class="conta-card" style="--accent-c:${c.cor}">
+          <div class="conta-actions">
+            <button class="icon-btn" data-action="editar-conta-inv" data-id="${c.id}" title="Editar">✎</button>
+            <button class="icon-btn" data-action="excluir-conta-inv" data-id="${c.id}" title="Excluir">✕</button>
+          </div>
+          <div class="card-top">
+            ${bankLogoHTML({ cor:c.cor, banco:c.instituicao, bancoDominio:c.instituicaoDominio, nome:c.nome }, 34)}
+            <div class="nome-wrap">
+              <div class="nome">${escapeHTML(c.nome)}</div>
+              <div class="banco">${escapeHTML(c.instituicao || '—')} · ${({renda_variavel:'Renda Variável',renda_fixa:'Renda Fixa',interno:'Na Empresa'})[c.tipo]}</div>
+            </div>
+          </div>
+          <div class="saldo mono ${rend>=0?'pos':'neg'}">${brl(v)}</div>
+          <div style="font-size:11.5px;color:var(--text-soft);margin-top:2px;">Rendimento: <span class="mono" style="color:${rend>=0?'var(--success)':'var(--danger)'}">${brl(rend)}</span></div>
+          <div style="display:flex;gap:8px;margin-top:12px;">
+            <button class="btn" data-action="add-ativo-direto" data-id="${c.id}" style="flex:1;">+ Ativo</button>
+            <button class="btn ghost sm" data-action="ver-ativos" data-id="${c.id}" style="flex:1;">Ver ativos</button>
+          </div>
+        </div>
+      `;}).join('')}
+      <div class="add-conta-card" id="btnNovaContaInv">+ Adicionar conta de investimento</div>
+    </div>
+    <div class="note" style="margin-top:0;">Cotações de ações, FIIs (B3) e criptomoedas são buscadas automaticamente via APIs públicas gratuitas quando o app está publicado e com internet — clique em "Atualizar cotações". Renda fixa (CDB, Tesouro, poupança) não tem cotação de mercado: o valor mostrado é uma estimativa pela taxa cadastrada.</div>
+  `;
+}
+
+function viewAtivosInvestimento(contaId){
+  const conta = state.contasInvestimento.find(c=>c.id===contaId);
+  if(!conta) return viewInvestimentos();
+  const ativos = state.ativosInvestimento.filter(a=>a.contaId===contaId);
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" id="btnVoltarInvestimentos">← Investimentos</span>
+        <h1 style="margin-top:6px;">${escapeHTML(conta.nome)}</h1>
+        <p>${escapeHTML(conta.instituicao || '')} · ${({renda_variavel:'Renda Variável',renda_fixa:'Renda Fixa',interno:'Na Empresa'})[conta.tipo]}</p>
+      </div>
+      <button class="btn" id="btnNovoAtivo" data-conta="${contaId}">+ Adicionar ativo</button>
+    </div>
+    <div class="panel">
+      <div class="ledger-row head" style="grid-template-columns:14px 1fr 120px 120px 110px 120px auto;">
+        <span></span><span>Ativo</span><span>Qtd / Aplicado</span><span>Preço méd. / Taxa</span><span>Preço atual</span><span>Valor atual</span><span></span>
+      </div>
+      <div class="panel-body">
+        ${ativos.length ? ativos.map(rowAtivoHTML).join('') : `<div class="empty">Nenhum ativo cadastrado nesta conta ainda.</div>`}
+      </div>
+    </div>
+  `;
+}
+
+function rowAtivoHTML(a){
+  const valor = valorAtivo(a);
+  const rend = valor - custoAtivo(a);
+  const isRF = a.tipoAtivo==='rendafixa';
+  const isManual = a.tipoAtivo==='rendafixa' || a.tipoAtivo==='interno' || a.manual;
+  return `
+    <div class="ledger-row" data-id="${a.id}" style="grid-template-columns:14px 1fr 120px 120px 110px 120px auto;">
+      <span class="dot ${rend>=0?'entrada':'saida'}"></span>
+      <div class="desc-cell"><div>${escapeHTML(a.nome || a.ticker || '')}</div><div class="cat">${rotuloTipoAtivo(a)}${a.ticker? ' · '+a.ticker.toUpperCase():''}${a.dataUltimaCotacao? ' · cotação '+fmtDate(a.dataUltimaCotacao.slice(0,10)) : ''}${isManual && a.valorAtualManual!=null ? ' · valor atualizado manualmente' : ''}</div></div>
+      <span class="mono" style="font-size:12.5px;">${isManual? brl(a.valorAplicado||0) : (a.quantidade||0)}</span>
+      <span class="mono" style="font-size:12.5px;">${isRF? ((a.taxaAnual||0)+'% a.a.') : (isManual? '—' : brl(a.precoMedio||0))}</span>
+      <span class="mono" style="font-size:12.5px;">${isManual? '—' : brl(a.precoAtual ?? a.precoMedio ?? 0)}</span>
+      <span class="mono" style="font-weight:600;">${brl(valor)}</span>
+      <div class="row-actions">
+        ${isManual ? `<button class="icon-btn" data-action="atualizar-valor-ativo" data-id="${a.id}" title="Atualizar valor">🔄</button>` : ''}
+        <button class="icon-btn" data-action="editar-ativo" data-id="${a.id}" title="Editar">✎</button>
+        <button class="icon-btn" data-action="excluir-ativo" data-id="${a.id}" title="Excluir">✕</button>
+      </div>
+    </div>
+  `;
+}
+
+function viewRelatorios(){
+  const hoje = new Date();
+  const anoAtual = hoje.getFullYear();
+  const mesAtual = String(hoje.getMonth()+1).padStart(2,'0');
+  return `
+    <div class="topbar"><div><h1>Relatórios</h1><p>DRE e Balanço Patrimonial gerados a partir dos lançamentos realizados</p></div></div>
+    <div class="toggle-row" id="reportToggle">
+      <button class="active" data-report="dre">DRE</button>
+      <button data-report="balanco">Balanço Patrimonial</button>
+    </div>
+    <div class="panel" id="reportPanel"></div>
+  `;
+}
+
+function renderDRE(periodo){
+  let de, ate, label;
+  const hoje = new Date();
+  if(periodo==='mes'){
+    de = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0,10);
+    ate = todayISO();
+    label = 'Mês atual';
+  } else if(periodo==='ano'){
+    de = new Date(hoje.getFullYear(), 0, 1).toISOString().slice(0,10);
+    ate = todayISO();
+    label = 'Ano atual (' + hoje.getFullYear() + ')';
+  } else {
+    de = document.getElementById('dreDe')?.value || todayISO();
+    ate = document.getElementById('dreAte')?.value || todayISO();
+    label = 'Período personalizado';
+  }
+  const lista = state.lancamentos.filter(l=>{
+    const ref = l.dataPagamento;
+    return ref && ref>=de && ref<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia';
+  });
+  const porCategoria = (tipo)=>{
+    const map = {};
+    lista.filter(l=>l.tipo===tipo).forEach(l=>{ map[l.categoria] = (map[l.categoria]||0) + l.valor; });
+    return map;
+  };
+  const receitas = porCategoria('entrada');
+  const despesas = porCategoria('saida');
+  const totalReceitas = Object.values(receitas).reduce((a,b)=>a+b,0);
+  const totalDespesas = Object.values(despesas).reduce((a,b)=>a+b,0);
+  const canceladosVK = state.lancamentos.filter(l=>l.origem==='vk' && l.status==='cancelado' && l.dataVencimento>=de && l.dataVencimento<=ate);
+  const totalCancelados = canceladosVK.reduce((s,l)=>s+l.valor,0);
+  const receitaLiquida = totalReceitas - totalCancelados;
+  const resultado = receitaLiquida - totalDespesas;
+
+  return `
+    <div class="report-controls">
+      <select id="drePeriodo">
+        <option value="mes" ${periodo==='mes'?'selected':''}>Mês atual</option>
+        <option value="ano" ${periodo==='ano'?'selected':''}>Ano atual</option>
+        <option value="custom" ${periodo==='custom'?'selected':''}>Personalizado</option>
+      </select>
+      ${periodo==='custom' ? `<input type="date" id="dreDe" value="${de}"> <span style="color:var(--text-soft);font-size:12px;">até</span> <input type="date" id="dreAte" value="${ate}">` : `<span style="font-size:12.5px;color:var(--text-soft);">${label}: ${fmtDate(de)} até ${fmtDate(ate)}</span>`}
+    </div>
+    <div class="report-block">
+      <div class="report-title">Receita Operacional</div>
+      ${Object.keys(receitas).length ? Object.entries(receitas).map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">${brl(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma receita no período</span><span class="v">${brl(0)}</span></div>`}
+      <div class="report-line total"><span>(=) Total de Receitas</span><span class="v">${brl(totalReceitas)}</span></div>
+      <div class="report-line sub"><span>(-) Pedidos Cancelados${canceladosVK.length?' ('+canceladosVK.length+')':''}</span><span class="v">(${brl(totalCancelados)})</span></div>
+      <div class="report-line total"><span>(=) Receita Líquida</span><span class="v">${brl(receitaLiquida)}</span></div>
+
+      <div class="report-title">Despesas Operacionais</div>
+      ${Object.keys(despesas).length ? Object.entries(despesas).map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">(${brl(v)})</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma despesa no período</span><span class="v">${brl(0)}</span></div>`}
+      <div class="report-line total"><span>(=) Total de Despesas</span><span class="v">(${brl(totalDespesas)})</span></div>
+
+      <div class="report-line result"><span>${resultado>=0?'Lucro':'Prejuízo'} do Período</span><span class="v" style="color:${resultado>=0?'var(--success)':'var(--danger)'}">${brl(resultado)}</span></div>
+    </div>
+  `;
+}
+
+function renderBalanco(){
+  const dataRef = document.getElementById('balancoData')?.value || todayISO();
+  const caixaBancos = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+  const aReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente').reduce((s,l)=>s+l.valor,0);
+  const aPagar = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente').reduce((s,l)=>s+l.valor,0);
+  const cartoesNaoFaturados = state.cartoes.reduce((s,c)=>{
+    const comp = competenciaAtual(c);
+    return s + (faturaStatus(c.id, comp)==='aberta' ? totalCompetencia(c.id, comp) : 0);
+  }, 0);
+  const investimentos = totalInvestimentos();
+  const totalAtivo = caixaBancos + aReceber + investimentos;
+  const totalPassivo = aPagar + cartoesNaoFaturados;
+  const patrimonioLiquido = totalAtivo - totalPassivo;
+
+  return `
+    <div class="report-controls">
+      <span style="font-size:12.5px;color:var(--text-soft);">Data de referência</span>
+      <input type="date" id="balancoData" value="${dataRef}">
+    </div>
+    <div class="report-block">
+      <div class="report-title">Ativo</div>
+      <div class="report-line"><span>Ativo Circulante</span><span class="v"></span></div>
+      <div class="report-line sub"><span>Caixa e Bancos</span><span class="v">${brl(caixaBancos)}</span></div>
+      <div class="report-line sub"><span>Contas a Receber</span><span class="v">${brl(aReceber)}</span></div>
+      <div class="report-line sub"><span>Investimentos Financeiros</span><span class="v">${brl(investimentos)}</span></div>
+      <div class="report-line sub"><span>Ativo Imobilizado (Ativos Patrimoniais)</span><span class="v">${brl(0)} <span style="color:var(--text-soft);">— módulo em construção</span></span></div>
+      <div class="report-line total"><span>Total do Ativo</span><span class="v">${brl(totalAtivo)}</span></div>
+
+      <div class="report-title">Passivo</div>
+      <div class="report-line"><span>Passivo Circulante</span><span class="v"></span></div>
+      <div class="report-line sub"><span>Contas a Pagar</span><span class="v">${brl(aPagar)}</span></div>
+      <div class="report-line sub"><span>Faturas de cartão em aberto (não fechadas)</span><span class="v">${brl(cartoesNaoFaturados)}</span></div>
+      <div class="report-line total"><span>Total do Passivo</span><span class="v">${brl(totalPassivo)}</span></div>
+
+      <div class="report-line result"><span>Patrimônio Líquido</span><span class="v" style="color:${patrimonioLiquido>=0?'var(--success)':'var(--danger)'}">${brl(patrimonioLiquido)}</span></div>
+    </div>
+  `;
+}
+
+function viewCategorias(){
+  return `
+    <div class="topbar">
+      <div><h1>Categorias</h1><p>Organize as categorias e subcategorias usadas nos lançamentos de despesas e receitas</p></div>
+    </div>
+    <div class="toggle-row" id="categoriaToggle">
+      <button class="${categoriaTipoAtivo==='saida'?'active':''}" data-tipo="saida">Despesas</button>
+      <button class="${categoriaTipoAtivo==='entrada'?'active':''}" data-tipo="entrada">Receitas</button>
+    </div>
+    <div id="categoriaPanel"></div>
+  `;
+}
+
+function renderCategoriaPanel(tipo){
+  const lista = listaCategorias(tipo);
+  return `
+    <div class="panel">
+      <div class="panel-body" style="padding:14px;">
+        ${lista.length ? lista.map(c=>`
+          <div class="categoria-item">
+            <div class="categoria-head">
+              <span class="nome">${escapeHTML(c.nome)}</span>
+              <div class="actions">
+                <button class="icon-btn" data-action="editar-categoria" data-tipo="${tipo}" data-id="${c.id}" title="Editar">✎</button>
+                <button class="icon-btn" data-action="excluir-categoria" data-tipo="${tipo}" data-id="${c.id}" title="Excluir">✕</button>
+              </div>
+            </div>
+            <div class="subcategoria-list">
+              ${(c.subcategorias||[]).map(sub=>`
+                <div class="subcategoria-row">
+                  <span>${escapeHTML(sub.nome)}</span>
+                  <div class="actions">
+                    <button class="icon-btn" data-action="editar-subcategoria" data-tipo="${tipo}" data-cat="${c.id}" data-id="${sub.id}" title="Editar">✎</button>
+                    <button class="icon-btn" data-action="excluir-subcategoria" data-tipo="${tipo}" data-cat="${c.id}" data-id="${sub.id}" title="Excluir">✕</button>
+                  </div>
+                </div>
+              `).join('')}
+              <div class="add-sub-row"><button data-action="nova-subcategoria" data-tipo="${tipo}" data-cat="${c.id}">+ Adicionar subcategoria</button></div>
+            </div>
+          </div>
+        `).join('') : `<div class="empty">Nenhuma categoria cadastrada ainda.</div>`}
+      </div>
+      <div style="padding:0 14px 16px;"><button class="btn" data-action="nova-categoria" data-tipo="${tipo}">+ Nova categoria</button></div>
+    </div>
+  `;
+}
+
+function viewComissoes(){
+  return `
+    <div class="topbar">
+      <div><h1>Comissões</h1><p>Comissão de vendas por vendedor — a partir dos pedidos do VK Industrial ou lançados manualmente</p></div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn ghost" id="btnNovoVendedor">+ Vendedor</button>
+        <button class="btn ghost" id="btnNovaComissaoManual">+ Comissão manual</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Vendedores cadastrados</h2></div>
+      <div class="panel-body" style="padding:14px;">
+        ${state.vendedores.length ? state.vendedores.map(v=>`
+          <div class="vendedor-mini-card">
+            <span class="nome">${escapeHTML(v.nome)}</span>
+            <span style="font-size:11.5px;color:var(--text-soft);">Comissão padrão</span>
+            <input type="text" inputmode="decimal" class="pct-input-sm vendedor-padrao-input" data-vendedor="${v.id}" value="${v.comissaoPadrao||0}">
+            <span style="font-size:11.5px;color:var(--text-soft);">%</span>
+            <button class="icon-btn" data-action="excluir-vendedor" data-id="${v.id}" title="Excluir">✕</button>
+          </div>
+        `).join('') : `<div class="empty">Nenhum vendedor ainda — cadastre um ou sincronize pedidos do VK Industrial que trazem representante.</div>`}
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="filter-bar">
+        <span style="font-size:12.5px;color:var(--text-soft);">Período</span>
+        <input type="date" id="comissaoDataDe" value="${primeiroDiaMes()}">
+        <span style="color:var(--text-soft);font-size:12px;">até</span>
+        <input type="date" id="comissaoDataAte" value="${todayISO()}">
+        <button class="btn ghost sm" id="btnFiltrarComissoes">Filtrar</button>
+      </div>
+      <div class="panel-body" id="comissoesPorVendedor" style="padding:14px;"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Pagamentos de comissão já gerados</h2></div>
+      <div class="panel-body" id="comissoesPagasLista"></div>
+    </div>
+  `;
+}
+
+function renderComissoesPendentes(dataDe, dataAte){
+  const itens = itensComissaoNoPeriodo(dataDe, dataAte).filter(it=>!itemComissaoPago(it));
+  if(!itens.length) return `<div class="empty">Nenhum pedido pendente de comissão nesse período.</div>`;
+  const porVendedor = {};
+  itens.forEach(it=>{
+    const key = it.vendedorId || '_sem_vendedor';
+    if(!porVendedor[key]) porVendedor[key] = [];
+    porVendedor[key].push(it);
+  });
+  return Object.entries(porVendedor).map(([vendedorId, lista])=>{
+    const vendedor = vendedorId!=='_sem_vendedor' ? state.vendedores.find(v=>v.id===vendedorId) : null;
+    const nome = vendedor ? vendedor.nome : 'Sem vendedor definido';
+    const padrao = vendedor ? (vendedor.comissaoPadrao||0) : 0;
+    const totalVendido = lista.reduce((s,it)=>s+it.valorBase,0);
+    return `
+      <div class="categoria-item" data-vendedor="${vendedorId}">
+        <div class="categoria-head"><span class="nome">${escapeHTML(nome)}</span></div>
+        <div class="subcategoria-list" style="background:var(--white);">
+          <div class="ledger-row head" style="grid-template-columns:24px 1fr 100px 110px;padding:9px 14px;">
+            <span></span><span>Pedido</span><span>Data</span><span>Valor</span>
+          </div>
+          ${lista.map(it=>`
+            <div class="ledger-row item-comissao" data-origem="${it.origem}" data-id="${it.id}" data-valor="${it.valorBase}" data-descricao="${escapeHTML(it.descricao)}" data-data="${it.data}" style="grid-template-columns:24px 1fr 100px 110px;padding:9px 14px;">
+              <input type="checkbox" class="chk-comissao" checked ${!vendedor?'disabled':''}>
+              <div class="desc-cell"><div>${escapeHTML(it.descricao)}</div></div>
+              <span class="mono" style="font-size:12px;color:var(--text-soft);">${fmtDate(it.data)}</span>
+              <span class="mono">${brl(it.valorBase)}</span>
+            </div>
+          `).join('')}
+        </div>
+        ${vendedor ? `
+        <div style="padding:14px;border-top:1px solid var(--line);">
+          <div class="field-row">
+            <div class="field"><label>Valor total vendido (selecionado)</label><input type="text" class="valor-total-vendido-display mono" value="${brl(totalVendido)}" disabled style="background:var(--bone);"></div>
+            <div class="field"><label>% de comissão sobre o total</label><input type="text" inputmode="decimal" class="pct-comissao-total" value="${padrao}"></div>
+          </div>
+          <div class="extras-lista" data-vendedor="${vendedorId}"></div>
+          <div class="field-row" style="align-items:flex-end;">
+            <div class="field"><label>Bonificação / outro valor (opcional)</label><input type="text" class="extra-descricao" placeholder="Ex: Bonificação — meta batida"></div>
+            <div class="field" style="max-width:130px;"><label>Valor (R$)</label><input type="text" inputmode="decimal" class="extra-valor" placeholder="0,00"></div>
+            <button class="btn ghost sm btn-add-extra" type="button" style="margin-bottom:14px;">+ Adicionar</button>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
+            <select class="conta-pagamento-comissao" style="flex:0 0 220px;border:1px solid var(--line);border-radius:7px;padding:7px 10px;font-size:12.5px;background:var(--bone);">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select>
+            <button class="btn btn-gerar-pagamento" data-vendedor="${vendedorId}" data-nome="${escapeHTML(nome)}">Gerar pagamento (<span class="total-comissao-vendedor mono">${brl(totalVendido*padrao/100)}</span>)</button>
+          </div>
+        </div>` : `<div class="note" style="margin:12px 14px 14px;">Estes pedidos vieram sem representante definido no VK Industrial, então não entram no cálculo de comissão.</div>`}
+      </div>
+    `;
+  }).join('');
+}
+
+function renderComissoesPagas(){
+  const lista = [...state.comissoesPagas].sort((a,b)=>b.dataGeracao.localeCompare(a.dataGeracao));
+  if(!lista.length) return `<div class="empty">Nenhum pagamento de comissão gerado ainda.</div>`;
+  return lista.map(cp=>{
+    const lanc = state.lancamentos.find(l=>l.id===cp.lancamentoDespesaId);
+    const statusLabel = !lanc ? 'Excluído' : (lanc.status==='pendente' ? 'Pendente' : 'Pago');
+    const nome = nomeVendedor(cp.vendedorId) || 'Vendedor removido';
+    return `
+      <div class="comissao-historico-row">
+        <div>
+          <div>${escapeHTML(nome)} · ${brl(cp.valorTotal)}</div>
+          <div class="sub">${cp.itens.length} pedido(s)${cp.extras && cp.extras.length ? ' + '+cp.extras.length+' bonificação(ões)' : ''} · gerado em ${fmtDate(cp.dataGeracao)} · ${statusLabel}</div>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button class="icon-btn" data-action="recibo-comissao" data-id="${cp.id}" title="Gerar recibo PDF">📄</button>
+          <button class="icon-btn" data-action="excluir-pagamento-comissao" data-id="${cp.id}" title="Excluir (volta a ficar pendente)">✕</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function viewStub(titulo, texto){
+  return `
+    <div class="topbar"><div><h1>${titulo}</h1></div></div>
+    <div class="panel"><div class="stub"><div class="display">${titulo} — em construção</div><p>${texto}</p></div></div>
+  `;
+}
+
+function viewVK(){
+  const cfg = state.vkConfig;
+  const totalImportados = state.lancamentos.filter(l=>l.origem==='vk').length;
+  return `
+    <div class="topbar">
+      <div><h1>Integração VK Industrial</h1><p>Pedidos lançados no VK Industrial caem automaticamente aqui em Contas a Receber</p></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Conexão com o Firebase do VK Industrial</h2></div>
+      <div class="integ-config">
+        <p style="font-size:12.5px;color:var(--text-soft);margin-bottom:10px;">Já preenchi com o projeto <span class="mono">vk-provisorio</span>. Informe o login (mesmo usado para entrar no VK Industrial) para autorizar a leitura dos pedidos.</p>
+        <textarea id="firebaseConfigInput">${cfg.firebaseConfig ? JSON.stringify(cfg.firebaseConfig, null, 2) : ''}</textarea>
+        <div class="field-row" style="margin-top:12px;">
+          <div class="field"><label>E-mail de acesso ao VK Industrial</label><input type="email" id="vkEmail" value="${escapeHTML(cfg.email||'')}" placeholder="seu@email.com"></div>
+          <div class="field"><label>Senha</label><input type="password" id="vkSenha" value="${escapeHTML(cfg.senha||'')}" placeholder="senha"></div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>Conta bancária de destino</label>
+            <select id="vkConta">${state.contas.map(c=>`<option value="${c.id}" ${cfg.contaId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
+          </div>
+          <div class="field">
+            <label>Categoria do lançamento</label>
+            <select id="vkCategoria">${opcoesCategoriaHTML('entrada', cfg.categoria)}</select>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:4px;">
+          <button class="btn ghost" id="btnSalvarConfigVK">Salvar configuração</button>
+          <button class="btn" id="btnSincronizarVK">⟳ Sincronizar pedidos agora</button>
+        </div>
+        <div class="integ-status"><span class="dot ${cfg.firebaseConfig?'on':''}"></span>${cfg.ultimaSincronizacao ? 'Última sincronização: '+new Date(cfg.ultimaSincronizacao).toLocaleString('pt-BR') : 'Ainda não sincronizado'} · ${totalImportados} pedido(s) importado(s) até agora</div>
+        <div class="note">
+          <strong>Como funciona:</strong> ao sincronizar, cada pedido do VK Industrial vira <strong>uma conta a receber</strong> aqui — descrição "Pedido N° [número]", valor total do pedido, vencimento na data de entrega, e uma observação com o nome do cliente e os itens comprados (clique no lançamento para ver).
+          <br><br>
+          Pedidos com status "Cancelado" não são importados. Pedidos já importados não são duplicados numa nova sincronização — mas se você editar o pedido no VK Industrial depois de importado, a alteração não atualiza automaticamente aqui (só na criação).
+          <br><br>
+          A sincronização não é automática/contínua — clique em "Sincronizar pedidos agora" sempre que quiser buscar os pedidos novos. A senha fica salva só neste navegador.
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function escapeHTML(s){ const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
+
+/* ---------------- Handlers de view ---------------- */
+function excluirLancamento(id){
+  const l = state.lancamentos.find(x=>x.id===id);
+  if(!l) return;
+  const msg = l.origem==='transferencia' ? 'Excluir esta transferência? As duas pontas (saída e entrada) serão removidas.' : 'Excluir este lançamento?';
+  if(!confirm(msg)) return;
+  if(l.origem==='transferencia' && l.transferenciaId){
+    state.lancamentos = state.lancamentos.filter(x=>x.transferenciaId!==l.transferenciaId);
+  } else {
+    state.lancamentos = state.lancamentos.filter(x=>x.id!==id);
+    if(l.origem==='cartao') state.faturasFechadas = state.faturasFechadas.filter(f=>f.lancamentoId!==id);
+  }
+  persist(); render(); showToast('Lançamento excluído');
+}
+
+function attachViewHandlers(){
+  const btnNovoRapido = document.getElementById('btnNovoRapido');
+  if(btnNovoRapido) btnNovoRapido.addEventListener('click', ()=>openLancamentoModal('saida'));
+
+  const btnNovoLancamento = document.getElementById('btnNovoLancamento');
+  if(btnNovoLancamento) btnNovoLancamento.addEventListener('click', (e)=>openLancamentoModal(e.target.dataset.tipo));
+
+  document.querySelectorAll('[data-goto]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      currentView = el.dataset.goto;
+      document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view===currentView));
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-action]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.dataset.id;
+      const action = btn.dataset.action;
+      const l = state.lancamentos.find(x=>x.id===id);
+      if(!l) return;
+      if(action==='quitar'){
+        l.status = l.tipo==='entrada' ? 'recebido' : 'pago';
+        l.dataPagamento = todayISO();
+        persist(); render(); showToast('Lançamento atualizado');
+      } else if(action==='editar'){
+        openLancamentoModal(l.tipo, l);
+      } else if(action==='excluir'){
+        excluirLancamento(id);
+      } else if(action==='ver-detalhe'){
+        openDetalheLancamentoModal(l);
+      }
+    });
+  });
+
+  const filtroStatus = document.getElementById('filtroStatus');
+  const filtroCategoria = document.getElementById('filtroCategoria');
+  if(filtroStatus || filtroCategoria){
+    const applyFilters = ()=>{
+      const tipo = document.getElementById('btnNovoLancamento')?.dataset.tipo || 'saida';
+      const fs = filtroStatus.value, fc = filtroCategoria.value;
+      let lista = state.lancamentos.filter(l=>l.tipo===tipo && l.origem!=='transferencia');
+      if(fs!=='todos') lista = lista.filter(l=> fs==='pago' ? (l.status==='pago'||l.status==='recebido') : l.status===fs);
+      if(fc!=='todas') lista = lista.filter(l=>l.categoria===fc);
+      lista.sort((a,b)=> (a.dataVencimento||'').localeCompare(b.dataVencimento||''));
+      document.getElementById('listaLancamentos').innerHTML = lista.length ? lista.map(rowHTML).join('') : `<div class="empty">Nenhum resultado para esse filtro.</div>`;
+      document.querySelectorAll('#listaLancamentos [data-action]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const id = btn.dataset.id, action = btn.dataset.action;
+          const l = state.lancamentos.find(x=>x.id===id);
+          if(!l) return;
+          if(action==='quitar'){ l.status = l.tipo==='entrada'?'recebido':'pago'; l.dataPagamento=todayISO(); persist(); render(); showToast('Lançamento atualizado'); }
+          else if(action==='editar'){ openLancamentoModal(l.tipo, l); }
+          else if(action==='excluir'){ excluirLancamento(id); }
+          else if(action==='ver-detalhe'){ openDetalheLancamentoModal(l); }
+        });
+      });
+    };
+    filtroStatus?.addEventListener('change', applyFilters);
+    filtroCategoria?.addEventListener('change', applyFilters);
+  }
+
+  // Relatórios
+  const reportToggle = document.getElementById('reportToggle');
+  if(reportToggle){
+    let activeReport = 'dre';
+    const paint = ()=>{
+      document.getElementById('reportPanel').innerHTML = activeReport==='dre' ? renderDRE('mes') : renderBalanco();
+      bindReportInner();
+    };
+    const bindReportInner = ()=>{
+      const drePeriodo = document.getElementById('drePeriodo');
+      if(drePeriodo) drePeriodo.addEventListener('change', ()=>{
+        document.getElementById('reportPanel').innerHTML = renderDRE(drePeriodo.value);
+        bindReportInner();
+      });
+      const dreDe = document.getElementById('dreDe'), dreAte = document.getElementById('dreAte');
+      if(dreDe) dreDe.addEventListener('change', ()=>{ document.getElementById('reportPanel').innerHTML = renderDRE('custom'); bindReportInner(); });
+      if(dreAte) dreAte.addEventListener('change', ()=>{ document.getElementById('reportPanel').innerHTML = renderDRE('custom'); bindReportInner(); });
+      const balancoData = document.getElementById('balancoData');
+      if(balancoData) balancoData.addEventListener('change', ()=>{ document.getElementById('reportPanel').innerHTML = renderBalanco(); bindReportInner(); });
+    };
+    reportToggle.querySelectorAll('button').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        reportToggle.querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        activeReport = btn.dataset.report;
+        paint();
+      });
+    });
+    paint();
+  }
+
+  // Categorias
+  const categoriaToggle = document.getElementById('categoriaToggle');
+  if(categoriaToggle){
+    let tipoCatAtivo = categoriaTipoAtivo;
+    const bindCategoriaPanel = ()=>{
+      document.querySelectorAll('[data-action="nova-categoria"]').forEach(btn=>{
+        btn.addEventListener('click', ()=>openCategoriaModal(btn.dataset.tipo));
+      });
+      document.querySelectorAll('[data-action="editar-categoria"]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const cat = listaCategorias(btn.dataset.tipo).find(c=>c.id===btn.dataset.id);
+          openCategoriaModal(btn.dataset.tipo, cat);
+        });
+      });
+      document.querySelectorAll('[data-action="excluir-categoria"]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const tipo = btn.dataset.tipo, id = btn.dataset.id;
+          const cat = listaCategorias(tipo).find(c=>c.id===id);
+          if(!cat) return;
+          const nomesAfetados = [cat.nome, ...(cat.subcategorias||[]).map(s=>`${cat.nome} / ${s.nome}`)];
+          if(nomesAfetados.some(n=>categoriaEmUso(n))){ showToast('Essa categoria está em uso em lançamentos — não é possível excluir'); return; }
+          if(!confirm(`Excluir a categoria "${cat.nome}"${(cat.subcategorias||[]).length?' e suas subcategorias':''}?`)) return;
+          state.categorias[tipo] = state.categorias[tipo].filter(c=>c.id!==id);
+          persist(); paintCategorias(); showToast('Categoria excluída');
+        });
+      });
+      document.querySelectorAll('[data-action="nova-subcategoria"]').forEach(btn=>{
+        btn.addEventListener('click', ()=>openSubcategoriaModal(btn.dataset.tipo, btn.dataset.cat));
+      });
+      document.querySelectorAll('[data-action="editar-subcategoria"]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const cat = listaCategorias(btn.dataset.tipo).find(c=>c.id===btn.dataset.cat);
+          const sub = cat?.subcategorias.find(s=>s.id===btn.dataset.id);
+          if(sub) openSubcategoriaModal(btn.dataset.tipo, btn.dataset.cat, sub);
+        });
+      });
+      document.querySelectorAll('[data-action="excluir-subcategoria"]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const tipo = btn.dataset.tipo, catId = btn.dataset.cat, id = btn.dataset.id;
+          const cat = listaCategorias(tipo).find(c=>c.id===catId);
+          const sub = cat?.subcategorias.find(s=>s.id===id);
+          if(!cat || !sub) return;
+          const full = `${cat.nome} / ${sub.nome}`;
+          if(categoriaEmUso(full)){ showToast('Essa subcategoria está em uso em lançamentos — não é possível excluir'); return; }
+          if(!confirm(`Excluir a subcategoria "${sub.nome}"?`)) return;
+          cat.subcategorias = cat.subcategorias.filter(s=>s.id!==id);
+          persist(); paintCategorias(); showToast('Subcategoria excluída');
+        });
+      });
+    };
+    var paintCategorias = ()=>{
+      document.getElementById('categoriaPanel').innerHTML = renderCategoriaPanel(tipoCatAtivo);
+      bindCategoriaPanel();
+    };
+    categoriaToggle.querySelectorAll('button').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        categoriaToggle.querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        tipoCatAtivo = btn.dataset.tipo;
+        categoriaTipoAtivo = tipoCatAtivo;
+        paintCategorias();
+      });
+    });
+    paintCategorias();
+  }
+
+  // Comissões
+  const comissoesPorVendedorEl = document.getElementById('comissoesPorVendedor');
+  if(comissoesPorVendedorEl){
+    const extraRowHTML = (descricao, valor)=>`
+      <div class="extra-row" data-descricao="${escapeHTML(descricao)}" data-valor="${valor}" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);font-size:12.5px;">
+        <span>${escapeHTML(descricao)}</span>
+        <span style="display:flex;gap:8px;align-items:center;"><span class="mono">${brl(valor)}</span><button type="button" class="icon-btn btn-remove-extra" style="width:20px;height:20px;">✕</button></span>
+      </div>`;
+    const recalcBloco = (bloco)=>{
+      if(!bloco) return;
+      let valorVendido = 0;
+      bloco.querySelectorAll('.item-comissao').forEach(row=>{
+        if(row.querySelector('.chk-comissao')?.checked) valorVendido += parseFloat(row.dataset.valor);
+      });
+      const vvDisplay = bloco.querySelector('.valor-total-vendido-display');
+      if(vvDisplay) vvDisplay.value = brl(valorVendido);
+      const pct = numBR(bloco.querySelector('.pct-comissao-total')?.value) || 0;
+      const comissao = valorVendido * pct / 100;
+      let extras = 0;
+      bloco.querySelectorAll('.extra-row').forEach(r=>extras += parseFloat(r.dataset.valor));
+      const totalSpan = bloco.querySelector('.total-comissao-vendedor');
+      if(totalSpan) totalSpan.textContent = brl(comissao + extras);
+    };
+    const bindBloco = (bloco)=>{
+      bloco.querySelectorAll('.chk-comissao, .pct-comissao-total').forEach(el=>{
+        el.addEventListener('input', ()=>recalcBloco(bloco));
+        el.addEventListener('change', ()=>recalcBloco(bloco));
+      });
+      const btnAddExtra = bloco.querySelector('.btn-add-extra');
+      btnAddExtra?.addEventListener('click', ()=>{
+        const descInput = bloco.querySelector('.extra-descricao');
+        const valInput = bloco.querySelector('.extra-valor');
+        const descricao = descInput.value.trim();
+        const valor = numBR(valInput.value);
+        if(!descricao || isNaN(valor) || valor<=0){ showToast('Preencha a descrição e um valor válido para a bonificação'); return; }
+        bloco.querySelector('.extras-lista').insertAdjacentHTML('beforeend', extraRowHTML(descricao, valor));
+        descInput.value=''; valInput.value='';
+        bindExtrasRemove(bloco);
+        recalcBloco(bloco);
+      });
+      bindExtrasRemove(bloco);
+    };
+    const bindExtrasRemove = (bloco)=>{
+      bloco.querySelectorAll('.btn-remove-extra').forEach(btn=>{
+        btn.onclick = ()=>{ btn.closest('.extra-row').remove(); recalcBloco(bloco); };
+      });
+    };
+    const bindBotoesGerarPagamento = ()=>{
+      document.querySelectorAll('.btn-gerar-pagamento').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const bloco = btn.closest('.categoria-item');
+          const vendedorId = btn.dataset.vendedor;
+          const contaId = bloco.querySelector('.conta-pagamento-comissao').value;
+          const itensSelecionados = [];
+          let valorTotalVendido = 0;
+          bloco.querySelectorAll('.item-comissao').forEach(row=>{
+            if(!row.querySelector('.chk-comissao').checked) return;
+            const valorBase = parseFloat(row.dataset.valor);
+            valorTotalVendido += valorBase;
+            itensSelecionados.push({ origem: row.dataset.origem, id: row.dataset.id, descricao: row.dataset.descricao, data: row.dataset.data, valorBase });
+          });
+          const percentual = numBR(bloco.querySelector('.pct-comissao-total').value) || 0;
+          const comissaoValor = Math.round(valorTotalVendido*percentual/100*100)/100;
+          const extras = [];
+          bloco.querySelectorAll('.extra-row').forEach(r=>extras.push({ descricao: r.dataset.descricao, valor: parseFloat(r.dataset.valor) }));
+          const extrasTotal = extras.reduce((s,e)=>s+e.valor,0);
+          const total = Math.round((comissaoValor+extrasTotal)*100)/100;
+          if(!itensSelecionados.length && !extras.length){ showToast('Selecione ao menos um pedido ou adicione uma bonificação'); return; }
+          if(total<=0){ showToast('O valor total está zerado — confira o percentual e os pedidos selecionados'); return; }
+          if(!confirm(`Gerar pagamento de ${brl(total)} para ${btn.dataset.nome}?`)) return;
+          const lancId = uid();
+          state.lancamentos.push({
+            id: lancId, tipo:'saida', categoria:'Comissões',
+            descricao: `Comissão — ${btn.dataset.nome}`,
+            valor: total, contaId, status:'pendente', dataVencimento: todayISO(), dataPagamento: null,
+            origem:'comissao', criadoEm: new Date().toISOString()
+          });
+          const dataDe = document.getElementById('comissaoDataDe').value;
+          const dataAte = document.getElementById('comissaoDataAte').value;
+          const cp = { id: uid(), vendedorId, dataGeracao: todayISO(), dataDe, dataAte, itens: itensSelecionados, percentual, valorTotalVendido, comissaoValor, extras, valorTotal: total, contaId, lancamentoDespesaId: lancId };
+          state.comissoesPagas.push(cp);
+          persist(); render();
+          showToast('Pagamento de comissão gerado em Contas a Pagar');
+          gerarReciboComissaoPDF(cp);
+        });
+      });
+    };
+    const pintarComissoes = ()=>{
+      const dataDe = document.getElementById('comissaoDataDe').value;
+      const dataAte = document.getElementById('comissaoDataAte').value;
+      comissoesPorVendedorEl.innerHTML = renderComissoesPendentes(dataDe, dataAte);
+      document.getElementById('comissoesPagasLista').innerHTML = renderComissoesPagas();
+      document.querySelectorAll('.categoria-item[data-vendedor]').forEach(bloco=>{
+        if(bloco.querySelector('.pct-comissao-total')) bindBloco(bloco);
+      });
+      bindBotoesGerarPagamento();
+      document.querySelectorAll('[data-action="excluir-pagamento-comissao"]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const cp = state.comissoesPagas.find(x=>x.id===btn.dataset.id);
+          if(!cp) return;
+          if(!confirm('Excluir este pagamento de comissão? Os pedidos voltam a ficar pendentes e a conta a pagar vinculada será removida.')) return;
+          state.lancamentos = state.lancamentos.filter(l=>l.id!==cp.lancamentoDespesaId);
+          state.comissoesPagas = state.comissoesPagas.filter(x=>x.id!==cp.id);
+          persist(); pintarComissoes();
+          showToast('Pagamento de comissão excluído');
+        });
+      });
+      document.querySelectorAll('[data-action="recibo-comissao"]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const cp = state.comissoesPagas.find(x=>x.id===btn.dataset.id);
+          if(cp) gerarReciboComissaoPDF(cp);
+        });
+      });
+    };
+    document.getElementById('btnFiltrarComissoes').addEventListener('click', pintarComissoes);
+    pintarComissoes();
+
+    document.getElementById('btnNovoVendedor')?.addEventListener('click', ()=>openVendedorModal());
+    document.querySelectorAll('.vendedor-padrao-input').forEach(inp=>{
+      inp.addEventListener('change', ()=>{
+        const v = state.vendedores.find(x=>x.id===inp.dataset.vendedor);
+        if(v){ v.comissaoPadrao = numBR(inp.value)||0; persist(); showToast('Comissão padrão atualizada'); }
+      });
+    });
+    document.querySelectorAll('[data-action="excluir-vendedor"]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const id = btn.dataset.id;
+        const usado = state.lancamentos.some(l=>l.vendedorId===id) || state.comissoesManuais.some(m=>m.vendedorId===id);
+        if(usado && !confirm('Esse vendedor tem pedidos vinculados. Excluir só remove o cadastro, os pedidos continuam aparecendo como "Sem vendedor definido". Continuar?')) return;
+        state.vendedores = state.vendedores.filter(v=>v.id!==id);
+        persist(); render(); showToast('Vendedor excluído');
+      });
+    });
+    document.getElementById('btnNovaComissaoManual')?.addEventListener('click', ()=>openComissaoManualModal());
+  }
+
+  // Contas bancárias
+  const btnNovaConta = document.getElementById('btnNovaConta');
+  if(btnNovaConta) btnNovaConta.addEventListener('click', ()=>openContaModal());
+  document.querySelectorAll('[data-action="editar-conta"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openContaModal(state.contas.find(c=>c.id===btn.dataset.id)));
+  });
+  document.querySelectorAll('[data-action="excluir-conta"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.dataset.id;
+      const usada = state.lancamentos.some(l=>l.contaId===id);
+      if(usada && !confirm('Essa conta tem lançamentos vinculados. Excluí-la vai movê-los para a primeira conta da lista. Continuar?')) return;
+      state.contas = state.contas.filter(c=>c.id!==id);
+      const idPadrao = state.contas[0].id;
+      state.lancamentos.forEach(l=>{ if(l.contaId===id) l.contaId = idPadrao; });
+      persist(); render(); showToast('Conta excluída');
+    });
+  });
+  document.querySelectorAll('[data-action="ver-extrato"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      extratoContaId = btn.dataset.id;
+      currentView = 'extrato';
+      render();
+    });
+  });
+  document.querySelectorAll('[data-action="investir-conta"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openInvestirModal(btn.dataset.id));
+  });
+  const btnVoltarContas = document.getElementById('btnVoltarContas');
+  if(btnVoltarContas) btnVoltarContas.addEventListener('click', ()=>{
+    currentView = 'contas';
+    document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view==='contas'));
+    render();
+  });
+  const btnNovaTransferencia = document.getElementById('btnNovaTransferencia');
+  if(btnNovaTransferencia) btnNovaTransferencia.addEventListener('click', ()=>openTransferenciaModal());
+
+  // Cartões de crédito
+  const btnNovoCartao = document.getElementById('btnNovoCartao');
+  if(btnNovoCartao) btnNovoCartao.addEventListener('click', ()=>openCartaoModal());
+  document.querySelectorAll('[data-action="editar-cartao"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openCartaoModal(state.cartoes.find(c=>c.id===btn.dataset.id)));
+  });
+  document.querySelectorAll('[data-action="excluir-cartao"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.dataset.id;
+      const usado = state.comprasCartao.some(p=>p.cartaoId===id);
+      if(usado && !confirm('Este cartão tem compras lançadas. Excluí-lo também remove o histórico de compras dele. Continuar?')) return;
+      state.cartoes = state.cartoes.filter(c=>c.id!==id);
+      state.comprasCartao = state.comprasCartao.filter(p=>p.cartaoId!==id);
+      state.faturasFechadas = state.faturasFechadas.filter(f=>f.cartaoId!==id);
+      persist(); render(); showToast('Cartão excluído');
+    });
+  });
+  document.querySelectorAll('[data-action="lancar-compra"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openCompraCartaoModal(btn.dataset.id));
+  });
+  document.querySelectorAll('[data-action="ver-fatura"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      faturaCartaoId = btn.dataset.id;
+      faturaCompetenciaAtual = null;
+      currentView = 'fatura';
+      render();
+    });
+  });
+  const btnVoltarCartoes = document.getElementById('btnVoltarCartoes');
+  if(btnVoltarCartoes) btnVoltarCartoes.addEventListener('click', ()=>{
+    currentView = 'cartoes';
+    document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view==='cartoes'));
+    render();
+  });
+  const faturaCompetenciaSelect = document.getElementById('faturaCompetenciaSelect');
+  if(faturaCompetenciaSelect) faturaCompetenciaSelect.addEventListener('change', ()=>{
+    faturaCompetenciaAtual = faturaCompetenciaSelect.value;
+    render();
+  });
+  const btnFecharFatura = document.getElementById('btnFecharFatura');
+  if(btnFecharFatura) btnFecharFatura.addEventListener('click', ()=>{
+    const cartao = state.cartoes.find(c=>c.id===faturaCartaoId);
+    const comp = faturaCompetenciaAtual;
+    const total = totalCompetencia(cartao.id, comp);
+    const contaId = document.getElementById('faturaContaPagamento').value;
+    if(!confirm(`Fechar a fatura de ${competenciaLabel(comp)} (${brl(total)}) e lançar como conta a pagar?`)) return;
+    const lancId = uid();
+    state.lancamentos.push({
+      id: lancId, tipo:'saida', categoria:'Cartão de Crédito',
+      descricao:`Fatura ${cartao.nome} — ${competenciaLabel(comp)}`,
+      valor: total, contaId, status:'pendente',
+      dataVencimento: dataVencimentoFatura(cartao, comp), dataPagamento: null,
+      origem:'cartao', cartaoId: cartao.id, competencia: comp, criadoEm: new Date().toISOString()
+    });
+    state.faturasFechadas.push({ cartaoId: cartao.id, competencia: comp, lancamentoId: lancId });
+    persist(); render(); showToast('Fatura fechada e lançada em Contas a Pagar');
+  });
+
+  // Investimentos
+  const btnNovaContaInv = document.getElementById('btnNovaContaInv');
+  if(btnNovaContaInv) btnNovaContaInv.addEventListener('click', ()=>openContaInvestimentoModal());
+  document.querySelectorAll('[data-action="editar-conta-inv"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openContaInvestimentoModal(state.contasInvestimento.find(c=>c.id===btn.dataset.id)));
+  });
+  document.querySelectorAll('[data-action="excluir-conta-inv"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.dataset.id;
+      const usada = state.ativosInvestimento.some(a=>a.contaId===id);
+      if(usada && !confirm('Essa conta tem ativos cadastrados. Excluí-la remove os ativos junto. Continuar?')) return;
+      state.contasInvestimento = state.contasInvestimento.filter(c=>c.id!==id);
+      state.ativosInvestimento = state.ativosInvestimento.filter(a=>a.contaId!==id);
+      persist(); render(); showToast('Conta de investimento excluída');
+    });
+  });
+  document.querySelectorAll('[data-action="ver-ativos"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      invContaId = btn.dataset.id;
+      currentView = 'ativos-inv';
+      render();
+    });
+  });
+  document.querySelectorAll('[data-action="add-ativo-direto"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openAtivoModal(null, btn.dataset.id));
+  });
+  const btnVoltarInvestimentos = document.getElementById('btnVoltarInvestimentos');
+  if(btnVoltarInvestimentos) btnVoltarInvestimentos.addEventListener('click', ()=>{
+    currentView = 'investimentos';
+    document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view==='investimentos'));
+    render();
+  });
+  const btnNovoAtivo = document.getElementById('btnNovoAtivo');
+  if(btnNovoAtivo) btnNovoAtivo.addEventListener('click', ()=>openAtivoModal(null, btnNovoAtivo.dataset.conta));
+  document.querySelectorAll('[data-action="editar-ativo"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const a = state.ativosInvestimento.find(x=>x.id===btn.dataset.id);
+      openAtivoModal(a, a.contaId);
+    });
+  });
+  document.querySelectorAll('[data-action="excluir-ativo"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!confirm('Excluir este ativo?')) return;
+      state.ativosInvestimento = state.ativosInvestimento.filter(x=>x.id!==btn.dataset.id);
+      persist(); render(); showToast('Ativo excluído');
+    });
+  });
+  document.querySelectorAll('[data-action="atualizar-valor-ativo"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const a = state.ativosInvestimento.find(x=>x.id===btn.dataset.id);
+      if(a) openAtualizarValorModal(a);
+    });
+  });
+  const btnAtualizarCotacoes = document.getElementById('btnAtualizarCotacoes');
+  if(btnAtualizarCotacoes) btnAtualizarCotacoes.addEventListener('click', ()=>{
+    btnAtualizarCotacoes.textContent = 'Atualizando...';
+    btnAtualizarCotacoes.disabled = true;
+    atualizarCotacoes().finally(()=>{});
+  });
+
+  const btnSalvarConfigVK = document.getElementById('btnSalvarConfigVK');
+  if(btnSalvarConfigVK) btnSalvarConfigVK.addEventListener('click', ()=>{
+    const txt = document.getElementById('firebaseConfigInput').value.trim();
+    try{
+      state.vkConfig.firebaseConfig = txt ? JSON.parse(txt) : null;
+      state.vkConfig.email = document.getElementById('vkEmail').value.trim();
+      state.vkConfig.senha = document.getElementById('vkSenha').value;
+      state.vkConfig.contaId = document.getElementById('vkConta').value;
+      state.vkConfig.categoria = document.getElementById('vkCategoria').value;
+      persist(); showToast('Configuração salva'); render();
+    }catch(e){ showToast('JSON do Firebase inválido — confira o formato'); }
+  });
+  const btnSincronizarVK = document.getElementById('btnSincronizarVK');
+  if(btnSincronizarVK) btnSincronizarVK.addEventListener('click', ()=>{
+    const txt = document.getElementById('firebaseConfigInput').value.trim();
+    try{
+      state.vkConfig.firebaseConfig = txt ? JSON.parse(txt) : null;
+    }catch(e){ showToast('JSON do Firebase inválido — confira o formato'); return; }
+    state.vkConfig.email = document.getElementById('vkEmail').value.trim();
+    state.vkConfig.senha = document.getElementById('vkSenha').value;
+    state.vkConfig.contaId = document.getElementById('vkConta').value;
+    state.vkConfig.categoria = document.getElementById('vkCategoria').value;
+    persist();
+    btnSincronizarVK.textContent = 'Sincronizando...';
+    btnSincronizarVK.disabled = true;
+    sincronizarPedidosVK();
+  });
+}
+
+/* ---------------- Modal de lançamento ---------------- */
+function openLancamentoModal(tipo, existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit ? 'Editar lançamento' : (tipo==='saida' ? 'Nova conta a pagar' : 'Nova conta a receber')}</h3>
+    <div class="field">
+      <label>Descrição</label>
+      <input type="text" id="fDescricao" value="${existing ? escapeHTML(existing.descricao) : ''}" placeholder="${tipo==='saida' ? 'Ex: Compra de farinha' : 'Ex: Venda pedido #123'}">
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Categoria</label>
+        <select id="fCategoria">${opcoesCategoriaHTML(tipo, existing?.categoria)}</select>
+      </div>
+      <div class="field">
+        <label>Valor (R$)</label>
+        <input type="text" inputmode="decimal" id="fValor" value="${existing ? existing.valor : ''}" placeholder="0,00">
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>${tipo==='saida' ? 'Fornecedor (opcional)' : 'Cliente (opcional)'}</label>
+        <input type="text" id="fFornecedor" value="${existing?.fornecedor ? escapeHTML(existing.fornecedor) : ''}">
+      </div>
+      <div class="field">
+        <label>Conta</label>
+        <select id="fConta">${state.contas.map(c=>`<option value="${c.id}" ${(existing?.contaId||state.contas[0].id)===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Vencimento</label>
+        <input type="date" id="fVencimento" value="${existing?.dataVencimento || todayISO()}">
+      </div>
+      <div class="field">
+        <label>Status</label>
+        <select id="fStatus">
+          <option value="pendente" ${existing?.status==='pendente'?'selected':''}>Pendente</option>
+          <option value="${tipo==='saida'?'pago':'recebido'}" ${(existing?.status==='pago'||existing?.status==='recebido')?'selected':''}>${tipo==='saida'?'Pago':'Recebido'}</option>
+          <option value="cancelado" ${existing?.status==='cancelado'?'selected':''}>Cancelado</option>
+        </select>
+      </div>
+    </div>
+    <div class="field">
+      <label>Observação (opcional)</label>
+      <textarea id="fObservacao" rows="3" placeholder="Detalhes extras — ex: nome do cliente, itens do pedido, etc.">${existing?.observacao ? escapeHTML(existing.observacao) : ''}</textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarLancamento">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarLancamento').addEventListener('click', ()=>{
+    const descricao = document.getElementById('fDescricao').value.trim();
+    const valor = numBR(document.getElementById('fValor').value);
+    if(!descricao || isNaN(valor) || valor<=0){ showToast('Preencha descrição e valor válido'); return; }
+    const status = document.getElementById('fStatus').value;
+    const payload = {
+      descricao,
+      categoria: document.getElementById('fCategoria').value,
+      valor,
+      fornecedor: document.getElementById('fFornecedor').value.trim(),
+      observacao: document.getElementById('fObservacao').value.trim(),
+      contaId: document.getElementById('fConta').value,
+      dataVencimento: document.getElementById('fVencimento').value,
+      status,
+      dataPagamento: (status==='pago'||status==='recebido') ? (existing?.dataPagamento || todayISO()) : null,
+    };
+    if(isEdit){
+      Object.assign(existing, payload);
+    } else {
+      state.lancamentos.push({ id: uid(), tipo, origem:'manual', criadoEm: new Date().toISOString(), ...payload });
+    }
+    persist();
+    closeModal();
+    render();
+    showToast(isEdit ? 'Lançamento atualizado' : 'Lançamento criado');
+  });
+}
+function openContaModal(existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  const corSelecionada = existing?.cor || CONTA_CORES[state.contas.length % CONTA_CORES.length];
+  modal.innerHTML = `
+    <h3>${isEdit ? 'Editar conta' : 'Nova conta bancária'}</h3>
+    <div class="field">
+      <label>Nome da conta</label>
+      <input type="text" id="cNome" value="${existing ? escapeHTML(existing.nome) : ''}" placeholder="Ex: Banco do Brasil, Caixa da loja...">
+    </div>
+    <div class="field">
+      <label>Banco</label>
+      <select id="cBancoSelect">
+        ${BANCOS_BR.map(b=>`<option value="${escapeHTML(b.nome)}" data-dominio="${b.dominio}" ${existing?.banco===b.nome ? 'selected' : ''}>${escapeHTML(b.nome)}</option>`).join('')}
+      </select>
+      <div class="bank-select-preview" id="bankPreview"></div>
+      <input type="text" id="cBancoOutro" placeholder="Nome do banco" style="margin-top:8px;display:none;" value="${(existing && !BANCOS_BR.some(b=>b.nome===existing.banco)) ? escapeHTML(existing.banco||'') : ''}">
+    </div>
+    <div class="field">
+      <label>Tipo</label>
+      <select id="cTipo">
+        <option value="corrente" ${existing?.tipo==='corrente'?'selected':''}>Conta corrente</option>
+        <option value="poupanca" ${existing?.tipo==='poupanca'?'selected':''}>Poupança</option>
+        <option value="caixa" ${(!existing||existing?.tipo==='caixa')?'selected':''}>Caixa físico</option>
+        <option value="digital" ${existing?.tipo==='digital'?'selected':''}>Conta digital</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Saldo inicial (R$)</label>
+      <input type="text" inputmode="decimal" id="cSaldo" value="${existing ? existing.saldoInicial : '0'}">
+    </div>
+    <div class="field">
+      <label>Cor de identificação</label>
+      <div class="color-pick" id="cCorPick">
+        ${CONTA_CORES.map(c=>`<span style="background:${c}" data-cor="${c}" class="${c===corSelecionada?'sel':''}"></span>`).join('')}
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarConta">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  let corAtual = corSelecionada;
+  document.getElementById('cCorPick').addEventListener('click', (e)=>{
+    const el = e.target.closest('span[data-cor]');
+    if(!el) return;
+    corAtual = el.dataset.cor;
+    document.querySelectorAll('#cCorPick span').forEach(s=>s.classList.toggle('sel', s.dataset.cor===corAtual));
+  });
+
+  const bancoSelect = document.getElementById('cBancoSelect');
+  const bancoOutro = document.getElementById('cBancoOutro');
+  const paintBankPreview = ()=>{
+    const opt = bancoSelect.options[bancoSelect.selectedIndex];
+    const dominio = opt.dataset.dominio;
+    const isOutro = opt.value === 'Outro / não listado';
+    bancoOutro.style.display = isOutro ? 'block' : 'none';
+    const nomeParaLogo = isOutro ? (bancoOutro.value || 'Outro') : opt.value;
+    document.getElementById('bankPreview').innerHTML = dominio || !isOutro
+      ? bankLogoHTML({ cor: corAtual, banco: nomeParaLogo, bancoDominio: isOutro ? '' : dominio }, 30) + `<span class="bname">${escapeHTML(nomeParaLogo)}</span>`
+      : `<span class="bname" style="color:var(--text-soft)">Digite o nome do banco acima</span>`;
+  };
+  bancoSelect.addEventListener('change', paintBankPreview);
+  bancoOutro.addEventListener('input', paintBankPreview);
+  // Se for edição de conta com banco não listado, seleciona "Outro" automaticamente
+  if(existing && !BANCOS_BR.some(b=>b.nome===existing.banco)){
+    for(const opt of bancoSelect.options){ if(opt.value==='Outro / não listado'){ opt.selected = true; } }
+  }
+  paintBankPreview();
+
+  document.getElementById('btnSalvarConta').addEventListener('click', ()=>{
+    const nome = document.getElementById('cNome').value.trim();
+    const saldoInicial = numBR(document.getElementById('cSaldo').value);
+    if(!nome || isNaN(saldoInicial)){ showToast('Preencha nome e saldo inicial'); return; }
+    const opt = bancoSelect.options[bancoSelect.selectedIndex];
+    const isOutro = opt.value === 'Outro / não listado';
+    const banco = isOutro ? bancoOutro.value.trim() : opt.value;
+    const bancoDominio = isOutro ? '' : opt.dataset.dominio;
+    const payload = { nome, banco, bancoDominio, tipo: document.getElementById('cTipo').value, saldoInicial, cor: corAtual };
+    if(isEdit){ Object.assign(existing, payload); }
+    else { state.contas.push({ id: uid(), ...payload }); }
+    persist(); closeModal(); render();
+    showToast(isEdit ? 'Conta atualizada' : 'Conta criada');
+  });
+}
+
+function openTransferenciaModal(){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Transferência entre contas</h3>
+    <div class="field-row">
+      <div class="field">
+        <label>De (origem)</label>
+        <select id="tOrigem">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select>
+      </div>
+      <div class="field">
+        <label>Para (destino)</label>
+        <select id="tDestino">${state.contas.map((c,i)=>`<option value="${c.id}" ${i===1?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Valor (R$)</label>
+        <input type="text" inputmode="decimal" id="tValor" placeholder="0,00">
+      </div>
+      <div class="field">
+        <label>Data</label>
+        <input type="date" id="tData" value="${todayISO()}">
+      </div>
+    </div>
+    <div class="field">
+      <label>Descrição (opcional)</label>
+      <input type="text" id="tDescricao" placeholder="Ex: Reforço de caixa da loja">
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarTransferencia">Transferir</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarTransferencia').addEventListener('click', ()=>{
+    const origemId = document.getElementById('tOrigem').value;
+    const destinoId = document.getElementById('tDestino').value;
+    const valor = numBR(document.getElementById('tValor').value);
+    const data = document.getElementById('tData').value;
+    const descricaoExtra = document.getElementById('tDescricao').value.trim();
+    if(origemId===destinoId){ showToast('Escolha contas diferentes para origem e destino'); return; }
+    if(isNaN(valor) || valor<=0){ showToast('Informe um valor válido'); return; }
+    if(!data){ showToast('Informe a data'); return; }
+    const nomeOrigem = nomeConta(origemId), nomeDestino = nomeConta(destinoId);
+    const tid = uid();
+    const base = descricaoExtra ? ' — ' + descricaoExtra : '';
+    state.lancamentos.push({
+      id: uid(), tipo:'saida', categoria:'Transferência', descricao:`Transferência para ${nomeDestino}${base}`,
+      valor, contaId: origemId, status:'pago', dataVencimento: data, dataPagamento: data,
+      origem:'transferencia', transferenciaId: tid, criadoEm: new Date().toISOString()
+    });
+    state.lancamentos.push({
+      id: uid(), tipo:'entrada', categoria:'Transferência', descricao:`Transferência de ${nomeOrigem}${base}`,
+      valor, contaId: destinoId, status:'recebido', dataVencimento: data, dataPagamento: data,
+      origem:'transferencia', transferenciaId: tid, criadoEm: new Date().toISOString()
+    });
+    persist(); closeModal(); render();
+    showToast('Transferência realizada');
+  });
+}
+
+function openCartaoModal(existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  const corSelecionada = existing?.cor || CONTA_CORES[state.cartoes.length % CONTA_CORES.length];
+  modal.innerHTML = `
+    <h3>${isEdit ? 'Editar cartão' : 'Novo cartão de crédito'}</h3>
+    <div class="field">
+      <label>Nome do cartão</label>
+      <input type="text" id="ccNome" value="${existing ? escapeHTML(existing.nome) : ''}" placeholder="Ex: Cartão empresarial, Cartão sócio...">
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Bandeira</label>
+        <select id="ccBandeira">${BANDEIRAS.map(b=>`<option value="${escapeHTML(b.nome)}" data-dominio="${b.dominio}" ${existing?.bandeira===b.nome?'selected':''}>${escapeHTML(b.nome)}</option>`).join('')}</select>
+      </div>
+      <div class="field">
+        <label>Banco emissor (opcional)</label>
+        <input type="text" id="ccBanco" value="${existing?.banco ? escapeHTML(existing.banco) : ''}" placeholder="Ex: Itaú, Nubank...">
+      </div>
+    </div>
+    <div class="field">
+      <label>Limite total (R$)</label>
+      <input type="text" inputmode="decimal" id="ccLimite" value="${existing ? existing.limite : ''}" placeholder="0,00">
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Dia de fechamento</label>
+        <input type="number" min="1" max="31" id="ccFechamento" value="${existing ? existing.diaFechamento : '25'}">
+      </div>
+      <div class="field">
+        <label>Dia de vencimento</label>
+        <input type="number" min="1" max="31" id="ccVencimento" value="${existing ? existing.diaVencimento : '5'}">
+      </div>
+    </div>
+    <div class="field">
+      <label>Cor de identificação</label>
+      <div class="color-pick" id="ccCorPick">
+        ${CONTA_CORES.map(c=>`<span style="background:${c}" data-cor="${c}" class="${c===corSelecionada?'sel':''}"></span>`).join('')}
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarCartao">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  let corAtual = corSelecionada;
+  document.getElementById('ccCorPick').addEventListener('click', (e)=>{
+    const el = e.target.closest('span[data-cor]');
+    if(!el) return;
+    corAtual = el.dataset.cor;
+    document.querySelectorAll('#ccCorPick span').forEach(s=>s.classList.toggle('sel', s.dataset.cor===corAtual));
+  });
+  document.getElementById('btnSalvarCartao').addEventListener('click', ()=>{
+    const nome = document.getElementById('ccNome').value.trim();
+    const limite = numBR(document.getElementById('ccLimite').value);
+    const diaFechamento = parseInt(document.getElementById('ccFechamento').value);
+    const diaVencimento = parseInt(document.getElementById('ccVencimento').value);
+    if(!nome || isNaN(limite) || isNaN(diaFechamento) || isNaN(diaVencimento)){ showToast('Preencha todos os campos obrigatórios'); return; }
+    const opt = document.getElementById('ccBandeira');
+    const optSel = opt.options[opt.selectedIndex];
+    const payload = { nome, bandeira: optSel.value, bandeiraDominio: optSel.dataset.dominio, banco: document.getElementById('ccBanco').value.trim(), limite, diaFechamento, diaVencimento, cor: corAtual };
+    if(isEdit){ Object.assign(existing, payload); }
+    else { state.cartoes.push({ id: uid(), ...payload }); }
+    persist(); closeModal(); render();
+    showToast(isEdit ? 'Cartão atualizado' : 'Cartão criado');
+  });
+}
+
+function openCompraCartaoModal(cartaoId){
+  const cartao = state.cartoes.find(c=>c.id===cartaoId);
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Lançar compra — ${escapeHTML(cartao.nome)}</h3>
+    <div class="field">
+      <label>Descrição</label>
+      <input type="text" id="pcDescricao" placeholder="Ex: Compra de embalagens">
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Valor total (R$)</label>
+        <input type="text" inputmode="decimal" id="pcValor" placeholder="0,00">
+      </div>
+      <div class="field">
+        <label>Data da compra</label>
+        <input type="date" id="pcData" value="${todayISO()}">
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Categoria</label>
+        <select id="pcCategoria">${opcoesCategoriaHTML('saida')}</select>
+      </div>
+      <div class="field">
+        <label>Parcelas</label>
+        <select id="pcParcelas">${Array.from({length:12},(_,i)=>i+1).map(n=>`<option value="${n}">${n}x</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="note" style="margin-top:0;">A compra entra na fatura com base na data e no dia de fechamento (${cartao.diaFechamento}) deste cartão. Parcelas seguintes caem nas faturas dos meses seguintes.</div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarCompra">Lançar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarCompra').addEventListener('click', ()=>{
+    const descricao = document.getElementById('pcDescricao').value.trim();
+    const valorTotal = numBR(document.getElementById('pcValor').value);
+    const data = document.getElementById('pcData').value;
+    const categoria = document.getElementById('pcCategoria').value;
+    const parcelas = parseInt(document.getElementById('pcParcelas').value);
+    if(!descricao || isNaN(valorTotal) || valorTotal<=0 || !data){ showToast('Preencha descrição, valor e data'); return; }
+    const grupoId = uid();
+    const valorParcela = Math.round((valorTotal/parcelas)*100)/100;
+    let compAtual = competenciaFromDate(cartao, data);
+    for(let i=1;i<=parcelas;i++){
+      state.comprasCartao.push({
+        id: uid(), cartaoId, grupoId, descricao, categoria,
+        valor: i===parcelas ? Math.round((valorTotal - valorParcela*(parcelas-1))*100)/100 : valorParcela,
+        dataCompra: data, competencia: compAtual, parcela: i, totalParcelas: parcelas
+      });
+      compAtual = addMonthsComp(compAtual, 1);
+    }
+    persist(); closeModal(); render();
+    showToast(parcelas>1 ? `Compra lançada em ${parcelas}x` : 'Compra lançada');
+  });
+}
+
+function openContaInvestimentoModal(existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  const corSelecionada = existing?.cor || CONTA_CORES[state.contasInvestimento.length % CONTA_CORES.length];
+  modal.innerHTML = `
+    <h3>${isEdit ? 'Editar conta de investimento' : 'Nova conta de investimento'}</h3>
+    <div class="field">
+      <label>Nome da conta</label>
+      <input type="text" id="ciNome" value="${existing ? escapeHTML(existing.nome) : ''}" placeholder="Ex: Carteira XP, Reserva de emergência...">
+    </div>
+    <div class="field">
+      <label>Instituição / Corretora</label>
+      <select id="ciInstituicao">
+        ${BANCOS_BR.map(b=>`<option value="${escapeHTML(b.nome)}" data-dominio="${b.dominio}" ${existing?.instituicao===b.nome ? 'selected' : ''}>${escapeHTML(b.nome)}</option>`).join('')}
+      </select>
+      <input type="text" id="ciInstituicaoOutro" placeholder="Nome da instituição" style="margin-top:8px;display:none;" value="${(existing && !BANCOS_BR.some(b=>b.nome===existing.instituicao)) ? escapeHTML(existing.instituicao||'') : ''}">
+    </div>
+    <div class="field">
+      <label>Tipo</label>
+      <div class="toggle-row" id="ciTipoToggle">
+        <button type="button" data-tipo="renda_variavel" class="${(!existing||existing.tipo==='renda_variavel')?'active':''}">Renda Variável</button>
+        <button type="button" data-tipo="renda_fixa" class="${existing?.tipo==='renda_fixa'?'active':''}">Renda Fixa</button>
+        <button type="button" data-tipo="interno" class="${existing?.tipo==='interno'?'active':''}">Na Empresa</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Cor de identificação</label>
+      <div class="color-pick" id="ciCorPick">
+        ${CONTA_CORES.map(c=>`<span style="background:${c}" data-cor="${c}" class="${c===corSelecionada?'sel':''}"></span>`).join('')}
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarContaInv">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  let corAtual = corSelecionada;
+  let tipoAtual = existing?.tipo || 'renda_variavel';
+  document.getElementById('ciCorPick').addEventListener('click', (e)=>{
+    const el = e.target.closest('span[data-cor]');
+    if(!el) return;
+    corAtual = el.dataset.cor;
+    document.querySelectorAll('#ciCorPick span').forEach(s=>s.classList.toggle('sel', s.dataset.cor===corAtual));
+  });
+  document.getElementById('ciTipoToggle').addEventListener('click', (e)=>{
+    const btn = e.target.closest('button[data-tipo]');
+    if(!btn) return;
+    tipoAtual = btn.dataset.tipo;
+    document.querySelectorAll('#ciTipoToggle button').forEach(b=>b.classList.toggle('active', b.dataset.tipo===tipoAtual));
+  });
+  const instSelect = document.getElementById('ciInstituicao');
+  const instOutro = document.getElementById('ciInstituicaoOutro');
+  const syncOutro = ()=>{ instOutro.style.display = instSelect.value==='Outro / não listado' ? 'block' : 'none'; };
+  instSelect.addEventListener('change', syncOutro);
+  if(existing && !BANCOS_BR.some(b=>b.nome===existing.instituicao)){
+    for(const opt of instSelect.options){ if(opt.value==='Outro / não listado') opt.selected = true; }
+  }
+  syncOutro();
+  document.getElementById('btnSalvarContaInv').addEventListener('click', ()=>{
+    const nome = document.getElementById('ciNome').value.trim();
+    if(!nome){ showToast('Informe o nome da conta'); return; }
+    const opt = instSelect.options[instSelect.selectedIndex];
+    const isOutro = opt.value === 'Outro / não listado';
+    const instituicao = isOutro ? instOutro.value.trim() : opt.value;
+    const instituicaoDominio = isOutro ? '' : opt.dataset.dominio;
+    const payload = { nome, instituicao, instituicaoDominio, tipo: tipoAtual, cor: corAtual };
+    if(isEdit){ Object.assign(existing, payload); }
+    else { state.contasInvestimento.push({ id: uid(), ...payload }); }
+    persist(); closeModal(); render();
+    showToast(isEdit ? 'Conta atualizada' : 'Conta criada');
+  });
+}
+
+function openInvestirModal(contaBancariaId){
+  const contaBancaria = state.contas.find(c=>c.id===contaBancariaId);
+  if(!contaBancaria) return;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Investir — a partir de ${escapeHTML(contaBancaria.nome)}</h3>
+    <p style="font-size:12.5px;color:var(--text-soft);margin-bottom:14px;">Saldo disponível: <strong class="mono">${brl(saldoConta(contaBancariaId))}</strong></p>
+    <div class="field">
+      <label>Tipo de investimento</label>
+      <div class="toggle-row" id="invTipoToggle">
+        <button type="button" data-tipo="rendafixa" class="active">Renda Fixa</button>
+        <button type="button" data-tipo="rendavariavel">Renda Variável</button>
+        <button type="button" data-tipo="interno">Na Empresa</button>
+      </div>
+    </div>
+
+    <div id="grupoInvRendaFixa" class="grupo-inv">
+      <div class="field"><label>Descrição</label><input type="text" id="invDescricaoRF" placeholder="Ex: CDB Banco X 110% CDI"></div>
+      <div class="field-row">
+        <div class="field"><label>Valor a investir (R$)</label><input type="text" inputmode="decimal" id="invValorRF" placeholder="0,00"></div>
+        <div class="field"><label>Data</label><input type="date" id="invDataRF" value="${todayISO()}"></div>
+      </div>
+      <div class="note" style="margin-top:0;">Sem taxa pra digitar aqui — o valor atual desse investimento você atualiza quando quiser, pelo botão "Atualizar valor" na aba Investimentos.</div>
+    </div>
+
+    <div id="grupoInvRendaVariavel" class="grupo-inv">
+      <div class="field-row">
+        <div class="field"><label>Tipo de ativo</label>
+          <select id="invTipoAtivoRV">
+            <option value="acao">Ação (B3)</option>
+            <option value="fii">Fundo Imobiliário (FII)</option>
+          </select>
+        </div>
+        <div class="field"><label>Ticker</label><input type="text" id="invTicker" style="text-transform:uppercase;" placeholder="Ex: PETR4, MXRF11"></div>
+      </div>
+      <div class="field">
+        <label>Corretora</label>
+        <select id="invCorretora">${BANCOS_BR.map(b=>`<option value="${escapeHTML(b.nome)}">${escapeHTML(b.nome)}</option>`).join('')}</select>
+        <input type="text" id="invCorretoraOutro" placeholder="Nome da corretora" style="margin-top:8px;display:none;">
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Data da operação</label><input type="date" id="invDataOperacao" value="${todayISO()}"></div>
+        <div class="field"><label>Quantidade</label><input type="number" step="1" id="invQuantidade"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Preço unitário (R$)</label><input type="text" inputmode="decimal" id="invPrecoUnit" placeholder="0,00"></div>
+        <div class="field"><label>Taxas da nota (R$, opcional)</label><input type="text" inputmode="decimal" id="invTaxas" placeholder="0,00"></div>
+      </div>
+      <div class="note" style="margin-top:0;">São os dados da nota de corretagem — o valor total (quantidade × preço + taxas) sai da conta bancária.</div>
+    </div>
+
+    <div id="grupoInvInterno" class="grupo-inv">
+      <div class="field"><label>Descrição</label><input type="text" id="invDescricaoInt" placeholder="Ex: Aporte de capital — expansão da fábrica"></div>
+      <div class="field-row">
+        <div class="field"><label>Valor a investir (R$)</label><input type="text" inputmode="decimal" id="invValorInt" placeholder="0,00"></div>
+        <div class="field"><label>Data</label><input type="date" id="invDataInt" value="${todayISO()}"></div>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarInvestimento">Investir</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+
+  let tipoInv = 'rendafixa';
+  const grupos = { rendafixa:'grupoInvRendaFixa', rendavariavel:'grupoInvRendaVariavel', interno:'grupoInvInterno' };
+  const syncGrupos = ()=>{
+    document.querySelectorAll('.grupo-inv').forEach(g=>g.style.display='none');
+    document.getElementById(grupos[tipoInv]).style.display='block';
+  };
+  syncGrupos();
+  document.getElementById('invTipoToggle').addEventListener('click', (e)=>{
+    const btn = e.target.closest('button[data-tipo]');
+    if(!btn) return;
+    tipoInv = btn.dataset.tipo;
+    document.querySelectorAll('#invTipoToggle button').forEach(b=>b.classList.toggle('active', b.dataset.tipo===tipoInv));
+    syncGrupos();
+  });
+
+  const corretoraSelect = document.getElementById('invCorretora');
+  const corretoraOutro = document.getElementById('invCorretoraOutro');
+  corretoraSelect.addEventListener('change', ()=>{ corretoraOutro.style.display = corretoraSelect.value==='Outro / não listado' ? 'block' : 'none'; });
+
+  function contaInvestimentoPara(tipoConta, nomePadrao){
+    let conta = state.contasInvestimento.find(c=>c.tipo===tipoConta);
+    if(!conta){
+      conta = { id: uid(), nome: nomePadrao, instituicao:'', instituicaoDominio:'', tipo: tipoConta, cor: CONTA_CORES[state.contasInvestimento.length % CONTA_CORES.length] };
+      state.contasInvestimento.push(conta);
+    }
+    return conta;
+  }
+
+  document.getElementById('btnSalvarInvestimento').addEventListener('click', ()=>{
+    let valorTotal, nomeAtivo, ativoPayload, contaInvTipo, contaInvNomePadrao;
+
+    if(tipoInv==='rendafixa'){
+      const descricao = document.getElementById('invDescricaoRF').value.trim();
+      const valor = numBR(document.getElementById('invValorRF').value);
+      const data = document.getElementById('invDataRF').value || todayISO();
+      if(!descricao || isNaN(valor) || valor<=0){ showToast('Preencha descrição e valor'); return; }
+      valorTotal = valor; nomeAtivo = descricao;
+      contaInvTipo = 'renda_fixa'; contaInvNomePadrao = 'Renda Fixa';
+      ativoPayload = { tipoAtivo:'rendafixa', nome: descricao, valorAplicado: valor, taxaAnual: 0, indexador: null, dataAplicacao: data, vencimento: null, valorAtualManual: valor };
+    } else if(tipoInv==='rendavariavel'){
+      const tipoAtivo = document.getElementById('invTipoAtivoRV').value;
+      const ticker = document.getElementById('invTicker').value.trim().toUpperCase();
+      const isOutraCorretora = corretoraSelect.value==='Outro / não listado';
+      const corretora = isOutraCorretora ? corretoraOutro.value.trim() : corretoraSelect.value;
+      const dataOperacao = document.getElementById('invDataOperacao').value || todayISO();
+      const quantidade = parseFloat(document.getElementById('invQuantidade').value);
+      const precoUnit = numBR(document.getElementById('invPrecoUnit').value);
+      const taxas = numBR(document.getElementById('invTaxas').value) || 0;
+      if(!ticker || isNaN(quantidade) || quantidade<=0 || isNaN(precoUnit) || precoUnit<=0){ showToast('Preencha ticker, quantidade e preço unitário'); return; }
+      valorTotal = Math.round((quantidade*precoUnit + taxas)*100)/100;
+      nomeAtivo = ticker;
+      contaInvTipo = 'renda_variavel'; contaInvNomePadrao = 'Renda Variável';
+      ativoPayload = { tipoAtivo, ticker, nome: ticker, quantidade, precoMedio: Math.round((valorTotal/quantidade)*100)/100, precoAtual: null, dataUltimaCotacao: null, corretora };
+    } else {
+      const descricao = document.getElementById('invDescricaoInt').value.trim();
+      const valor = numBR(document.getElementById('invValorInt').value);
+      const data = document.getElementById('invDataInt').value || todayISO();
+      if(!descricao || isNaN(valor) || valor<=0){ showToast('Preencha descrição e valor'); return; }
+      valorTotal = valor; nomeAtivo = descricao;
+      contaInvTipo = 'interno'; contaInvNomePadrao = 'Investimentos na Empresa';
+      ativoPayload = { tipoAtivo:'interno', nome: descricao, valorAplicado: valor, dataAplicacao: data, valorAtualManual: valor };
+    }
+
+    const contaInv = contaInvestimentoPara(contaInvTipo, contaInvNomePadrao);
+    const ativoId = uid();
+    state.ativosInvestimento.push({ id: ativoId, contaId: contaInv.id, ...ativoPayload });
+
+    const dataMov = ativoPayload.dataAplicacao || document.getElementById('invDataOperacao')?.value || todayISO();
+    state.lancamentos.push({
+      id: uid(), tipo:'saida', categoria:'Investimentos',
+      descricao: `Aplicação — ${nomeAtivo}`,
+      valor: valorTotal, contaId: contaBancariaId, status:'pago',
+      dataVencimento: dataMov, dataPagamento: dataMov,
+      origem:'investimento', investimentoAtivoId: ativoId,
+      criadoEm: new Date().toISOString()
+    });
+
+    persist(); closeModal(); render();
+    showToast(`Investimento de ${brl(valorTotal)} realizado`);
+  });
+}
+
+function openAtivoModal(existing, contaId){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit ? 'Editar ativo' : 'Novo ativo'}</h3>
+    <div class="field">
+      <label>Tipo de ativo</label>
+      <select id="aiTipo">
+        <option value="acao" ${existing?.tipoAtivo==='acao'?'selected':''}>Ação (B3)</option>
+        <option value="fii" ${existing?.tipoAtivo==='fii'?'selected':''}>Fundo Imobiliário (FII)</option>
+        <option value="cripto" ${existing?.tipoAtivo==='cripto'?'selected':''}>Criptomoeda</option>
+        <option value="rendafixa" ${existing?.tipoAtivo==='rendafixa'?'selected':''}>Renda Fixa (CDB/Tesouro/Poupança)</option>
+      </select>
+    </div>
+
+    <div id="grupoAcaoFii" class="grupo-ativo">
+      <div class="field"><label>Nome do ativo</label><input type="text" id="aiNomeAF" value="${existing && (existing.tipoAtivo==='acao'||existing.tipoAtivo==='fii') ? escapeHTML(existing.nome||'') : ''}" placeholder="Ex: MXRF11, Petrobras PN"></div>
+      <div class="field"><label>Valor aplicado (R$)</label><input type="text" inputmode="decimal" id="aiValorAF" value="${existing && (existing.tipoAtivo==='acao'||existing.tipoAtivo==='fii') ? (existing.valorAtualManual ?? existing.valorAplicado ?? '') : ''}"></div>
+      <div class="note" style="margin-top:0;border-color:#F3C6C2;background:#FDEEED;color:var(--danger);"><strong>Provisório:</strong> essa tela ainda não calcula por cotação nem quantidade — é só pra registrar o valor total aplicado. Você atualiza esse valor sempre que quiser pelo botão "Atualizar valor" na lista. Depois a gente melhora essa parte.</div>
+    </div>
+
+    <div id="grupoCripto" class="grupo-ativo">
+      <div class="field">
+        <label>Criptomoeda</label>
+        <select id="aiCripto">${CRIPTOS_COMUNS.map(c=>`<option value="${c.id}" data-simbolo="${c.simbolo}" ${existing?.criptoId===c.id?'selected':''}>${c.nome} (${c.simbolo})</option>`).join('')}<option value="outro" ${existing?.tipoAtivo==='cripto' && !CRIPTOS_COMUNS.some(c=>c.id===existing.criptoId) ? 'selected':''}>Outra (informar id do CoinGecko)</option></select>
+        <input type="text" id="aiCriptoOutroId" placeholder="id no CoinGecko, ex: chainlink" style="margin-top:8px;display:none;" value="${existing?.tipoAtivo==='cripto' && !CRIPTOS_COMUNS.some(c=>c.id===existing.criptoId) ? escapeHTML(existing.criptoId||'') : ''}">
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Quantidade</label><input type="text" inputmode="decimal" id="aiQtdCripto" value="${existing?.tipoAtivo==='cripto' ? existing.quantidade : ''}"></div>
+        <div class="field"><label>Preço médio (R$)</label><input type="text" inputmode="decimal" id="aiPrecoCripto" value="${existing?.tipoAtivo==='cripto' ? existing.precoMedio : ''}"></div>
+      </div>
+    </div>
+
+    <div id="grupoRendaFixa" class="grupo-ativo">
+      <div class="field"><label>Descrição</label><input type="text" id="aiNomeRF" value="${existing?.tipoAtivo==='rendafixa' ? escapeHTML(existing.nome||'') : ''}" placeholder="Ex: LCI Banco Inter, CDB Banco X 110% CDI"></div>
+      <div class="field">
+        <label>Como acompanhar o valor?</label>
+        <div class="toggle-row" id="rfModoToggle">
+          <button type="button" data-modo="manual" class="${(!existing || existing?.valorAtualManual!=null) ? 'active' : ''}">Saldo inicial (atualizo eu mesmo)</button>
+          <button type="button" data-modo="taxa" class="${(existing && existing?.valorAtualManual==null) ? 'active' : ''}">Calcular por taxa</button>
+        </div>
+      </div>
+      <div id="rfCampoSaldoInicial">
+        <div class="field-row">
+          <div class="field"><label>Saldo inicial (R$)</label><input type="text" inputmode="decimal" id="aiSaldoInicial" value="${existing?.tipoAtivo==='rendafixa' && existing?.valorAtualManual!=null ? existing.valorAtualManual : ''}"></div>
+          <div class="field"><label>Data</label><input type="date" id="aiDataSaldoInicial" value="${existing?.dataAplicacao || todayISO()}"></div>
+        </div>
+        <div class="note" style="margin-top:0;">Esse valor é o ponto de partida. Depois, sempre que quiser, você atualiza pelo botão "Atualizar valor" na lista de ativos — sem precisar digitar taxa nenhuma.</div>
+      </div>
+      <div id="rfCampoTaxa">
+        <div class="field-row">
+          <div class="field"><label>Valor aplicado (R$)</label><input type="text" inputmode="decimal" id="aiValorAplicado" value="${existing?.tipoAtivo==='rendafixa' && existing?.valorAtualManual==null ? existing.valorAplicado : ''}"></div>
+          <div class="field"><label>Taxa anual (%)</label><input type="text" inputmode="decimal" id="aiTaxaAnual" value="${existing?.tipoAtivo==='rendafixa' ? existing.taxaAnual : ''}"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Indexador</label>
+            <select id="aiIndexador">
+              <option ${existing?.indexador==='CDI'?'selected':''}>CDI</option>
+              <option ${existing?.indexador==='Pré-fixado'?'selected':''}>Pré-fixado</option>
+              <option ${existing?.indexador==='IPCA+'?'selected':''}>IPCA+</option>
+              <option ${existing?.indexador==='Poupança'?'selected':''}>Poupança</option>
+            </select>
+          </div>
+          <div class="field"><label>Data da aplicação</label><input type="date" id="aiDataAplicacao" value="${existing?.dataAplicacao || todayISO()}"></div>
+        </div>
+        <div class="note" style="margin-top:0;">O valor atual nesse modo é estimado por juros compostos com a taxa informada — pode não bater exatamente com o extrato do banco.</div>
+      </div>
+      <div class="field"><label>Vencimento (opcional)</label><input type="date" id="aiVencimento" value="${existing?.vencimento || ''}"></div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarAtivo">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+
+  const tipoSelect = document.getElementById('aiTipo');
+  const grupos = { acao:'grupoAcaoFii', fii:'grupoAcaoFii', cripto:'grupoCripto', rendafixa:'grupoRendaFixa' };
+  const syncGrupos = ()=>{
+    document.querySelectorAll('.grupo-ativo').forEach(g=>g.style.display='none');
+    document.getElementById(grupos[tipoSelect.value]).style.display='block';
+  };
+  tipoSelect.addEventListener('change', syncGrupos);
+  syncGrupos();
+
+  const criptoSelect = document.getElementById('aiCripto');
+  const criptoOutro = document.getElementById('aiCriptoOutroId');
+  const syncCripto = ()=>{ criptoOutro.style.display = criptoSelect.value==='outro' ? 'block' : 'none'; };
+  criptoSelect.addEventListener('change', syncCripto);
+  syncCripto();
+
+  let rfModo = (existing && existing?.valorAtualManual==null && existing?.tipoAtivo==='rendafixa') ? 'taxa' : 'manual';
+  const rfModoToggle = document.getElementById('rfModoToggle');
+  const syncRfModo = ()=>{
+    document.getElementById('rfCampoSaldoInicial').style.display = rfModo==='manual' ? 'block' : 'none';
+    document.getElementById('rfCampoTaxa').style.display = rfModo==='taxa' ? 'block' : 'none';
+  };
+  syncRfModo();
+  rfModoToggle.addEventListener('click', (e)=>{
+    const btn = e.target.closest('button[data-modo]');
+    if(!btn) return;
+    rfModo = btn.dataset.modo;
+    document.querySelectorAll('#rfModoToggle button').forEach(b=>b.classList.toggle('active', b.dataset.modo===rfModo));
+    syncRfModo();
+  });
+
+  document.getElementById('btnSalvarAtivo').addEventListener('click', ()=>{
+    const tipoAtivo = tipoSelect.value;
+    let payload = { tipoAtivo, contaId };
+    if(tipoAtivo==='acao' || tipoAtivo==='fii'){
+      const nome = document.getElementById('aiNomeAF').value.trim();
+      const valor = numBR(document.getElementById('aiValorAF').value);
+      if(!nome || isNaN(valor) || valor<0){ showToast('Preencha nome e valor aplicado'); return; }
+      payload = { ...payload, nome, ticker: null, quantidade: null, precoMedio: null, precoAtual: null, dataUltimaCotacao: null, valorAplicado: valor, valorAtualManual: valor, manual: true };
+    } else if(tipoAtivo==='cripto'){
+      const isOutro = criptoSelect.value === 'outro';
+      const criptoId = isOutro ? criptoOutro.value.trim() : criptoSelect.value;
+      const simbolo = isOutro ? criptoId.toUpperCase() : criptoSelect.options[criptoSelect.selectedIndex].dataset.simbolo;
+      const quantidade = numBR(document.getElementById('aiQtdCripto').value);
+      const precoMedio = numBR(document.getElementById('aiPrecoCripto').value);
+      if(!criptoId || isNaN(quantidade) || isNaN(precoMedio)){ showToast('Preencha a criptomoeda, quantidade e preço médio'); return; }
+      payload = { ...payload, criptoId, ticker: simbolo, nome: simbolo, quantidade, precoMedio, precoAtual: existing?.precoAtual, dataUltimaCotacao: existing?.dataUltimaCotacao };
+    } else if(rfModo==='manual'){
+      const nome = document.getElementById('aiNomeRF').value.trim();
+      const saldoInicial = numBR(document.getElementById('aiSaldoInicial').value);
+      const dataAplicacao = document.getElementById('aiDataSaldoInicial').value || todayISO();
+      if(!nome || isNaN(saldoInicial)){ showToast('Preencha descrição e saldo inicial'); return; }
+      payload = { ...payload, nome, valorAplicado: saldoInicial, valorAtualManual: saldoInicial, taxaAnual: null, indexador: null, dataAplicacao, vencimento: document.getElementById('aiVencimento').value || null };
+    } else {
+      const nome = document.getElementById('aiNomeRF').value.trim();
+      const valorAplicado = numBR(document.getElementById('aiValorAplicado').value);
+      const taxaAnual = numBR(document.getElementById('aiTaxaAnual').value);
+      const dataAplicacao = document.getElementById('aiDataAplicacao').value || todayISO();
+      if(!nome || isNaN(valorAplicado) || isNaN(taxaAnual)){ showToast('Preencha descrição, valor e taxa'); return; }
+      payload = { ...payload, nome, valorAplicado, taxaAnual, indexador: document.getElementById('aiIndexador').value, dataAplicacao, valorAtualManual: null, vencimento: document.getElementById('aiVencimento').value || null };
+    }
+    if(isEdit){ Object.keys(existing).forEach(k=>{ if(!(k in payload) && k!=='id') delete existing[k]; }); Object.assign(existing, payload); }
+    else { state.ativosInvestimento.push({ id: uid(), ...payload }); }
+    persist(); closeModal(); render();
+    showToast(isEdit ? 'Ativo atualizado' : 'Ativo adicionado');
+  });
+}
+
+function openCategoriaModal(tipo, existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit ? 'Editar categoria' : `Nova categoria de ${tipo==='saida'?'despesa':'receita'}`}</h3>
+    <div class="field">
+      <label>Nome da categoria</label>
+      <input type="text" id="catNome" value="${existing ? escapeHTML(existing.nome) : ''}" placeholder="Ex: Insumos">
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarCategoria">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarCategoria').addEventListener('click', ()=>{
+    const nome = document.getElementById('catNome').value.trim();
+    if(!nome){ showToast('Informe o nome da categoria'); return; }
+    if(isEdit){
+      const oldNome = existing.nome;
+      existing.nome = nome;
+      if(oldNome !== nome){
+        state.lancamentos.forEach(l=>{
+          if(l.categoria===oldNome) l.categoria = nome;
+          else if(l.categoria && l.categoria.startsWith(oldNome+' / ')) l.categoria = nome + l.categoria.slice(oldNome.length);
+        });
+        state.comprasCartao.forEach(p=>{
+          if(p.categoria===oldNome) p.categoria = nome;
+          else if(p.categoria && p.categoria.startsWith(oldNome+' / ')) p.categoria = nome + p.categoria.slice(oldNome.length);
+        });
+      }
+    } else {
+      state.categorias[tipo].push({ id: uid(), nome, subcategorias: [] });
+    }
+    persist(); closeModal(); render();
+    showToast(isEdit ? 'Categoria atualizada' : 'Categoria criada');
+  });
+}
+
+function openSubcategoriaModal(tipo, categoriaId, existing){
+  const isEdit = !!existing;
+  const cat = listaCategorias(tipo).find(c=>c.id===categoriaId);
+  if(!cat) return;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit ? 'Editar subcategoria' : 'Nova subcategoria'} — ${escapeHTML(cat.nome)}</h3>
+    <div class="field">
+      <label>Nome da subcategoria</label>
+      <input type="text" id="subNome" value="${existing ? escapeHTML(existing.nome) : ''}" placeholder="Ex: Embalagens">
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarSubcategoria">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarSubcategoria').addEventListener('click', ()=>{
+    const nome = document.getElementById('subNome').value.trim();
+    if(!nome){ showToast('Informe o nome da subcategoria'); return; }
+    if(isEdit){
+      const oldFull = `${cat.nome} / ${existing.nome}`;
+      existing.nome = nome;
+      const newFull = `${cat.nome} / ${nome}`;
+      if(oldFull !== newFull){
+        state.lancamentos.forEach(l=>{ if(l.categoria===oldFull) l.categoria = newFull; });
+        state.comprasCartao.forEach(p=>{ if(p.categoria===oldFull) p.categoria = newFull; });
+      }
+    } else {
+      if(!cat.subcategorias) cat.subcategorias = [];
+      cat.subcategorias.push({ id: uid(), nome });
+    }
+    persist(); closeModal(); render();
+    showToast(isEdit ? 'Subcategoria atualizada' : 'Subcategoria criada');
+  });
+}
+
+function openDetalheLancamentoModal(l){
+  const modal = document.getElementById('modalContent');
+  const statusLabel = { pago:'Pago', recebido:'Recebido', pendente:'Pendente', cancelado:'Cancelado' }[l.status];
+  const origemLabel = { manual:'Lançado manualmente', forneira:'Forneira', vk:'VK Industrial', transferencia:'Transferência entre contas', cartao:'Fatura de cartão de crédito', investimento:'Aplicação em investimento', comissao:'Pagamento de comissão' }[l.origem] || 'Lançado manualmente';
+  modal.innerHTML = `
+    <h3>${escapeHTML(l.descricao)}</h3>
+    <div class="report-line"><span>Valor</span><span class="v mono" style="font-weight:600;color:${l.tipo==='entrada'?'var(--success)':'var(--danger)'}">${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}</span></div>
+    <div class="report-line"><span>Categoria</span><span class="v">${escapeHTML(l.categoria)}</span></div>
+    <div class="report-line"><span>${l.tipo==='saida'?'Fornecedor':'Cliente'}</span><span class="v">${l.fornecedor ? escapeHTML(l.fornecedor) : '—'}</span></div>
+    <div class="report-line"><span>Conta</span><span class="v">${escapeHTML(nomeConta(l.contaId))}</span></div>
+    <div class="report-line"><span>Vencimento</span><span class="v">${fmtDate(l.dataVencimento)}</span></div>
+    <div class="report-line"><span>Status</span><span class="v">${statusLabel}${l.dataPagamento ? ' em '+fmtDate(l.dataPagamento) : ''}</span></div>
+    <div class="report-line" style="border-bottom:none;"><span>Origem</span><span class="v">${origemLabel}</span></div>
+    ${l.observacao ? `<div class="note" style="margin-top:14px;white-space:pre-wrap;">${escapeHTML(l.observacao)}</div>` : ''}
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnFecharDetalhe">Fechar</button>
+      ${l.origem!=='transferencia' ? `<button class="btn" id="btnEditarDoDetalhe">Editar</button>` : ''}
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnFecharDetalhe').addEventListener('click', closeModal);
+  const btnEditar = document.getElementById('btnEditarDoDetalhe');
+  if(btnEditar) btnEditar.addEventListener('click', ()=>{ closeModal(); openLancamentoModal(l.tipo, l); });
+}
+
+function openVendedorModal(existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit ? 'Editar vendedor' : 'Novo vendedor'}</h3>
+    <div class="field">
+      <label>Nome</label>
+      <input type="text" id="vNome" value="${existing ? escapeHTML(existing.nome) : ''}" placeholder="Ex: Carlos Silva">
+    </div>
+    <div class="field">
+      <label>Comissão padrão (%)</label>
+      <input type="text" inputmode="decimal" id="vComissaoPadrao" value="${existing ? existing.comissaoPadrao : '0'}">
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarVendedor">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarVendedor').addEventListener('click', ()=>{
+    const nome = document.getElementById('vNome').value.trim();
+    const comissaoPadrao = numBR(document.getElementById('vComissaoPadrao').value);
+    if(!nome || isNaN(comissaoPadrao)){ showToast('Preencha nome e comissão padrão'); return; }
+    if(isEdit){ existing.nome = nome; existing.comissaoPadrao = comissaoPadrao; }
+    else { state.vendedores.push({ id: uid(), nome, comissaoPadrao }); }
+    persist(); closeModal(); render();
+    showToast(isEdit ? 'Vendedor atualizado' : 'Vendedor criado');
+  });
+}
+
+function openComissaoManualModal(){
+  const modal = document.getElementById('modalContent');
+  if(!state.vendedores.length){ showToast('Cadastre um vendedor primeiro'); return; }
+  modal.innerHTML = `
+    <h3>Comissão manual</h3>
+    <div class="field">
+      <label>Vendedor</label>
+      <select id="cmVendedor">${state.vendedores.map(v=>`<option value="${v.id}" data-padrao="${v.comissaoPadrao||0}">${escapeHTML(v.nome)}</option>`).join('')}</select>
+    </div>
+    <div class="field">
+      <label>Descrição</label>
+      <input type="text" id="cmDescricao" placeholder="Ex: Venda balcão — Cliente João">
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Valor da venda (R$)</label><input type="text" inputmode="decimal" id="cmValorBase" placeholder="0,00"></div>
+      <div class="field"><label>Data</label><input type="date" id="cmData" value="${todayISO()}"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarComissaoManual">Adicionar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarComissaoManual').addEventListener('click', ()=>{
+    const vendedorId = document.getElementById('cmVendedor').value;
+    const descricao = document.getElementById('cmDescricao').value.trim();
+    const valorBase = numBR(document.getElementById('cmValorBase').value);
+    const data = document.getElementById('cmData').value;
+    if(!descricao || isNaN(valorBase) || valorBase<=0 || !data){ showToast('Preencha descrição, valor e data'); return; }
+    state.comissoesManuais.push({ id: uid(), vendedorId, descricao, valorBase, data });
+    persist(); closeModal(); render();
+    showToast('Comissão manual adicionada — apareça na lista de pendentes do período');
+  });
+}
+
+function openAtualizarValorModal(a){
+  const modal = document.getElementById('modalContent');
+  const valorAtual = valorAtivo(a);
+  modal.innerHTML = `
+    <h3>Atualizar valor — ${escapeHTML(a.nome || '')}</h3>
+    <p style="font-size:12.5px;color:var(--text-soft);margin-bottom:14px;">Valor aplicado originalmente: <strong class="mono">${brl(a.valorAplicado||0)}</strong></p>
+    <div class="field">
+      <label>Valor atual (R$)</label>
+      <input type="text" inputmode="decimal" id="avNovoValor" value="${valorAtual}">
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarValorAtivo">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarValorAtivo').addEventListener('click', ()=>{
+    const novoValor = numBR(document.getElementById('avNovoValor').value);
+    if(isNaN(novoValor) || novoValor<0){ showToast('Informe um valor válido'); return; }
+    a.valorAtualManual = novoValor;
+    persist(); closeModal(); render();
+    showToast('Valor atualizado');
+  });
+}
+
+function closeModal(){ document.getElementById('modalOverlay').classList.remove('open'); }
+document.getElementById('modalOverlay').addEventListener('click', (e)=>{ if(e.target.id==='modalOverlay') closeModal(); });
+
+/* ---------------- Backup / Restore ---------------- */
+document.getElementById('btnBackup').addEventListener('click', ()=>{
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Backup / Restaurar</h3>
+    <p style="font-size:13px;color:var(--text-soft);margin-bottom:16px;">Exporte um arquivo JSON com todos os dados, ou restaure a partir de um backup anterior.</p>
+    <div class="modal-actions" style="justify-content:flex-start;">
+      <button class="btn ghost" id="btnExportar">Exportar backup</button>
+      <button class="btn ghost" id="btnImportar">Restaurar backup</button>
+    </div>
+    <div class="modal-actions"><button class="btn" id="btnFecharBackup">Fechar</button></div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnFecharBackup').addEventListener('click', closeModal);
+  document.getElementById('btnExportar').addEventListener('click', ()=>{
+    const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `livrocaixa-backup-${todayISO()}.json`;
+    a.click(); URL.revokeObjectURL(url);
+    showToast('Backup exportado');
+  });
+  document.getElementById('btnImportar').addEventListener('click', ()=> document.getElementById('fileImport').click());
+});
+document.getElementById('fileImport').addEventListener('change', (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev)=>{
+    try{
+      const data = JSON.parse(ev.target.result);
+      if(!data.lancamentos) throw new Error('formato inválido');
+      state = { lancamentos:[], ativos:[], investimentos:[], forneiraConfig:null, contas:[], cartoes:[], comprasCartao:[], faturasFechadas:[], contasInvestimento:[], ativosInvestimento:[], categorias:null, ...data };
+      if(state.contas.length===0) state.contas.push({ id:'conta_caixa', nome:'Caixa', banco:'Conta padrão', tipo:'caixa', saldoInicial:0, cor:CONTA_CORES[0] });
+      const idPadrao = state.contas[0].id;
+      state.lancamentos.forEach(l=>{ if(!l.contaId) l.contaId = idPadrao; });
+      if(!state.categorias){
+        state.categorias = {
+          saida: CATEGORIAS_SAIDA.map(nome=>({ id: uid(), nome, subcategorias: [] })),
+          entrada: CATEGORIAS_ENTRADA.map(nome=>({ id: uid(), nome, subcategorias: [] }))
+        };
+      }
+      if(!state.vkConfig){
+        state.vkConfig = {
+          firebaseConfig: {
+            apiKey: "AIzaSyCkofAYirFhxwi2TPUyEhWXhjPN7YTEJ-Q", authDomain: "vk-provisorio.firebaseapp.com",
+            projectId: "vk-provisorio", storageBucket: "vk-provisorio.firebasestorage.app",
+            messagingSenderId: "965749096462", appId: "1:965749096462:web:f3e4f263d0311c3883bc5f"
+          },
+          email:'', senha:'', contaId:'', categoria:'Vendas', ultimaSincronizacao:null
+        };
+      }
+      persist(); closeModal(); render();
+      showToast('Backup restaurado com sucesso');
+    }catch(err){ showToast('Arquivo inválido'); }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+});
+
+/* ---------------- Autenticação / Init ---------------- */
+let dadosCarregados = false;
+auth.onAuthStateChanged(async user=>{
+  const loginOverlay = document.getElementById('loginOverlay');
+  const appRoot = document.getElementById('appRoot');
+  if(user){
+    loginOverlay.style.display = 'none';
+    appRoot.style.display = 'flex';
+    if(dadosCarregados) return; // evita recarregar e sobrescrever dados em memória a cada re-emissão do evento de auth
+    try{
+      state = await carregarDados();
+      dadosCarregados = true;
+      render();
+    }catch(e){
+      console.error('Erro ao carregar dados:', e);
+      showToast('Não foi possível carregar os dados — verifique a internet e recarregue a página');
+    }
+  } else {
+    dadosCarregados = false;
+    appRoot.style.display = 'none';
+    loginOverlay.style.display = 'flex';
+  }
+});
+
+function tentarLogin(){
+  const email = document.getElementById('loginEmail').value.trim();
+  const senha = document.getElementById('loginSenha').value;
+  const erroEl = document.getElementById('loginErro');
+  erroEl.style.display = 'none';
+  if(!email || !senha){ erroEl.textContent = 'Preencha e-mail e senha.'; erroEl.style.display = 'block'; return; }
+  auth.signInWithEmailAndPassword(email, senha).catch(e=>{
+    erroEl.textContent = 'E-mail ou senha incorretos.';
+    erroEl.style.display = 'block';
+  });
+}
+document.getElementById('btnEntrar').addEventListener('click', tentarLogin);
+document.getElementById('loginSenha').addEventListener('keydown', e=>{ if(e.key==='Enter') tentarLogin(); });
+
+document.getElementById('btnSair').addEventListener('click', ()=>{
+  if(confirm('Sair da sua conta?')) auth.signOut();
+});
+</script>
+</body>
+</html>
