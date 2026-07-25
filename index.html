@@ -381,6 +381,16 @@
 /* ---------------- Estado & Persistência ---------------- */
 const CATEGORIAS_SAIDA = ['Insumos', 'Fornecedores', 'Salários', 'Aluguel', 'Utilidades (água/luz/internet)', 'Impostos', 'Manutenção', 'Marketing', 'Cartão de Crédito', 'Comissões', 'Investimentos', 'Ativos Patrimoniais', 'Outros'];
 const CATEGORIAS_ATIVO_PATRIMONIAL = ['Equipamento','Máquina','Veículo','Imóvel','Móveis e Utensílios','Informática','Outro'];
+// Vida útil padrão conforme IN RFB nº 1.700/2017, Anexo III (regra geral por categoria)
+const VIDA_UTIL_RFB = {
+  'Equipamento': 10,           // 10% a.a. — máquinas e equipamentos em geral
+  'Máquina': 10,                // 10% a.a.
+  'Veículo': 5,                 // 20% a.a.
+  'Imóvel': 25,                 // 4% a.a. — edificações e construções
+  'Móveis e Utensílios': 10,    // 10% a.a.
+  'Informática': 5,             // 20% a.a. — equipamentos de processamento de dados
+  'Outro': null                 // sem taxa geral — depende do bem específico (consultar Anexo III)
+};
 const CATEGORIAS_ENTRADA = ['Vendas', 'Serviços', 'Recebimento de cliente', 'Rendimentos', 'Outros'];
 
 const CONTA_CORES = ['#3B6FE0','#1E9E6B','#D98F2B','#8A5CF6','#D5473F','#0F9BB0'];
@@ -1741,7 +1751,7 @@ function viewAtivosPatrimoniais(){
   const totalDepreciado = totalAquisicao - totalAtual;
   return `
     <div class="topbar">
-      <div><h1>Ativos Patrimoniais</h1><p>Bens da empresa — equipamentos, veículos, imóveis, móveis — com depreciação calculada automaticamente</p></div>
+      <div><h1>Ativos Patrimoniais</h1><p>Bens da empresa com depreciação linear conforme as taxas da Receita Federal (IN RFB nº 1.700/2017)</p></div>
       <button class="btn" id="btnNovoAtivoPatrimonial">+ Ativo</button>
     </div>
     <div class="cards">
@@ -1782,19 +1792,22 @@ function rowAtivoPatrimonialHTML(a){
 function openAtivoPatrimonialModal(existing){
   const isEdit = !!existing;
   const modal = document.getElementById('modalContent');
+  const categoriaInicial = existing?.categoria || CATEGORIAS_ATIVO_PATRIMONIAL[0];
+  const vidaUtilInicial = existing ? existing.vidaUtilAnos : (VIDA_UTIL_RFB[categoriaInicial] || 10);
   modal.innerHTML = `
     <h3>${isEdit ? 'Editar ativo' : 'Novo ativo patrimonial'}</h3>
     <div class="field"><label>Nome / descrição</label><input type="text" id="apNome" value="${existing?escapeHTML(existing.nome):''}" placeholder="Ex: Forno industrial, Fiat Fiorino 2022"></div>
     <div class="field-row">
       <div class="field"><label>Categoria</label>
-        <select id="apCategoria">${CATEGORIAS_ATIVO_PATRIMONIAL.map(c=>`<option ${existing?.categoria===c?'selected':''}>${c}</option>`).join('')}</select>
+        <select id="apCategoria">${CATEGORIAS_ATIVO_PATRIMONIAL.map(c=>`<option ${categoriaInicial===c?'selected':''}>${c}</option>`).join('')}</select>
       </div>
       <div class="field"><label>Data de aquisição</label><input type="date" id="apData" value="${existing?.dataAquisicao || todayISO()}"></div>
     </div>
     <div class="field-row">
       <div class="field"><label>Valor de aquisição (R$)</label><input type="text" inputmode="decimal" id="apValor" value="${existing?existing.valorAquisicao:''}"></div>
-      <div class="field"><label>Vida útil (anos)</label><input type="text" inputmode="decimal" id="apVidaUtil" value="${existing?existing.vidaUtilAnos:'5'}"></div>
+      <div class="field"><label>Vida útil (anos)</label><input type="text" inputmode="decimal" id="apVidaUtil" value="${vidaUtilInicial||''}"></div>
     </div>
+    <div class="note" id="apVidaUtilNota" style="margin-top:-6px;"></div>
     <div class="field"><label>Valor residual ao final da vida útil (R$, opcional)</label><input type="text" inputmode="decimal" id="apResidual" value="${existing&&existing.valorResidual?existing.valorResidual:''}" placeholder="0,00"></div>
     ${!isEdit ? `
     <div class="field" style="margin-top:4px;">
@@ -1803,7 +1816,7 @@ function openAtivoPatrimonialModal(existing){
     <div id="apContaGrupo" style="display:none;margin-bottom:14px;">
       <select id="apConta">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select>
     </div>` : ''}
-    <div class="note" style="margin-top:0;">A depreciação é calculada automaticamente pelo método linear, com base na vida útil informada — não precisa atualizar valor manualmente.</div>
+    <div class="note" style="margin-top:0;">Depreciação linear (método aceito pela Receita Federal) e vida útil sugerida conforme a Instrução Normativa RFB nº 1.700/2017, Anexo III. Você pode ajustar o prazo se tiver laudo técnico que justifique um valor diferente do padrão.</div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       <button class="btn" id="btnSalvarAtivoPatrimonial">Salvar</button>
@@ -1811,6 +1824,20 @@ function openAtivoPatrimonialModal(existing){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  const selectCategoria = document.getElementById('apCategoria');
+  const inputVidaUtil = document.getElementById('apVidaUtil');
+  const notaVidaUtil = document.getElementById('apVidaUtilNota');
+  const atualizarNota = ()=>{
+    const cat = selectCategoria.value;
+    const oficial = VIDA_UTIL_RFB[cat];
+    notaVidaUtil.textContent = oficial ? `Padrão da Receita Federal para "${cat}": ${oficial} anos (${Math.round(100/oficial)}% ao ano).` : `Sem taxa geral fixa para "Outro" — confira o Anexo III da IN RFB 1.700/2017 para o bem específico.`;
+  };
+  atualizarNota();
+  selectCategoria.addEventListener('change', ()=>{
+    const oficial = VIDA_UTIL_RFB[selectCategoria.value];
+    if(oficial) inputVidaUtil.value = oficial;
+    atualizarNota();
+  });
   const chkDesconto = document.getElementById('apDescontarConta');
   if(chkDesconto){
     chkDesconto.addEventListener('change', ()=>{
