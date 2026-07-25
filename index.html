@@ -117,6 +117,16 @@
   .panel-details summary::before{content:'▸ ';color:var(--text-soft);}
   .panel-details[open] summary::before{content:'▾ ';}
   .panel-details[open] summary{border-bottom:1px solid var(--line);}
+  .alerta-panel{padding:2px;}
+  .alerta-linha{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;font-size:13px;}
+  .alerta-linha:not(:last-child){border-bottom:1px solid var(--line);}
+  .alerta-linha.atrasado{color:var(--danger);font-weight:600;}
+  .alerta-linha[data-goto-alerta]{cursor:pointer;}
+  .backup-alerta .alerta-linha{color:var(--text-soft);}
+  .meta-progresso{margin-top:8px;max-width:320px;}
+  .meta-progresso-barra{height:6px;border-radius:4px;background:var(--bone);overflow:hidden;}
+  .meta-progresso-fill{height:100%;background:var(--success);border-radius:4px;}
+  .meta-progresso-label{font-size:11px;color:var(--text-soft);margin-top:4px;display:block;}
   .btn.danger-o{background:transparent;border:1px solid var(--line);color:var(--danger);}
   .btn.danger-o:hover{background:#FDEEED;border-color:var(--danger);}
   .btn:disabled{opacity:.45;cursor:not-allowed;}
@@ -861,7 +871,7 @@ function nomeVendedor(id){ return state.vendedores.find(v=>v.id===id)?.nome || n
 function itensComissaoNoPeriodo(dataDe, dataAte){
   const itens = [];
   state.lancamentos.forEach(l=>{
-    if(l.origem==='vk' && l.dataVencimento>=dataDe && l.dataVencimento<=dataAte){
+    if(l.origem==='vk' && l.status!=='cancelado' && l.dataVencimento>=dataDe && l.dataVencimento<=dataAte){
       const descricao = l.fornecedor ? `${l.descricao} — ${l.fornecedor}` : l.descricao;
       itens.push({ origem:'vk', id:l.id, vendedorId:l.vendedorId||null, descricao, data:l.dataVencimento, valorBase:l.valor });
     }
@@ -980,6 +990,44 @@ function gerarReciboComissaoPDF(cp){
   docPdf.save(nomeArquivo);
 }
 
+function desenharGraficoMeses(canvasId){
+  const canvas = document.getElementById(canvasId);
+  if(!canvas) return;
+  const dados = ultimos6Meses();
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = canvas.clientWidth || canvas.parentElement.clientWidth || 600;
+  const cssHeight = 180;
+  canvas.width = cssWidth * dpr;
+  canvas.height = cssHeight * dpr;
+  canvas.style.width = cssWidth+'px';
+  canvas.style.height = cssHeight+'px';
+  const ctx = canvas.getContext('2d');
+  if(!ctx) return;
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0,0,cssWidth,cssHeight);
+
+  const maxVal = Math.max(1, ...dados.map(d=>Math.max(d.entradas,d.saidas)));
+  const padLeft = 10, padRight = 10, padBottom = 24, padTop = 10;
+  const chartW = cssWidth - padLeft - padRight;
+  const chartH = cssHeight - padBottom - padTop;
+  const grupoW = chartW / dados.length;
+  const barW = Math.min(22, grupoW*0.28);
+
+  ctx.font = '10.5px Inter, sans-serif';
+  dados.forEach((d,i)=>{
+    const cx = padLeft + grupoW*i + grupoW/2;
+    const hEnt = maxVal>0 ? (d.entradas/maxVal)*chartH : 0;
+    const hSai = maxVal>0 ? (d.saidas/maxVal)*chartH : 0;
+    ctx.fillStyle = '#2E7D5B';
+    ctx.fillRect(cx-barW-2, padTop+chartH-hEnt, barW, hEnt);
+    ctx.fillStyle = '#C24A3D';
+    ctx.fillRect(cx+2, padTop+chartH-hSai, barW, hSai);
+    ctx.fillStyle = '#8A8F98';
+    ctx.textAlign = 'center';
+    ctx.fillText(d.label, cx, cssHeight-6);
+  });
+}
+
 function pendentesResumo(){
   let aPagar=0, aReceber=0, atrasados=0;
   const hoje = todayISO();
@@ -993,18 +1041,77 @@ function pendentesResumo(){
   return { aPagar, aReceber, atrasados };
 }
 
+function contasVencendoResumo(){
+  const hoje = todayISO();
+  const em7dias = new Date(); em7dias.setDate(em7dias.getDate()+7);
+  const em7ISO = em7dias.toISOString().slice(0,10);
+  const atrasadas = [], venceEmBreve = [];
+  state.lancamentos.forEach(l=>{
+    if(l.status!=='pendente' || !l.dataVencimento || l.origem==='transferencia') return;
+    if(l.dataVencimento < hoje) atrasadas.push(l);
+    else if(l.dataVencimento <= em7ISO) venceEmBreve.push(l);
+  });
+  atrasadas.sort((a,b)=>a.dataVencimento.localeCompare(b.dataVencimento));
+  venceEmBreve.sort((a,b)=>a.dataVencimento.localeCompare(b.dataVencimento));
+  return { atrasadas, venceEmBreve };
+}
+
+function ultimos6Meses(){
+  const meses = [];
+  const hoje = new Date();
+  for(let i=5;i>=0;i--){
+    const d = new Date(hoje.getFullYear(), hoje.getMonth()-i, 1);
+    const ym = d.toISOString().slice(0,7);
+    let entradas=0, saidas=0;
+    state.lancamentos.forEach(l=>{
+      const ref = (l.dataPagamento || '').slice(0,7);
+      if(ref!==ym) return;
+      if(l.tipo==='entrada' && l.status==='recebido') entradas += l.valor;
+      if(l.tipo==='saida' && l.status==='pago') saidas += l.valor;
+    });
+    meses.push({ ym, label: d.toLocaleDateString('pt-BR',{month:'short'}).replace('.',''), entradas, saidas });
+  }
+  return meses;
+}
+
 /* ---------------- Views ---------------- */
 function viewDashboard(){
   const t = totaisRealizados();
   const mes = totaisMesAtual();
   const pend = pendentesResumo();
+  const venc = contasVencendoResumo();
   const recentes = [...state.lancamentos].sort((a,b)=> (b.dataPagamento||b.dataVencimento||'').localeCompare(a.dataPagamento||a.dataVencimento||'')).slice(0,6);
+  const diasSemBackup = state.ultimoBackupEm ? Math.floor((new Date() - new Date(state.ultimoBackupEm))/86400000) : null;
+  const avisarBackup = diasSemBackup===null || diasSemBackup>30;
 
   return `
     <div class="topbar">
       <div><h1>Dashboard</h1><p>Visão geral da saúde financeira da empresa</p></div>
       <button class="btn" id="btnNovoRapido">+ Novo lançamento</button>
     </div>
+
+    ${(venc.atrasadas.length || venc.venceEmBreve.length) ? `
+    <div class="panel alerta-panel">
+      ${venc.atrasadas.length ? `
+        <div class="alerta-linha atrasado" data-goto-alerta="atrasadas">
+          <span>⚠️ ${venc.atrasadas.length} conta(s) <strong>atrasada(s)</strong></span>
+          <span class="mono">${brl(venc.atrasadas.reduce((s,l)=>s+l.valor,0))}</span>
+        </div>` : ''}
+      ${venc.venceEmBreve.length ? `
+        <div class="alerta-linha" data-goto-alerta="venceEmBreve">
+          <span>🔔 ${venc.venceEmBreve.length} conta(s) vence(m) nos próximos 7 dias</span>
+          <span class="mono">${brl(venc.venceEmBreve.reduce((s,l)=>s+l.valor,0))}</span>
+        </div>` : ''}
+    </div>` : ''}
+
+    ${avisarBackup ? `
+    <div class="panel alerta-panel backup-alerta">
+      <div class="alerta-linha">
+        <span>💾 ${diasSemBackup===null ? 'Você ainda não fez nenhum backup' : `Já fazem ${diasSemBackup} dias desde o último backup`} — recomendado fazer pelo menos uma vez por mês.</span>
+        <button class="btn ghost sm" id="btnBackupAgora">Fazer backup agora</button>
+      </div>
+    </div>` : ''}
+
     <div class="cards">
       <div class="card saldo"><div class="label">Saldo em caixa</div><div class="value mono ${t.saldo>=0?'pos':'neg'}">${brl(t.saldo)}</div></div>
       <div class="card"><div class="label">Entradas no mês</div><div class="value mono pos">${brl(mes.entradas)}</div></div>
@@ -1015,6 +1122,14 @@ function viewDashboard(){
       <div class="card"><div class="label">A pagar (pendente)</div><div class="value mono neg">${brl(pend.aPagar)}</div></div>
       <div class="card"><div class="label">A receber (pendente)</div><div class="value mono pos">${brl(pend.aReceber)}</div></div>
     </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Entradas x Saídas — últimos 6 meses</h2></div>
+      <div class="panel-body" style="padding:18px;">
+        <canvas id="chartMeses" height="180"></canvas>
+      </div>
+    </div>
+
     <div class="panel">
       <div class="panel-head"><h2>Últimos lançamentos</h2><span style="font-size:12px;color:var(--text-soft);cursor:pointer;" data-goto="fluxo">Ver fluxo de caixa completo →</span></div>
       <div class="panel-body">
@@ -1098,6 +1213,27 @@ function viewFluxo(){
     `;
   }).join('');
 
+  const hoje = todayISO();
+  const em60dias = new Date(); em60dias.setDate(em60dias.getDate()+60);
+  const em60ISO = em60dias.toISOString().slice(0,10);
+  let pendentes = state.lancamentos.filter(l=>l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento && l.dataVencimento<=em60ISO);
+  pendentes.sort((a,b)=>(a.dataVencimento||'').localeCompare(b.dataVencimento||''));
+  let saldoProjetado = saldo;
+  const rowsProjetado = pendentes.map(l=>{
+    saldoProjetado += l.tipo==='entrada' ? l.valor : -l.valor;
+    const atrasado = l.dataVencimento < hoje;
+    return `
+      <div class="ledger-row" data-id="${l.id}" style="opacity:.85;">
+        <span class="dot ${l.tipo}" style="opacity:.5;"></span>
+        <span class="mono" style="font-size:12.5px;color:${atrasado?'var(--danger)':'var(--text-soft)'}">${fmtDate(l.dataVencimento)}</span>
+        <div class="desc-cell" data-action="ver-detalhe" data-id="${l.id}" style="cursor:pointer;"><div>${escapeHTML(l.descricao)}</div><div class="cat">${escapeHTML(l.categoria)} · previsto</div></div>
+        <span class="mono" style="font-weight:600;color:${l.tipo==='entrada'?'var(--success)':'var(--danger)'}">${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}</span>
+        <span class="mono" style="font-weight:600;">${brl(saldoProjetado)}</span>
+        <span></span>
+      </div>
+    `;
+  }).join('');
+
   return `
     <div class="topbar">
       <div><h1>Fluxo de Caixa</h1><p>Lançamentos realizados, em ordem cronológica, com saldo acumulado (transferências entre contas próprias não entram aqui — veja o extrato da conta)</p></div>
@@ -1110,6 +1246,18 @@ function viewFluxo(){
         ${lista.length? rows : `<div class="empty">Nenhum lançamento realizado (pago/recebido) ainda.</div>`}
       </div>
     </div>
+
+    <details class="panel-details" ${pendentes.length?'open':''}>
+      <summary>Fluxo de caixa projetado — próximos 60 dias (${pendentes.length} conta(s) pendente(s))</summary>
+      <div>
+        <div class="note" style="margin:0;border-radius:0;border-top:1px solid var(--line);">Projeção baseada nas contas a pagar e a receber já cadastradas com vencimento até 60 dias. Não considera contas que ainda não foram lançadas.</div>
+        ${pendentes.length ? `
+        <div class="ledger-row head">
+          <span></span><span>Vence em</span><span>Descrição</span><span>Valor</span><span>Saldo projetado</span><span></span>
+        </div>
+        ${rowsProjetado}` : `<div class="empty">Nenhuma conta pendente nos próximos 60 dias.</div>`}
+      </div>
+    </details>
   `;
 }
 
@@ -1391,13 +1539,83 @@ function viewRelatorios(){
   const anoAtual = hoje.getFullYear();
   const mesAtual = String(hoje.getMonth()+1).padStart(2,'0');
   return `
-    <div class="topbar"><div><h1>Relatórios</h1><p>DRE e Balanço Patrimonial gerados a partir dos lançamentos realizados</p></div></div>
+    <div class="topbar">
+      <div><h1>Relatórios</h1><p>DRE e Balanço Patrimonial gerados a partir dos lançamentos realizados</p></div>
+      <button class="btn ghost" id="btnExportarRelatorioPDF">📄 Exportar PDF</button>
+    </div>
     <div class="toggle-row" id="reportToggle">
       <button class="active" data-report="dre">DRE</button>
       <button data-report="balanco">Balanço Patrimonial</button>
     </div>
     <div class="panel" id="reportPanel"></div>
   `;
+}
+
+function exportarRelatorioPDF(titulo){
+  if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
+  const panel = document.getElementById('reportPanel');
+  if(!panel) return;
+  const { jsPDF } = window.jspdf;
+  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+  const M = 20, PW = 210, W = PW - M*2;
+  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
+  let y = 25;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
+  docPdf.text('Livro Caixa Financeiro VK', M, y);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
+  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
+  y += 8;
+  docPdf.setDrawColor(...LINEC); docPdf.setLineWidth(0.3); docPdf.line(M, y, M+W, y);
+  y += 10;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...BLUEDEEP);
+  docPdf.text(titulo.toUpperCase(), M, y);
+  y += 4;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 9;
+
+  const controls = panel.querySelector('.report-controls');
+  if(controls){
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
+    docPdf.text(controls.textContent.replace(/\s+/g,' ').trim(), M, y);
+    y += 9;
+  }
+
+  const checkPageBreak = ()=>{ if(y > 275){ docPdf.addPage(); y = 25; } };
+
+  panel.querySelectorAll('.report-title, .report-line').forEach(el=>{
+    checkPageBreak();
+    if(el.classList.contains('report-title')){
+      y += 3;
+      docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10.5); docPdf.setTextColor(...INK);
+      docPdf.text(el.textContent.trim(), M, y);
+      y += 6;
+      return;
+    }
+    const label = el.querySelector('span:first-child')?.textContent.trim() || '';
+    const valor = el.querySelector('.v')?.textContent.trim() || '';
+    const isTotal = el.classList.contains('total');
+    const isResult = el.classList.contains('result');
+    docPdf.setFont('helvetica', isTotal||isResult ? 'bold' : 'normal');
+    docPdf.setFontSize(isResult ? 11 : 9.5);
+    const cor = isResult ? (valor.includes('-') ? DANGER : SUCCESS) : (isTotal ? INK : SOFT);
+    docPdf.setTextColor(...cor);
+    docPdf.text(label, M, y);
+    docPdf.text(valor, M+W, y, { align:'right' });
+    y += isResult ? 8 : 6;
+    if(isTotal){ docPdf.setDrawColor(...LINEC); docPdf.line(M, y-4.5, M+W, y-4.5); }
+  });
+
+  y += 10;
+  checkPageBreak();
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 6;
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8); docPdf.setTextColor(...SOFT);
+  docPdf.text('VIERGUTZ E KRUEGER PARTICIPAÇÕES E EMPREENDIMENTOS', M, y);
+
+  docPdf.save(`${titulo.includes('DRE')?'dre':'balanco'}-${todayISO()}.pdf`);
+  showToast('PDF gerado');
 }
 
 function renderDRE(periodo){
@@ -1588,6 +1806,10 @@ function renderComissaoResultado(){
   }
   const vendedor = state.vendedores.find(v=>v.id===comissaoVendedorSelecionado);
   if(!vendedor) return `<div class="panel"><div class="empty">Vendedor não encontrado.</div></div>`;
+  const dataDe = comissaoDataDeSelecionada || primeiroDiaMes();
+  const dataAte = comissaoDataAteSelecionada || todayISO();
+  const totalVendidoPeriodo = itensComissaoNoPeriodo(dataDe, dataAte).filter(it=>it.vendedorId===vendedor.id).reduce((s,it)=>s+it.valorBase,0);
+  const metaPct = vendedor.metaMensal ? Math.min(100, Math.round(totalVendidoPeriodo/vendedor.metaMensal*100)) : null;
   return `
     <div class="panel">
       <div class="comissao-vendedor-header">
@@ -1595,6 +1817,11 @@ function renderComissaoResultado(){
         <div style="flex:1;">
           <div class="comissao-vendedor-nome">${escapeHTML(vendedor.nome)}</div>
           <div class="comissao-vendedor-sub">Comissão padrão: ${vendedor.comissaoPadrao||0}%</div>
+          ${metaPct!==null ? `
+            <div class="meta-progresso">
+              <div class="meta-progresso-barra"><div class="meta-progresso-fill" style="width:${metaPct}%;"></div></div>
+              <span class="meta-progresso-label">${brl(totalVendidoPeriodo)} de ${brl(vendedor.metaMensal)} (${metaPct}%)</span>
+            </div>` : ''}
         </div>
         <button class="icon-btn" data-action="editar-vendedor-comissoes" data-id="${vendedor.id}" title="Editar vendedor">✎</button>
         <button class="icon-btn" data-action="excluir-vendedor-comissoes" data-id="${vendedor.id}" title="Excluir vendedor">✕</button>
@@ -1776,6 +2003,19 @@ function attachViewHandlers(){
   const btnNovoRapido = document.getElementById('btnNovoRapido');
   if(btnNovoRapido) btnNovoRapido.addEventListener('click', ()=>openLancamentoModal('saida'));
 
+  const chartMeses = document.getElementById('chartMeses');
+  if(chartMeses) desenharGraficoMeses('chartMeses');
+
+  document.querySelectorAll('[data-goto-alerta]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      currentView = 'fluxo';
+      document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view===currentView));
+      render();
+    });
+  });
+  const btnBackupAgora = document.getElementById('btnBackupAgora');
+  if(btnBackupAgora) btnBackupAgora.addEventListener('click', ()=>document.getElementById('btnBackup')?.click());
+
   const btnNovoLancamento = document.getElementById('btnNovoLancamento');
   if(btnNovoLancamento) btnNovoLancamento.addEventListener('click', (e)=>openLancamentoModal(e.target.dataset.tipo));
 
@@ -1863,6 +2103,9 @@ function attachViewHandlers(){
       });
     });
     paint();
+    document.getElementById('btnExportarRelatorioPDF')?.addEventListener('click', ()=>{
+      exportarRelatorioPDF(activeReport==='dre' ? 'DRE (Demonstrativo de Resultado)' : 'Balanço Patrimonial');
+    });
   }
 
   // Categorias
@@ -3127,6 +3370,10 @@ function openVendedorModal(existing){
       <label>Comissão padrão (%)</label>
       <input type="text" inputmode="decimal" id="vComissaoPadrao" value="${existing ? existing.comissaoPadrao : '0'}">
     </div>
+    <div class="field">
+      <label>Meta de vendas mensal (R$, opcional)</label>
+      <input type="text" inputmode="decimal" id="vMetaMensal" value="${existing && existing.metaMensal ? existing.metaMensal : ''}" placeholder="Ex: 30.000,00">
+    </div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       <button class="btn" id="btnSalvarVendedor">Salvar</button>
@@ -3137,9 +3384,11 @@ function openVendedorModal(existing){
   document.getElementById('btnSalvarVendedor').addEventListener('click', ()=>{
     const nome = document.getElementById('vNome').value.trim();
     const comissaoPadrao = numBR(document.getElementById('vComissaoPadrao').value);
+    const metaMensalRaw = document.getElementById('vMetaMensal').value.trim();
+    const metaMensal = metaMensalRaw ? numBR(metaMensalRaw) : null;
     if(!nome || isNaN(comissaoPadrao)){ showToast('Preencha nome e comissão padrão'); return; }
-    if(isEdit){ existing.nome = nome; existing.comissaoPadrao = comissaoPadrao; }
-    else { state.vendedores.push({ id: uid(), nome, comissaoPadrao }); }
+    if(isEdit){ existing.nome = nome; existing.comissaoPadrao = comissaoPadrao; existing.metaMensal = metaMensal; }
+    else { state.vendedores.push({ id: uid(), nome, comissaoPadrao, metaMensal }); }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Vendedor atualizado' : 'Vendedor criado');
   });
@@ -3233,6 +3482,8 @@ document.getElementById('btnBackup').addEventListener('click', ()=>{
     const a = document.createElement('a');
     a.href = url; a.download = `livrocaixa-backup-${todayISO()}.json`;
     a.click(); URL.revokeObjectURL(url);
+    state.ultimoBackupEm = new Date().toISOString();
+    persist();
     showToast('Backup exportado');
   });
   document.getElementById('btnImportar').addEventListener('click', ()=> document.getElementById('fileImport').click());
