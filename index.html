@@ -105,6 +105,18 @@
   .btn.ghost{background:transparent;color:var(--blue-accent);border:1px solid var(--line);}
   .btn.ghost:hover{border-color:var(--blue-accent);background:#F0F4FF;}
   .btn.sm{padding:6px 10px;font-size:12px;}
+  .btn.lg{padding:14px 26px;font-size:14px;}
+  .vk-status-panel{background:linear-gradient(135deg, var(--ink) 0%, #2A3548 100%);}
+  .vk-status-row{display:flex;justify-content:space-between;align-items:center;padding:22px 24px;flex-wrap:wrap;gap:16px;}
+  .vk-status-label{font-size:11.5px;color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.04em;}
+  .vk-status-value{font-family:'Space Grotesk';font-weight:600;font-size:17px;color:var(--white);margin-top:3px;}
+  .vk-status-sub{font-size:12.5px;color:rgba(255,255,255,.55);margin-top:4px;}
+  .panel-details{background:var(--white);border:1px solid var(--line);border-radius:12px;margin-bottom:16px;overflow:hidden;}
+  .panel-details summary{padding:16px 20px;font-family:'Space Grotesk';font-weight:600;font-size:13.5px;cursor:pointer;list-style:none;}
+  .panel-details summary::-webkit-details-marker{display:none;}
+  .panel-details summary::before{content:'▸ ';color:var(--text-soft);}
+  .panel-details[open] summary::before{content:'▾ ';}
+  .panel-details[open] summary{border-bottom:1px solid var(--line);}
   .btn.danger-o{background:transparent;border:1px solid var(--line);color:var(--danger);}
   .btn.danger-o:hover{background:#FDEEED;border-color:var(--danger);}
   .btn:disabled{opacity:.45;cursor:not-allowed;}
@@ -1689,12 +1701,22 @@ function viewVK(){
     <div class="topbar">
       <div><h1>Integração VK Industrial</h1><p>Pedidos lançados no VK Industrial caem automaticamente aqui em Contas a Receber</p></div>
     </div>
+
+    <div class="panel vk-status-panel">
+      <div class="vk-status-row">
+        <div>
+          <div class="vk-status-label">${cfg.ultimaSincronizacao ? 'Última sincronização' : 'Ainda não sincronizado'}</div>
+          <div class="vk-status-value">${cfg.ultimaSincronizacao ? new Date(cfg.ultimaSincronizacao).toLocaleString('pt-BR') : '—'}</div>
+          <div class="vk-status-sub">${totalImportados} pedido(s) importado(s) até agora</div>
+        </div>
+        <button class="btn lg" id="btnSincronizarVK">⟳ Sincronizar pedidos agora</button>
+      </div>
+    </div>
+
     <div class="panel">
-      <div class="panel-head"><h2>Conexão com o Firebase do VK Industrial</h2></div>
-      <div class="integ-config">
-        <p style="font-size:12.5px;color:var(--text-soft);margin-bottom:10px;">Já preenchi com o projeto <span class="mono">vk-provisorio</span>. Informe o login (mesmo usado para entrar no VK Industrial) para autorizar a leitura dos pedidos.</p>
-        <textarea id="firebaseConfigInput">${cfg.firebaseConfig ? JSON.stringify(cfg.firebaseConfig, null, 2) : ''}</textarea>
-        <div class="field-row" style="margin-top:12px;">
+      <div class="panel-head"><h2>Configurações</h2></div>
+      <div class="panel-body" style="padding:20px;">
+        <div class="field-row">
           <div class="field"><label>E-mail de acesso ao VK Industrial</label><input type="email" id="vkEmail" value="${escapeHTML(cfg.email||'')}" placeholder="seu@email.com"></div>
           <div class="field"><label>Senha</label><input type="password" id="vkSenha" value="${escapeHTML(cfg.senha||'')}" placeholder="senha"></div>
         </div>
@@ -1708,20 +1730,28 @@ function viewVK(){
             <select id="vkCategoria">${opcoesCategoriaHTML('entrada', cfg.categoria)}</select>
           </div>
         </div>
-        <div style="display:flex;gap:8px;margin-top:4px;">
-          <button class="btn ghost" id="btnSalvarConfigVK">Salvar configuração</button>
-          <button class="btn" id="btnSincronizarVK">⟳ Sincronizar pedidos agora</button>
-        </div>
-        <div class="integ-status"><span class="dot ${cfg.firebaseConfig?'on':''}"></span>${cfg.ultimaSincronizacao ? 'Última sincronização: '+new Date(cfg.ultimaSincronizacao).toLocaleString('pt-BR') : 'Ainda não sincronizado'} · ${totalImportados} pedido(s) importado(s) até agora</div>
-        <div class="note">
-          <strong>Como funciona:</strong> ao sincronizar, cada pedido do VK Industrial vira <strong>uma conta a receber</strong> aqui — descrição "Pedido N° [número]", valor total do pedido, vencimento na data de entrega, e uma observação com o nome do cliente e os itens comprados (clique no lançamento para ver).
-          <br><br>
-          Pedidos com status "Cancelado" não são importados. Pedidos já importados não são duplicados numa nova sincronização — mas se você editar o pedido no VK Industrial depois de importado, a alteração não atualiza automaticamente aqui (só na criação).
-          <br><br>
-          A sincronização não é automática/contínua — clique em "Sincronizar pedidos agora" sempre que quiser buscar os pedidos novos. A senha fica salva só neste navegador.
-        </div>
+        <button class="btn ghost" id="btnSalvarConfigVK">Salvar configuração</button>
       </div>
     </div>
+
+    <details class="panel-details">
+      <summary>Como funciona a sincronização</summary>
+      <div class="note" style="margin:0;border-top-left-radius:0;border-top-right-radius:0;">
+        Ao sincronizar, cada pedido do VK Industrial vira <strong>uma conta a receber</strong> aqui — descrição "Pedido N° [número]", valor total do pedido, vencimento na data de entrega, e uma observação com o nome do cliente e os itens comprados (clique no lançamento para ver).
+        <br><br>
+        Pedidos cancelados no VK Industrial entram marcados como "Cancelado" (não somem). Pedidos já importados não são duplicados numa nova sincronização — mas se você editar o pedido no VK Industrial depois de importado, a alteração não atualiza automaticamente aqui (só cancelamento é detectado depois).
+        <br><br>
+        A sincronização não é automática/contínua — clique em "Sincronizar pedidos agora" sempre que quiser buscar os pedidos novos. A senha fica salva só neste navegador.
+      </div>
+    </details>
+
+    <details class="panel-details">
+      <summary>Configuração avançada (Firebase do VK Industrial)</summary>
+      <div style="padding:16px 18px;">
+        <p style="font-size:12.5px;color:var(--text-soft);margin-bottom:10px;">Já preenchido com o projeto <span class="mono">vk-provisorio</span>. Só mexa aqui se souber o que está fazendo.</p>
+        <textarea id="firebaseConfigInput">${cfg.firebaseConfig ? JSON.stringify(cfg.firebaseConfig, null, 2) : ''}</textarea>
+      </div>
+    </details>
   `;
 }
 
