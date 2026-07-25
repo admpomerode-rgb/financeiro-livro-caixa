@@ -1548,22 +1548,6 @@ function viewComissoes(){
       </div>
     </div>
 
-    <div class="panel">
-      <div class="panel-head"><h2>Vendedores cadastrados</h2></div>
-      <div class="panel-body" style="padding:14px;">
-        ${state.vendedores.length ? state.vendedores.map(v=>`
-          <div class="vendedor-mini-card">
-            <span class="vendedor-avatar" style="background:${corVendedor(v.id)}">${initials(v.nome)}</span>
-            <span class="nome">${escapeHTML(v.nome)}</span>
-            <span style="font-size:11.5px;color:var(--text-soft);">Comissão padrão</span>
-            <input type="text" inputmode="decimal" class="pct-input-sm vendedor-padrao-input" data-vendedor="${v.id}" value="${v.comissaoPadrao||0}">
-            <span style="font-size:11.5px;color:var(--text-soft);">%</span>
-            <button class="icon-btn" data-action="excluir-vendedor" data-id="${v.id}" title="Excluir">✕</button>
-          </div>
-        `).join('') : `<div class="empty">Nenhum vendedor ainda — cadastre um ou sincronize pedidos do VK Industrial que trazem representante.</div>`}
-      </div>
-    </div>
-
     <div class="panel comissao-seletor">
       <div class="panel-head"><h2>Selecionar vendedor e período</h2></div>
       <div class="panel-body" style="padding:20px;">
@@ -1596,10 +1580,12 @@ function renderComissaoResultado(){
     <div class="panel">
       <div class="comissao-vendedor-header">
         <span class="vendedor-avatar lg" style="background:${corVendedor(vendedor.id)}">${initials(vendedor.nome)}</span>
-        <div>
+        <div style="flex:1;">
           <div class="comissao-vendedor-nome">${escapeHTML(vendedor.nome)}</div>
           <div class="comissao-vendedor-sub">Comissão padrão: ${vendedor.comissaoPadrao||0}%</div>
         </div>
+        <button class="icon-btn" data-action="editar-vendedor-comissoes" data-id="${vendedor.id}" title="Editar vendedor">✎</button>
+        <button class="icon-btn" data-action="excluir-vendedor-comissoes" data-id="${vendedor.id}" title="Excluir vendedor">✕</button>
       </div>
       <div class="toggle-row" id="comissaoAbaToggle" style="margin:0 20px 0;">
         <button type="button" data-aba="pendentes" class="active">Pedidos pendentes</button>
@@ -2033,8 +2019,27 @@ function attachViewHandlers(){
         });
       }
     };
+    const bindEditarExcluirVendedor = ()=>{
+      document.querySelectorAll('[data-action="editar-vendedor-comissoes"]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const v = state.vendedores.find(x=>x.id===btn.dataset.id);
+          if(v) openVendedorModal(v);
+        });
+      });
+      document.querySelectorAll('[data-action="excluir-vendedor-comissoes"]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const id = btn.dataset.id;
+          const usado = state.lancamentos.some(l=>l.vendedorId===id) || state.comissoesManuais.some(m=>m.vendedorId===id);
+          if(usado && !confirm('Esse vendedor tem pedidos vinculados. Excluir só remove o cadastro, os pedidos continuam aparecendo como "Sem vendedor definido". Continuar?')) return;
+          state.vendedores = state.vendedores.filter(v=>v.id!==id);
+          if(comissaoVendedorSelecionado===id) comissaoVendedorSelecionado = '';
+          persist(); render(); showToast('Vendedor excluído');
+        });
+      });
+    };
     const pintarResultado = ()=>{
       comissaoResultadoEl.innerHTML = renderComissaoResultado();
+      bindEditarExcluirVendedor();
       const toggle = document.getElementById('comissaoAbaToggle');
       if(toggle){
         toggle.querySelectorAll('button').forEach(btn=>{
@@ -2059,22 +2064,6 @@ function attachViewHandlers(){
     });
 
     document.getElementById('btnNovoVendedor')?.addEventListener('click', ()=>openVendedorModal());
-    document.querySelectorAll('.vendedor-padrao-input').forEach(inp=>{
-      inp.addEventListener('change', ()=>{
-        const v = state.vendedores.find(x=>x.id===inp.dataset.vendedor);
-        if(v){ v.comissaoPadrao = numBR(inp.value)||0; persist(); showToast('Comissão padrão atualizada'); }
-      });
-    });
-    document.querySelectorAll('[data-action="excluir-vendedor"]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        const id = btn.dataset.id;
-        const usado = state.lancamentos.some(l=>l.vendedorId===id) || state.comissoesManuais.some(m=>m.vendedorId===id);
-        if(usado && !confirm('Esse vendedor tem pedidos vinculados. Excluir só remove o cadastro, os pedidos continuam aparecendo como "Sem vendedor definido". Continuar?')) return;
-        state.vendedores = state.vendedores.filter(v=>v.id!==id);
-        if(comissaoVendedorSelecionado===id) comissaoVendedorSelecionado = '';
-        persist(); render(); showToast('Vendedor excluído');
-      });
-    });
     document.getElementById('btnNovaComissaoManual')?.addEventListener('click', ()=>openComissaoManualModal());
   }
 
@@ -3188,7 +3177,10 @@ function openAtualizarValorModal(a){
   });
 }
 
-function closeModal(){ document.getElementById('modalOverlay').classList.remove('open'); }
+function closeModal(){
+  document.getElementById('modalOverlay').classList.remove('open');
+  document.getElementById('modalContent').innerHTML = '';
+}
 document.getElementById('modalOverlay').addEventListener('click', (e)=>{ if(e.target.id==='modalOverlay') closeModal(); });
 
 /* ---------------- Backup / Restore ---------------- */
