@@ -379,7 +379,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
 /* ---------------- Estado & Persistência ---------------- */
-const CATEGORIAS_SAIDA = ['Insumos', 'Fornecedores', 'Salários', 'Aluguel', 'Utilidades (água/luz/internet)', 'Impostos', 'Manutenção', 'Marketing', 'Cartão de Crédito', 'Comissões', 'Investimentos', 'Outros'];
+const CATEGORIAS_SAIDA = ['Insumos', 'Fornecedores', 'Salários', 'Aluguel', 'Utilidades (água/luz/internet)', 'Impostos', 'Manutenção', 'Marketing', 'Cartão de Crédito', 'Comissões', 'Investimentos', 'Ativos Patrimoniais', 'Outros'];
+const CATEGORIAS_ATIVO_PATRIMONIAL = ['Equipamento','Máquina','Veículo','Imóvel','Móveis e Utensílios','Informática','Outro'];
 const CATEGORIAS_ENTRADA = ['Vendas', 'Serviços', 'Recebimento de cliente', 'Rendimentos', 'Outros'];
 
 const CONTA_CORES = ['#3B6FE0','#1E9E6B','#D98F2B','#8A5CF6','#D5473F','#0F9BB0'];
@@ -486,6 +487,7 @@ function aplicarMigracoes(s){
   if(!s.vendedores) s.vendedores = [];
   if(!s.comissoesPagas) s.comissoesPagas = [];
   if(!s.comissoesManuais) s.comissoesManuais = [];
+  if(!s.ativosPatrimoniais) s.ativosPatrimoniais = [];
   return s;
 }
 async function carregarDados(){
@@ -570,7 +572,7 @@ function render(){
   else if(currentView==='relatorios') main.innerHTML = viewRelatorios();
   else if(currentView==='categorias') main.innerHTML = viewCategorias();
   else if(currentView==='comissoes') main.innerHTML = viewComissoes();
-  else if(currentView==='ativos') main.innerHTML = viewStub('Ativos Patrimoniais', 'Cadastro e controle de bens da empresa (equipamentos, veículos, imóveis), com depreciação e valor atual. Este módulo é o próximo passo — me diga quando quiser priorizá-lo e detalhamos os campos.');
+  else if(currentView==='ativos') main.innerHTML = viewAtivosPatrimoniais();
   else if(currentView==='vk') main.innerHTML = viewVK();
   attachViewHandlers();
 }
@@ -1147,7 +1149,7 @@ function rowHTML(l){
       <span class="dot ${l.tipo}"></span>
       <span class="mono" style="font-size:12.5px;color:var(--text-soft)">${fmtDate(l.dataPagamento || l.dataVencimento)}</span>
       <div class="desc-cell" data-action="ver-detalhe" data-id="${l.id}" style="cursor:pointer;">
-        <div>${escapeHTML(l.descricao)}${l.origem==='forneira' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Forneira</span>' : ''}${l.origem==='vk' ? ' <span style="color:var(--blue-accent);font-size:11px;">· VK Industrial</span>' : ''}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Investimento</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}</div>
+        <div>${escapeHTML(l.descricao)}${l.origem==='forneira' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Forneira</span>' : ''}${l.origem==='vk' ? ' <span style="color:var(--blue-accent);font-size:11px;">· VK Industrial</span>' : ''}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Ativo Patrimonial</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}</div>
         <div class="cat"><span class="conta-tag"><span class="conta-swatch" style="background:${corConta(l.contaId)}"></span>${escapeHTML(nomeConta(l.contaId))}</span> · ${escapeHTML(l.categoria)}${l.fornecedor ? ' · '+escapeHTML(l.fornecedor) : ''}</div>
       </div>
       <span class="col-cat mono" style="font-size:11.5px;color:var(--text-soft)">${fmtDate(l.dataVencimento)}</span>
@@ -1310,7 +1312,7 @@ function viewExtrato(contaId){
       <div class="ledger-row" data-id="${l.id}">
         <span class="dot ${l.tipo}"></span>
         <span class="mono" style="font-size:12.5px;color:var(--text-soft)">${fmtDate(l.dataPagamento)}</span>
-        <div class="desc-cell" data-action="ver-detalhe" data-id="${l.id}" style="cursor:pointer;"><div>${escapeHTML(l.descricao)}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Investimento</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}</div><div class="cat">${escapeHTML(l.categoria)}</div></div>
+        <div class="desc-cell" data-action="ver-detalhe" data-id="${l.id}" style="cursor:pointer;"><div>${escapeHTML(l.descricao)}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Ativo Patrimonial</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}</div><div class="cat">${escapeHTML(l.categoria)}</div></div>
         <span class="mono" style="font-weight:600;color:${l.tipo==='entrada'?'var(--success)':'var(--danger)'}">${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}</span>
         <span class="mono" style="font-weight:600;">${brl(saldo)}</span>
         <div class="row-actions">${l.origem!=='transferencia' ? `<button class="icon-btn" data-action="editar" data-id="${l.id}" title="Editar">✎</button>` : ''}<button class="icon-btn" data-action="excluir" data-id="${l.id}" title="Excluir">✕</button></div>
@@ -1687,7 +1689,8 @@ function renderBalanco(){
     return s + (faturaStatus(c.id, comp)==='aberta' ? totalCompetencia(c.id, comp) : 0);
   }, 0);
   const investimentos = totalInvestimentos();
-  const totalAtivo = caixaBancos + aReceber + investimentos;
+  const ativoImobilizado = totalAtivosPatrimoniais();
+  const totalAtivo = caixaBancos + aReceber + investimentos + ativoImobilizado;
   const totalPassivo = aPagar + cartoesNaoFaturados;
   const patrimonioLiquido = totalAtivo - totalPassivo;
 
@@ -1702,7 +1705,7 @@ function renderBalanco(){
       <div class="report-line sub"><span>Caixa e Bancos</span><span class="v">${brl(caixaBancos)}</span></div>
       <div class="report-line sub"><span>Contas a Receber</span><span class="v">${brl(aReceber)}</span></div>
       <div class="report-line sub"><span>Investimentos Financeiros</span><span class="v">${brl(investimentos)}</span></div>
-      <div class="report-line sub"><span>Ativo Imobilizado (Ativos Patrimoniais)</span><span class="v">${brl(0)} <span style="color:var(--text-soft);">— módulo em construção</span></span></div>
+      <div class="report-line sub"><span>Ativo Imobilizado (Ativos Patrimoniais, já depreciado)</span><span class="v">${brl(ativoImobilizado)}</span></div>
       <div class="report-line total"><span>Total do Ativo</span><span class="v">${brl(totalAtivo)}</span></div>
 
       <div class="report-title">Passivo</div>
@@ -1714,6 +1717,135 @@ function renderBalanco(){
       <div class="report-line result"><span>Patrimônio Líquido</span><span class="v" style="color:${patrimonioLiquido>=0?'var(--success)':'var(--danger)'}">${brl(patrimonioLiquido)}</span></div>
     </div>
   `;
+}
+
+/* --- Ativos Patrimoniais --- */
+function calcDepreciacao(a){
+  const valorResidual = a.valorResidual || 0;
+  const valorDepreciavel = Math.max(0, a.valorAquisicao - valorResidual);
+  const vidaUtil = a.vidaUtilAnos || 1;
+  const depreciacaoAnual = valorDepreciavel / vidaUtil;
+  const dias = Math.max(0, (new Date(todayISO()) - new Date(a.dataAquisicao)) / 86400000);
+  const anos = dias / 365;
+  const depreciacaoAcumulada = Math.min(valorDepreciavel, depreciacaoAnual * anos);
+  const valorAtual = a.valorAquisicao - depreciacaoAcumulada;
+  const pctDepreciado = valorDepreciavel>0 ? Math.min(100, (depreciacaoAcumulada/valorDepreciavel)*100) : 100;
+  const totalmenteDepreciado = depreciacaoAcumulada >= valorDepreciavel - 0.01;
+  return { valorAtual, depreciacaoAcumulada, depreciacaoAnual, pctDepreciado, totalmenteDepreciado };
+}
+function totalAtivosPatrimoniais(){ return state.ativosPatrimoniais.reduce((s,a)=>s+calcDepreciacao(a).valorAtual, 0); }
+
+function viewAtivosPatrimoniais(){
+  const totalAquisicao = state.ativosPatrimoniais.reduce((s,a)=>s+a.valorAquisicao,0);
+  const totalAtual = totalAtivosPatrimoniais();
+  const totalDepreciado = totalAquisicao - totalAtual;
+  return `
+    <div class="topbar">
+      <div><h1>Ativos Patrimoniais</h1><p>Bens da empresa — equipamentos, veículos, imóveis, móveis — com depreciação calculada automaticamente</p></div>
+      <button class="btn" id="btnNovoAtivoPatrimonial">+ Ativo</button>
+    </div>
+    <div class="cards">
+      <div class="card"><div class="label">Valor de aquisição (total)</div><div class="value mono">${brl(totalAquisicao)}</div></div>
+      <div class="card"><div class="label">Depreciação acumulada</div><div class="value mono neg">${brl(totalDepreciado)}</div></div>
+      <div class="card saldo"><div class="label">Valor atual (total)</div><div class="value mono pos">${brl(totalAtual)}</div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Bens cadastrados</h2></div>
+      <div class="panel-body">
+        ${state.ativosPatrimoniais.length ? `
+        <div class="ledger-row head" style="grid-template-columns:14px 1fr 120px 120px 120px auto;">
+          <span></span><span>Ativo</span><span>Aquisição</span><span>Depreciado</span><span>Valor atual</span><span></span>
+        </div>
+        ${state.ativosPatrimoniais.map(rowAtivoPatrimonialHTML).join('')}` : `<div class="empty">Nenhum ativo cadastrado ainda. Clique em "+ Ativo" para começar.</div>`}
+      </div>
+    </div>
+  `;
+}
+
+function rowAtivoPatrimonialHTML(a){
+  const d = calcDepreciacao(a);
+  return `
+    <div class="ledger-row" data-id="${a.id}" style="grid-template-columns:14px 1fr 120px 120px 120px auto;">
+      <span class="dot ${d.totalmenteDepreciado?'saida':'entrada'}"></span>
+      <div class="desc-cell"><div>${escapeHTML(a.nome)}</div><div class="cat">${escapeHTML(a.categoria)} · adquirido em ${fmtDate(a.dataAquisicao)}${d.totalmenteDepreciado?' · totalmente depreciado':''}</div></div>
+      <span class="mono" style="font-size:12.5px;">${brl(a.valorAquisicao)}</span>
+      <span class="mono" style="font-size:12.5px;color:var(--danger);">-${brl(d.depreciacaoAcumulada)}</span>
+      <span class="mono" style="font-weight:600;">${brl(d.valorAtual)}</span>
+      <div class="row-actions">
+        <button class="icon-btn" data-action="editar-ativo-patrimonial" data-id="${a.id}" title="Editar">✎</button>
+        <button class="icon-btn" data-action="excluir-ativo-patrimonial" data-id="${a.id}" title="Excluir">✕</button>
+      </div>
+    </div>
+  `;
+}
+
+function openAtivoPatrimonialModal(existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit ? 'Editar ativo' : 'Novo ativo patrimonial'}</h3>
+    <div class="field"><label>Nome / descrição</label><input type="text" id="apNome" value="${existing?escapeHTML(existing.nome):''}" placeholder="Ex: Forno industrial, Fiat Fiorino 2022"></div>
+    <div class="field-row">
+      <div class="field"><label>Categoria</label>
+        <select id="apCategoria">${CATEGORIAS_ATIVO_PATRIMONIAL.map(c=>`<option ${existing?.categoria===c?'selected':''}>${c}</option>`).join('')}</select>
+      </div>
+      <div class="field"><label>Data de aquisição</label><input type="date" id="apData" value="${existing?.dataAquisicao || todayISO()}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Valor de aquisição (R$)</label><input type="text" inputmode="decimal" id="apValor" value="${existing?existing.valorAquisicao:''}"></div>
+      <div class="field"><label>Vida útil (anos)</label><input type="text" inputmode="decimal" id="apVidaUtil" value="${existing?existing.vidaUtilAnos:'5'}"></div>
+    </div>
+    <div class="field"><label>Valor residual ao final da vida útil (R$, opcional)</label><input type="text" inputmode="decimal" id="apResidual" value="${existing&&existing.valorResidual?existing.valorResidual:''}" placeholder="0,00"></div>
+    ${!isEdit ? `
+    <div class="field" style="margin-top:4px;">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:500;"><input type="checkbox" id="apDescontarConta" style="width:auto;"> Descontar o valor de uma conta bancária agora</label>
+    </div>
+    <div id="apContaGrupo" style="display:none;margin-bottom:14px;">
+      <select id="apConta">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select>
+    </div>` : ''}
+    <div class="note" style="margin-top:0;">A depreciação é calculada automaticamente pelo método linear, com base na vida útil informada — não precisa atualizar valor manualmente.</div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarAtivoPatrimonial">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  const chkDesconto = document.getElementById('apDescontarConta');
+  if(chkDesconto){
+    chkDesconto.addEventListener('change', ()=>{
+      document.getElementById('apContaGrupo').style.display = chkDesconto.checked ? 'block' : 'none';
+    });
+  }
+  document.getElementById('btnSalvarAtivoPatrimonial').addEventListener('click', ()=>{
+    const nome = document.getElementById('apNome').value.trim();
+    const categoria = document.getElementById('apCategoria').value;
+    const dataAquisicao = document.getElementById('apData').value || todayISO();
+    const valorAquisicao = numBR(document.getElementById('apValor').value);
+    const vidaUtilAnos = numBR(document.getElementById('apVidaUtil').value);
+    const valorResidualRaw = document.getElementById('apResidual').value.trim();
+    const valorResidual = valorResidualRaw ? numBR(valorResidualRaw) : 0;
+    if(!nome || isNaN(valorAquisicao) || valorAquisicao<=0 || isNaN(vidaUtilAnos) || vidaUtilAnos<=0){ showToast('Preencha nome, valor de aquisição e vida útil'); return; }
+    if(isEdit){
+      Object.assign(existing, { nome, categoria, dataAquisicao, valorAquisicao, vidaUtilAnos, valorResidual });
+    } else {
+      const novoId = uid();
+      state.ativosPatrimoniais.push({ id: novoId, nome, categoria, dataAquisicao, valorAquisicao, vidaUtilAnos, valorResidual });
+      if(chkDesconto && chkDesconto.checked){
+        const contaId = document.getElementById('apConta').value;
+        state.lancamentos.push({
+          id: uid(), tipo:'saida', categoria:'Ativos Patrimoniais',
+          descricao: `Aquisição — ${nome}`,
+          valor: valorAquisicao, contaId, status:'pago',
+          dataVencimento: dataAquisicao, dataPagamento: dataAquisicao,
+          origem:'ativo_patrimonial', ativoPatrimonialId: novoId,
+          criadoEm: new Date().toISOString()
+        });
+      }
+    }
+    persist(); closeModal(); render();
+    showToast(isEdit ? 'Ativo atualizado' : 'Ativo cadastrado');
+  });
 }
 
 function viewCategorias(){
@@ -2339,6 +2471,22 @@ function attachViewHandlers(){
     document.getElementById('btnNovoVendedor')?.addEventListener('click', ()=>openVendedorModal());
     document.getElementById('btnNovaComissaoManual')?.addEventListener('click', ()=>openComissaoManualModal());
   }
+
+  // Ativos Patrimoniais
+  document.getElementById('btnNovoAtivoPatrimonial')?.addEventListener('click', ()=>openAtivoPatrimonialModal());
+  document.querySelectorAll('[data-action="editar-ativo-patrimonial"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const a = state.ativosPatrimoniais.find(x=>x.id===btn.dataset.id);
+      if(a) openAtivoPatrimonialModal(a);
+    });
+  });
+  document.querySelectorAll('[data-action="excluir-ativo-patrimonial"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!confirm('Excluir este ativo? O lançamento de aquisição vinculado (se houver) não será excluído automaticamente.')) return;
+      state.ativosPatrimoniais = state.ativosPatrimoniais.filter(x=>x.id!==btn.dataset.id);
+      persist(); render(); showToast('Ativo excluído');
+    });
+  });
 
   // Contas bancárias
   const btnNovaConta = document.getElementById('btnNovaConta');
@@ -3335,7 +3483,7 @@ function openSubcategoriaModal(tipo, categoriaId, existing){
 function openDetalheLancamentoModal(l){
   const modal = document.getElementById('modalContent');
   const statusLabel = { pago:'Pago', recebido:'Recebido', pendente:'Pendente', cancelado:'Cancelado' }[l.status];
-  const origemLabel = { manual:'Lançado manualmente', forneira:'Forneira', vk:'VK Industrial', transferencia:'Transferência entre contas', cartao:'Fatura de cartão de crédito', investimento:'Aplicação em investimento', comissao:'Pagamento de comissão' }[l.origem] || 'Lançado manualmente';
+  const origemLabel = { manual:'Lançado manualmente', forneira:'Forneira', vk:'VK Industrial', transferencia:'Transferência entre contas', cartao:'Fatura de cartão de crédito', investimento:'Aplicação em investimento', comissao:'Pagamento de comissão', ativo_patrimonial:'Aquisição de ativo patrimonial' }[l.origem] || 'Lançado manualmente';
   modal.innerHTML = `
     <h3>${escapeHTML(l.descricao)}</h3>
     <div class="report-line"><span>Valor</span><span class="v mono" style="font-weight:600;color:${l.tipo==='entrada'?'var(--success)':'var(--danger)'}">${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}</span></div>
