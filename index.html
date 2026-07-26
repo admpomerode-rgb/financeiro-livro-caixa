@@ -385,6 +385,12 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+  if(typeof pdfjsLib !== 'undefined'){
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+</script>
 <script>
 /* ---------------- Estado & Persistência ---------------- */
 const CATEGORIAS_SAIDA = ['Insumos', 'Fornecedores', 'Salários', 'Aluguel', 'Utilidades (água/luz/internet)', 'Impostos', 'Manutenção', 'Marketing', 'Cartão de Crédito', 'Comissões', 'Investimentos', 'Ativos Patrimoniais', 'Outros'];
@@ -1465,6 +1471,78 @@ function viewFatura(cartaoId, competencia){
   `;
 }
 
+async function extrairLinhasPDF(file){
+  if(typeof pdfjsLib === 'undefined') throw new Error('Biblioteca de leitura de PDF não carregou — verifique a internet');
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const linhas = [];
+  for(let i=1; i<=pdf.numPages; i++){
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const porY = {};
+    content.items.forEach(it=>{
+      const y = Math.round(it.transform[5]);
+      if(!porY[y]) porY[y] = [];
+      porY[y].push({ x: it.transform[4], str: it.str });
+    });
+    const ys = Object.keys(porY).map(Number).sort((a,b)=>b-a);
+    ys.forEach(y=>{
+      const linha = porY[y].sort((a,b)=>a.x-b.x).map(t=>t.str).join(' ').replace(/\s+/g,' ').trim();
+      if(linha) linhas.push(linha);
+    });
+  }
+  return linhas;
+}
+
+function parseNotaCorretagem(linhas){
+  const texto = linhas.join('\n');
+  const buscarValor = (regex)=>{
+    const m = texto.match(regex);
+    if(!m) return 0;
+    const v = numBR(m[1]);
+    return isNaN(v) ? 0 : v;
+  };
+  const buscarUltimoValor = (regex)=>{
+    let ultimo = null, m;
+    const re = new RegExp(regex, 'gi');
+    while((m = re.exec(texto)) !== null) ultimo = m[1];
+    if(!ultimo) return 0;
+    const v = numBR(ultimo);
+    return isNaN(v) ? 0 : v;
+  };
+
+  // Operações — procura linhas com C/V + ticker + quantidade + preço + valor
+  const operacoes = [];
+  const regexOp = /\b([CV])\s+(?:VISTA|FRACION[AÁ]RIO)?\s*[A-ZÀ-Ú/ ]*?\b([A-Z]{4}\d{1,2})\b[A-ZÀ-Ú0-9 .]*?(\d{1,3}(?:\.\d{3})*)\s+([\d]+,\d{2,6})\s+([\d.]+,\d{2})/;
+  linhas.forEach(linha=>{
+    const m = linha.match(regexOp);
+    if(m){
+      const quantidade = parseInt(m[3].replace(/\./g,''), 10);
+      const preco = numBR(m[4]);
+      const valor = numBR(m[5]);
+      if(quantidade>0 && preco>0){
+        operacoes.push({ tipo: m[1], ticker: m[2], quantidade, preco, valor: valor || Math.round(quantidade*preco*100)/100 });
+      }
+    }
+  });
+
+  const dataMatch = texto.match(/(\d{2}\/\d{2}\/\d{4})/);
+  const dataPregao = dataMatch ? dataMatch[1].split('/').reverse().join('-') : todayISO();
+
+  const taxas = {
+    corretagem: buscarValor(/corretagem\D{0,20}?([\d.]+,\d{2})/i),
+    liquidacao: buscarValor(/taxa de liquida[çc][ãa]o\D{0,20}?([\d.]+,\d{2})/i),
+    registro: buscarValor(/taxa de registro\D{0,20}?([\d.]+,\d{2})/i),
+    emolumentos: buscarValor(/emolumentos\D{0,20}?([\d.]+,\d{2})/i),
+    iss: buscarValor(/\bISS\D{0,20}?([\d.]+,\d{2})/i),
+    irrf: buscarValor(/I\.?R\.?R\.?F\.?[^\d]{0,30}?([\d.]+,\d{2})/i),
+    outras: buscarValor(/outras?\s+(?:taxas|despesas)\D{0,20}?([\d.]+,\d{2})/i)
+  };
+  const liquido = buscarUltimoValor(/l[ií]quido (?:para|de)?\s*(?:\d{2}\/\d{2}\/\d{4})?[^\d]{0,10}?([\d.]+,\d{2})/i);
+
+  return { dataPregao, operacoes, taxas, liquido };
+}
+
 function viewInvestimentos(){
   const total = totalInvestimentos();
   const custo = state.ativosInvestimento.reduce((s,a)=>s+custoAtivo(a),0);
@@ -1472,7 +1550,10 @@ function viewInvestimentos(){
   return `
     <div class="topbar">
       <div><h1>Investimentos</h1><p>Carteira de aplicações — renda fixa e renda variável</p></div>
-      <button class="btn ghost" id="btnAtualizarCotacoes">⟳ Atualizar cotações</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn ghost" id="btnImportarNota">📄 Importar nota de corretagem (PDF)</button>
+        <button class="btn ghost" id="btnAtualizarCotacoes">⟳ Atualizar cotações</button>
+      </div>
     </div>
     <div class="cards">
       <div class="card saldo"><div class="label">Total investido (valor atual)</div><div class="value mono">${brl(total)}</div></div>
@@ -3284,6 +3365,7 @@ function attachViewHandlers(){
     btnAtualizarCotacoes.disabled = true;
     atualizarCotacoes().finally(()=>{});
   });
+  document.getElementById('btnImportarNota')?.addEventListener('click', ()=>openImportarNotaModal());
 
   const btnSalvarConfigVK = document.getElementById('btnSalvarConfigVK');
   if(btnSalvarConfigVK) btnSalvarConfigVK.addEventListener('click', ()=>{
@@ -3761,6 +3843,190 @@ function openContaInvestimentoModal(existing){
     else { state.contasInvestimento.push({ id: uid(), ...payload }); }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Conta atualizada' : 'Conta criada');
+  });
+}
+
+function openImportarNotaModal(){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Importar nota de corretagem</h3>
+    <div class="field">
+      <label>Arquivo PDF da nota de corretagem</label>
+      <input type="file" id="notaFileInput" accept="application/pdf">
+    </div>
+    <div id="notaStatus" class="note" style="margin-top:0;">Escolha o PDF da nota — o sistema tenta ler as operações e as taxas automaticamente. Confira tudo antes de confirmar, porque o formato varia de corretora pra corretora.</div>
+    <div id="notaRevisao" style="display:none;">
+      <div class="field-row">
+        <div class="field"><label>Data do pregão</label><input type="date" id="notaData"></div>
+        <div class="field"><label>Corretora</label><input type="text" id="notaCorretora" placeholder="Ex: XP Investimentos"></div>
+      </div>
+      <label style="font-size:12.5px;font-weight:600;display:block;margin:10px 0 6px;">Operações identificadas</label>
+      <div id="notaOperacoesTable"></div>
+      <button type="button" class="btn ghost sm" id="btnAdicionarLinhaOp" style="margin-top:8px;">+ Adicionar linha</button>
+
+      <label style="font-size:12.5px;font-weight:600;display:block;margin:16px 0 6px;">Taxas da nota (R$)</label>
+      <div class="field-row">
+        <div class="field"><label>Corretagem</label><input type="text" inputmode="decimal" id="notaTxCorretagem"></div>
+        <div class="field"><label>Taxa de liquidação</label><input type="text" inputmode="decimal" id="notaTxLiquidacao"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Emolumentos</label><input type="text" inputmode="decimal" id="notaTxEmolumentos"></div>
+        <div class="field"><label>Taxa de registro</label><input type="text" inputmode="decimal" id="notaTxRegistro"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>ISS</label><input type="text" inputmode="decimal" id="notaTxIss"></div>
+        <div class="field"><label>IRRF</label><input type="text" inputmode="decimal" id="notaTxIrrf"></div>
+      </div>
+      <div class="field"><label>Outras taxas</label><input type="text" inputmode="decimal" id="notaTxOutras"></div>
+
+      <div class="field"><label>Valor líquido da nota (R$) — o que efetivamente sai/entra da conta</label><input type="text" inputmode="decimal" id="notaLiquido"></div>
+      <div class="note" id="notaTipoNota" style="margin-top:0;"></div>
+      <div class="field"><label>Conta bancária de origem/destino</label>
+        <select id="notaContaBancaria">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarNota" style="display:none;">Confirmar e lançar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+
+  let operacoesAtuais = [];
+
+  const linhaOperacaoHTML = (op, idx)=>`
+    <div class="field-row nota-op-row" data-idx="${idx}" style="align-items:flex-end;">
+      <div class="field" style="max-width:70px;"><label>C/V</label>
+        <select class="op-tipo">
+          <option value="C" ${op.tipo==='C'?'selected':''}>C</option>
+          <option value="V" ${op.tipo==='V'?'selected':''}>V</option>
+        </select>
+      </div>
+      <div class="field" style="max-width:90px;"><label>Tipo</label>
+        <select class="op-tipoativo">
+          <option value="acao">Ação</option>
+          <option value="fii">FII</option>
+        </select>
+      </div>
+      <div class="field"><label>Ticker</label><input type="text" class="op-ticker mono" style="text-transform:uppercase;" value="${escapeHTML(op.ticker||'')}"></div>
+      <div class="field" style="max-width:90px;"><label>Qtd</label><input type="text" inputmode="decimal" class="op-qtd" value="${op.quantidade||''}"></div>
+      <div class="field"><label>Preço unit.</label><input type="text" inputmode="decimal" class="op-preco" value="${op.preco||''}"></div>
+      <button type="button" class="icon-btn btn-remover-op" style="margin-bottom:14px;">✕</button>
+    </div>
+  `;
+  const pintarOperacoes = ()=>{
+    document.getElementById('notaOperacoesTable').innerHTML = operacoesAtuais.map((op,i)=>linhaOperacaoHTML(op,i)).join('') || `<div class="empty">Nenhuma operação identificada — adicione manualmente.</div>`;
+    document.querySelectorAll('.btn-remover-op').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const idx = parseInt(btn.closest('.nota-op-row').dataset.idx);
+        operacoesAtuais.splice(idx,1);
+        pintarOperacoes();
+      });
+    });
+  };
+
+  document.getElementById('btnAdicionarLinhaOp').addEventListener('click', ()=>{
+    operacoesAtuais.push({ tipo:'C', ticker:'', quantidade:'', preco:'' });
+    pintarOperacoes();
+  });
+
+  document.getElementById('notaFileInput').addEventListener('change', async ()=>{
+    const file = document.getElementById('notaFileInput').files[0];
+    if(!file) return;
+    const status = document.getElementById('notaStatus');
+    status.textContent = 'Lendo o PDF...';
+    try{
+      const linhas = await extrairLinhasPDF(file);
+      const dados = parseNotaCorretagem(linhas);
+      operacoesAtuais = dados.operacoes;
+      document.getElementById('notaData').value = dados.dataPregao;
+      document.getElementById('notaTxCorretagem').value = dados.taxas.corretagem || 0;
+      document.getElementById('notaTxLiquidacao').value = dados.taxas.liquidacao || 0;
+      document.getElementById('notaTxEmolumentos').value = dados.taxas.emolumentos || 0;
+      document.getElementById('notaTxRegistro').value = dados.taxas.registro || 0;
+      document.getElementById('notaTxIss').value = dados.taxas.iss || 0;
+      document.getElementById('notaTxIrrf').value = dados.taxas.irrf || 0;
+      document.getElementById('notaTxOutras').value = dados.taxas.outras || 0;
+      document.getElementById('notaLiquido').value = dados.liquido || 0;
+      pintarOperacoes();
+      document.getElementById('notaRevisao').style.display = 'block';
+      document.getElementById('btnConfirmarNota').style.display = 'inline-flex';
+      status.textContent = operacoesAtuais.length
+        ? `${operacoesAtuais.length} operação(ões) identificada(s). Confira todos os campos antes de confirmar — a leitura automática pode errar.`
+        : 'Não consegui identificar operações automaticamente nessa nota — adicione as linhas manualmente abaixo.';
+    }catch(e){
+      console.error('Erro ao ler PDF da nota:', e);
+      status.textContent = 'Não consegui ler esse PDF automaticamente. Você pode preencher tudo manualmente abaixo.';
+      operacoesAtuais = [];
+      pintarOperacoes();
+      document.getElementById('notaData').value = todayISO();
+      document.getElementById('notaRevisao').style.display = 'block';
+      document.getElementById('btnConfirmarNota').style.display = 'inline-flex';
+    }
+  });
+
+  document.getElementById('btnConfirmarNota').addEventListener('click', ()=>{
+    const linhas = [...document.querySelectorAll('.nota-op-row')].map(row=>({
+      tipo: row.querySelector('.op-tipo').value,
+      tipoAtivo: row.querySelector('.op-tipoativo').value,
+      ticker: row.querySelector('.op-ticker').value.trim().toUpperCase(),
+      quantidade: numBR(row.querySelector('.op-qtd').value),
+      preco: numBR(row.querySelector('.op-preco').value)
+    })).filter(op=>op.ticker && op.quantidade>0 && op.preco>0);
+
+    if(!linhas.length){ showToast('Adicione ao menos uma operação válida'); return; }
+
+    const dataPregao = document.getElementById('notaData').value || todayISO();
+    const corretora = document.getElementById('notaCorretora').value.trim();
+    const taxasTotal = ['notaTxCorretagem','notaTxLiquidacao','notaTxEmolumentos','notaTxRegistro','notaTxIss','notaTxOutras']
+      .reduce((s,id)=>s + (numBR(document.getElementById(id).value)||0), 0);
+    const irrf = numBR(document.getElementById('notaTxIrrf').value) || 0;
+    const liquido = numBR(document.getElementById('notaLiquido').value);
+    const contaBancariaId = document.getElementById('notaContaBancaria').value;
+
+    const totalCompras = linhas.filter(l=>l.tipo==='C').reduce((s,l)=>s+l.quantidade*l.preco,0);
+    const totalVendas = linhas.filter(l=>l.tipo==='V').reduce((s,l)=>s+l.quantidade*l.preco,0);
+    const valorLancamento = !isNaN(liquido) && liquido>0 ? liquido : Math.abs(totalCompras - totalVendas) + taxasTotal;
+
+    let contaInv = state.contasInvestimento.find(c=>c.tipo==='renda_variavel');
+    if(!contaInv){
+      contaInv = { id: uid(), nome:'Renda Variável', instituicao:'', instituicaoDominio:'', tipo:'renda_variavel', cor: CONTA_CORES[state.contasInvestimento.length % CONTA_CORES.length] };
+      state.contasInvestimento.push(contaInv);
+    }
+
+    linhas.forEach(l=>{
+      const taxaProporcional = totalCompras>0 ? (l.quantidade*l.preco/totalCompras)*taxasTotal : 0;
+      let ativo = state.ativosInvestimento.find(a=>a.contaId===contaInv.id && a.ticker===l.ticker && !a.manual);
+      if(l.tipo==='C'){
+        if(ativo){
+          const custoAntigo = (ativo.quantidade||0) * (ativo.precoMedio||0);
+          const custoNovo = l.quantidade*l.preco + taxaProporcional;
+          ativo.quantidade = (ativo.quantidade||0) + l.quantidade;
+          ativo.precoMedio = Math.round(((custoAntigo+custoNovo)/ativo.quantidade)*100)/100;
+        } else {
+          const precoMedio = Math.round(((l.quantidade*l.preco + taxaProporcional)/l.quantidade)*100)/100;
+          state.ativosInvestimento.push({ id: uid(), tipoAtivo: l.tipoAtivo, contaId: contaInv.id, ticker: l.ticker, nome: l.ticker, quantidade: l.quantidade, precoMedio, precoAtual: null, dataUltimaCotacao: null, corretora });
+        }
+      } else {
+        if(ativo){
+          ativo.quantidade = Math.max(0, (ativo.quantidade||0) - l.quantidade);
+        }
+      }
+    });
+
+    const tipoNota = totalCompras>=totalVendas ? 'saida' : 'entrada';
+    state.lancamentos.push({
+      id: uid(), tipo: tipoNota, categoria: tipoNota==='saida' ? 'Investimentos' : 'Outros',
+      descricao: `Nota de corretagem${corretora ? ' — '+corretora : ''} (${linhas.length} operação(ões))`,
+      valor: Math.round(valorLancamento*100)/100, contaId: contaBancariaId, status: tipoNota==='saida'?'pago':'recebido',
+      dataVencimento: dataPregao, dataPagamento: dataPregao,
+      origem:'investimento', observacao: `Taxas: ${brl(taxasTotal)}${irrf>0?' · IRRF: '+brl(irrf):''}\nOperações: `+linhas.map(l=>`${l.tipo} ${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', '),
+      criadoEm: new Date().toISOString()
+    });
+
+    persist(); closeModal(); render();
+    showToast('Nota de corretagem lançada e posições atualizadas');
   });
 }
 
