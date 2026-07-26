@@ -148,6 +148,12 @@
   }
   .ledger-row:last-child{border-bottom:none;}
   .ledger-row.head{color:var(--text-soft);font-size:11px;text-transform:uppercase;letter-spacing:.04em;padding-top:9px;padding-bottom:9px;background:var(--bone);}
+  .ledger-row.compact{grid-template-columns:12px 1fr 95px 95px auto;gap:10px;padding:6px 16px;font-size:12px;}
+  .ledger-row.compact .cat{font-size:10.5px;}
+  .extrato-dia{margin-bottom:14px;overflow:hidden;}
+  .extrato-dia-head{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:var(--bone);border-bottom:1px solid var(--line);font-size:12px;font-weight:600;color:var(--ink);}
+  .extrato-dia-data{font-family:'Space Grotesk';}
+  .extrato-dia-foot{display:flex;justify-content:space-between;padding:8px 16px;background:var(--bone);font-size:11.5px;font-weight:600;color:var(--text-soft);border-top:1px solid var(--line);}
   .dot{width:8px;height:8px;border-radius:50%;}
   .dot.entrada{background:var(--success);}
   .dot.saida{background:var(--danger);}
@@ -1225,13 +1231,11 @@ function viewDashboard(){
   const pend = pendentesResumo();
   const venc = contasVencendoResumo();
   const recentes = [...state.lancamentos].sort((a,b)=> (b.dataPagamento||b.dataVencimento||'').localeCompare(a.dataPagamento||a.dataVencimento||'')).slice(0,6);
-  const diasSemBackup = state.ultimoBackupEm ? Math.floor((new Date() - new Date(state.ultimoBackupEm))/86400000) : null;
-  const avisarBackup = diasSemBackup===null || diasSemBackup>30;
 
   return `
     <div class="topbar">
       <div><h1>Dashboard</h1><p>Visão geral da saúde financeira da empresa</p></div>
-      <button class="btn" id="btnNovoRapido">+ Novo lançamento</button>
+      ${dropdownNovoHTML()}
     </div>
 
     ${(venc.atrasadas.length || venc.venceEmBreve.length) ? `
@@ -1246,14 +1250,6 @@ function viewDashboard(){
           <span>🔔 ${venc.venceEmBreve.length} conta(s) vence(m) nos próximos 7 dias</span>
           <span class="mono">${brl(venc.venceEmBreve.reduce((s,l)=>s+l.valor,0))}</span>
         </div>` : ''}
-    </div>` : ''}
-
-    ${avisarBackup ? `
-    <div class="panel alerta-panel backup-alerta">
-      <div class="alerta-linha">
-        <span>💾 ${diasSemBackup===null ? 'Você ainda não fez nenhum backup' : `Já fazem ${diasSemBackup} dias desde o último backup`} — recomendado fazer pelo menos uma vez por mês.</span>
-        <button class="btn ghost sm" id="btnBackupAgora">Fazer backup agora</button>
-      </div>
     </div>` : ''}
 
     <div class="cards">
@@ -1277,7 +1273,7 @@ function viewDashboard(){
     <div class="panel">
       <div class="panel-head"><h2>Últimos lançamentos</h2><span style="font-size:12px;color:var(--text-soft);cursor:pointer;" data-goto="fluxo">Ver fluxo de caixa completo →</span></div>
       <div class="panel-body">
-        ${recentes.length? recentes.map(rowHTML).join('') : `<div class="empty">Nenhum lançamento ainda. Clique em "Novo lançamento" para começar.</div>`}
+        ${recentes.length? recentes.map(rowHTML).join('') : `<div class="empty">Nenhum lançamento ainda. Clique em "+ Novo" para começar.</div>`}
       </div>
     </div>
   `;
@@ -1315,14 +1311,7 @@ function viewLancamentos(tipo){
   return `
     <div class="topbar">
       <div><h1>${titulo}</h1><p>${tipo==='saida' ? 'Obrigações e despesas da empresa' : 'Valores a receber de clientes e outras fontes'}</p></div>
-      <div class="dropdown-wrap">
-        <button class="btn" id="btnNovoMenu">+ Novo ▾</button>
-        <div class="dropdown-menu" id="novoMenu">
-          <button type="button" data-novo="entrada"><span class="dropdown-dot" style="background:var(--success);"></span> Nova receita</button>
-          <button type="button" data-novo="saida"><span class="dropdown-dot" style="background:var(--danger);"></span> Nova despesa</button>
-          <button type="button" data-novo="transferencia" ${state.contas.length<2?'disabled title="Crie pelo menos 2 contas para transferir"':''}><span class="dropdown-dot" style="background:var(--blue-accent);"></span> Transferência entre contas</button>
-        </div>
-      </div>
+      ${dropdownNovoHTML()}
     </div>
     <div class="panel">
       <div class="filter-bar">
@@ -1419,7 +1408,7 @@ function viewContas(){
     <div class="topbar">
       <div><h1>Contas Bancárias</h1><p>Contas usadas para representar onde o dinheiro da empresa está — bancos, caixa físico, etc.</p></div>
       <div style="display:flex;gap:10px;align-items:center;">
-        <button class="btn ghost" id="btnNovaTransferencia" ${state.contas.length<2?'disabled title="Crie pelo menos 2 contas para transferir"':''}>⇄ Transferir entre contas</button>
+        ${dropdownNovoHTML()}
         <div class="card saldo" style="padding:12px 18px;"><div class="label">Saldo total</div><div class="value mono ${total>=0?'pos':'neg'}" style="font-size:20px;">${brl(total)}</div></div>
       </div>
     </div>
@@ -1455,20 +1444,46 @@ function viewExtrato(contaId){
   if(!conta) return viewContas();
   let lista = state.lancamentos.filter(l=>l.contaId===contaId && (l.status==='pago'||l.status==='recebido'));
   lista.sort((a,b)=> (a.dataPagamento||'').localeCompare(b.dataPagamento||''));
+
   let saldo = conta.saldoInicial || 0;
-  const rows = lista.map(l=>{
+  const grupos = [];
+  let atual = null;
+  lista.forEach(l=>{
+    const dia = l.dataPagamento;
+    if(!atual || atual.dia!==dia){
+      atual = { dia, saldoInicial: saldo, itens: [] };
+      grupos.push(atual);
+    }
     saldo += l.tipo==='entrada' ? l.valor : -l.valor;
-    return `
-      <div class="ledger-row" data-id="${l.id}">
-        <span class="dot ${l.tipo}"></span>
-        <span class="mono" style="font-size:12.5px;color:var(--text-soft)">${fmtDate(l.dataPagamento)}</span>
-        <div class="desc-cell" data-action="ver-detalhe" data-id="${l.id}" style="cursor:pointer;"><div>${escapeHTML(l.descricao)}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Ativo Patrimonial</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}</div><div class="cat">${escapeHTML(l.categoria)}</div></div>
-        <span class="mono" style="font-weight:600;color:${l.tipo==='entrada'?'var(--success)':'var(--danger)'}">${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}</span>
-        <span class="mono" style="font-weight:600;">${brl(saldo)}</span>
-        <div class="row-actions">${l.origem!=='transferencia' ? `<button class="icon-btn" data-action="editar" data-id="${l.id}" title="Editar">✎</button>` : ''}<button class="icon-btn" data-action="excluir" data-id="${l.id}" title="Excluir">✕</button></div>
+    atual.itens.push({ l, saldoApos: saldo });
+    atual.saldoFinal = saldo;
+  });
+
+  const gruposHTML = grupos.slice().reverse().map(g=>`
+    <div class="panel extrato-dia">
+      <div class="extrato-dia-head">
+        <span class="extrato-dia-data">${fmtDate(g.dia)}</span>
+        <span>Saldo inicial do dia: <strong class="mono">${brl(g.saldoInicial)}</strong></span>
       </div>
-    `;
-  }).join('');
+      ${g.itens.slice().reverse().map(({l, saldoApos})=>`
+        <div class="ledger-row compact" data-id="${l.id}">
+          <span class="dot ${l.tipo}"></span>
+          <div class="desc-cell" data-action="ver-detalhe" data-id="${l.id}" style="cursor:pointer;">
+            <div>${escapeHTML(l.descricao)}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Ativo Patrimonial</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:10.5px;" title="Tem observação">📝</span>' : ''}</div>
+            <div class="cat">${escapeHTML(l.categoria)}</div>
+          </div>
+          <span class="mono" style="font-weight:600;font-size:12.5px;color:${l.tipo==='entrada'?'var(--success)':'var(--danger)'}">${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}</span>
+          <span class="mono" style="font-weight:600;font-size:12.5px;">${brl(saldoApos)}</span>
+          <div class="row-actions">${l.origem!=='transferencia' ? `<button class="icon-btn" data-action="editar" data-id="${l.id}" title="Editar">✎</button>` : ''}<button class="icon-btn" data-action="excluir" data-id="${l.id}" title="Excluir">✕</button></div>
+        </div>
+      `).join('')}
+      <div class="extrato-dia-foot">
+        <span>Saldo final do dia</span>
+        <span class="mono">${brl(g.saldoFinal)}</span>
+      </div>
+    </div>
+  `).join('');
+
   const pendentesConta = state.lancamentos.filter(l=>l.contaId===contaId && l.status==='pendente');
 
   return `
@@ -1480,14 +1495,7 @@ function viewExtrato(contaId){
       </div>
       <button class="btn" data-action="investir-conta" data-id="${contaId}">📈 Investir</button>
     </div>
-    <div class="panel">
-      <div class="ledger-row head">
-        <span></span><span>Data</span><span>Descrição</span><span>Valor</span><span>Saldo</span><span></span>
-      </div>
-      <div class="panel-body">
-        ${lista.length? rows : `<div class="empty">Nenhuma movimentação realizada nesta conta ainda.</div>`}
-      </div>
-    </div>
+    ${grupos.length ? gruposHTML : `<div class="panel"><div class="empty">Nenhuma movimentação realizada nesta conta ainda.</div></div>`}
     ${pendentesConta.length ? `
     <div class="panel">
       <div class="panel-head"><h2>Previsto (ainda pendente) nesta conta</h2></div>
@@ -2705,7 +2713,7 @@ function renderComissoesPagas(vendedorId){
   lista.sort((a,b)=>b.dataGeracao.localeCompare(a.dataGeracao));
   if(!lista.length) return `<div class="empty">Nenhum pagamento de comissão gerado ainda para esse vendedor.</div>`;
   return lista.map(cp=>{
-    const lanc = state.lancamentos.find(l=>l.id===cp.lancamentoDespesaId);
+    const lanc = state.lancamentos.find(l=>l.id===cp.lancamentoDespesaId) || state.lancamentos.find(l=>(cp.extrasLancamentoIds||[]).includes(l.id));
     const statusLabel = !lanc ? 'Excluído' : (lanc.status==='pendente' ? 'Pendente' : 'Pago');
     const nome = nomeVendedor(cp.vendedorId) || 'Vendedor removido';
     return `
@@ -2911,6 +2919,19 @@ function viewVK(){
 
 function escapeHTML(s){ const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
 
+function dropdownNovoHTML(){
+  return `
+    <div class="dropdown-wrap">
+      <button class="btn" id="btnNovoMenu">+ Novo ▾</button>
+      <div class="dropdown-menu" id="novoMenu">
+        <button type="button" data-novo="entrada"><span class="dropdown-dot" style="background:var(--success);"></span> Nova receita</button>
+        <button type="button" data-novo="saida"><span class="dropdown-dot" style="background:var(--danger);"></span> Nova despesa</button>
+        <button type="button" data-novo="transferencia" ${state.contas.length<2?'disabled title="Crie pelo menos 2 contas para transferir"':''}><span class="dropdown-dot" style="background:var(--blue-accent);"></span> Transferência entre contas</button>
+      </div>
+    </div>
+  `;
+}
+
 /* ---------------- Handlers de view ---------------- */
 function excluirLancamento(id){
   const l = state.lancamentos.find(x=>x.id===id);
@@ -2927,9 +2948,6 @@ function excluirLancamento(id){
 }
 
 function attachViewHandlers(){
-  const btnNovoRapido = document.getElementById('btnNovoRapido');
-  if(btnNovoRapido) btnNovoRapido.addEventListener('click', ()=>openLancamentoModal('saida'));
-
   const chartMeses = document.getElementById('chartMeses');
   if(chartMeses) desenharGraficoMeses('chartMeses');
 
@@ -2940,9 +2958,6 @@ function attachViewHandlers(){
       render();
     });
   });
-  const btnBackupAgora = document.getElementById('btnBackupAgora');
-  if(btnBackupAgora) btnBackupAgora.addEventListener('click', ()=>document.getElementById('btnBackup')?.click());
-
   const btnNovoMenu = document.getElementById('btnNovoMenu');
   const novoMenu = document.getElementById('novoMenu');
   if(btnNovoMenu && novoMenu){
@@ -3194,17 +3209,30 @@ function attachViewHandlers(){
         if(!itensSelecionados.length && !extras.length){ showToast('Selecione ao menos um pedido ou adicione uma bonificação'); return; }
         if(total<=0){ showToast('O valor total está zerado — confira o percentual e os pedidos selecionados'); return; }
         if(!confirm(`Gerar pagamento de ${brl(total)} para ${btn.dataset.nome}?`)) return;
-        const lancId = uid();
-        state.lancamentos.push({
-          id: lancId, tipo:'saida', categoria:'Comissões',
-          descricao: `Comissão — ${btn.dataset.nome}`,
-          valor: total, contaId, status:'pendente', dataVencimento: todayISO(), dataPagamento: null,
-          origem:'comissao', criadoEm: new Date().toISOString()
+        let lancId = null;
+        if(comissaoValor>0){
+          lancId = uid();
+          state.lancamentos.push({
+            id: lancId, tipo:'saida', categoria:'Comissões',
+            descricao: `Comissão — ${btn.dataset.nome}`,
+            valor: comissaoValor, contaId, status:'pendente', dataVencimento: todayISO(), dataPagamento: null,
+            origem:'comissao', criadoEm: new Date().toISOString()
+          });
+        }
+        const extrasLancamentoIds = extras.map(ex=>{
+          const idExtra = uid();
+          state.lancamentos.push({
+            id: idExtra, tipo:'saida', categoria:'Comissões',
+            descricao: `Bonificação — ${btn.dataset.nome}: ${ex.descricao}`,
+            valor: ex.valor, contaId, status:'pendente', dataVencimento: todayISO(), dataPagamento: null,
+            origem:'comissao', criadoEm: new Date().toISOString()
+          });
+          return idExtra;
         });
-        const cp = { id: uid(), vendedorId, dataGeracao: todayISO(), dataDe: comissaoDataDeSelecionada, dataAte: comissaoDataAteSelecionada, itens: itensSelecionados, percentual, valorTotalVendido, comissaoValor, extras, valorTotal: total, contaId, lancamentoDespesaId: lancId };
+        const cp = { id: uid(), vendedorId, dataGeracao: todayISO(), dataDe: comissaoDataDeSelecionada, dataAte: comissaoDataAteSelecionada, itens: itensSelecionados, percentual, valorTotalVendido, comissaoValor, extras, extrasLancamentoIds, valorTotal: total, contaId, lancamentoDespesaId: lancId };
         state.comissoesPagas.push(cp);
         persist();
-        showToast('Pagamento de comissão gerado em Contas a Pagar');
+        showToast('Pagamento de comissão gerado em Contas a Pagar (comissão e bonificações lançadas separadamente)');
         gerarReciboComissaoPDF(cp);
         pintarAbaComissao();
       });
@@ -3223,8 +3251,9 @@ function attachViewHandlers(){
           btn.addEventListener('click', ()=>{
             const cp = state.comissoesPagas.find(x=>x.id===btn.dataset.id);
             if(!cp) return;
-            if(!confirm('Excluir este pagamento de comissão? Os pedidos voltam a ficar pendentes e a conta a pagar vinculada será removida.')) return;
-            state.lancamentos = state.lancamentos.filter(l=>l.id!==cp.lancamentoDespesaId);
+            if(!confirm('Excluir este pagamento de comissão? Os pedidos voltam a ficar pendentes e as contas a pagar vinculadas (comissão e bonificações) serão removidas.')) return;
+            const idsRemover = [cp.lancamentoDespesaId, ...(cp.extrasLancamentoIds||[])];
+            state.lancamentos = state.lancamentos.filter(l=>!idsRemover.includes(l.id));
             state.comissoesPagas = state.comissoesPagas.filter(x=>x.id!==cp.id);
             persist(); pintarAbaComissao();
             showToast('Pagamento de comissão excluído');
@@ -3587,7 +3616,7 @@ function openLancamentoModal(tipo, existing){
   modal.innerHTML = `
     <h3>${isEdit ? 'Editar lançamento' : (tipo==='saida' ? 'Nova conta a pagar' : 'Nova conta a receber')}</h3>
     <div class="field">
-      <label>Descrição</label>
+      <label>Descrição (opcional — se deixar em branco, usa o nome da categoria)</label>
       <input type="text" id="fDescricao" value="${existing ? escapeHTML(existing.descricao) : ''}" placeholder="${tipo==='saida' ? 'Ex: Compra de farinha' : 'Ex: Venda pedido #123'}">
     </div>
     <div class="field-row">
@@ -3636,13 +3665,14 @@ function openLancamentoModal(tipo, existing){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnSalvarLancamento').addEventListener('click', ()=>{
-    const descricao = document.getElementById('fDescricao').value.trim();
+    const categoria = document.getElementById('fCategoria').value;
+    const descricao = document.getElementById('fDescricao').value.trim() || categoria;
     const valor = numBR(document.getElementById('fValor').value);
-    if(!descricao || isNaN(valor) || valor<=0){ showToast('Preencha descrição e valor válido'); return; }
+    if(!valor || isNaN(valor) || valor<=0){ showToast('Preencha um valor válido'); return; }
     const status = document.getElementById('fStatus').value;
     const payload = {
       descricao,
-      categoria: document.getElementById('fCategoria').value,
+      categoria,
       valor,
       fornecedor: document.getElementById('fFornecedor').value.trim(),
       observacao: document.getElementById('fObservacao').value.trim(),
@@ -4150,15 +4180,19 @@ function openImportarNotaModal(){
 
     const dataPregao = document.getElementById('notaData').value || todayISO();
     const corretora = document.getElementById('notaCorretora').value.trim();
-    const taxasTotal = ['notaTxCorretagem','notaTxLiquidacao','notaTxEmolumentos','notaTxRegistro','notaTxIss','notaTxOutras']
-      .reduce((s,id)=>s + (numBR(document.getElementById(id).value)||0), 0);
+    const taxaCorretagem = numBR(document.getElementById('notaTxCorretagem').value) || 0;
+    const taxaLiquidacao = numBR(document.getElementById('notaTxLiquidacao').value) || 0;
+    const taxaEmolumentos = numBR(document.getElementById('notaTxEmolumentos').value) || 0;
+    const taxaRegistro = numBR(document.getElementById('notaTxRegistro').value) || 0;
+    const taxaIss = numBR(document.getElementById('notaTxIss').value) || 0;
+    const taxaOutras = numBR(document.getElementById('notaTxOutras').value) || 0;
+    const taxasTotal = taxaCorretagem + taxaLiquidacao + taxaEmolumentos + taxaRegistro + taxaIss + taxaOutras;
     const irrf = numBR(document.getElementById('notaTxIrrf').value) || 0;
-    const liquido = numBR(document.getElementById('notaLiquido').value);
+    const custosTotal = Math.round((taxasTotal + irrf)*100)/100;
     const contaBancariaId = document.getElementById('notaContaBancaria').value;
 
     const totalCompras = linhas.filter(l=>l.tipo==='C').reduce((s,l)=>s+l.quantidade*l.preco,0);
     const totalVendas = linhas.filter(l=>l.tipo==='V').reduce((s,l)=>s+l.quantidade*l.preco,0);
-    const valorLancamento = !isNaN(liquido) && liquido>0 ? liquido : Math.abs(totalCompras - totalVendas) + taxasTotal;
 
     let contaInv = state.contasInvestimento.find(c=>c.tipo==='renda_variavel');
     if(!contaInv){
@@ -4186,18 +4220,47 @@ function openImportarNotaModal(){
       }
     });
 
-    const tipoNota = totalCompras>=totalVendas ? 'saida' : 'entrada';
-    state.lancamentos.push({
-      id: uid(), tipo: tipoNota, categoria: tipoNota==='saida' ? 'Investimentos' : 'Outros',
-      descricao: `Nota de corretagem${corretora ? ' — '+corretora : ''} (${linhas.length} operação(ões))`,
-      valor: Math.round(valorLancamento*100)/100, contaId: contaBancariaId, status: tipoNota==='saida'?'pago':'recebido',
-      dataVencimento: dataPregao, dataPagamento: dataPregao,
-      origem:'investimento', observacao: `Taxas: ${brl(taxasTotal)}${irrf>0?' · IRRF: '+brl(irrf):''}\nOperações: `+linhas.map(l=>`${l.tipo} ${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', '),
-      criadoEm: new Date().toISOString()
-    });
+    if(totalCompras>0){
+      state.lancamentos.push({
+        id: uid(), tipo:'saida', categoria:'Investimentos',
+        descricao: `Compra de ativos${corretora ? ' — '+corretora : ''} (nota de corretagem)`,
+        valor: Math.round(totalCompras*100)/100, contaId: contaBancariaId, status:'pago',
+        dataVencimento: dataPregao, dataPagamento: dataPregao,
+        origem:'investimento', observacao: 'Operações: '+linhas.filter(l=>l.tipo==='C').map(l=>`${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', '),
+        criadoEm: new Date().toISOString()
+      });
+    }
+    if(totalVendas>0){
+      state.lancamentos.push({
+        id: uid(), tipo:'entrada', categoria:'Outros',
+        descricao: `Venda de ativos${corretora ? ' — '+corretora : ''} (nota de corretagem)`,
+        valor: Math.round(totalVendas*100)/100, contaId: contaBancariaId, status:'recebido',
+        dataVencimento: dataPregao, dataPagamento: dataPregao,
+        origem:'investimento', observacao: 'Operações: '+linhas.filter(l=>l.tipo==='V').map(l=>`${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', '),
+        criadoEm: new Date().toISOString()
+      });
+    }
+    if(custosTotal>0){
+      const partesCusto = [];
+      if(taxaCorretagem) partesCusto.push(`Corretagem: ${brl(taxaCorretagem)}`);
+      if(taxaLiquidacao) partesCusto.push(`Liquidação: ${brl(taxaLiquidacao)}`);
+      if(taxaEmolumentos) partesCusto.push(`Emolumentos: ${brl(taxaEmolumentos)}`);
+      if(taxaRegistro) partesCusto.push(`Registro: ${brl(taxaRegistro)}`);
+      if(taxaIss) partesCusto.push(`ISS: ${brl(taxaIss)}`);
+      if(taxaOutras) partesCusto.push(`Outras: ${brl(taxaOutras)}`);
+      if(irrf) partesCusto.push(`IRRF: ${brl(irrf)}`);
+      state.lancamentos.push({
+        id: uid(), tipo:'saida', categoria:'Investimentos',
+        descricao: `Taxas e custos — nota de corretagem${corretora ? ' — '+corretora : ''}`,
+        valor: custosTotal, contaId: contaBancariaId, status:'pago',
+        dataVencimento: dataPregao, dataPagamento: dataPregao,
+        origem:'investimento', observacao: partesCusto.join(' · '),
+        criadoEm: new Date().toISOString()
+      });
+    }
 
     persist(); closeModal(); render();
-    showToast('Nota de corretagem lançada e posições atualizadas');
+    showToast('Nota de corretagem lançada — operação e taxas registradas separadamente');
   });
 }
 
