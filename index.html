@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Livro Caixa — Administração Financeira</title>
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
@@ -328,10 +328,51 @@
   .report-line.result{font-weight:700;font-size:16px;padding-top:14px;}
   .report-line .v{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;}
 
+  .bottom-nav{
+    display:none;position:fixed;left:0;right:0;bottom:0;z-index:60;
+    background:var(--ink);border-top:1px solid #1C2330;
+    padding:8px 4px calc(8px + env(safe-area-inset-bottom));
+    justify-content:space-around;align-items:center;
+  }
+  .bottom-nav-item{
+    display:flex;flex-direction:column;align-items:center;gap:3px;flex:1;
+    color:#7B8492;font-size:10.5px;font-weight:600;cursor:pointer;padding:4px 2px;
+  }
+  .bottom-nav-item .bn-icon{font-size:19px;line-height:1;color:#7B8492;}
+  .bottom-nav-item.active{color:var(--blue-accent);}
+  .bottom-nav-item.active .bn-icon{color:var(--blue-accent);}
+
+  .more-drawer{
+    display:none;position:fixed;inset:0;z-index:70;background:rgba(11,15,20,.5);
+  }
+  .more-drawer.open{display:block;}
+  .more-drawer-sheet{
+    position:absolute;left:0;right:0;bottom:0;background:var(--white);
+    border-radius:18px 18px 0 0;padding:18px 18px calc(18px + env(safe-area-inset-bottom));
+    max-height:80vh;overflow-y:auto;
+  }
+  .more-drawer-head{display:flex;justify-content:space-between;align-items:center;font-family:'Space Grotesk';font-weight:600;font-size:15px;margin-bottom:16px;}
+  .more-drawer-head button{background:var(--bone);border:none;border-radius:50%;width:30px;height:30px;font-size:14px;color:var(--text-soft);}
+  .more-drawer-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;}
+  .more-item{
+    display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;
+    padding:16px 8px;border:1px solid var(--line);border-radius:12px;font-size:12.5px;font-weight:600;color:var(--ink);cursor:pointer;
+  }
+  .more-item .more-icon{font-size:24px;}
+  .more-drawer-footer{display:flex;gap:10px;margin-top:16px;}
+  .more-drawer-footer button{
+    flex:1;display:flex;align-items:center;justify-content:center;gap:6px;
+    padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bone);font-size:12.5px;font-weight:600;color:var(--ink);
+  }
+
   @media (max-width: 900px){
     .cards{grid-template-columns:repeat(2,1fr);}
     .ledger-row{grid-template-columns:14px 70px 1fr 90px auto;}
     .ledger-row .col-cat, .ledger-row .col-status{display:none;}
+
+    .sidebar{display:none;}
+    .main{padding-bottom:calc(78px + env(safe-area-inset-bottom));}
+    .bottom-nav{display:flex;}
   }
 
   .login-overlay{
@@ -386,6 +427,37 @@
   </aside>
 
   <main class="main" id="main"></main>
+</div>
+
+<nav class="bottom-nav" id="bottomNav">
+  <div class="bottom-nav-item active" data-view="dashboard"><span class="bn-icon">⌂</span><span class="bn-label">Início</span></div>
+  <div class="bottom-nav-item" data-view="pagar"><span class="bn-icon">↑</span><span class="bn-label">Pagar</span></div>
+  <div class="bottom-nav-item" data-view="receber"><span class="bn-icon">↓</span><span class="bn-label">Receber</span></div>
+  <div class="bottom-nav-item" data-view="fluxo"><span class="bn-icon">≋</span><span class="bn-label">Fluxo</span></div>
+  <div class="bottom-nav-item" id="btnAbrirMais"><span class="bn-icon">⋯</span><span class="bn-label">Mais</span></div>
+</nav>
+
+<div class="more-drawer" id="moreDrawer">
+  <div class="more-drawer-sheet">
+    <div class="more-drawer-head">
+      <span>Mais opções</span>
+      <button id="btnFecharMais">✕</button>
+    </div>
+    <div class="more-drawer-grid">
+      <div class="more-item" data-view="contas"><span class="more-icon">🏦</span>Contas Bancárias</div>
+      <div class="more-item" data-view="cartoes"><span class="more-icon">💳</span>Cartões de Crédito</div>
+      <div class="more-item" data-view="relatorios"><span class="more-icon">📊</span>Relatórios</div>
+      <div class="more-item" data-view="categorias"><span class="more-icon">🏷️</span>Categorias</div>
+      <div class="more-item" data-view="comissoes"><span class="more-icon">🤝</span>Comissões</div>
+      <div class="more-item" data-view="ativos"><span class="more-icon">📦</span>Ativos Patrimoniais</div>
+      <div class="more-item" data-view="investimentos"><span class="more-icon">📈</span>Investimentos</div>
+      <div class="more-item" data-view="vk"><span class="more-icon">🏭</span>Integração VK Industrial</div>
+    </div>
+    <div class="more-drawer-footer">
+      <button id="btnBackupMobile"><span class="footer-icon">⇅</span> Backup / Restaurar</button>
+      <button id="btnSairMobile"><span class="footer-icon">⎋</span> Sair</button>
+    </div>
+  </div>
 </div>
 
 <div class="modal-overlay" id="modalOverlay">
@@ -598,7 +670,35 @@ document.getElementById('btnToggleSidebar').addEventListener('click', ()=>{
   document.getElementById('btnToggleSidebar').title = collapsed ? 'Expandir menu' : 'Minimizar menu';
 });
 
+/* Barra de navegação inferior (celular) */
+const moreDrawer = document.getElementById('moreDrawer');
+document.getElementById('bottomNav').addEventListener('click', (e)=>{
+  const item = e.target.closest('.bottom-nav-item[data-view]');
+  if(!item) return;
+  currentView = item.dataset.view;
+  render();
+});
+document.getElementById('btnAbrirMais').addEventListener('click', ()=>moreDrawer.classList.add('open'));
+document.getElementById('btnFecharMais').addEventListener('click', ()=>moreDrawer.classList.remove('open'));
+moreDrawer.addEventListener('click', (e)=>{ if(e.target===moreDrawer) moreDrawer.classList.remove('open'); });
+document.querySelector('.more-drawer-grid').addEventListener('click', (e)=>{
+  const item = e.target.closest('.more-item[data-view]');
+  if(!item) return;
+  currentView = item.dataset.view;
+  moreDrawer.classList.remove('open');
+  render();
+});
+document.getElementById('btnBackupMobile').addEventListener('click', ()=>{
+  moreDrawer.classList.remove('open');
+  document.getElementById('btnBackup').click();
+});
+document.getElementById('btnSairMobile').addEventListener('click', ()=>{
+  moreDrawer.classList.remove('open');
+  document.getElementById('btnSair').click();
+});
+
 function render(){
+  document.querySelectorAll('.nav-item, .bottom-nav-item[data-view]').forEach(n=>n.classList.toggle('active', n.dataset.view===currentView));
   const main = document.getElementById('main');
   if(currentView==='dashboard') main.innerHTML = viewDashboard();
   else if(currentView==='pagar') main.innerHTML = viewLancamentos('saida');
