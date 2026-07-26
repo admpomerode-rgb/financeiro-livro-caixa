@@ -1494,51 +1494,80 @@ async function extrairLinhasPDF(file){
   return linhas;
 }
 
+// Algumas notas (ex: Banco Inter) não mostram o código do papel, só o nome — esse
+// dicionário cobre os ativos mais comuns pra tentar preencher o ticker certo sozinho.
+// Sempre confira na tela de revisão — é um "melhor esforço", não uma lista completa.
+const NOME_PARA_TICKER = {
+  'UNIFIQUE': 'UNIQ3',
+  'CSNMINERACAO': 'CMIN3', 'CSN MINERACAO': 'CMIN3',
+  'SUNO EL': 'SNEL11', 'SUNO RE': 'SNRE11',
+  'FIAGRO RIZA': 'RZAG11', 'RIZA': 'RZAG11',
+  'MAXI REN': 'MXRF11',
+  'BTG PACTUAL CI': 'BTCI11', 'BTG CRI': 'BTCI11',
+  'PETROBRAS': 'PETR4', 'VALE': 'VALE3',
+  'ITAU': 'ITUB4', 'BRADESCO': 'BBDC4', 'SANTANDER': 'SANB11',
+  'BANCO DO BRASIL': 'BBAS3', 'AMBEV': 'ABEV3',
+  'MAGAZINE LUIZA': 'MGLU3', 'WEG': 'WEGE3',
+  'B3 SA': 'B3SA3', 'GERDAU': 'GGBR4', 'JBS': 'JBSS3',
+  'SUZANO': 'SUZB3', 'LOCALIZA': 'RENT3', 'RAIA DROGASIL': 'RADL3'
+};
+
 function parseNotaCorretagem(linhas){
   const texto = linhas.join('\n');
-  const buscarValor = (regex)=>{
-    const m = texto.match(regex);
-    if(!m) return 0;
-    const v = numBR(m[1]);
-    return isNaN(v) ? 0 : v;
-  };
-  const buscarUltimoValor = (regex)=>{
-    let ultimo = null, m;
-    const re = new RegExp(regex, 'gi');
-    while((m = re.exec(texto)) !== null) ultimo = m[1];
-    if(!ultimo) return 0;
-    const v = numBR(ultimo);
-    return isNaN(v) ? 0 : v;
+
+  // Extrai o ultimo numero em formato R$ (0,00) da linha que contem o rotulo — evita
+  // confundir com CEP, datas, ou o titulo de uma secao sem valor (ex: "Corretagem / Despesas").
+  const valorNaLinhaContendo = (regexRotulo)=>{
+    for(const linha of linhas){
+      if(regexRotulo.test(linha)){
+        const nums = linha.match(/[\d.]+,\d{2}/g);
+        if(nums && nums.length) return numBR(nums[nums.length-1]) || 0;
+      }
+    }
+    return 0;
   };
 
-  // Operações — procura linhas com C/V + ticker + quantidade + preço + valor
+  // Operações — aceita "VISTA"/"VIS", "FRACIONARIO"/"FRA" (abreviado), com ou sem prefixo
+  // de bolsa ("1-BOVESPA"), e com ou sem o código do papel (algumas notas só mostram o nome).
   const operacoes = [];
-  const regexOp = /\b([CV])\s+(?:VISTA|FRACION[AÁ]RIO)?\s*[A-ZÀ-Ú/ ]*?\b([A-Z]{4}\d{1,2})\b[A-ZÀ-Ú0-9 .]*?(\d{1,3}(?:\.\d{3})*)\s+([\d]+,\d{2,6})\s+([\d.]+,\d{2})/;
+  const regexOp = /\b([CV])\s+(?:VISTA|VIS|FRACION[AÁ]RIO|FRA|OPC|TER)\b\s*(.*?)\s+(\d{1,3}(?:\.\d{3})*)\s+(\d+,\d{2,6})\s+([\d.]+,\d{2})\s*[CD]?\s*$/i;
   linhas.forEach(linha=>{
     const m = linha.match(regexOp);
-    if(m){
-      const quantidade = parseInt(m[3].replace(/\./g,''), 10);
-      const preco = numBR(m[4]);
-      const valor = numBR(m[5]);
-      if(quantidade>0 && preco>0){
-        operacoes.push({ tipo: m[1], ticker: m[2], quantidade, preco, valor: valor || Math.round(quantidade*preco*100)/100 });
+    if(!m) return;
+    const tipo = m[1].toUpperCase();
+    const especificacao = m[2].trim();
+    const quantidade = parseInt(m[3].replace(/\./g,''), 10);
+    const preco = numBR(m[4]);
+    const valor = numBR(m[5]);
+    if(quantidade>0 && preco>0){
+      const tickerMatch = especificacao.match(/\b([A-Z]{4}\d{1,2})\b/);
+      let ticker;
+      if(tickerMatch){
+        ticker = tickerMatch[1];
+      } else {
+        const especNorm = especificacao.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+        const chave = Object.keys(NOME_PARA_TICKER).find(k=>especNorm.includes(k));
+        ticker = chave ? NOME_PARA_TICKER[chave] : (especificacao.replace(/[#@]/g,'').trim().split(/\s+/).slice(0,3).join(' ') || 'ATIVO');
       }
+      operacoes.push({ tipo, ticker, quantidade, preco, valor: valor || Math.round(quantidade*preco*100)/100 });
     }
   });
 
-  const dataMatch = texto.match(/(\d{2}\/\d{2}\/\d{4})/);
-  const dataPregao = dataMatch ? dataMatch[1].split('/').reverse().join('-') : todayISO();
+  let dataPregao = todayISO();
+  const linhaData = linhas.find(l=>/data\s*preg[ãa]o/i.test(l));
+  const dm = (linhaData || texto).match(/(\d{2}\/\d{2}\/\d{4})/);
+  if(dm) dataPregao = dm[1].split('/').reverse().join('-');
 
   const taxas = {
-    corretagem: buscarValor(/corretagem\D{0,20}?([\d.]+,\d{2})/i),
-    liquidacao: buscarValor(/taxa de liquida[çc][ãa]o\D{0,20}?([\d.]+,\d{2})/i),
-    registro: buscarValor(/taxa de registro\D{0,20}?([\d.]+,\d{2})/i),
-    emolumentos: buscarValor(/emolumentos\D{0,20}?([\d.]+,\d{2})/i),
-    iss: buscarValor(/\bISS\D{0,20}?([\d.]+,\d{2})/i),
-    irrf: buscarValor(/I\.?R\.?R\.?F\.?[^\d]{0,30}?([\d.]+,\d{2})/i),
-    outras: buscarValor(/outras?\s+(?:taxas|despesas)\D{0,20}?([\d.]+,\d{2})/i)
+    corretagem: valorNaLinhaContendo(/\bcorretagem\b/i),
+    liquidacao: valorNaLinhaContendo(/taxa de liquida[çc][ãa]o/i),
+    registro: valorNaLinhaContendo(/taxa de registro/i),
+    emolumentos: valorNaLinhaContendo(/emolumentos/i),
+    iss: valorNaLinhaContendo(/\biss\b/i),
+    irrf: valorNaLinhaContendo(/i\.?r\.?r\.?f\.?/i),
+    outras: valorNaLinhaContendo(/\boutr[ao]s\b/i)
   };
-  const liquido = buscarUltimoValor(/l[ií]quido (?:para|de)?\s*(?:\d{2}\/\d{2}\/\d{4})?[^\d]{0,10}?([\d.]+,\d{2})/i);
+  const liquido = valorNaLinhaContendo(/l[ií]quido\s+para/i);
 
   return { dataPregao, operacoes, taxas, liquido };
 }
@@ -3953,7 +3982,7 @@ function openImportarNotaModal(){
       document.getElementById('notaRevisao').style.display = 'block';
       document.getElementById('btnConfirmarNota').style.display = 'inline-flex';
       status.textContent = operacoesAtuais.length
-        ? `${operacoesAtuais.length} operação(ões) identificada(s). Confira todos os campos antes de confirmar — a leitura automática pode errar.`
+        ? `${operacoesAtuais.length} operação(ões) identificada(s). Confira todos os campos — se o campo "Ticker" mostrar o nome da empresa em vez do código (ex: "PETROBRAS PN" em vez de "PETR4"), corrija ali antes de confirmar.`
         : 'Não consegui identificar operações automaticamente nessa nota — adicione as linhas manualmente abaixo.';
     }catch(e){
       console.error('Erro ao ler PDF da nota:', e);
