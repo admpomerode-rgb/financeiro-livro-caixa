@@ -276,6 +276,14 @@
   .pct-input-sm{width:56px;border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-size:12.5px;text-align:right;}
   .item-comissao input[type="checkbox"]{width:16px;height:16px;}
   .comissao-historico-row{display:flex;justify-content:space-between;align-items:center;padding:11px 20px;border-bottom:1px solid var(--line);font-size:13.5px;}
+  .ficha-historico-row{display:flex;justify-content:space-between;align-items:center;padding:11px 20px;border-bottom:1px solid var(--line);font-size:13px;}
+  .ficha-historico-row:last-child{border-bottom:none;}
+  .ficha-historico-row .sub{font-size:11.5px;color:var(--text-soft);margin-top:2px;}
+  .ficha-historico-row.anulada{opacity:.55;text-decoration:line-through;}
+  .foto-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;}
+  .foto-item{position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;border:1px solid var(--line);}
+  .foto-item img{width:100%;height:100%;object-fit:cover;cursor:pointer;display:block;}
+  .foto-remover{position:absolute;top:4px;right:4px;background:rgba(11,15,20,.6);color:var(--white);border:none;width:22px;height:22px;}
   .comissao-historico-row:last-child{border-bottom:none;}
   .comissao-historico-row .sub{font-size:11.5px;color:var(--text-soft);margin-top:2px;}
 
@@ -391,6 +399,7 @@ const VIDA_UTIL_RFB = {
   'Informática': 5,             // 20% a.a. — equipamentos de processamento de dados
   'Outro': null                 // sem taxa geral — depende do bem específico (consultar Anexo III)
 };
+const MOTIVOS_BAIXA = ['Venda','Perda','Quebra','Doação','Outro'];
 const CATEGORIAS_ENTRADA = ['Vendas', 'Serviços', 'Recebimento de cliente', 'Rendimentos', 'Outros'];
 
 const CONTA_CORES = ['#3B6FE0','#1E9E6B','#D98F2B','#8A5CF6','#D5473F','#0F9BB0'];
@@ -439,7 +448,7 @@ function bankLogoHTML(conta, size){
   const dom = conta.bancoDominio;
   return `
     <div class="bank-logo ${!dom ? 'fallback' : ''}" style="width:${size}px;height:${size}px;--accent-c:${conta.cor}">
-      ${dom ? `<img src="https://logo.clearbit.com/${dom}?size=128" alt="" onerror="this.parentElement.classList.add('fallback')">` : ''}
+      ${dom ? `<img src="https://logos.hunter.io/${dom}" alt="" data-fallback="https://www.google.com/s2/favicons?domain=${dom}&sz=128" onerror="if(!this.dataset.tried){this.dataset.tried='1';this.src=this.dataset.fallback;}else{this.parentElement.classList.add('fallback');}">` : ''}
       <span class="fallback-initials">${initials(conta.banco || conta.nome)}</span>
     </div>
   `;
@@ -540,6 +549,7 @@ function showToast(msg){
 /* ---------------- Navegação ---------------- */
 let currentView = 'dashboard';
 let extratoContaId = null;
+let ativoPatrimonialDetalheId = null;
 let faturaCartaoId = null;
 let faturaCompetenciaAtual = null;
 let invContaId = null;
@@ -583,6 +593,7 @@ function render(){
   else if(currentView==='categorias') main.innerHTML = viewCategorias();
   else if(currentView==='comissoes') main.innerHTML = viewComissoes();
   else if(currentView==='ativos') main.innerHTML = viewAtivosPatrimoniais();
+  else if(currentView==='ativo-detalhe') main.innerHTML = viewAtivoPatrimonialDetalhe(ativoPatrimonialDetalheId);
   else if(currentView==='vk') main.innerHTML = viewVK();
   attachViewHandlers();
 }
@@ -1735,15 +1746,16 @@ function calcDepreciacao(a){
   const valorDepreciavel = Math.max(0, a.valorAquisicao - valorResidual);
   const vidaUtil = a.vidaUtilAnos || 1;
   const depreciacaoAnual = valorDepreciavel / vidaUtil;
-  const dias = Math.max(0, (new Date(todayISO()) - new Date(a.dataAquisicao)) / 86400000);
+  const dataRef = a.baixa ? a.baixa.data : todayISO();
+  const dias = Math.max(0, (new Date(dataRef) - new Date(a.dataAquisicao)) / 86400000);
   const anos = dias / 365;
   const depreciacaoAcumulada = Math.min(valorDepreciavel, depreciacaoAnual * anos);
   const valorAtual = a.valorAquisicao - depreciacaoAcumulada;
   const pctDepreciado = valorDepreciavel>0 ? Math.min(100, (depreciacaoAcumulada/valorDepreciavel)*100) : 100;
   const totalmenteDepreciado = depreciacaoAcumulada >= valorDepreciavel - 0.01;
-  return { valorAtual, depreciacaoAcumulada, depreciacaoAnual, pctDepreciado, totalmenteDepreciado };
+  return { valorAtual, depreciacaoAcumulada, depreciacaoAnual, pctDepreciado, totalmenteDepreciado, valorDepreciavel };
 }
-function totalAtivosPatrimoniais(){ return state.ativosPatrimoniais.reduce((s,a)=>s+calcDepreciacao(a).valorAtual, 0); }
+function totalAtivosPatrimoniais(){ return state.ativosPatrimoniais.filter(a=>!a.baixa).reduce((s,a)=>s+calcDepreciacao(a).valorAtual, 0); }
 
 function viewAtivosPatrimoniais(){
   const totalAquisicao = state.ativosPatrimoniais.reduce((s,a)=>s+a.valorAquisicao,0);
@@ -1774,15 +1786,18 @@ function viewAtivosPatrimoniais(){
 
 function rowAtivoPatrimonialHTML(a){
   const d = calcDepreciacao(a);
+  const baixado = !!a.baixa;
   return `
-    <div class="ledger-row" data-id="${a.id}" style="grid-template-columns:14px 1fr 120px 120px 120px auto;">
-      <span class="dot ${d.totalmenteDepreciado?'saida':'entrada'}"></span>
-      <div class="desc-cell"><div>${escapeHTML(a.nome)}</div><div class="cat">${escapeHTML(a.categoria)} · adquirido em ${fmtDate(a.dataAquisicao)}${d.totalmenteDepreciado?' · totalmente depreciado':''}</div></div>
+    <div class="ledger-row" data-id="${a.id}" style="grid-template-columns:14px 1fr 120px 120px 120px auto;${baixado?'opacity:.6;':''}">
+      <span class="dot ${baixado ? 'saida' : (d.totalmenteDepreciado?'saida':'entrada')}"></span>
+      <div class="desc-cell" data-action="ver-ativo-patrimonial" data-id="${a.id}" style="cursor:pointer;">
+        <div>${escapeHTML(a.nome)}${a.numeroPatrimonio ? ` <span class="mono" style="font-size:11px;color:var(--text-soft);">#${escapeHTML(a.numeroPatrimonio)}</span>` : ''}${baixado ? ' <span style="color:var(--danger);font-size:11px;font-weight:600;">· BAIXADO</span>' : ''}</div>
+        <div class="cat">${escapeHTML(a.categoria)} · adquirido em ${fmtDate(a.dataAquisicao)}${!baixado && d.totalmenteDepreciado?' · totalmente depreciado':''}</div>
+      </div>
       <span class="mono" style="font-size:12.5px;">${brl(a.valorAquisicao)}</span>
       <span class="mono" style="font-size:12.5px;color:var(--danger);">-${brl(d.depreciacaoAcumulada)}</span>
       <span class="mono" style="font-weight:600;">${brl(d.valorAtual)}</span>
       <div class="row-actions">
-        <button class="icon-btn" data-action="editar-ativo-patrimonial" data-id="${a.id}" title="Editar">✎</button>
         <button class="icon-btn" data-action="excluir-ativo-patrimonial" data-id="${a.id}" title="Excluir">✕</button>
       </div>
     </div>
@@ -1801,14 +1816,25 @@ function openAtivoPatrimonialModal(existing){
       <div class="field"><label>Categoria</label>
         <select id="apCategoria">${CATEGORIAS_ATIVO_PATRIMONIAL.map(c=>`<option ${categoriaInicial===c?'selected':''}>${c}</option>`).join('')}</select>
       </div>
-      <div class="field"><label>Data de aquisição</label><input type="date" id="apData" value="${existing?.dataAquisicao || todayISO()}"></div>
+      <div class="field"><label>Nº de patrimônio</label><input type="text" id="apNumeroPatrimonio" value="${existing?escapeHTML(existing.numeroPatrimonio||''):''}" placeholder="Ex: 0247"></div>
+    </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:500;"><input type="checkbox" id="apSemAdesivo" style="width:auto;" ${existing?.semAdesivo?'checked':''}> Não é possível colar o adesivo neste objeto (ex: panela — o adesivo estraga)</label>
+      <div class="note" style="margin-top:6px;">Nesse caso, o adesivo de patrimônio vai colado na Ficha de Patrimônio impressa (PDF), não no objeto.</div>
     </div>
     <div class="field-row">
+      <div class="field"><label>Data de aquisição</label><input type="date" id="apData" value="${existing?.dataAquisicao || todayISO()}"></div>
       <div class="field"><label>Valor de aquisição (R$)</label><input type="text" inputmode="decimal" id="apValor" value="${existing?existing.valorAquisicao:''}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Fornecedor</label><input type="text" id="apFornecedor" value="${existing?escapeHTML(existing.fornecedor||''):''}" placeholder="Ex: Casa do Forneiro Ltda"></div>
+      <div class="field"><label>Nº da nota fiscal</label><input type="text" id="apNotaFiscal" value="${existing?escapeHTML(existing.notaFiscal||''):''}" placeholder="Ex: 123456"></div>
+    </div>
+    <div class="field-row">
       <div class="field"><label>Vida útil (anos)</label><input type="text" inputmode="decimal" id="apVidaUtil" value="${vidaUtilInicial||''}"></div>
+      <div class="field"><label>Valor residual (R$, opcional)</label><input type="text" inputmode="decimal" id="apResidual" value="${existing&&existing.valorResidual?existing.valorResidual:''}" placeholder="0,00"></div>
     </div>
     <div class="note" id="apVidaUtilNota" style="margin-top:-6px;"></div>
-    <div class="field"><label>Valor residual ao final da vida útil (R$, opcional)</label><input type="text" inputmode="decimal" id="apResidual" value="${existing&&existing.valorResidual?existing.valorResidual:''}" placeholder="0,00"></div>
     ${!isEdit ? `
     <div class="field" style="margin-top:4px;">
       <label style="display:flex;align-items:center;gap:8px;font-weight:500;"><input type="checkbox" id="apDescontarConta" style="width:auto;"> Descontar o valor de uma conta bancária agora</label>
@@ -1847,6 +1873,10 @@ function openAtivoPatrimonialModal(existing){
   document.getElementById('btnSalvarAtivoPatrimonial').addEventListener('click', ()=>{
     const nome = document.getElementById('apNome').value.trim();
     const categoria = document.getElementById('apCategoria').value;
+    const numeroPatrimonio = document.getElementById('apNumeroPatrimonio').value.trim();
+    const semAdesivo = document.getElementById('apSemAdesivo').checked;
+    const fornecedor = document.getElementById('apFornecedor').value.trim();
+    const notaFiscal = document.getElementById('apNotaFiscal').value.trim();
     const dataAquisicao = document.getElementById('apData').value || todayISO();
     const valorAquisicao = numBR(document.getElementById('apValor').value);
     const vidaUtilAnos = numBR(document.getElementById('apVidaUtil').value);
@@ -1854,10 +1884,10 @@ function openAtivoPatrimonialModal(existing){
     const valorResidual = valorResidualRaw ? numBR(valorResidualRaw) : 0;
     if(!nome || isNaN(valorAquisicao) || valorAquisicao<=0 || isNaN(vidaUtilAnos) || vidaUtilAnos<=0){ showToast('Preencha nome, valor de aquisição e vida útil'); return; }
     if(isEdit){
-      Object.assign(existing, { nome, categoria, dataAquisicao, valorAquisicao, vidaUtilAnos, valorResidual });
+      Object.assign(existing, { nome, categoria, numeroPatrimonio, semAdesivo, fornecedor, notaFiscal, dataAquisicao, valorAquisicao, vidaUtilAnos, valorResidual });
     } else {
       const novoId = uid();
-      state.ativosPatrimoniais.push({ id: novoId, nome, categoria, dataAquisicao, valorAquisicao, vidaUtilAnos, valorResidual });
+      state.ativosPatrimoniais.push({ id: novoId, nome, categoria, numeroPatrimonio, semAdesivo, fornecedor, notaFiscal, dataAquisicao, valorAquisicao, vidaUtilAnos, valorResidual, fotos: [], fichas: [], manutencoes: [], baixa: null });
       if(chkDesconto && chkDesconto.checked){
         const contaId = document.getElementById('apConta').value;
         state.lancamentos.push({
@@ -1873,6 +1903,393 @@ function openAtivoPatrimonialModal(existing){
     persist(); closeModal(); render();
     showToast(isEdit ? 'Ativo atualizado' : 'Ativo cadastrado');
   });
+}
+
+function viewAtivoPatrimonialDetalhe(id){
+  const a = state.ativosPatrimoniais.find(x=>x.id===id);
+  if(!a) return `<div class="panel"><div class="empty">Ativo não encontrado.</div></div>`;
+  const d = calcDepreciacao(a);
+  const fotos = a.fotos || [];
+  const fichas = a.fichas || [];
+  const manutencoes = a.manutencoes || [];
+  const proximaFichaNum = fichas.length + 1;
+
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="ativos">← Ativos Patrimoniais</span>
+        <h1 style="margin-top:6px;">${escapeHTML(a.nome)}${a.numeroPatrimonio ? ` <span class="mono" style="font-size:16px;color:var(--text-soft);">#${escapeHTML(a.numeroPatrimonio)}</span>` : ''}</h1>
+        <p>${escapeHTML(a.categoria)}${a.baixa ? ' · <span style="color:var(--danger);font-weight:600;">BAIXADO</span>' : ''}</p>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn ghost" id="btnEditarAtivoDetalhe">✎ Editar dados</button>
+        <button class="btn" id="btnGerarFichaPDF">📄 Gerar Ficha de Patrimônio (PDF)</button>
+      </div>
+    </div>
+
+    ${a.baixa ? `
+    <div class="panel alerta-panel">
+      <div class="alerta-linha atrasado">
+        <span>⚠️ Este ativo foi dado como baixa — motivo: <strong>${escapeHTML(a.baixa.motivo)}</strong>, em ${fmtDate(a.baixa.data)}${a.baixa.observacao ? ' — '+escapeHTML(a.baixa.observacao) : ''}${a.baixa.valorVenda ? ` — valor de venda: ${brl(a.baixa.valorVenda)}` : ''}</span>
+      </div>
+    </div>` : ''}
+
+    <div class="cards">
+      <div class="card"><div class="label">Valor de aquisição</div><div class="value mono">${brl(a.valorAquisicao)}</div></div>
+      <div class="card"><div class="label">Depreciação acumulada</div><div class="value mono neg">${brl(d.depreciacaoAcumulada)}</div></div>
+      <div class="card saldo"><div class="label">Valor atual</div><div class="value mono pos">${brl(d.valorAtual)}</div></div>
+      <div class="card"><div class="label">Depreciado</div><div class="value mono">${Math.round(d.pctDepreciado)}%</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Dados de aquisição</h2></div>
+      <div class="panel-body" style="padding:16px 20px;display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;">
+        <div><span style="color:var(--text-soft);">Data de aquisição</span><br>${fmtDate(a.dataAquisicao)}</div>
+        <div><span style="color:var(--text-soft);">Fornecedor</span><br>${a.fornecedor ? escapeHTML(a.fornecedor) : '—'}</div>
+        <div><span style="color:var(--text-soft);">Nº da nota fiscal</span><br>${a.notaFiscal ? escapeHTML(a.notaFiscal) : '—'}</div>
+        <div><span style="color:var(--text-soft);">Vida útil</span><br>${a.vidaUtilAnos} anos${a.valorResidual ? ` · valor residual ${brl(a.valorResidual)}` : ''}</div>
+        <div><span style="color:var(--text-soft);">Adesivo de patrimônio</span><br>${a.semAdesivo ? 'Colado na Ficha de Patrimônio (não é possível colar no objeto)' : 'Colado diretamente no objeto'}</div>
+      </div>
+    </div>
+
+    <details class="panel-details">
+      <summary>Como a depreciação é calculada</summary>
+      <div style="padding:16px 20px;font-size:12.5px;color:var(--text-soft);line-height:1.6;">
+        Método <strong>linear</strong>, conforme a Instrução Normativa RFB nº 1.700/2017, Anexo III:
+        <div class="note" style="margin:10px 0;">
+          Depreciação anual = (Valor de aquisição − Valor residual) ÷ Vida útil<br>
+          Depreciação anual = (${brl(a.valorAquisicao)} − ${brl(a.valorResidual||0)}) ÷ ${a.vidaUtilAnos} anos = <strong>${brl(d.depreciacaoAnual)} por ano</strong>
+        </div>
+        Desde a aquisição em ${fmtDate(a.dataAquisicao)}${a.baixa ? ` até a baixa em ${fmtDate(a.baixa.data)}` : ' até hoje'}, foram acumulados <strong>${brl(d.depreciacaoAcumulada)}</strong> (${Math.round(d.pctDepreciado)}% do valor depreciável), restando um valor atual de <strong>${brl(d.valorAtual)}</strong>.
+      </div>
+    </details>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Fotos do objeto</h2><span style="font-size:12px;color:var(--blue-accent);cursor:pointer;" id="btnAdicionarFoto">+ Adicionar foto</span></div>
+      <div class="panel-body" style="padding:16px 20px;">
+        <input type="file" id="apFotoInput" accept="image/*" style="display:none;" multiple>
+        ${fotos.length ? `<div class="foto-grid">${fotos.map(f=>`
+          <div class="foto-item" data-id="${f.id}">
+            <img src="${f.dataUrl}" data-action="ver-foto" data-id="${f.id}">
+            <button class="icon-btn foto-remover" data-action="remover-foto" data-id="${f.id}" title="Remover">✕</button>
+          </div>
+        `).join('')}</div>` : `<div class="empty">Nenhuma foto ainda.</div>`}
+        <div class="note" style="margin-top:12px;">As fotos ficam salvas no mesmo banco de dados do sistema, que tem um limite de tamanho — evite adicionar muitas fotos em muitos ativos diferentes. Prefira poucas fotos essenciais por ativo.</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Fichas de Patrimônio impressas</h2></div>
+      <div class="panel-body" style="padding:0;">
+        ${fichas.length ? fichas.slice().reverse().map(f=>`
+          <div class="ficha-historico-row ${f.anulada?'anulada':''}">
+            <div>
+              <div>Ficha Nº ${f.numero} — ${f.tipo==='original' ? 'Original' : 'Atualização'}${f.anulada?' · ANULADA':''}</div>
+              <div class="sub">Gerada em ${new Date(f.dataEmissao).toLocaleString('pt-BR')}${f.anulada && f.motivoAnulacao ? ' · Motivo: '+escapeHTML(f.motivoAnulacao) : ''}</div>
+            </div>
+            ${!f.anulada ? `<button class="btn ghost sm" data-action="anular-ficha" data-numero="${f.numero}">Anular</button>` : ''}
+          </div>
+        `).join('') : `<div class="empty">Nenhuma ficha gerada ainda. Clique em "Gerar Ficha de Patrimônio (PDF)" acima.</div>`}
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Manutenções</h2><span style="font-size:12px;color:var(--blue-accent);cursor:pointer;" id="btnAdicionarManutencao">+ Adicionar</span></div>
+      <div class="panel-body" style="padding:0;">
+        ${manutencoes.length ? manutencoes.slice().reverse().map(m=>`
+          <div class="ficha-historico-row">
+            <div>
+              <div>${escapeHTML(m.descricao)}${m.custo ? ' · '+brl(m.custo) : ''}</div>
+              <div class="sub">${fmtDate(m.data)}</div>
+            </div>
+            <button class="icon-btn" data-action="excluir-manutencao" data-id="${m.id}" title="Excluir">✕</button>
+          </div>
+        `).join('') : `<div class="empty">Nenhuma manutenção registrada.</div>`}
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Baixa do ativo</h2></div>
+      <div class="panel-body" style="padding:16px 20px;">
+        ${a.baixa ? `
+          <div style="font-size:13px;">
+            <strong>Motivo:</strong> ${escapeHTML(a.baixa.motivo)}<br>
+            <strong>Data:</strong> ${fmtDate(a.baixa.data)}<br>
+            ${a.baixa.valorVenda ? `<strong>Valor de venda:</strong> ${brl(a.baixa.valorVenda)}<br>` : ''}
+            ${a.baixa.observacao ? `<strong>Observação:</strong> ${escapeHTML(a.baixa.observacao)}<br>` : ''}
+          </div>
+          <button class="btn ghost sm" id="btnReverterBaixa" style="margin-top:10px;">Reverter baixa</button>
+        ` : `
+          <p style="font-size:12.5px;color:var(--text-soft);margin-bottom:10px;">Se este ativo foi vendido, perdido ou quebrou, registre a baixa aqui.</p>
+          <button class="btn ghost" id="btnDarBaixa">Dar baixa neste ativo</button>
+        `}
+      </div>
+    </div>
+
+    <button class="btn ghost" id="btnExcluirAtivoDetalhe" style="color:var(--danger);border-color:#F3C6C2;">Excluir ativo definitivamente</button>
+  `;
+}
+
+function comprimirImagem(file){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = ()=>{
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = ()=>{
+        const maxW = 480;
+        const scale = Math.min(1, maxW / img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.55));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function openManutencaoModal(ativo){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Registrar manutenção</h3>
+    <div class="field"><label>Descrição</label><input type="text" id="mnDescricao" placeholder="Ex: Troca de resistência do forno"></div>
+    <div class="field-row">
+      <div class="field"><label>Data</label><input type="date" id="mnData" value="${todayISO()}"></div>
+      <div class="field"><label>Custo (R$, opcional)</label><input type="text" inputmode="decimal" id="mnCusto" placeholder="0,00"></div>
+    </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:500;"><input type="checkbox" id="mnDescontarConta" style="width:auto;"> Registrar essa saída em uma conta bancária</label>
+    </div>
+    <div id="mnContaGrupo" style="display:none;margin-bottom:14px;">
+      <select id="mnConta">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarManutencao">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  const chk = document.getElementById('mnDescontarConta');
+  chk.addEventListener('change', ()=>{ document.getElementById('mnContaGrupo').style.display = chk.checked ? 'block' : 'none'; });
+  document.getElementById('btnSalvarManutencao').addEventListener('click', ()=>{
+    const descricao = document.getElementById('mnDescricao').value.trim();
+    const data = document.getElementById('mnData').value || todayISO();
+    const custoRaw = document.getElementById('mnCusto').value.trim();
+    const custo = custoRaw ? numBR(custoRaw) : 0;
+    if(!descricao){ showToast('Descreva a manutenção'); return; }
+    if(!ativo.manutencoes) ativo.manutencoes = [];
+    const manutId = uid();
+    ativo.manutencoes.push({ id: manutId, descricao, data, custo });
+    if(chk.checked && custo>0){
+      const contaId = document.getElementById('mnConta').value;
+      state.lancamentos.push({
+        id: uid(), tipo:'saida', categoria:'Manutenção',
+        descricao: `Manutenção — ${ativo.nome}: ${descricao}`,
+        valor: custo, contaId, status:'pago',
+        dataVencimento: data, dataPagamento: data,
+        origem:'ativo_patrimonial', ativoPatrimonialId: ativo.id,
+        criadoEm: new Date().toISOString()
+      });
+    }
+    persist(); closeModal(); render();
+    showToast('Manutenção registrada');
+  });
+}
+
+function openBaixaModal(ativo){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Dar baixa — ${escapeHTML(ativo.nome)}</h3>
+    <div class="field">
+      <label>Motivo</label>
+      <select id="bxMotivo">${MOTIVOS_BAIXA.map(m=>`<option>${m}</option>`).join('')}</select>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Data</label><input type="date" id="bxData" value="${todayISO()}"></div>
+      <div class="field" id="bxValorGrupo" style="display:none;"><label>Valor de venda (R$)</label><input type="text" inputmode="decimal" id="bxValor" placeholder="0,00"></div>
+    </div>
+    <div class="field"><label>Observação (opcional)</label><input type="text" id="bxObservacao" placeholder="Detalhes sobre a baixa"></div>
+    <div id="bxContaGrupoWrap" style="display:none;">
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:8px;font-weight:500;"><input type="checkbox" id="bxRegistrarEntrada" style="width:auto;"> Registrar entrada do valor de venda em uma conta bancária</label>
+      </div>
+      <div id="bxContaGrupo" style="display:none;margin-bottom:14px;">
+        <select id="bxConta">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="note" style="margin-top:0;">Depois da baixa, este ativo para de entrar no total de Ativos Patrimoniais do Balanço Patrimonial.</div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarBaixa">Confirmar baixa</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  const selMotivo = document.getElementById('bxMotivo');
+  const syncMotivo = ()=>{
+    const isVenda = selMotivo.value === 'Venda';
+    document.getElementById('bxValorGrupo').style.display = isVenda ? 'block' : 'none';
+    document.getElementById('bxContaGrupoWrap').style.display = isVenda ? 'block' : 'none';
+  };
+  selMotivo.addEventListener('change', syncMotivo);
+  syncMotivo();
+  const chkEntrada = document.getElementById('bxRegistrarEntrada');
+  chkEntrada.addEventListener('change', ()=>{ document.getElementById('bxContaGrupo').style.display = chkEntrada.checked ? 'block' : 'none'; });
+  document.getElementById('btnSalvarBaixa').addEventListener('click', ()=>{
+    const motivo = selMotivo.value;
+    const data = document.getElementById('bxData').value || todayISO();
+    const observacao = document.getElementById('bxObservacao').value.trim();
+    const valorVendaRaw = document.getElementById('bxValor').value.trim();
+    const valorVenda = valorVendaRaw ? numBR(valorVendaRaw) : 0;
+    if(!confirm(`Confirmar baixa deste ativo por motivo "${motivo}"? Essa ação marca o ativo como baixado.`)) return;
+    ativo.baixa = { motivo, data, observacao, valorVenda: motivo==='Venda' ? valorVenda : 0 };
+    if(motivo==='Venda' && valorVenda>0 && chkEntrada.checked){
+      const contaId = document.getElementById('bxConta').value;
+      state.lancamentos.push({
+        id: uid(), tipo:'entrada', categoria:'Outros',
+        descricao: `Venda de ativo — ${ativo.nome}`,
+        valor: valorVenda, contaId, status:'recebido',
+        dataVencimento: data, dataPagamento: data,
+        origem:'ativo_patrimonial', ativoPatrimonialId: ativo.id,
+        criadoEm: new Date().toISOString()
+      });
+    }
+    persist(); closeModal(); render();
+    showToast('Baixa registrada');
+  });
+}
+
+function gerarFichaPatrimonialPDF(ativo){
+  if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
+  if(!ativo.fichas) ativo.fichas = [];
+  const numero = ativo.fichas.length + 1;
+  const tipo = numero===1 ? 'original' : 'atualizacao';
+  const ficha = { numero, tipo, dataEmissao: new Date().toISOString(), anulada: false, motivoAnulacao: null };
+  ativo.fichas.push(ficha);
+  persist(); render();
+
+  const { jsPDF } = window.jspdf;
+  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+  const M = 20, W = 210 - M*2;
+  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
+  let y = 25;
+  const d = calcDepreciacao(ativo);
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
+  docPdf.text('Livro Caixa Financeiro VK', M, y);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
+  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
+  y += 8;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 10;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
+  docPdf.text('FICHA DE PATRIMÔNIO', M, y);
+  y += 7;
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(10.5); docPdf.setTextColor(...INK);
+  docPdf.text(`${ativo.numeroPatrimonio ? 'Nº '+ativo.numeroPatrimonio+' — ' : ''}${ativo.nome}`, M, y);
+  y += 6;
+  docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
+  docPdf.text(`Ficha Nº ${numero} · ${tipo==='original' ? 'ORIGINAL' : 'ATUALIZAÇÃO'}`, M, y);
+  y += 5;
+  if(tipo==='original'){
+    docPdf.text(ativo.semAdesivo ? 'O adesivo de patrimônio deve ser colado nesta ficha (não é possível colar no objeto).' : 'O adesivo de patrimônio deve ser colado diretamente no objeto.', M, y);
+  } else {
+    docPdf.text(`Ficha de atualização — o adesivo de patrimônio já está ${ativo.semAdesivo ? 'colado na Ficha Nº 1' : 'colado no objeto'}.`, M, y);
+  }
+  y += 10;
+
+  if(tipo==='original'){
+    // Quadro retangular reservado para colar o adesivo — só aparece na ficha original
+    const boxW = 65, boxH = 24, boxX = M, boxY = y;
+    docPdf.setDrawColor(...BLUEDEEP); docPdf.setLineWidth(0.6);
+    docPdf.rect(boxX, boxY, boxW, boxH);
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(8.5); docPdf.setTextColor(...BLUEDEEP);
+    docPdf.text('COLE O ADESIVO DE', boxX+boxW/2, boxY+boxH/2-2, { align:'center' });
+    docPdf.text('PATRIMÔNIO AQUI', boxX+boxW/2, boxY+boxH/2+4, { align:'center' });
+    docPdf.setLineWidth(0.3);
+    y = boxY + boxH + 8;
+  }
+
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 8;
+
+  const secao = (titulo)=>{
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10.5); docPdf.setTextColor(...INK);
+    docPdf.text(titulo, M, y);
+    y += 6;
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
+  };
+  const linha = (label, valor)=>{
+    docPdf.text(label, M, y);
+    docPdf.text(String(valor), M+W, y, { align:'right' });
+    y += 5.5;
+  };
+
+  secao('Dados de Aquisição');
+  linha('Data de aquisição', fmtDate(ativo.dataAquisicao));
+  linha('Fornecedor', ativo.fornecedor || '—');
+  linha('Nº da nota fiscal', ativo.notaFiscal || '—');
+  linha('Valor de aquisição', brl(ativo.valorAquisicao));
+  linha('Categoria', ativo.categoria);
+  y += 3;
+
+  secao('Depreciação (linear — IN RFB nº 1.700/2017, Anexo III)');
+  linha('Vida útil', `${ativo.vidaUtilAnos} anos`);
+  linha('Valor residual', brl(ativo.valorResidual||0));
+  linha('Depreciação anual', brl(d.depreciacaoAnual));
+  linha('Depreciação acumulada', brl(d.depreciacaoAcumulada));
+  docPdf.setFont('helvetica','bold'); docPdf.setTextColor(...SUCCESS);
+  linha('Valor atual', brl(d.valorAtual));
+  docPdf.setFont('helvetica','normal'); docPdf.setTextColor(...SOFT);
+  y += 3;
+
+  if(ativo.manutencoes && ativo.manutencoes.length){
+    secao('Manutenções');
+    ativo.manutencoes.forEach(m=>linha(`${fmtDate(m.data)} — ${m.descricao}`, m.custo ? brl(m.custo) : ''));
+    y += 3;
+  }
+
+  if(ativo.baixa){
+    secao('Baixa do Ativo');
+    linha('Motivo', ativo.baixa.motivo);
+    linha('Data', fmtDate(ativo.baixa.data));
+    if(ativo.baixa.valorVenda) linha('Valor de venda', brl(ativo.baixa.valorVenda));
+    y += 3;
+  }
+
+  secao(`Histórico de Fichas (${ativo.fichas.length})`);
+  ativo.fichas.forEach(f=>{
+    linha(`Ficha Nº ${f.numero} — ${f.tipo==='original'?'Original':'Atualização'} — ${new Date(f.dataEmissao).toLocaleDateString('pt-BR')}`, f.anulada ? 'ANULADA' : 'Válida');
+  });
+  y += 6;
+
+  const fotos = (ativo.fotos||[]).slice(0,4);
+  if(fotos.length){
+    if(y > 230) { docPdf.addPage(); y = 25; }
+    secao('Fotos do Objeto');
+    let x = M;
+    fotos.forEach((f)=>{
+      try{ docPdf.addImage(f.dataUrl, 'JPEG', x, y, 38, 38); }catch(e){}
+      x += 42;
+    });
+    y += 44;
+  }
+
+  y = Math.max(y, 270);
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 6;
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8); docPdf.setTextColor(...SOFT);
+  docPdf.text('VIERGUTZ E KRUEGER PARTICIPAÇÕES E EMPREENDIMENTOS', M, y);
+
+  docPdf.save(`ficha-patrimonio-${(ativo.numeroPatrimonio||ativo.id)}-n${numero}.pdf`);
+  showToast(`Ficha Nº ${numero} gerada`);
 }
 
 function viewCategorias(){
@@ -2080,6 +2497,85 @@ function viewStub(titulo, texto){
   `;
 }
 
+async function sincronizarAtivosVK(){
+  const cfg = state.vkConfig;
+  if(!cfg.firebaseConfig){ showToast('Cole a configuração do Firebase antes de sincronizar'); render(); return; }
+  if(!cfg.email || !cfg.senha){ showToast('Informe o e-mail e a senha de acesso ao VK Industrial'); render(); return; }
+  if(typeof firebase === 'undefined'){ showToast('Não foi possível carregar o Firebase — confira a internet'); render(); return; }
+
+  try{
+    if(!vkFirebaseApp){
+      vkFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'vk-industrial');
+    }
+    const auth = vkFirebaseApp.auth();
+    if(!auth.currentUser){
+      await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
+    }
+    const db = vkFirebaseApp.firestore();
+    const [ativosSnap, osSnap] = await Promise.all([
+      db.collection('ativosPatrimoniais').get({ source: 'server' }).catch(()=>({docs:[]})),
+      db.collection('ordensServico').get({ source: 'server' }).catch(()=>({docs:[]}))
+    ]);
+    const ativosVK = ativosSnap.docs.map(d=>({ id: d.id, ...d.data() }));
+    const ordensVK = osSnap.docs.map(d=>({ id: d.id, ...d.data() }));
+
+    let novosAtivos = 0, ativosJaImportados = 0;
+    ativosVK.forEach(av=>{
+      const jaExiste = state.ativosPatrimoniais.some(a=>a.vkAtivoId===av.id);
+      if(jaExiste){ ativosJaImportados++; return; }
+      const categoria = CATEGORIAS_ATIVO_PATRIMONIAL.includes(av.categoria) ? av.categoria : 'Outro';
+      const vidaUtilAnos = av.vidaUtilAnos || VIDA_UTIL_RFB[categoria] || 10;
+      state.ativosPatrimoniais.push({
+        id: uid(), vkAtivoId: av.id,
+        nome: av.nome || 'Ativo sem nome', categoria,
+        numeroPatrimonio: '', semAdesivo: false,
+        fornecedor: av.fornecedor || '', notaFiscal: av.notaFiscal || '',
+        dataAquisicao: av.dataEntrada || todayISO(),
+        valorAquisicao: av.valor || 0, vidaUtilAnos, valorResidual: 0,
+        fotos: [], fichas: [], manutencoes: [], baixa: null
+      });
+      novosAtivos++;
+    });
+
+    let novasOS = 0, osJaImportadas = 0, osSemAtivo = 0;
+    ordensVK.forEach(os=>{
+      const jaExiste = state.ativosPatrimoniais.some(a=>(a.manutencoes||[]).some(m=>m.vkOsId===os.id));
+      if(jaExiste){ osJaImportadas++; return; }
+      let ativo = null;
+      if(os.ativoId) ativo = state.ativosPatrimoniais.find(a=>a.vkAtivoId===os.ativoId);
+      if(!ativo && os.ativoDescricaoManual){
+        const termo = os.ativoDescricaoManual.trim().toLowerCase();
+        ativo = state.ativosPatrimoniais.find(a=>a.nome.toLowerCase().includes(termo) || termo.includes(a.nome.toLowerCase()));
+      }
+      if(!ativo){ osSemAtivo++; return; }
+      if(!ativo.manutencoes) ativo.manutencoes = [];
+      ativo.manutencoes.push({
+        id: uid(), vkOsId: os.id, numeroOS: os.numeroOS || '',
+        descricao: os.descricaoServico || 'Ordem de serviço sem descrição',
+        data: os.data || todayISO(), custo: os.custo || 0
+      });
+      novasOS++;
+    });
+
+    cfg.ultimaSincronizacaoAtivos = new Date().toISOString();
+    persist();
+    render();
+    const partes = [];
+    if(novosAtivos>0) partes.push(`${novosAtivos} ativo(s) novo(s)`);
+    if(novasOS>0) partes.push(`${novasOS} manutenção(ões) nova(s)`);
+    if(osSemAtivo>0) partes.push(`${osSemAtivo} OS sem ativo correspondente`);
+    showToast(partes.length ? partes.join(' · ') : `Nada novo (${ativosJaImportados} ativo(s) e ${osJaImportadas} OS já importados)`);
+  }catch(e){
+    console.error('Erro ao sincronizar ativos do VK Industrial:', e);
+    let msg = 'Falha ao sincronizar ativos';
+    if(e.code==='auth/wrong-password' || e.code==='auth/user-not-found' || e.code==='auth/invalid-credential') msg = 'E-mail ou senha incorretos';
+    else if(e.code==='permission-denied') msg = 'Sem permissão para ler os dados — confira o login';
+    else if(e.message) msg += ': ' + e.message;
+    showToast(msg);
+    render();
+  }
+}
+
 function viewVK(){
   const cfg = state.vkConfig;
   const totalImportados = state.lancamentos.filter(l=>l.origem==='vk').length;
@@ -2096,6 +2592,17 @@ function viewVK(){
           <div class="vk-status-sub">${totalImportados} pedido(s) importado(s) até agora</div>
         </div>
         <button class="btn lg" id="btnSincronizarVK">⟳ Sincronizar pedidos agora</button>
+      </div>
+    </div>
+
+    <div class="panel vk-status-panel">
+      <div class="vk-status-row">
+        <div>
+          <div class="vk-status-label">${cfg.ultimaSincronizacaoAtivos ? 'Última sincronização de ativos' : 'Ativos ainda não sincronizados'}</div>
+          <div class="vk-status-value">${cfg.ultimaSincronizacaoAtivos ? new Date(cfg.ultimaSincronizacaoAtivos).toLocaleString('pt-BR') : '—'}</div>
+          <div class="vk-status-sub">${state.ativosPatrimoniais.filter(a=>a.vkAtivoId).length} ativo(s) e ${state.ativosPatrimoniais.reduce((s,a)=>s+(a.manutencoes||[]).filter(m=>m.vkOsId).length,0)} ordem(ns) de serviço importados do VK Industrial</div>
+        </div>
+        <button class="btn lg" id="btnSincronizarAtivosVK">⟳ Sincronizar Ativos e Ordens de Serviço</button>
       </div>
     </div>
 
@@ -2128,6 +2635,34 @@ function viewVK(){
         Pedidos cancelados no VK Industrial entram marcados como "Cancelado" (não somem). Pedidos já importados não são duplicados numa nova sincronização — mas se você editar o pedido no VK Industrial depois de importado, a alteração não atualiza automaticamente aqui (só cancelamento é detectado depois).
         <br><br>
         A sincronização não é automática/contínua — clique em "Sincronizar pedidos agora" sempre que quiser buscar os pedidos novos. A senha fica salva só neste navegador.
+      </div>
+    </details>
+
+    <details class="panel-details">
+      <summary>Esquema esperado — Ativos Patrimoniais e Ordens de Serviço (para quem for construir essas telas no VK Industrial)</summary>
+      <div style="padding:16px 20px;font-size:12px;color:var(--text-soft);line-height:1.7;">
+        Essa sincronização lê duas coleções do mesmo projeto Firebase do VK Industrial (<span class="mono">vk-provisorio</span>):
+        <br><br>
+        <strong style="color:var(--ink);">Coleção "ativosPatrimoniais"</strong> — um documento por ativo que deu entrada:
+        <pre class="mono" style="background:var(--bone);padding:10px 12px;border-radius:8px;margin:8px 0;white-space:pre-wrap;font-size:11px;">{
+  nome: string,
+  categoria: string, // Equipamento, Máquina, Veículo, Imóvel, Móveis e Utensílios, Informática ou Outro
+  valor: number,
+  fornecedor: string,
+  notaFiscal: string,
+  dataEntrada: "AAAA-MM-DD",
+  vidaUtilAnos: number // opcional, se não vier o sistema sugere pela categoria
+}</pre>
+        <strong style="color:var(--ink);">Coleção "ordensServico"</strong> — um documento por ordem de serviço de manutenção:
+        <pre class="mono" style="background:var(--bone);padding:10px 12px;border-radius:8px;margin:8px 0;white-space:pre-wrap;font-size:11px;">{
+  numeroOS: string,
+  ativoId: string,               // opcional — o ID do documento em "ativosPatrimoniais", se escolhido de uma lista
+  ativoDescricaoManual: string,  // opcional — se digitado manualmente em vez de escolher da lista
+  descricaoServico: string,
+  data: "AAAA-MM-DD",
+  custo: number // opcional
+}</pre>
+        O número de patrimônio <strong>fica em branco</strong> nos ativos importados — você preenche depois aqui no Livro Caixa, na ficha de cada ativo. Uma OS sem ativo correspondente (nem por ID, nem por nome parecido) não é importada — a sincronização avisa quantas ficaram assim.
       </div>
     </details>
 
@@ -2514,6 +3049,87 @@ function attachViewHandlers(){
       persist(); render(); showToast('Ativo excluído');
     });
   });
+  document.querySelectorAll('[data-action="ver-ativo-patrimonial"]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      ativoPatrimonialDetalheId = el.dataset.id;
+      currentView = 'ativo-detalhe';
+      render();
+    });
+  });
+
+  // Ficha do ativo patrimonial (tela de detalhe)
+  const ativoDetalheAtual = ativoPatrimonialDetalheId ? state.ativosPatrimoniais.find(x=>x.id===ativoPatrimonialDetalheId) : null;
+  if(ativoDetalheAtual){
+    document.getElementById('btnEditarAtivoDetalhe')?.addEventListener('click', ()=>openAtivoPatrimonialModal(ativoDetalheAtual));
+    document.getElementById('btnGerarFichaPDF')?.addEventListener('click', ()=>gerarFichaPatrimonialPDF(ativoDetalheAtual));
+    document.querySelectorAll('[data-action="anular-ficha"]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const numero = parseInt(btn.dataset.numero);
+        const ficha = ativoDetalheAtual.fichas.find(f=>f.numero===numero);
+        if(!ficha) return;
+        const motivo = window.prompt('Motivo da anulação (opcional):', '') || '';
+        if(!confirm(`Anular a Ficha Nº ${numero}?`)) return;
+        ficha.anulada = true;
+        ficha.motivoAnulacao = motivo;
+        persist(); render();
+        showToast('Ficha anulada');
+      });
+    });
+    document.getElementById('btnAdicionarFoto')?.addEventListener('click', ()=>document.getElementById('apFotoInput').click());
+    const fotoInput = document.getElementById('apFotoInput');
+    if(fotoInput){
+      fotoInput.addEventListener('change', async ()=>{
+        const files = [...fotoInput.files].slice(0, 6);
+        if(!files.length) return;
+        if(!ativoDetalheAtual.fotos) ativoDetalheAtual.fotos = [];
+        for(const file of files){
+          try{
+            const dataUrl = await comprimirImagem(file);
+            ativoDetalheAtual.fotos.push({ id: uid(), dataUrl, criadoEm: new Date().toISOString() });
+          }catch(e){ console.error('Erro ao processar imagem:', e); }
+        }
+        persist(); render();
+        showToast('Foto(s) adicionada(s)');
+      });
+    }
+    document.querySelectorAll('[data-action="ver-foto"]').forEach(img=>{
+      img.addEventListener('click', ()=>{
+        const modal = document.getElementById('modalContent');
+        modal.innerHTML = `<img src="${img.src}" style="width:100%;border-radius:8px;"><div class="modal-actions"><button class="btn ghost" id="btnCancelarModal">Fechar</button></div>`;
+        document.getElementById('modalOverlay').classList.add('open');
+        document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+      });
+    });
+    document.querySelectorAll('[data-action="remover-foto"]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        if(!confirm('Remover esta foto?')) return;
+        ativoDetalheAtual.fotos = (ativoDetalheAtual.fotos||[]).filter(f=>f.id!==btn.dataset.id);
+        persist(); render(); showToast('Foto removida');
+      });
+    });
+    document.getElementById('btnAdicionarManutencao')?.addEventListener('click', ()=>openManutencaoModal(ativoDetalheAtual));
+    document.querySelectorAll('[data-action="excluir-manutencao"]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        if(!confirm('Excluir este registro de manutenção?')) return;
+        ativoDetalheAtual.manutencoes = (ativoDetalheAtual.manutencoes||[]).filter(m=>m.id!==btn.dataset.id);
+        persist(); render(); showToast('Manutenção excluída');
+      });
+    });
+    document.getElementById('btnDarBaixa')?.addEventListener('click', ()=>openBaixaModal(ativoDetalheAtual));
+    document.getElementById('btnReverterBaixa')?.addEventListener('click', ()=>{
+      if(!confirm('Reverter a baixa deste ativo? Ele volta a ser contado como ativo normalmente.')) return;
+      ativoDetalheAtual.baixa = null;
+      persist(); render(); showToast('Baixa revertida');
+    });
+    document.getElementById('btnExcluirAtivoDetalhe')?.addEventListener('click', ()=>{
+      if(!confirm('Excluir este ativo definitivamente? Essa ação não pode ser desfeita.')) return;
+      state.ativosPatrimoniais = state.ativosPatrimoniais.filter(x=>x.id!==ativoDetalheAtual.id);
+      persist();
+      currentView = 'ativos';
+      render();
+      showToast('Ativo excluído');
+    });
+  }
 
   // Contas bancárias
   const btnNovaConta = document.getElementById('btnNovaConta');
@@ -2695,6 +3311,19 @@ function attachViewHandlers(){
     btnSincronizarVK.textContent = 'Sincronizando...';
     btnSincronizarVK.disabled = true;
     sincronizarPedidosVK();
+  });
+  const btnSincronizarAtivosVK = document.getElementById('btnSincronizarAtivosVK');
+  if(btnSincronizarAtivosVK) btnSincronizarAtivosVK.addEventListener('click', ()=>{
+    const txt = document.getElementById('firebaseConfigInput').value.trim();
+    try{
+      state.vkConfig.firebaseConfig = txt ? JSON.parse(txt) : null;
+    }catch(e){ showToast('JSON do Firebase inválido — confira o formato'); return; }
+    state.vkConfig.email = document.getElementById('vkEmail').value.trim();
+    state.vkConfig.senha = document.getElementById('vkSenha').value;
+    persist();
+    btnSincronizarAtivosVK.textContent = 'Sincronizando...';
+    btnSincronizarAtivosVK.disabled = true;
+    sincronizarAtivosVK();
   });
 }
 
