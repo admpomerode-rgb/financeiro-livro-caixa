@@ -424,6 +424,9 @@
       <div class="nav-item" data-view="fornecedores" title="Fornecedores"><span class="nav-dot"></span><span class="nav-abbr">FN</span><span class="nav-label">Fornecedores</span></div>
       <div class="nav-item" data-view="recorrencias" title="Lançamentos Recorrentes"><span class="nav-dot"></span><span class="nav-abbr">RC</span><span class="nav-label">Recorrentes</span></div>
       <div class="nav-item" data-view="precificacao" title="Simulador de Precificação"><span class="nav-dot"></span><span class="nav-abbr">PR</span><span class="nav-label">Precificação</span></div>
+      <div class="nav-item" data-view="contratos" title="Central de Contratos"><span class="nav-dot"></span><span class="nav-abbr">CN</span><span class="nav-label">Contratos</span></div>
+      <div class="nav-item" data-view="metas" title="Metas de Reserva"><span class="nav-dot"></span><span class="nav-abbr">MT</span><span class="nav-label">Metas de Reserva</span></div>
+      <div class="nav-item" data-view="auditoria" title="Log de Auditoria"><span class="nav-dot"></span><span class="nav-abbr">LG</span><span class="nav-label">Log de Auditoria</span></div>
       <div class="nav-item" data-view="comissoes" title="Comissões"><span class="nav-dot"></span><span class="nav-abbr">CM</span><span class="nav-label">Comissões</span></div>
       <div class="nav-item" data-view="ativos" title="Ativos Patrimoniais"><span class="nav-dot"></span><span class="nav-abbr">AP</span><span class="nav-label">Ativos Patrimoniais</span></div>
       <div class="nav-item" data-view="investimentos" title="Investimentos"><span class="nav-dot"></span><span class="nav-abbr">IV</span><span class="nav-label">Investimentos</span></div>
@@ -460,6 +463,9 @@
       <div class="more-item" data-view="fornecedores"><span class="more-icon">🚚</span>Fornecedores</div>
       <div class="more-item" data-view="recorrencias"><span class="more-icon">🔁</span>Recorrentes</div>
       <div class="more-item" data-view="precificacao"><span class="more-icon">🧮</span>Precificação</div>
+      <div class="more-item" data-view="contratos"><span class="more-icon">📑</span>Contratos</div>
+      <div class="more-item" data-view="metas"><span class="more-icon">🎯</span>Metas de Reserva</div>
+      <div class="more-item" data-view="auditoria"><span class="more-icon">🕵️</span>Log de Auditoria</div>
       <div class="more-item" data-view="comissoes"><span class="more-icon">🤝</span>Comissões</div>
       <div class="more-item" data-view="ativos"><span class="more-icon">📦</span>Ativos Patrimoniais</div>
       <div class="more-item" data-view="investimentos"><span class="more-icon">📈</span>Investimentos</div>
@@ -609,6 +615,9 @@ function aplicarMigracoes(s){
   if(!s.fornecedores) s.fornecedores = [];
   if(!s.recorrencias) s.recorrencias = [];
   if(!s.orcamentoCategorias) s.orcamentoCategorias = {};
+  if(!s.logAuditoria) s.logAuditoria = [];
+  if(!s.contratos) s.contratos = [];
+  if(!s.metasReserva) s.metasReserva = [];
   return s;
 }
 async function carregarDados(){
@@ -625,6 +634,12 @@ function persist(){
       showToast('Não foi possível salvar — verifique a internet');
     });
   }, 500);
+}
+
+function registrarLog(acao, detalhe){
+  if(!state.logAuditoria) state.logAuditoria = [];
+  state.logAuditoria.unshift({ id: uid(), data: new Date().toISOString(), acao, detalhe });
+  if(state.logAuditoria.length > 500) state.logAuditoria.length = 500;
 }
 
 function uid(){ return 'l' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
@@ -725,6 +740,9 @@ function render(){
   else if(currentView==='fornecedores') main.innerHTML = viewFornecedores();
   else if(currentView==='recorrencias') main.innerHTML = viewRecorrencias();
   else if(currentView==='precificacao') main.innerHTML = viewPrecificacao();
+  else if(currentView==='contratos') main.innerHTML = viewContratos();
+  else if(currentView==='metas') main.innerHTML = viewMetasReserva();
+  else if(currentView==='auditoria') main.innerHTML = viewLogAuditoria();
   else if(currentView==='comissoes') main.innerHTML = viewComissoes();
   else if(currentView==='ativos') main.innerHTML = viewAtivosPatrimoniais();
   else if(currentView==='ativo-detalhe') main.innerHTML = viewAtivoPatrimonialDetalhe(ativoPatrimonialDetalheId);
@@ -1314,6 +1332,7 @@ function viewDashboard(){
   const mes = totaisMesAtual();
   const pend = pendentesResumo();
   const venc = contasVencendoResumo();
+  const contratosVenc = contratosVencendoResumo();
   const recentes = [...state.lancamentos].sort((a,b)=> (b.dataPagamento||b.dataVencimento||'').localeCompare(a.dataPagamento||a.dataVencimento||'')).slice(0,6);
 
   return `
@@ -1333,6 +1352,18 @@ function viewDashboard(){
         <div class="alerta-linha" data-goto-alerta="venceEmBreve">
           <span>🔔 ${venc.venceEmBreve.length} conta(s) vence(m) nos próximos 7 dias</span>
           <span class="mono">${brl(venc.venceEmBreve.reduce((s,l)=>s+l.valor,0))}</span>
+        </div>` : ''}
+    </div>` : ''}
+
+    ${(contratosVenc.vencidos.length || contratosVenc.vencendo.length) ? `
+    <div class="panel alerta-panel">
+      ${contratosVenc.vencidos.length ? `
+        <div class="alerta-linha atrasado" data-goto="contratos">
+          <span>📑 ${contratosVenc.vencidos.length} contrato(s) <strong>vencido(s)</strong></span>
+        </div>` : ''}
+      ${contratosVenc.vencendo.length ? `
+        <div class="alerta-linha" data-goto="contratos">
+          <span>📑 ${contratosVenc.vencendo.length} contrato(s) vence(m) nos próximos 30 dias</span>
         </div>` : ''}
     </div>` : ''}
 
@@ -1375,7 +1406,7 @@ function rowHTML(l){
       <span class="dot ${l.tipo}"></span>
       <span class="mono" style="font-size:12.5px;color:var(--text-soft)">${fmtDate(l.dataPagamento || l.dataVencimento)}</span>
       <div class="desc-cell" data-action="ver-detalhe" data-id="${l.id}" style="cursor:pointer;">
-        <div>${escapeHTML(l.descricao)}${l.origem==='forneira' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Forneira</span>' : ''}${l.origem==='vk' ? ' <span style="color:var(--blue-accent);font-size:11px;">· VK Industrial</span>' : ''}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Ativo Patrimonial</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}</div>
+        <div>${escapeHTML(l.descricao)}${l.origem==='forneira' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Forneira</span>' : ''}${l.origem==='vk' ? ' <span style="color:var(--blue-accent);font-size:11px;">· VK Industrial</span>' : ''}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Ativo Patrimonial</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}${l.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${l.id}" style="cursor:pointer;font-size:11px;" title="Ver comprovante">📎</span>` : ''}</div>
         <div class="cat"><span class="conta-tag"><span class="conta-swatch" style="background:${corConta(l.contaId)}"></span>${escapeHTML(nomeConta(l.contaId))}</span> · ${escapeHTML(l.categoria)}${l.fornecedor ? ' · '+escapeHTML(l.fornecedor) : ''}</div>
       </div>
       <span class="col-cat mono" style="font-size:11.5px;color:var(--text-soft)">${fmtDate(l.dataVencimento)}</span>
@@ -1743,7 +1774,7 @@ function viewExtrato(contaId){
         <div class="ledger-row compact" data-id="${l.id}">
           <span class="dot ${l.tipo}"></span>
           <div class="desc-cell" data-action="ver-detalhe" data-id="${l.id}" style="cursor:pointer;">
-            <div>${escapeHTML(l.descricao)}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Ativo Patrimonial</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:10.5px;" title="Tem observação">📝</span>' : ''}</div>
+            <div>${escapeHTML(l.descricao)}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Ativo Patrimonial</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:10.5px;" title="Tem observação">📝</span>' : ''}${l.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${l.id}" style="cursor:pointer;font-size:10.5px;" title="Ver comprovante">📎</span>` : ''}</div>
             <div class="cat">${escapeHTML(l.categoria)}</div>
           </div>
           <span class="mono" style="font-weight:600;font-size:12.5px;color:${l.tipo==='entrada'?'var(--success)':'var(--danger)'}">${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}</span>
@@ -2557,6 +2588,7 @@ function openAtivoPatrimonialModal(existing){
       <div class="field"><label>Valor residual (R$, opcional)</label><input type="text" inputmode="decimal" id="apResidual" value="${existing&&existing.valorResidual?existing.valorResidual:''}" placeholder="0,00"></div>
     </div>
     <div class="note" id="apVidaUtilNota" style="margin-top:-6px;"></div>
+    <div class="field"><label>Garantia (meses, opcional)</label><input type="text" inputmode="decimal" id="apGarantiaMeses" value="${existing&&existing.garantiaMeses?existing.garantiaMeses:''}" placeholder="Ex: 12"></div>
     ${!isEdit ? `
     <div class="field" style="margin-top:4px;">
       <label style="display:flex;align-items:center;gap:8px;font-weight:500;"><input type="checkbox" id="apDescontarConta" style="width:auto;"> Descontar o valor de uma conta bancária agora</label>
@@ -2604,12 +2636,14 @@ function openAtivoPatrimonialModal(existing){
     const vidaUtilAnos = numBR(document.getElementById('apVidaUtil').value);
     const valorResidualRaw = document.getElementById('apResidual').value.trim();
     const valorResidual = valorResidualRaw ? numBR(valorResidualRaw) : 0;
+    const garantiaMesesRaw = document.getElementById('apGarantiaMeses').value.trim();
+    const garantiaMeses = garantiaMesesRaw ? numBR(garantiaMesesRaw) : null;
     if(!nome || isNaN(valorAquisicao) || valorAquisicao<=0 || isNaN(vidaUtilAnos) || vidaUtilAnos<=0){ showToast('Preencha nome, valor de aquisição e vida útil'); return; }
     if(isEdit){
-      Object.assign(existing, { nome, categoria, numeroPatrimonio, semAdesivo, fornecedor, notaFiscal, dataAquisicao, valorAquisicao, vidaUtilAnos, valorResidual });
+      Object.assign(existing, { nome, categoria, numeroPatrimonio, semAdesivo, fornecedor, notaFiscal, dataAquisicao, valorAquisicao, vidaUtilAnos, valorResidual, garantiaMeses });
     } else {
       const novoId = uid();
-      state.ativosPatrimoniais.push({ id: novoId, nome, categoria, numeroPatrimonio, semAdesivo, fornecedor, notaFiscal, dataAquisicao, valorAquisicao, vidaUtilAnos, valorResidual, fotos: [], fichas: [], manutencoes: [], baixa: null });
+      state.ativosPatrimoniais.push({ id: novoId, nome, categoria, numeroPatrimonio, semAdesivo, fornecedor, notaFiscal, dataAquisicao, valorAquisicao, vidaUtilAnos, valorResidual, garantiaMeses, fotos: [], fichas: [], manutencoes: [], baixa: null });
       if(chkDesconto && chkDesconto.checked){
         const contaId = document.getElementById('apConta').value;
         state.lancamentos.push({
@@ -2671,6 +2705,12 @@ function viewAtivoPatrimonialDetalhe(id){
         <div><span style="color:var(--text-soft);">Nº da nota fiscal</span><br>${a.notaFiscal ? escapeHTML(a.notaFiscal) : '—'}</div>
         <div><span style="color:var(--text-soft);">Vida útil</span><br>${a.vidaUtilAnos} anos${a.valorResidual ? ` · valor residual ${brl(a.valorResidual)}` : ''}</div>
         <div><span style="color:var(--text-soft);">Adesivo de patrimônio</span><br>${a.semAdesivo ? 'Colado na Ficha de Patrimônio (não é possível colar no objeto)' : 'Colado diretamente no objeto'}</div>
+        ${a.garantiaMeses ? (()=>{
+          const dataGarantia = new Date(a.dataAquisicao);
+          dataGarantia.setMonth(dataGarantia.getMonth() + a.garantiaMeses);
+          const vencida = dataGarantia < new Date();
+          return `<div><span style="color:var(--text-soft);">Garantia</span><br>${a.garantiaMeses} meses — <span style="${vencida?'color:var(--danger);':'color:var(--success);'}font-weight:600;">${vencida?'vencida em':'até'} ${fmtDate(dataGarantia.toISOString().slice(0,10))}</span></div>`;
+        })() : ''}
       </div>
     </div>
 
@@ -3421,6 +3461,7 @@ function excluirLancamento(id){
   if(!l) return;
   const msg = l.origem==='transferencia' ? 'Excluir esta transferência? As duas pontas (saída e entrada) serão removidas.' : 'Excluir este lançamento?';
   if(!confirm(msg)) return;
+  registrarLog('Lançamento excluído', `${l.tipo==='entrada'?'Receita':'Despesa'} "${l.descricao}" — ${brl(l.valor)}`);
   if(l.origem==='transferencia' && l.transferenciaId){
     state.lancamentos = state.lancamentos.filter(x=>x.transferenciaId!==l.transferenciaId);
   } else {
@@ -3433,6 +3474,18 @@ function excluirLancamento(id){
 function attachViewHandlers(){
   const chartMeses = document.getElementById('chartMeses');
   if(chartMeses) desenharGraficoMeses('chartMeses');
+
+  document.querySelectorAll('[data-action="ver-comprovante"]').forEach(el=>{
+    el.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const l = state.lancamentos.find(x=>x.id===el.dataset.id);
+      if(!l || !l.comprovanteFoto) return;
+      const modal = document.getElementById('modalContent');
+      modal.innerHTML = `<h3>Comprovante</h3><img src="${l.comprovanteFoto}" style="width:100%;border-radius:8px;margin-top:10px;"><div class="modal-actions"><button class="btn ghost" id="btnCancelarModal">Fechar</button></div>`;
+      document.getElementById('modalOverlay').classList.add('open');
+      document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+    });
+  });
 
   document.querySelectorAll('[data-goto-alerta]').forEach(el=>{
     el.addEventListener('click', ()=>{
@@ -3615,6 +3668,8 @@ function attachViewHandlers(){
   document.querySelectorAll('[data-action="excluir-recorrencia"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       if(!confirm('Excluir esta recorrência? Os lançamentos já gerados não são apagados.')) return;
+      const r = (state.recorrencias||[]).find(x=>x.id===btn.dataset.id);
+      if(r) registrarLog('Recorrência excluída', `"${r.descricao}" — ${brl(r.valor)}/mês`);
       state.recorrencias = (state.recorrencias||[]).filter(r=>r.id!==btn.dataset.id);
       persist(); render(); showToast('Recorrência excluída');
     });
@@ -3669,6 +3724,34 @@ function attachViewHandlers(){
     pintarProjecao();
   }
 
+  // Central de Contratos
+  document.getElementById('btnNovoContrato')?.addEventListener('click', ()=>openContratoModal());
+  document.querySelectorAll('[data-action="editar-contrato"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openContratoModal((state.contratos||[]).find(x=>x.id===btn.dataset.id)));
+  });
+  document.querySelectorAll('[data-action="excluir-contrato"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!confirm('Excluir este contrato?')) return;
+      const c = (state.contratos||[]).find(x=>x.id===btn.dataset.id);
+      if(c) registrarLog('Contrato excluído', c.nome);
+      state.contratos = (state.contratos||[]).filter(x=>x.id!==btn.dataset.id);
+      persist(); render(); showToast('Contrato excluído');
+    });
+  });
+
+  // Metas de Reserva
+  document.getElementById('btnNovaMeta')?.addEventListener('click', ()=>openMetaModal());
+  document.querySelectorAll('[data-action="editar-meta"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openMetaModal((state.metasReserva||[]).find(x=>x.id===btn.dataset.id)));
+  });
+  document.querySelectorAll('[data-action="excluir-meta"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!confirm('Excluir esta meta?')) return;
+      state.metasReserva = (state.metasReserva||[]).filter(x=>x.id!==btn.dataset.id);
+      persist(); render(); showToast('Meta excluída');
+    });
+  });
+
   // Fornecedores
   document.getElementById('btnNovoFornecedor')?.addEventListener('click', ()=>openFornecedorModal());
   document.querySelectorAll('[data-action="ver-fornecedor"]').forEach(el=>{
@@ -3687,6 +3770,8 @@ function attachViewHandlers(){
   document.querySelectorAll('[data-action="excluir-fornecedor"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       if(!confirm('Excluir este fornecedor? Os lançamentos já feitos com ele não são apagados.')) return;
+      const f = (state.fornecedores||[]).find(x=>x.id===btn.dataset.id);
+      if(f) registrarLog('Fornecedor excluído', f.nome);
       state.fornecedores = (state.fornecedores||[]).filter(f=>f.id!==btn.dataset.id);
       persist(); render(); showToast('Fornecedor excluído');
     });
@@ -4330,6 +4415,16 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       <input type="text" id="fProduto" value="${existing?.produtoTag ? escapeHTML(existing.produtoTag) : ''}" placeholder="Ex: Biscoito Amanteigado, Bolacha Recheada...">
     </div>
     <div class="field">
+      <label>Comprovante / nota fiscal (foto, opcional)</label>
+      <input type="file" id="fComprovanteInput" accept="image/*" style="display:none;">
+      <div id="fComprovantePreviewWrap" style="${existing?.comprovanteFoto?'':'display:none;'}margin-bottom:8px;">
+        <img id="fComprovantePreview" src="${existing?.comprovanteFoto||''}" style="max-width:140px;border-radius:8px;border:1px solid var(--line);display:block;">
+        <button type="button" class="btn ghost sm" id="btnRemoverComprovante" style="margin-top:6px;">Remover foto</button>
+      </div>
+      <button type="button" class="btn ghost sm" id="btnAnexarComprovante">${existing?.comprovanteFoto?'Trocar foto':'📎 Anexar foto'}</button>
+      <div class="note" style="margin-top:8px;">A foto fica salva no mesmo banco de dados do sistema — evite anexar em todos os lançamentos, só nos que realmente precisam de comprovante guardado.</div>
+    </div>
+    <div class="field">
       <label>Observação (opcional)</label>
       <textarea id="fObservacao" rows="3" placeholder="Detalhes extras — ex: nome do cliente, itens do pedido, etc.">${existing?.observacao ? escapeHTML(existing.observacao) : ''}</textarea>
     </div>
@@ -4340,6 +4435,23 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  let comprovanteAtual = existing?.comprovanteFoto || null;
+  document.getElementById('btnAnexarComprovante').addEventListener('click', ()=>document.getElementById('fComprovanteInput').click());
+  document.getElementById('fComprovanteInput').addEventListener('change', async ()=>{
+    const file = document.getElementById('fComprovanteInput').files[0];
+    if(!file) return;
+    try{
+      comprovanteAtual = await comprimirImagem(file);
+      document.getElementById('fComprovantePreview').src = comprovanteAtual;
+      document.getElementById('fComprovantePreviewWrap').style.display = 'block';
+      document.getElementById('btnAnexarComprovante').textContent = 'Trocar foto';
+    }catch(e){ console.error('Erro ao processar comprovante:', e); showToast('Não foi possível processar a foto'); }
+  });
+  document.getElementById('btnRemoverComprovante').addEventListener('click', ()=>{
+    comprovanteAtual = null;
+    document.getElementById('fComprovantePreviewWrap').style.display = 'none';
+    document.getElementById('btnAnexarComprovante').textContent = '📎 Anexar foto';
+  });
   const fFornecedorSelect = document.getElementById('fFornecedorSelect');
   if(fFornecedorSelect){
     const fFornecedorInput = document.getElementById('fFornecedor');
@@ -4365,6 +4477,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       valor,
       fornecedor: fornecedorValor,
       produtoTag: document.getElementById('fProduto').value.trim(),
+      comprovanteFoto: comprovanteAtual,
       observacao: document.getElementById('fObservacao').value.trim(),
       contaId: document.getElementById('fConta').value,
       dataVencimento: document.getElementById('fVencimento').value,
@@ -4372,8 +4485,10 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       dataPagamento: (status==='pago'||status==='recebido') ? (existing?.dataPagamento || todayISO()) : null,
     };
     if(isEdit){
+      registrarLog('Lançamento editado', `${tipo==='entrada'?'Receita':'Despesa'} "${payload.descricao}" — ${brl(payload.valor)}`);
       Object.assign(existing, payload);
     } else {
+      registrarLog('Lançamento criado', `${tipo==='entrada'?'Receita':'Despesa'} "${payload.descricao}" — ${brl(payload.valor)}`);
       state.lancamentos.push({ id: uid(), tipo, origem:'manual', criadoEm: new Date().toISOString(), ...payload });
     }
     persist();
@@ -4579,6 +4694,199 @@ function openRecorrenciaModal(existing){
     closeModal(); render();
     showToast(isEdit?'Recorrência atualizada':'Recorrência cadastrada');
   });
+}
+
+function contratosVencendoResumo(){
+  const hoje = todayISO();
+  const em30 = new Date(); em30.setDate(em30.getDate()+30);
+  const em30ISO = em30.toISOString().slice(0,10);
+  const lista = state.contratos||[];
+  return {
+    vencidos: lista.filter(c=>c.dataVencimento && c.dataVencimento<hoje),
+    vencendo: lista.filter(c=>c.dataVencimento && c.dataVencimento>=hoje && c.dataVencimento<=em30ISO)
+  };
+}
+
+function viewMetasReserva(){
+  const lista = [...(state.metasReserva||[])];
+  return `
+    <div class="topbar">
+      <div><h1>Metas de Reserva</h1><p>Acompanhe reservas de emergência ou metas de poupança da empresa</p></div>
+      <button class="btn" id="btnNovaMeta">+ Meta</button>
+    </div>
+    <div class="panel">
+      <div class="panel-body" style="padding:16px 20px;">
+        ${lista.length ? lista.map(m=>{
+          const atual = m.contaId ? saldoConta(m.contaId) : (m.valorAtualManual||0);
+          const pct = m.valorAlvo>0 ? Math.min(100, Math.round(atual/m.valorAlvo*100)) : 0;
+          return `
+          <div style="margin-bottom:22px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+              <strong style="font-size:13.5px;">${escapeHTML(m.nome)}</strong>
+              <div class="row-actions">
+                <button class="icon-btn" data-action="editar-meta" data-id="${m.id}" title="Editar">✎</button>
+                <button class="icon-btn" data-action="excluir-meta" data-id="${m.id}" title="Excluir">✕</button>
+              </div>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--text-soft);margin-bottom:6px;">
+              <span class="mono">${brl(atual)} de ${brl(m.valorAlvo)}${m.contaId ? ' · '+escapeHTML(nomeConta(m.contaId)) : ''}</span>
+              <span>${pct}%</span>
+            </div>
+            <div style="background:var(--bone);border-radius:6px;height:9px;overflow:hidden;">
+              <div style="width:${pct}%;height:100%;background:${pct>=100?'var(--success)':'var(--blue-accent)'};"></div>
+            </div>
+          </div>
+        `;}).join('') : `<div class="empty">Nenhuma meta cadastrada ainda.</div>`}
+      </div>
+    </div>
+  `;
+}
+
+function openMetaModal(existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit?'Editar meta':'Nova meta de reserva'}</h3>
+    <div class="field"><label>Nome da meta</label><input type="text" id="mtNome" value="${existing?escapeHTML(existing.nome):''}" placeholder="Ex: Reserva de emergência, Fundo pra máquina nova..."></div>
+    <div class="field"><label>Valor alvo (R$)</label><input type="text" inputmode="decimal" id="mtValorAlvo" value="${existing?existing.valorAlvo:''}" placeholder="0,00"></div>
+    <div class="field">
+      <label>Vincular a uma conta bancária (opcional)</label>
+      <select id="mtConta">
+        <option value="">— nenhuma, vou digitar o valor atual manualmente —</option>
+        ${state.contas.map(c=>`<option value="${c.id}" ${existing?.contaId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field" id="mtValorManualGrupo" style="${existing?.contaId?'display:none;':''}">
+      <label>Valor já guardado hoje (R$)</label>
+      <input type="text" inputmode="decimal" id="mtValorManual" value="${existing&&existing.valorAtualManual?existing.valorAtualManual:''}" placeholder="0,00">
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarMeta">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  const mtConta = document.getElementById('mtConta');
+  mtConta.addEventListener('change', ()=>{
+    document.getElementById('mtValorManualGrupo').style.display = mtConta.value ? 'none' : 'block';
+  });
+  document.getElementById('btnSalvarMeta').addEventListener('click', ()=>{
+    const nome = document.getElementById('mtNome').value.trim();
+    const valorAlvo = numBR(document.getElementById('mtValorAlvo').value);
+    if(!nome || isNaN(valorAlvo) || valorAlvo<=0){ showToast('Preencha nome e valor alvo válido'); return; }
+    const contaId = mtConta.value || null;
+    const valorManualRaw = document.getElementById('mtValorManual').value.trim();
+    const payload = {
+      nome, valorAlvo, contaId,
+      valorAtualManual: !contaId && valorManualRaw ? numBR(valorManualRaw) : 0
+    };
+    if(!state.metasReserva) state.metasReserva = [];
+    if(isEdit){ Object.assign(existing, payload); }
+    else { state.metasReserva.push({ id: uid(), criadoEm: new Date().toISOString(), ...payload }); }
+    persist(); closeModal(); render();
+    showToast(isEdit?'Meta atualizada':'Meta cadastrada');
+  });
+}
+
+function viewContratos(){
+  const lista = [...(state.contratos||[])].sort((a,b)=>(a.dataVencimento||'9999').localeCompare(b.dataVencimento||'9999'));
+  const hoje = todayISO();
+  return `
+    <div class="topbar">
+      <div><h1>Central de Contratos</h1><p>Contratos com fornecedores e clientes — vencimento e renovação</p></div>
+      <button class="btn" id="btnNovoContrato">+ Contrato</button>
+    </div>
+    <div class="panel">
+      <div class="panel-body">
+        ${lista.length ? lista.map(c=>{
+          const diasRestantes = c.dataVencimento ? Math.floor((new Date(c.dataVencimento)-new Date(hoje))/86400000) : null;
+          const vencido = diasRestantes!==null && diasRestantes<0;
+          const vencendo = diasRestantes!==null && diasRestantes>=0 && diasRestantes<=30;
+          return `
+          <div class="ledger-row" data-id="${c.id}" style="grid-template-columns:14px 1fr 150px 110px auto;">
+            <span class="dot" style="background:${vencido?'var(--danger)':vencendo?'var(--warn)':'var(--text-soft)'};"></span>
+            <div class="desc-cell"><div>${escapeHTML(c.nome)}</div><div class="cat">${c.tipo==='fornecedor'?'Fornecedor':'Cliente'}${c.contraparte?' · '+escapeHTML(c.contraparte):''}</div></div>
+            <span style="font-size:12px;${vencido?'color:var(--danger);font-weight:600;':vencendo?'color:var(--warn);font-weight:600;':'color:var(--text-soft);'}">${c.dataVencimento ? (vencido ? 'Venceu há '+Math.abs(diasRestantes)+' dia(s)' : diasRestantes+' dia(s) pra vencer') : 'Sem vencimento definido'}</span>
+            <span class="mono" style="font-size:12.5px;">${c.valorMensal?brl(c.valorMensal)+'/mês':'—'}</span>
+            <div class="row-actions">
+              <button class="icon-btn" data-action="editar-contrato" data-id="${c.id}" title="Editar">✎</button>
+              <button class="icon-btn" data-action="excluir-contrato" data-id="${c.id}" title="Excluir">✕</button>
+            </div>
+          </div>
+        `;}).join('') : `<div class="empty">Nenhum contrato cadastrado ainda.</div>`}
+      </div>
+    </div>
+  `;
+}
+
+function openContratoModal(existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit?'Editar contrato':'Novo contrato'}</h3>
+    <div class="field"><label>Nome / descrição do contrato</label><input type="text" id="ctNome" value="${existing?escapeHTML(existing.nome):''}" placeholder="Ex: Contrato de fornecimento de farinha"></div>
+    <div class="field-row">
+      <div class="field"><label>Tipo</label>
+        <select id="ctTipo">
+          <option value="fornecedor" ${(!existing||existing.tipo==='fornecedor')?'selected':''}>Fornecedor</option>
+          <option value="cliente" ${existing?.tipo==='cliente'?'selected':''}>Cliente</option>
+        </select>
+      </div>
+      <div class="field"><label>Contraparte (opcional)</label><input type="text" id="ctContraparte" value="${existing?escapeHTML(existing.contraparte||''):''}" placeholder="Nome do fornecedor/cliente"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Início</label><input type="date" id="ctInicio" value="${existing?.dataInicio||todayISO()}"></div>
+      <div class="field"><label>Vencimento (opcional)</label><input type="date" id="ctVencimento" value="${existing?.dataVencimento||''}"></div>
+    </div>
+    <div class="field"><label>Valor mensal (opcional, R$)</label><input type="text" inputmode="decimal" id="ctValor" value="${existing&&existing.valorMensal?existing.valorMensal:''}" placeholder="0,00"></div>
+    <div class="field"><label>Observação (opcional)</label><textarea id="ctObs" rows="3" placeholder="Condições de reajuste, renovação, etc.">${existing?escapeHTML(existing.observacao||''):''}</textarea></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarContrato">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarContrato').addEventListener('click', ()=>{
+    const nome = document.getElementById('ctNome').value.trim();
+    if(!nome){ showToast('Digite o nome do contrato'); return; }
+    const valorRaw = document.getElementById('ctValor').value.trim();
+    const payload = {
+      nome, tipo: document.getElementById('ctTipo').value,
+      contraparte: document.getElementById('ctContraparte').value.trim(),
+      dataInicio: document.getElementById('ctInicio').value || todayISO(),
+      dataVencimento: document.getElementById('ctVencimento').value || null,
+      valorMensal: valorRaw ? numBR(valorRaw) : null,
+      observacao: document.getElementById('ctObs').value.trim()
+    };
+    if(!state.contratos) state.contratos = [];
+    if(isEdit){ Object.assign(existing, payload); }
+    else { state.contratos.push({ id: uid(), criadoEm: new Date().toISOString(), ...payload }); }
+    persist(); closeModal(); render();
+    showToast(isEdit?'Contrato atualizado':'Contrato cadastrado');
+  });
+}
+
+function viewLogAuditoria(){
+  const lista = [...(state.logAuditoria||[])].sort((a,b)=>b.data.localeCompare(a.data)).slice(0,200);
+  return `
+    <div class="topbar">
+      <div><h1>Log de Auditoria</h1><p>Histórico de criações, edições e exclusões — só pra consulta, não dá pra apagar daqui</p></div>
+    </div>
+    <div class="panel">
+      <div class="panel-body">
+        ${lista.length ? lista.map(l=>`
+          <div class="ledger-row" style="grid-template-columns:130px 160px 1fr;">
+            <span class="mono" style="font-size:11.5px;color:var(--text-soft);">${new Date(l.data).toLocaleString('pt-BR')}</span>
+            <span style="font-size:12px;font-weight:600;">${escapeHTML(l.acao)}</span>
+            <span style="font-size:12.5px;color:var(--text-soft);">${escapeHTML(l.detalhe||'')}</span>
+          </div>
+        `).join('') : `<div class="empty">Nenhuma ação registrada ainda.</div>`}
+      </div>
+    </div>
+    ${(state.logAuditoria||[]).length>200 ? `<div class="note">Mostrando os 200 registros mais recentes.</div>` : ''}
+  `;
 }
 
 function viewPrecificacao(){
