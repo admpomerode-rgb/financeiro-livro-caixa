@@ -511,8 +511,7 @@
       <div class="nav-item" data-view="comissoes" title="Comissões"><span class="nav-dot"></span><span class="nav-abbr">CM</span><span class="nav-label">Comissões</span></div>
       <div class="nav-item" data-view="ativos" title="Ativos Patrimoniais"><span class="nav-dot"></span><span class="nav-abbr">AP</span><span class="nav-label">Ativos Patrimoniais</span></div>
       <div class="nav-item" data-view="investimentos" title="Investimentos"><span class="nav-dot"></span><span class="nav-abbr">IV</span><span class="nav-label">Investimentos</span></div>
-      <div class="nav-item" data-view="vk" title="Integração VK Industrial"><span class="nav-dot"></span><span class="nav-abbr">VK</span><span class="nav-label">Integração VK Industrial</span></div>
-      <div class="nav-item" data-view="processos" title="Integração Livro de Processos"><span class="nav-dot"></span><span class="nav-abbr">LP</span><span class="nav-label">Integração Livro de Processos</span></div>
+      <div class="nav-item" data-view="integracoes" title="Central de Integrações"><span class="nav-dot"></span><span class="nav-abbr">IN</span><span class="nav-label">Central de Integrações</span></div>
     </nav>
     <div class="sidebar-footer">
       <button id="btnBackup"><span class="footer-icon">⇅</span><span class="footer-label">Backup / Restaurar</span></button>
@@ -553,8 +552,7 @@
       <div class="more-item" data-view="comissoes"><span class="more-icon">🤝</span>Comissões</div>
       <div class="more-item" data-view="ativos"><span class="more-icon">📦</span>Ativos Patrimoniais</div>
       <div class="more-item" data-view="investimentos"><span class="more-icon">📈</span>Investimentos</div>
-      <div class="more-item" data-view="vk"><span class="more-icon">🏭</span>Integração VK Industrial</div>
-      <div class="more-item" data-view="processos"><span class="more-icon">📁</span>Integração Livro de Processos</div>
+      <div class="more-item" data-view="integracoes"><span class="more-icon">🔌</span>Central de Integrações</div>
     </div>
     <div class="more-drawer-footer">
       <button id="btnBackupMobile"><span class="footer-icon">⇅</span> Backup / Restaurar</button>
@@ -850,6 +848,7 @@ function render(){
   else if(currentView==='comissoes') main.innerHTML = viewComissoes();
   else if(currentView==='ativos') main.innerHTML = viewAtivosPatrimoniais();
   else if(currentView==='ativo-detalhe') main.innerHTML = viewAtivoPatrimonialDetalhe(ativoPatrimonialDetalheId);
+  else if(currentView==='integracoes') main.innerHTML = viewIntegracoes();
   else if(currentView==='vk') main.innerHTML = viewVK();
   else if(currentView==='processos') main.innerHTML = viewProcessosConfig();
   attachViewHandlers();
@@ -2852,6 +2851,29 @@ function rowAtivoHTML(a){
   `;
 }
 
+function viewIntegracoes(){
+  const cards = [
+    { id:'vk', icone:'🏭', nome:'VK Industrial', desc:'Pedidos, ativos e ordens de serviço sincronizados automaticamente', configurado: !!(state.vkConfig && state.vkConfig.firebaseConfig) },
+    { id:'processos', icone:'📁', nome:'Livro de Processos', desc:'Decisões finais de processos viram ocorrência na ficha do ativo', configurado: !!(state.processosConfig && state.processosConfig.firebaseConfig) },
+  ];
+  return `
+    <div class="topbar">
+      <div><h1>Central de Integrações</h1><p>Conexões com os outros sistemas da empresa</p></div>
+    </div>
+    <div class="more-drawer-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;">
+      ${cards.map(c=>`
+        <div class="more-item" data-action="abrir-integracao" data-integracao="${c.id}" style="text-align:left;align-items:flex-start;padding:18px;cursor:pointer;position:relative;">
+          <span class="more-icon" style="font-size:26px;">${c.icone}</span>
+          <span style="position:absolute;top:16px;right:16px;font-size:10px;font-weight:600;padding:3px 8px;border-radius:10px;background:${c.configurado?'#E3F5EC':'#F1F2F4'};color:${c.configurado?'var(--success)':'var(--text-soft)'};">${c.configurado?'Conectado':'Não configurado'}</span>
+          <div style="font-weight:600;font-size:13.5px;margin-top:8px;">${c.nome}</div>
+          <div style="font-size:11.5px;color:var(--text-soft);margin-top:4px;line-height:1.4;">${c.desc}</div>
+        </div>
+      `).join('')}
+    </div>
+    <div class="note" style="margin-top:16px;">Toda nova integração com outro sistema entra aqui nessa central.</div>
+  `;
+}
+
 function viewRelatorios(){
   const cards = [
     { id:'mensal', icone:'📅', nome:'Super Relatório Mensal', desc:'Tudo sobre o mês — DRE, indicadores, orçamento, alertas — num relatório só' },
@@ -4389,7 +4411,11 @@ function viewProcessosConfig(){
   const totalImportadas = state.ativosPatrimoniais.reduce((s,a)=>s+(a.ocorrencias||[]).filter(o=>o.origem==='processo').length,0);
   return `
     <div class="topbar">
-      <div><h1>Integração — Livro de Processos</h1><p>Decisões finais de processos vinculados a um ativo caem automaticamente como ocorrência na ficha dele</p></div>
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="integracoes">← Central de Integrações</span>
+        <h1 style="margin-top:6px;">Integração — Livro de Processos</h1>
+        <p>Decisões finais de processos vinculados a um ativo caem automaticamente como ocorrência na ficha dele</p>
+      </div>
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Configuração</h2></div>
@@ -4434,7 +4460,11 @@ function viewVK(){
   const totalImportados = state.lancamentos.filter(l=>l.origem==='vk').length;
   return `
     <div class="topbar">
-      <div><h1>Integração VK Industrial</h1><p>Pedidos lançados no VK Industrial caem automaticamente aqui em Contas a Receber</p></div>
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="integracoes">← Central de Integrações</span>
+        <h1 style="margin-top:6px;">Integração VK Industrial</h1>
+        <p>Pedidos lançados no VK Industrial caem automaticamente aqui em Contas a Receber</p>
+      </div>
     </div>
 
     <div class="panel vk-status-panel">
@@ -4850,6 +4880,12 @@ function attachViewHandlers(){
     card.addEventListener('click', ()=>{
       relatorioAtivo = card.dataset.relatorio;
       currentView = 'relatorio-detalhe';
+      render();
+    });
+  });
+  document.querySelectorAll('[data-action="abrir-integracao"]').forEach(card=>{
+    card.addEventListener('click', ()=>{
+      currentView = card.dataset.integracao;
       render();
     });
   });
