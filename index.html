@@ -370,7 +370,6 @@
   /* Categorias */
   .categoria-item{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden;}
   .categoria-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--white);flex-wrap:wrap;gap:8px;}
-  .codigo-contabil-badge{font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;color:var(--blue-deep);background:#E8EFFC;border-radius:5px;padding:3px 7px;white-space:nowrap;}
   .categoria-head .nome{font-weight:600;font-size:14px;}
   .categoria-head .actions{display:flex;gap:6px;}
   .subcategoria-list{background:var(--bone);border-top:1px solid var(--line);}
@@ -2090,7 +2089,7 @@ function viewLancamentosCategoria(){
 
 function gerarExtratoCategoriaPDF(tipo, categoria, dataDe, dataAte){
   if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
-  let lista = state.lancamentos.filter(l=>l.tipo===tipo && l.categoria===categoria && l.origem!=='transferencia');
+  let lista = state.lancamentos.filter(l=>l.tipo===tipo && l.origem!=='transferencia' && (!categoria || l.categoria===categoria));
   if(dataDe) lista = lista.filter(l=>(l.dataPagamento||l.dataVencimento||'')>=dataDe);
   if(dataAte) lista = lista.filter(l=>(l.dataPagamento||l.dataVencimento||'')<=dataAte);
   lista.sort((a,b)=>(a.dataPagamento||a.dataVencimento||'').localeCompare(b.dataPagamento||b.dataVencimento||''));
@@ -2102,6 +2101,8 @@ function gerarExtratoCategoriaPDF(tipo, categoria, dataDe, dataAte){
   const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
   let y = 22;
 
+  const titulo = categoria || (tipo==='entrada' ? 'Todas as categorias de receita' : 'Todas as categorias de despesa');
+
   docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
   docPdf.text('Livro Caixa Financeiro VK', M, y);
   docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
@@ -2111,7 +2112,7 @@ function gerarExtratoCategoriaPDF(tipo, categoria, dataDe, dataAte){
   y += 9;
 
   docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
-  docPdf.text(`Extrato — ${categoria}`, M, y);
+  docPdf.text(`Extrato — ${titulo}`, M, y);
   y += 6;
   docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
   docPdf.text(`${tipo==='entrada'?'Receita':'Despesa'} · ${(dataDe||dataAte) ? `Período: ${dataDe?fmtDate(dataDe):'início'} até ${dataAte?fmtDate(dataAte):'hoje'}` : 'Todas as movimentações'}`, M, y);
@@ -2128,20 +2129,83 @@ function gerarExtratoCategoriaPDF(tipo, categoria, dataDe, dataAte){
   lista.forEach(l=>{
     if(y > 270){ docPdf.addPage(); y = 20; }
     docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...INK);
-    const desc = l.descricao.length>45 ? l.descricao.slice(0,45)+'…' : l.descricao;
-    docPdf.text(`${fmtDate(l.dataPagamento||l.dataVencimento)}  ${desc}`, M, y);
+    const sufixoCategoria = categoria ? '' : `  (${l.categoria})`;
+    const limiteTexto = categoria ? 45 : 34;
+    const desc = l.descricao.length>limiteTexto ? l.descricao.slice(0,limiteTexto)+'…' : l.descricao;
+    docPdf.text(`${fmtDate(l.dataPagamento||l.dataVencimento)}  ${desc}${sufixoCategoria}`, M, y);
     docPdf.setTextColor(...(tipo==='entrada'?SUCCESS:DANGER));
     docPdf.text(brl(l.valor), M+W, y, { align:'right' });
     y += 6;
   });
 
-  docPdf.save(`extrato-${categoria.toLowerCase().replace(/\s+/g,'-')}.pdf`);
+  docPdf.save(`extrato-${titulo.toLowerCase().replace(/\s+/g,'-')}.pdf`);
   showToast('Extrato baixado em PDF');
 }
 
-function gerarExtratoGeralPDF(){
+function openExportarExtratoModal(tipoInicial){
+  const modal = document.getElementById('modalContent');
+  const montarOpcoesCategoria = (tipo)=>{
+    const cats = [...listaCategorias(tipo)].sort((a,b)=>{
+      const ta = totalCategoriaTodoHistorico(a.nome, tipo).total;
+      const tb = totalCategoriaTodoHistorico(b.nome, tipo).total;
+      return tb - ta;
+    });
+    return `<option value="">Todas as categorias</option>` + cats.map(c=>`<option value="${escapeHTML(c.nome)}">${escapeHTML(c.nome)}</option>`).join('');
+  };
+  modal.innerHTML = `
+    <h3>Exportar extrato</h3>
+    <div class="field">
+      <label>Tipo</label>
+      <div class="toggle-row" id="exTipoToggle">
+        <button type="button" data-tipo="saida" class="${tipoInicial!=='entrada'?'active':''}">Despesas</button>
+        <button type="button" data-tipo="entrada" class="${tipoInicial==='entrada'?'active':''}">Receitas</button>
+        <button type="button" data-tipo="ambos">Ambos</button>
+      </div>
+    </div>
+    <div class="field" id="exCategoriaGrupo">
+      <label>Categoria</label>
+      <select id="exCategoria">${montarOpcoesCategoria(tipoInicial==='entrada'?'entrada':'saida')}</select>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>De (opcional)</label><input type="date" id="exDe"></div>
+      <div class="field"><label>Até (opcional)</label><input type="date" id="exAte"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnGerarExtratoSelecionado">📄 Gerar PDF</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  let tipoAtual = tipoInicial==='entrada' ? 'entrada' : 'saida';
+  document.getElementById('exTipoToggle').querySelectorAll('button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.getElementById('exTipoToggle').querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      tipoAtual = btn.dataset.tipo;
+      const grupo = document.getElementById('exCategoriaGrupo');
+      if(tipoAtual==='ambos'){ grupo.style.display = 'none'; }
+      else { grupo.style.display = 'block'; document.getElementById('exCategoria').innerHTML = montarOpcoesCategoria(tipoAtual); }
+    });
+  });
+  document.getElementById('btnGerarExtratoSelecionado').addEventListener('click', ()=>{
+    const dataDe = document.getElementById('exDe').value || null;
+    const dataAte = document.getElementById('exAte').value || null;
+    if(tipoAtual==='ambos'){ gerarExtratoGeralPDF(dataDe, dataAte); }
+    else {
+      const categoria = document.getElementById('exCategoria').value || null;
+      gerarExtratoCategoriaPDF(tipoAtual, categoria, dataDe, dataAte);
+    }
+    closeModal();
+  });
+}
+
+function gerarExtratoGeralPDF(dataDe, dataAte){
   if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
-  const lista = state.lancamentos.filter(l=>l.origem!=='transferencia' && (l.status==='pago'||l.status==='recebido')).sort((a,b)=>(a.dataPagamento||'').localeCompare(b.dataPagamento||''));
+  let lista = state.lancamentos.filter(l=>l.origem!=='transferencia' && (l.status==='pago'||l.status==='recebido'));
+  if(dataDe) lista = lista.filter(l=>(l.dataPagamento||'')>=dataDe);
+  if(dataAte) lista = lista.filter(l=>(l.dataPagamento||'')<=dataAte);
+  lista.sort((a,b)=>(a.dataPagamento||'').localeCompare(b.dataPagamento||''));
   if(!lista.length){ showToast('Nenhum lançamento realizado ainda'); return; }
 
   const { jsPDF } = window.jspdf;
@@ -3785,58 +3849,35 @@ function viewCategorias(){
   `;
 }
 
-const GRUPOS_CONTABEIS_DESPESA = {
-  custos: { numero:'4.1', nome:'Custos' },
-  pessoal: { numero:'4.2', nome:'Despesas com Pessoal' },
-  administrativas: { numero:'4.3', nome:'Despesas Administrativas' },
-  comerciais: { numero:'4.4', nome:'Despesas Comerciais' },
-  financeiras: { numero:'4.5', nome:'Despesas Financeiras' },
-  outras: { numero:'4.9', nome:'Outras Despesas' }
-};
-const GRUPOS_CONTABEIS_RECEITA = {
-  operacional: { numero:'3.1', nome:'Receita Operacional (Vendas)' },
-  servicos: { numero:'3.2', nome:'Receita de Serviços' },
-  outras: { numero:'3.9', nome:'Outras Receitas' }
-};
-function grupoContabilPadrao(nome, tipo){
-  const n = (nome||'').toLowerCase();
-  if(tipo==='entrada'){
-    if(/servi[çc]|consultoria/.test(n)) return 'servicos';
-    if(/outra|divers/.test(n)) return 'outras';
-    return 'operacional';
-  }
-  if(/insumo|mat[eé]ria|mercadoria|fornecedor/.test(n)) return 'custos';
-  if(/sal[aá]rio|colaborador|funcion|comiss|pessoal/.test(n)) return 'pessoal';
-  if(/aluguel|utilidade|[aá]gua|luz|energia|internet|telefone|administrat/.test(n)) return 'administrativas';
-  if(/marketing|propaganda|comercial|venda/.test(n)) return 'comerciais';
-  if(/juro|tarifa|banc[aá]rio|financeir/.test(n)) return 'financeiras';
-  return 'outras';
-}
-function codigoContabilCategoria(categoria, tipo, indice){
-  const grupos = tipo==='entrada' ? GRUPOS_CONTABEIS_RECEITA : GRUPOS_CONTABEIS_DESPESA;
-  const grupoKey = categoria.grupoContabil || grupoContabilPadrao(categoria.nome, tipo);
-  const info = grupos[grupoKey] || grupos.outras;
-  return `${info.numero}.${String(indice).padStart(3,'0')}`;
+function totalCategoriaTodoHistorico(categoria, tipo){
+  const statusOk = tipo==='entrada' ? 'recebido' : 'pago';
+  let total = 0, qtd = 0;
+  state.lancamentos.forEach(l=>{
+    if(l.categoria===categoria && l.tipo===tipo && l.status===statusOk){ total += l.valor; qtd++; }
+  });
+  return { total, qtd };
 }
 
 function renderCategoriaPanel(tipo){
-  const lista = listaCategorias(tipo);
-  const grupos = tipo==='entrada' ? GRUPOS_CONTABEIS_RECEITA : GRUPOS_CONTABEIS_DESPESA;
+  const lista = [...listaCategorias(tipo)].sort((a,b)=>{
+    const ta = totalCategoriaTodoHistorico(a.nome, tipo).total;
+    const tb = totalCategoriaTodoHistorico(b.nome, tipo).total;
+    return tb - ta;
+  });
   return `
     <div class="panel">
-      <div class="panel-head"><h2>Categorias de ${tipo==='entrada'?'receita':'despesa'}</h2><span style="font-size:12px;color:var(--blue-accent);cursor:pointer;" id="btnExportarExtratoGeral">📄 Exportar extrato geral</span></div>
+      <div class="panel-head"><h2>Categorias de ${tipo==='entrada'?'receita':'despesa'}</h2><span style="font-size:12px;color:var(--blue-accent);cursor:pointer;" id="btnAbrirExportarExtrato">📄 Exportar extrato</span></div>
       <div class="panel-body" style="padding:14px;">
-        ${lista.length ? lista.map((c,i)=>`
+        ${lista.length ? lista.map(c=>{
+          const info = totalCategoriaTodoHistorico(c.nome, tipo);
+          return `
           <div class="categoria-item">
             <div class="categoria-head">
-              <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;">
-                <span class="codigo-contabil-badge">${codigoContabilCategoria(c, tipo, i+1)}</span>
+              <div style="display:flex;flex-direction:column;">
                 <span class="nome" data-action="ver-lancamentos-categoria" data-tipo="${tipo}" data-cat="${escapeHTML(c.nome)}" style="cursor:pointer;text-decoration:underline;text-decoration-color:var(--line);">${escapeHTML(c.nome)}</span>
+                <span style="font-size:11px;color:var(--text-soft);margin-top:2px;">${info.qtd} lançamento(s) · ${brl(info.total)}</span>
               </div>
               <div class="actions" style="display:flex;align-items:center;gap:8px;">
-                <select class="grupo-contabil-select" data-cat="${escapeHTML(c.nome)}" data-tipo="${tipo}" data-id="${c.id}" style="font-size:11px;padding:4px 6px;">
-                  ${Object.entries(grupos).map(([key,g])=>`<option value="${key}" ${(c.grupoContabil||grupoContabilPadrao(c.nome,tipo))===key?'selected':''}>${g.numero} ${g.nome}</option>`).join('')}
-                </select>
                 <button class="icon-btn" data-action="editar-categoria" data-tipo="${tipo}" data-id="${c.id}" title="Editar">✎</button>
                 <button class="icon-btn" data-action="excluir-categoria" data-tipo="${tipo}" data-id="${c.id}" title="Excluir">✕</button>
               </div>
@@ -3854,7 +3895,7 @@ function renderCategoriaPanel(tipo){
               <div class="add-sub-row"><button data-action="nova-subcategoria" data-tipo="${tipo}" data-cat="${c.id}">+ Adicionar subcategoria</button></div>
             </div>
           </div>
-        `).join('') : `<div class="empty">Nenhuma categoria cadastrada ainda.</div>`}
+        `;}).join('') : `<div class="empty">Nenhuma categoria cadastrada ainda.</div>`}
       </div>
       <div style="padding:0 14px 16px;"><button class="btn" data-action="nova-categoria" data-tipo="${tipo}">+ Nova categoria</button></div>
     </div>
@@ -4633,13 +4674,7 @@ function attachViewHandlers(){
   if(categoriaToggle){
     let tipoCatAtivo = categoriaTipoAtivo;
     const bindCategoriaPanel = ()=>{
-      document.getElementById('btnExportarExtratoGeral')?.addEventListener('click', ()=>gerarExtratoGeralPDF());
-      document.querySelectorAll('.grupo-contabil-select').forEach(sel=>{
-        sel.addEventListener('change', ()=>{
-          const cat = listaCategorias(sel.dataset.tipo).find(c=>c.id===sel.dataset.id);
-          if(cat){ cat.grupoContabil = sel.value; persist(); render(); showToast('Categoria reclassificada'); }
-        });
-      });
+      document.getElementById('btnAbrirExportarExtrato')?.addEventListener('click', ()=>openExportarExtratoModal(tipoCatAtivo));
       document.querySelectorAll('[data-action="ver-lancamentos-categoria"]').forEach(el=>{
         el.addEventListener('click', ()=>{
           categoriaLancamentosAtual = { tipo: el.dataset.tipo, categoria: el.dataset.cat };
