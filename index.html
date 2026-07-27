@@ -426,6 +426,7 @@
       <div class="nav-item" data-view="precificacao" title="Simulador de Precificação"><span class="nav-dot"></span><span class="nav-abbr">PR</span><span class="nav-label">Precificação</span></div>
       <div class="nav-item" data-view="contratos" title="Central de Contratos"><span class="nav-dot"></span><span class="nav-abbr">CN</span><span class="nav-label">Contratos</span></div>
       <div class="nav-item" data-view="metas" title="Metas de Reserva"><span class="nav-dot"></span><span class="nav-abbr">MT</span><span class="nav-label">Metas de Reserva</span></div>
+      <div class="nav-item" data-view="simulacao" title="Simulação &quot;E Se&quot;"><span class="nav-dot"></span><span class="nav-abbr">SE</span><span class="nav-label">Simulação "E Se"</span></div>
       <div class="nav-item" data-view="auditoria" title="Log de Auditoria"><span class="nav-dot"></span><span class="nav-abbr">LG</span><span class="nav-label">Log de Auditoria</span></div>
       <div class="nav-item" data-view="comissoes" title="Comissões"><span class="nav-dot"></span><span class="nav-abbr">CM</span><span class="nav-label">Comissões</span></div>
       <div class="nav-item" data-view="ativos" title="Ativos Patrimoniais"><span class="nav-dot"></span><span class="nav-abbr">AP</span><span class="nav-label">Ativos Patrimoniais</span></div>
@@ -465,6 +466,7 @@
       <div class="more-item" data-view="precificacao"><span class="more-icon">🧮</span>Precificação</div>
       <div class="more-item" data-view="contratos"><span class="more-icon">📑</span>Contratos</div>
       <div class="more-item" data-view="metas"><span class="more-icon">🎯</span>Metas de Reserva</div>
+      <div class="more-item" data-view="simulacao"><span class="more-icon">🔮</span>Simulação "E Se"</div>
       <div class="more-item" data-view="auditoria"><span class="more-icon">🕵️</span>Log de Auditoria</div>
       <div class="more-item" data-view="comissoes"><span class="more-icon">🤝</span>Comissões</div>
       <div class="more-item" data-view="ativos"><span class="more-icon">📦</span>Ativos Patrimoniais</div>
@@ -618,6 +620,7 @@ function aplicarMigracoes(s){
   if(!s.logAuditoria) s.logAuditoria = [];
   if(!s.contratos) s.contratos = [];
   if(!s.metasReserva) s.metasReserva = [];
+  if(!s.simulacaoAtual) s.simulacaoAtual = [];
   return s;
 }
 async function carregarDados(){
@@ -666,6 +669,7 @@ function showToast(msg){
 /* ---------------- Navegação ---------------- */
 let currentView = 'dashboard';
 let extratoContaId = null;
+let relatorioAtivo = 'dre';
 let lancamentosBuscaPreenchida = '';
 let ativoPatrimonialDetalheId = null;
 let faturaCartaoId = null;
@@ -736,12 +740,14 @@ function render(){
   else if(currentView==='investimentos') main.innerHTML = viewInvestimentos();
   else if(currentView==='ativos-inv') main.innerHTML = viewAtivosInvestimento(invContaId);
   else if(currentView==='relatorios') main.innerHTML = viewRelatorios();
+  else if(currentView==='relatorio-detalhe') main.innerHTML = viewRelatorioDetalhe();
   else if(currentView==='categorias') main.innerHTML = viewCategorias();
   else if(currentView==='fornecedores') main.innerHTML = viewFornecedores();
   else if(currentView==='recorrencias') main.innerHTML = viewRecorrencias();
   else if(currentView==='precificacao') main.innerHTML = viewPrecificacao();
   else if(currentView==='contratos') main.innerHTML = viewContratos();
   else if(currentView==='metas') main.innerHTML = viewMetasReserva();
+  else if(currentView==='simulacao') main.innerHTML = viewSimulacao();
   else if(currentView==='auditoria') main.innerHTML = viewLogAuditoria();
   else if(currentView==='comissoes') main.innerHTML = viewComissoes();
   else if(currentView==='ativos') main.innerHTML = viewAtivosPatrimoniais();
@@ -1618,6 +1624,135 @@ function projecaoMultiMesHTML(mesesAFrente, cenario){
   `;
 }
 
+function calcularProjecaoSimulacao(mesesAFrente, itensHipoteticos){
+  const hoje = new Date();
+  let saldoBase = totaisRealizados().saldo;
+  let saldoSim = saldoBase;
+  const meses = [];
+  for(let i=0;i<mesesAFrente;i++){
+    const d = new Date(hoje.getFullYear(), hoje.getMonth()+i, 1);
+    const deMes = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0,10);
+    const ateMes = new Date(d.getFullYear(), d.getMonth()+1, 0).toISOString().slice(0,10);
+    const pendentesReceita = state.lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pendente'&&l.dataVencimento>=deMes&&l.dataVencimento<=ateMes).reduce((s,l)=>s+l.valor,0);
+    const pendentesDespesa = state.lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente'&&l.dataVencimento>=deMes&&l.dataVencimento<=ateMes).reduce((s,l)=>s+l.valor,0);
+    let recorrenciaReceita = 0, recorrenciaDespesa = 0;
+    if(i>0){
+      recorrenciaReceita = (state.recorrencias||[]).filter(r=>r.ativo&&r.tipo==='entrada').reduce((s,r)=>s+r.valor,0);
+      recorrenciaDespesa = (state.recorrencias||[]).filter(r=>r.ativo&&r.tipo==='saida').reduce((s,r)=>s+r.valor,0);
+    }
+    const movBase = (pendentesReceita+recorrenciaReceita) - (pendentesDespesa+recorrenciaDespesa);
+    saldoBase += movBase;
+
+    let hipReceita = 0, hipDespesa = 0;
+    itensHipoteticos.forEach(it=>{
+      const aplica = it.recorrente ? (it.data<=ateMes) : (it.data>=deMes && it.data<=ateMes);
+      if(aplica){ if(it.tipo==='entrada') hipReceita += it.valor; else hipDespesa += it.valor; }
+    });
+    saldoSim += movBase + (hipReceita - hipDespesa);
+
+    meses.push({ label: d.toLocaleDateString('pt-BR',{month:'short',year:'2-digit'}), saldoBase, saldoSim, diferenca: saldoSim-saldoBase });
+  }
+  return meses;
+}
+
+function viewSimulacao(){
+  const itens = state.simulacaoAtual||[];
+  return `
+    <div class="topbar">
+      <div><h1>Simulação "E Se"</h1><p>Teste o impacto de uma decisão no seu caixa dos próximos meses, sem lançar nada de verdade</p></div>
+      <button class="btn" id="btnAddItemSimulacao">+ Adicionar item hipotético</button>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Itens da simulação</h2>${itens.length ? `<span style="font-size:12px;color:var(--blue-accent);cursor:pointer;" id="btnLimparSimulacao">Limpar tudo</span>` : ''}</div>
+      <div class="panel-body">
+        ${itens.length ? itens.map(it=>`
+          <div class="ledger-row" data-id="${it.id}" style="grid-template-columns:14px 1fr 110px auto;">
+            <span class="dot ${it.tipo}"></span>
+            <div class="desc-cell"><div>${escapeHTML(it.descricao)}</div><div class="cat">${it.recorrente ? 'Todo mês a partir de '+fmtDate(it.data) : fmtDate(it.data)}</div></div>
+            <span class="mono" style="font-weight:600;color:${it.tipo==='entrada'?'var(--success)':'var(--danger)'}">${it.tipo==='entrada'?'+':'-'} ${brl(it.valor)}</span>
+            <button class="icon-btn" data-action="remover-item-simulacao" data-id="${it.id}" title="Remover">✕</button>
+          </div>
+        `).join('') : `<div class="empty">Nenhum item ainda. Adicione uma compra, contratação ou receita hipotética pra ver o impacto no caixa.</div>`}
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Impacto no caixa — próximos meses</h2></div>
+      <div class="panel-body" id="resultadoSimulacao" style="padding:16px 20px;">
+        ${resultadoSimulacaoHTML(itens)}
+      </div>
+    </div>
+  `;
+}
+
+function resultadoSimulacaoHTML(itens){
+  if(!itens.length) return `<div class="empty">Adicione ao menos um item pra ver a comparação.</div>`;
+  const meses = calcularProjecaoSimulacao(6, itens);
+  return `
+    <div class="ledger-row head" style="grid-template-columns:1fr 130px 130px 120px;">
+      <span>Mês</span><span>Saldo sem a decisão</span><span>Saldo com a decisão</span><span>Diferença</span>
+    </div>
+    ${meses.map(m=>`
+      <div class="ledger-row" style="grid-template-columns:1fr 130px 130px 120px;">
+        <span style="text-transform:capitalize;">${m.label}</span>
+        <span class="mono" style="font-size:12.5px;color:var(--text-soft);">${brl(m.saldoBase)}</span>
+        <span class="mono" style="font-weight:600;${m.saldoSim<0?'color:var(--danger);':''}">${brl(m.saldoSim)}</span>
+        <span class="mono" style="font-size:12.5px;color:${m.diferenca>=0?'var(--success)':'var(--danger)'}">${m.diferenca>=0?'+':''}${brl(m.diferenca)}</span>
+      </div>
+    `).join('')}
+    ${meses.some(m=>m.saldoSim<0) ? `<div class="note" style="border-color:var(--danger);margin-top:10px;">⚠️ Com essa decisão, o saldo projetado fica negativo em algum mês — reveja antes de seguir.</div>` : ''}
+  `;
+}
+
+function openItemSimulacaoModal(){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Adicionar item hipotético</h3>
+    <div class="field"><label>Descrição</label><input type="text" id="simDescricao" placeholder="Ex: Comprar forno novo, contratar funcionário..."></div>
+    <div class="field-row">
+      <div class="field"><label>Tipo</label>
+        <div class="toggle-row" id="simTipoToggle">
+          <button type="button" data-tipo="saida" class="active">Despesa</button>
+          <button type="button" data-tipo="entrada">Receita</button>
+        </div>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Valor (R$)</label><input type="text" inputmode="decimal" id="simValor" placeholder="0,00"></div>
+      <div class="field"><label>Data</label><input type="date" id="simData" value="${todayISO()}"></div>
+    </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:500;"><input type="checkbox" id="simRecorrente" style="width:auto;"> Repete todo mês a partir dessa data (ex: novo salário, nova assinatura)</label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarItemSimulacao">Adicionar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  let tipoAtual = 'saida';
+  document.getElementById('simTipoToggle').querySelectorAll('button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.getElementById('simTipoToggle').querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      tipoAtual = btn.dataset.tipo;
+    });
+  });
+  document.getElementById('btnSalvarItemSimulacao').addEventListener('click', ()=>{
+    const descricao = document.getElementById('simDescricao').value.trim();
+    const valor = numBR(document.getElementById('simValor').value);
+    if(!descricao || isNaN(valor) || valor<=0){ showToast('Preencha descrição e valor válido'); return; }
+    if(!state.simulacaoAtual) state.simulacaoAtual = [];
+    state.simulacaoAtual.push({
+      id: uid(), descricao, tipo: tipoAtual, valor,
+      data: document.getElementById('simData').value || todayISO(),
+      recorrente: document.getElementById('simRecorrente').checked
+    });
+    persist(); closeModal(); render();
+    showToast('Item adicionado à simulação');
+  });
+}
+
 function gerarExtratoPDF(contaId, dataDe, dataAte){
   const conta = state.contas.find(c=>c.id===contaId);
   if(!conta) return;
@@ -2102,20 +2237,46 @@ function rowAtivoHTML(a){
 }
 
 function viewRelatorios(){
-  const hoje = new Date();
-  const anoAtual = hoje.getFullYear();
-  const mesAtual = String(hoje.getMonth()+1).padStart(2,'0');
+  const cards = [
+    { id:'mensal', icone:'📅', nome:'Super Relatório Mensal', desc:'Tudo sobre o mês — DRE, indicadores, orçamento, alertas — num relatório só' },
+    { id:'dre', icone:'📊', nome:'DRE', desc:'Demonstrativo de resultado, com análise vertical e horizontal' },
+    { id:'balanco', icone:'⚖️', nome:'Balanço Patrimonial', desc:'Ativos, passivos e patrimônio líquido' },
+    { id:'indicadores', icone:'📈', nome:'Indicadores Financeiros', desc:'Margem, liquidez, ticket médio, ponto de equilíbrio e mais' },
+    { id:'produto', icone:'🍪', nome:'Rentabilidade por Produto', desc:'Receita, custo e margem por produto ou linha' },
+    { id:'mei', icone:'🧾', nome:'Declaração MEI', desc:'Números prontos pra DASN-SIMEI' },
+  ];
   return `
     <div class="topbar">
-      <div><h1>Relatórios</h1><p>DRE e Balanço Patrimonial gerados a partir dos lançamentos realizados</p></div>
+      <div><h1>Central de Relatórios</h1><p>Escolha o relatório que você quer ver</p></div>
+    </div>
+    <div class="more-drawer-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;">
+      ${cards.map(c=>`
+        <div class="more-item" data-action="abrir-relatorio" data-relatorio="${c.id}" style="text-align:left;align-items:flex-start;padding:18px;cursor:pointer;">
+          <span class="more-icon" style="font-size:26px;">${c.icone}</span>
+          <div style="font-weight:600;font-size:13.5px;margin-top:8px;">${c.nome}</div>
+          <div style="font-size:11.5px;color:var(--text-soft);margin-top:4px;line-height:1.4;">${c.desc}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function viewRelatorioDetalhe(){
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="relatorios">← Central de Relatórios</span>
+        <h1 style="margin-top:6px;">Relatórios</h1>
+      </div>
       <button class="btn ghost" id="btnExportarRelatorioPDF">📄 Exportar PDF</button>
     </div>
     <div class="toggle-row" id="reportToggle">
-      <button class="active" data-report="dre">DRE</button>
+      <button data-report="dre">DRE</button>
       <button data-report="balanco">Balanço Patrimonial</button>
       <button data-report="mei">Declaração MEI</button>
       <button data-report="indicadores">Indicadores</button>
       <button data-report="produto">Por Produto</button>
+      <button data-report="mensal">Super Mensal</button>
     </div>
     <div class="panel" id="reportPanel"></div>
   `;
@@ -2289,6 +2450,26 @@ function renderDRE(periodo){
   const receitaLiquida = totalReceitas - totalCancelados;
   const resultado = receitaLiquida - totalDespesas;
 
+  // Análise horizontal — compara com o período imediatamente anterior, de mesma duração
+  const diasPeriodo = Math.round((new Date(ate)-new Date(de))/86400000)+1;
+  const deAnterior = new Date(new Date(de).getTime() - diasPeriodo*86400000).toISOString().slice(0,10);
+  const ateAnterior = new Date(new Date(de).getTime() - 86400000).toISOString().slice(0,10);
+  const listaAnterior = state.lancamentos.filter(l=>{
+    const ref = l.dataPagamento;
+    return ref && ref>=deAnterior && ref<=ateAnterior && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia';
+  });
+  const totalReceitasAnt = listaAnterior.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+l.valor,0);
+  const totalDespesasAnt = listaAnterior.filter(l=>l.tipo==='saida').reduce((s,l)=>s+l.valor,0);
+  const resultadoAnt = totalReceitasAnt - totalDespesasAnt;
+
+  const pctVertical = (v)=> totalReceitas>0 ? ` <span style="color:var(--text-soft);font-size:11px;">(${(v/totalReceitas*100).toFixed(1)}%)</span>` : '';
+  const variacaoHTML = (atual, anterior)=>{
+    if(anterior===0) return atual===0 ? '' : ` <span style="font-size:11px;color:var(--text-soft);">(sem período anterior pra comparar)</span>`;
+    const pct = ((atual-anterior)/Math.abs(anterior))*100;
+    const cor = pct>=0 ? 'var(--success)' : 'var(--danger)';
+    return ` <span style="font-size:11px;color:${cor};">(${pct>=0?'+':''}${pct.toFixed(1)}% vs período anterior)</span>`;
+  };
+
   return `
     <div class="report-controls">
       <select id="drePeriodo">
@@ -2298,19 +2479,128 @@ function renderDRE(periodo){
       </select>
       ${periodo==='custom' ? `<input type="date" id="dreDe" value="${de}"> <span style="color:var(--text-soft);font-size:12px;">até</span> <input type="date" id="dreAte" value="${ate}">` : `<span style="font-size:12.5px;color:var(--text-soft);">${label}: ${fmtDate(de)} até ${fmtDate(ate)}</span>`}
     </div>
+    <div class="note" style="margin-top:0;">Análise vertical: % de cada linha sobre o total de receitas. Análise horizontal: variação comparada ao período anterior de mesma duração (${fmtDate(deAnterior)} a ${fmtDate(ateAnterior)}).</div>
     <div class="report-block">
       <div class="report-title">Receita Operacional</div>
-      ${Object.keys(receitas).length ? Object.entries(receitas).map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">${brl(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma receita no período</span><span class="v">${brl(0)}</span></div>`}
-      <div class="report-line total"><span>(=) Total de Receitas</span><span class="v">${brl(totalReceitas)}</span></div>
+      ${Object.keys(receitas).length ? Object.entries(receitas).map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">${brl(v)}${pctVertical(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma receita no período</span><span class="v">${brl(0)}</span></div>`}
+      <div class="report-line total"><span>(=) Total de Receitas</span><span class="v">${brl(totalReceitas)}${variacaoHTML(totalReceitas, totalReceitasAnt)}</span></div>
       <div class="report-line sub"><span>(-) Pedidos Cancelados${canceladosVK.length?' ('+canceladosVK.length+')':''}</span><span class="v">(${brl(totalCancelados)})</span></div>
       <div class="report-line total"><span>(=) Receita Líquida</span><span class="v">${brl(receitaLiquida)}</span></div>
 
       <div class="report-title">Despesas Operacionais</div>
-      ${Object.keys(despesas).length ? Object.entries(despesas).map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">(${brl(v)})</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma despesa no período</span><span class="v">${brl(0)}</span></div>`}
-      <div class="report-line total"><span>(=) Total de Despesas</span><span class="v">(${brl(totalDespesas)})</span></div>
+      ${Object.keys(despesas).length ? Object.entries(despesas).map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">(${brl(v)})${pctVertical(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma despesa no período</span><span class="v">${brl(0)}</span></div>`}
+      <div class="report-line total"><span>(=) Total de Despesas</span><span class="v">(${brl(totalDespesas)})${variacaoHTML(totalDespesas, totalDespesasAnt)}</span></div>
 
-      <div class="report-line result"><span>${resultado>=0?'Lucro':'Prejuízo'} do Período</span><span class="v" style="color:${resultado>=0?'var(--success)':'var(--danger)'}">${brl(resultado)}</span></div>
+      <div class="report-line result"><span>${resultado>=0?'Lucro':'Prejuízo'} do Período</span><span class="v" style="color:${resultado>=0?'var(--success)':'var(--danger)'}">${brl(resultado)}${variacaoHTML(resultado, resultadoAnt)}</span></div>
     </div>
+  `;
+}
+
+function renderSuperRelatorioMensal(mesRef){
+  const [ano, mes] = mesRef.split('-').map(Number);
+  const de = `${mesRef}-01`;
+  const ultimoDia = new Date(ano, mes, 0).getDate();
+  const ate = `${mesRef}-${String(ultimoDia).padStart(2,'0')}`;
+
+  const mesAnteriorDate = new Date(ano, mes-2, 1);
+  const mesAnteriorRef = `${mesAnteriorDate.getFullYear()}-${String(mesAnteriorDate.getMonth()+1).padStart(2,'0')}`;
+  const deAnt = `${mesAnteriorRef}-01`;
+  const ultimoDiaAnt = new Date(mesAnteriorDate.getFullYear(), mesAnteriorDate.getMonth()+1, 0).getDate();
+  const ateAnt = `${mesAnteriorRef}-${String(ultimoDiaAnt).padStart(2,'0')}`;
+
+  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
+  const realizadosAnt = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=deAnt && l.dataPagamento<=ateAnt && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
+
+  const totalReceitas = realizados.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+l.valor,0);
+  const totalDespesas = realizados.filter(l=>l.tipo==='saida').reduce((s,l)=>s+l.valor,0);
+  const lucro = totalReceitas-totalDespesas;
+  const margem = totalReceitas>0 ? (lucro/totalReceitas*100) : 0;
+
+  const totalReceitasAnt = realizadosAnt.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+l.valor,0);
+  const totalDespesasAnt = realizadosAnt.filter(l=>l.tipo==='saida').reduce((s,l)=>s+l.valor,0);
+
+  const variacao = (atual, anterior)=> anterior===0 ? null : ((atual-anterior)/Math.abs(anterior))*100;
+  const varReceita = variacao(totalReceitas, totalReceitasAnt);
+  const varDespesa = variacao(totalDespesas, totalDespesasAnt);
+  const varHTML = (v, positivoEhBom)=>{
+    if(v===null) return '';
+    const bom = positivoEhBom ? v>=0 : v<=0;
+    return ` <span style="font-size:11px;color:${bom?'var(--success)':'var(--danger)'}">(${v>=0?'+':''}${v.toFixed(1)}% vs mês anterior)</span>`;
+  };
+
+  const porCategoriaDespesa = {};
+  realizados.filter(l=>l.tipo==='saida').forEach(l=>{ porCategoriaDespesa[l.categoria] = (porCategoriaDespesa[l.categoria]||0)+l.valor; });
+  const topDespesas = Object.entries(porCategoriaDespesa).sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+  const receitasCount = realizados.filter(l=>l.tipo==='entrada').length;
+  const ticketMedio = receitasCount>0 ? totalReceitas/receitasCount : 0;
+
+  const saldoCaixa = totaisRealizados().saldo;
+  const aReceberPendente = state.lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pendente').reduce((s,l)=>s+l.valor,0);
+  const aPagarPendente = state.lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente').reduce((s,l)=>s+l.valor,0);
+  const liquidez = aPagarPendente>0 ? (saldoCaixa+aReceberPendente)/aPagarPendente : null;
+
+  const orc = state.orcamentoCategorias||{};
+  const orcadoLinhas = Object.entries(orc).map(([cat,valorOrcado])=>{
+    const gasto = gastoCategoriaNoPeriodo(cat, de, ate);
+    return { cat, gasto, valorOrcado, pct: valorOrcado>0?Math.round(gasto/valorOrcado*100):0 };
+  });
+
+  const hoje = todayISO();
+  const atrasadas = state.lancamentos.filter(l=>l.status==='pendente'&&l.dataVencimento<hoje);
+  const contratosVenc = contratosVencendoResumo();
+
+  const porProduto = {};
+  realizados.forEach(l=>{
+    const tag = l.produtoTag || 'Não classificado';
+    if(!porProduto[tag]) porProduto[tag] = {receita:0,custo:0};
+    if(l.tipo==='entrada') porProduto[tag].receita+=l.valor; else porProduto[tag].custo+=l.valor;
+  });
+  const produtosOrdenados = Object.entries(porProduto).map(([tag,v])=>({tag,...v,margem:v.receita-v.custo})).sort((a,b)=>b.receita-a.receita).slice(0,5);
+
+  const nomeMes = new Date(ano, mes-1, 1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+
+  return `
+    <div class="report-controls">
+      <input type="month" id="mensalMesRef" value="${mesRef}">
+      <span style="font-size:12.5px;color:var(--text-soft);text-transform:capitalize;">${nomeMes}</span>
+    </div>
+
+    <div class="report-block">
+      <div class="report-title">Resumo do mês</div>
+      <div class="report-line"><span>Receita Total</span><span class="v">${brl(totalReceitas)}${varHTML(varReceita,true)}</span></div>
+      <div class="report-line"><span>Despesa Total</span><span class="v">${brl(totalDespesas)}${varHTML(varDespesa,false)}</span></div>
+      <div class="report-line total"><span>${lucro>=0?'Lucro':'Prejuízo'} do mês</span><span class="v" style="color:${lucro>=0?'var(--success)':'var(--danger)'}">${brl(lucro)}</span></div>
+      <div class="report-line"><span>Margem de lucro</span><span class="v">${margem.toFixed(1)}%</span></div>
+      <div class="report-line"><span>Ticket médio</span><span class="v">${brl(ticketMedio)}</span></div>
+      <div class="report-line"><span>Liquidez corrente</span><span class="v">${liquidez===null?'—':liquidez.toFixed(2)}</span></div>
+    </div>
+
+    ${(atrasadas.length || contratosVenc.vencidos.length || contratosVenc.vencendo.length) ? `
+    <div class="report-block">
+      <div class="report-title">Alertas pra revisar no fechamento</div>
+      ${atrasadas.length ? `<div class="report-line"><span>⚠️ Contas atrasadas</span><span class="v" style="color:var(--danger);">${atrasadas.length} — ${brl(atrasadas.reduce((s,l)=>s+l.valor,0))}</span></div>` : ''}
+      ${contratosVenc.vencidos.length ? `<div class="report-line"><span>📑 Contratos vencidos</span><span class="v" style="color:var(--danger);">${contratosVenc.vencidos.length}</span></div>` : ''}
+      ${contratosVenc.vencendo.length ? `<div class="report-line"><span>📑 Contratos vencendo em 30 dias</span><span class="v" style="color:var(--warn);">${contratosVenc.vencendo.length}</span></div>` : ''}
+    </div>` : ''}
+
+    ${topDespesas.length ? `
+    <div class="report-block">
+      <div class="report-title">Maiores despesas do mês</div>
+      ${topDespesas.map(([cat,v])=>`<div class="report-line sub"><span>${escapeHTML(cat)}</span><span class="v">${brl(v)}</span></div>`).join('')}
+    </div>` : ''}
+
+    ${orcadoLinhas.length ? `
+    <div class="report-block">
+      <div class="report-title">Orçado x Realizado</div>
+      ${orcadoLinhas.map(l=>`<div class="report-line sub"><span>${escapeHTML(l.cat)}</span><span class="v" style="color:${l.pct>=100?'var(--danger)':l.pct>=80?'var(--warn)':'inherit'}">${brl(l.gasto)} / ${brl(l.valorOrcado)} (${l.pct}%)</span></div>`).join('')}
+    </div>` : ''}
+
+    ${produtosOrdenados.length ? `
+    <div class="report-block">
+      <div class="report-title">Rentabilidade por produto</div>
+      ${produtosOrdenados.map(p=>`<div class="report-line sub"><span>${escapeHTML(p.tag)}</span><span class="v">receita ${brl(p.receita)} · margem ${brl(p.margem)}</span></div>`).join('')}
+    </div>` : ''}
   `;
 }
 
@@ -3582,14 +3872,16 @@ function attachViewHandlers(){
   // Relatórios
   const reportToggle = document.getElementById('reportToggle');
   if(reportToggle){
-    let activeReport = 'dre';
     let meiAnoAtual = new Date().getFullYear();
+    let mensalMesRef = todayISO().slice(0,7);
     const paint = ()=>{
+      reportToggle.querySelectorAll('button').forEach(b=>b.classList.toggle('active', b.dataset.report===relatorioAtivo));
       document.getElementById('reportPanel').innerHTML =
-        activeReport==='dre' ? renderDRE('mes') :
-        activeReport==='balanco' ? renderBalanco() :
-        activeReport==='mei' ? renderMEI(meiAnoAtual) :
-        activeReport==='produto' ? renderRentabilidadeProduto('mes') :
+        relatorioAtivo==='dre' ? renderDRE('mes') :
+        relatorioAtivo==='balanco' ? renderBalanco() :
+        relatorioAtivo==='mei' ? renderMEI(meiAnoAtual) :
+        relatorioAtivo==='produto' ? renderRentabilidadeProduto('mes') :
+        relatorioAtivo==='mensal' ? renderSuperRelatorioMensal(mensalMesRef) :
         renderIndicadores('mes');
       bindReportInner();
     };
@@ -3641,21 +3933,32 @@ function attachViewHandlers(){
       const rpDe = document.getElementById('rpDe'), rpAte = document.getElementById('rpAte');
       if(rpDe) rpDe.addEventListener('change', ()=>{ document.getElementById('reportPanel').innerHTML = renderRentabilidadeProduto('custom'); bindReportInner(); });
       if(rpAte) rpAte.addEventListener('change', ()=>{ document.getElementById('reportPanel').innerHTML = renderRentabilidadeProduto('custom'); bindReportInner(); });
+      const mensalMes = document.getElementById('mensalMesRef');
+      if(mensalMes) mensalMes.addEventListener('change', ()=>{
+        mensalMesRef = mensalMes.value;
+        document.getElementById('reportPanel').innerHTML = renderSuperRelatorioMensal(mensalMesRef);
+        bindReportInner();
+      });
     };
     reportToggle.querySelectorAll('button').forEach(btn=>{
       btn.addEventListener('click', ()=>{
-        reportToggle.querySelectorAll('button').forEach(b=>b.classList.remove('active'));
-        btn.classList.add('active');
-        activeReport = btn.dataset.report;
+        relatorioAtivo = btn.dataset.report;
         paint();
       });
     });
     paint();
     document.getElementById('btnExportarRelatorioPDF')?.addEventListener('click', ()=>{
-      const titulos = { dre: 'DRE (Demonstrativo de Resultado)', balanco: 'Balanço Patrimonial', mei: `Declaração MEI — Ano ${meiAnoAtual}`, indicadores: 'Indicadores Financeiros', produto: 'Rentabilidade por Produto' };
-      exportarRelatorioPDF(titulos[activeReport]);
+      const titulos = { dre: 'DRE (Demonstrativo de Resultado)', balanco: 'Balanço Patrimonial', mei: `Declaração MEI — Ano ${meiAnoAtual}`, indicadores: 'Indicadores Financeiros', produto: 'Rentabilidade por Produto', mensal: `Super Relatório Mensal — ${mensalMesRef}` };
+      exportarRelatorioPDF(titulos[relatorioAtivo]);
     });
   }
+  document.querySelectorAll('[data-action="abrir-relatorio"]').forEach(card=>{
+    card.addEventListener('click', ()=>{
+      relatorioAtivo = card.dataset.relatorio;
+      currentView = 'relatorio-detalhe';
+      render();
+    });
+  });
 
   // Categorias
   // Recorrências
@@ -3714,6 +4017,20 @@ function attachViewHandlers(){
     });
     calcular();
   }
+
+  // Simulação "E Se"
+  document.getElementById('btnAddItemSimulacao')?.addEventListener('click', ()=>openItemSimulacaoModal());
+  document.getElementById('btnLimparSimulacao')?.addEventListener('click', ()=>{
+    if(!confirm('Remover todos os itens da simulação?')) return;
+    state.simulacaoAtual = [];
+    persist(); render(); showToast('Simulação limpa');
+  });
+  document.querySelectorAll('[data-action="remover-item-simulacao"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      state.simulacaoAtual = (state.simulacaoAtual||[]).filter(it=>it.id!==btn.dataset.id);
+      persist(); render();
+    });
+  });
 
   // Projeção multi-mês (Fluxo de Caixa)
   const projecaoPanel = document.getElementById('projecaoMultiMesPanel');
