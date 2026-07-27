@@ -1703,7 +1703,7 @@ function viewContas(){
   const total = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
   return `
     <div class="topbar">
-      <div><h1>Contas Bancárias</h1><p>Contas usadas para representar onde o dinheiro da empresa está — bancos, caixa físico, etc.</p></div>
+      <div><h1>Contas Bancárias</h1></div>
       <div style="display:flex;gap:10px;align-items:center;">
         ${dropdownNovoHTML()}
         <div class="card saldo" style="padding:12px 18px;"><div class="label">Saldo total</div><div class="value mono ${total>=0?'pos':'neg'}" style="font-size:20px;">${brl(total)}</div></div>
@@ -1726,15 +1726,7 @@ function viewContas(){
           <div class="saldo mono ${saldoConta(c.id)>=0?'pos':'neg'}">${brl(saldoConta(c.id))}</div>
           <div style="display:flex;gap:8px;margin-top:12px;">
             <button class="btn ghost sm" data-action="ver-extrato" data-id="${c.id}" style="flex:1;">Ver extrato</button>
-            <div class="dropdown-wrap" style="flex:1;">
-              <button class="btn sm" data-action="toggle-adicionar-conta" data-id="${c.id}" style="width:100%;">+ Adicionar ▾</button>
-              <div class="dropdown-menu" data-menu-conta="${c.id}">
-                <button type="button" data-add="despesa" data-conta="${c.id}"><span class="dropdown-dot" style="background:var(--danger);"></span> Despesa</button>
-                <button type="button" data-add="receita" data-conta="${c.id}"><span class="dropdown-dot" style="background:var(--success);"></span> Receita</button>
-                <button type="button" data-add="cartao" data-conta="${c.id}"><span class="dropdown-dot" style="background:var(--warn);"></span> Despesa no cartão</button>
-                <button type="button" data-add="investimento" data-conta="${c.id}"><span class="dropdown-dot" style="background:var(--blue-accent);"></span> Aplicação financeira</button>
-              </div>
-            </div>
+            ${menuAdicionarContaHTML(c.id, true)}
           </div>
         </div>
       `).join('')}
@@ -1797,13 +1789,13 @@ function viewExtrato(contaId){
         <h1 style="margin-top:6px;">Extrato — ${escapeHTML(conta.nome)}</h1>
         <p>${escapeHTML(conta.banco||'')} · Saldo atual: <strong class="mono">${brl(saldoConta(contaId))}</strong></p>
       </div>
-      <button class="btn" data-action="investir-conta" data-id="${contaId}">📈 Investir</button>
+      ${menuAdicionarContaHTML(contaId)}
     </div>
     <div class="panel">
-      <div class="filter-bar">
-        <div class="field" style="margin:0;min-width:130px;"><label style="font-size:11px;">De</label><input type="date" id="extratoFiltroDe"></div>
-        <div class="field" style="margin:0;min-width:130px;"><label style="font-size:11px;">Até</label><input type="date" id="extratoFiltroAte"></div>
-        <button class="btn ghost" id="btnBaixarExtratoPDF" style="margin-top:16px;">📄 Baixar extrato em PDF</button>
+      <div class="filter-bar" style="align-items:flex-end;">
+        <div class="field" style="margin:0;max-width:120px;"><label style="font-size:10.5px;">De</label><input type="date" id="extratoFiltroDe" style="padding:6px 8px;font-size:12px;"></div>
+        <div class="field" style="margin:0;max-width:120px;"><label style="font-size:10.5px;">Até</label><input type="date" id="extratoFiltroAte" style="padding:6px 8px;font-size:12px;"></div>
+        <button class="btn ghost sm" id="btnBaixarExtratoPDF">📄 Baixar PDF</button>
       </div>
     </div>
     ${grupos.length ? gruposHTML : `<div class="panel"><div class="empty">Nenhuma movimentação realizada nesta conta ainda.</div></div>`}
@@ -3455,6 +3447,21 @@ function dropdownNovoHTML(){
   `;
 }
 
+function menuAdicionarContaHTML(contaId, flex){
+  return `
+    <div class="dropdown-wrap" style="${flex?'flex:1;':''}">
+      <button class="btn sm" data-action="toggle-adicionar-conta" data-id="${contaId}" style="width:100%;">+ Adicionar ▾</button>
+      <div class="dropdown-menu" data-menu-conta="${contaId}">
+        <button type="button" data-add="despesa" data-conta="${contaId}"><span class="dropdown-dot" style="background:var(--danger);"></span> Despesa</button>
+        <button type="button" data-add="receita" data-conta="${contaId}"><span class="dropdown-dot" style="background:var(--success);"></span> Receita</button>
+        <button type="button" data-add="cartao" data-conta="${contaId}"><span class="dropdown-dot" style="background:var(--warn);"></span> Despesa no cartão</button>
+        <button type="button" data-add="transferencia" data-conta="${contaId}" ${state.contas.length<2?'disabled title="Crie pelo menos 2 contas para transferir"':''}><span class="dropdown-dot" style="background:#7B5CD6;"></span> Transferência</button>
+        <button type="button" data-add="investimento" data-conta="${contaId}"><span class="dropdown-dot" style="background:var(--blue-accent);"></span> Aplicação financeira</button>
+      </div>
+    </div>
+  `;
+}
+
 /* ---------------- Handlers de view ---------------- */
 function excluirLancamento(id){
   const l = state.lancamentos.find(x=>x.id===id);
@@ -4176,6 +4183,7 @@ function attachViewHandlers(){
         if(state.cartoes.length===1) openCompraCartaoModal(state.cartoes[0].id);
         else openEscolherCartaoModal();
       }
+      else if(tipo==='transferencia') openTransferenciaModal(contaId);
       else if(tipo==='investimento') openInvestirModal(contaId);
     });
   });
@@ -5012,18 +5020,20 @@ function openContaModal(existing){
   });
 }
 
-function openTransferenciaModal(){
+function openTransferenciaModal(contaOrigemId){
+  const origemId = contaOrigemId || state.contas[0].id;
+  const destinoPadrao = state.contas.find(c=>c.id!==origemId)?.id || state.contas[0].id;
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
     <h3>Transferência entre contas</h3>
     <div class="field-row">
       <div class="field">
         <label>De (origem)</label>
-        <select id="tOrigem">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select>
+        <select id="tOrigem">${state.contas.map(c=>`<option value="${c.id}" ${origemId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
       </div>
       <div class="field">
         <label>Para (destino)</label>
-        <select id="tDestino">${state.contas.map((c,i)=>`<option value="${c.id}" ${i===1?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
+        <select id="tDestino">${state.contas.map(c=>`<option value="${c.id}" ${destinoPadrao===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
       </div>
     </div>
     <div class="field-row">
