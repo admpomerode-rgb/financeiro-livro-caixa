@@ -1897,8 +1897,76 @@ function viewRelatorios(){
     <div class="toggle-row" id="reportToggle">
       <button class="active" data-report="dre">DRE</button>
       <button data-report="balanco">Balanço Patrimonial</button>
+      <button data-report="mei">Declaração MEI</button>
     </div>
     <div class="panel" id="reportPanel"></div>
+  `;
+}
+
+const MEI_LIMITE_ANUAL = 81000;
+
+function renderMEI(ano){
+  const anosComDados = [...new Set(state.lancamentos.filter(l=>l.dataPagamento).map(l=>l.dataPagamento.slice(0,4)))].sort().reverse();
+  if(!anosComDados.includes(String(new Date().getFullYear()))) anosComDados.unshift(String(new Date().getFullYear()));
+
+  const de = `${ano}-01-01`, ate = `${ano}-12-31`;
+  const receitas = state.lancamentos.filter(l=>{
+    const ref = l.dataPagamento;
+    return ref && ref>=de && ref<=ate && l.tipo==='entrada' && l.status==='recebido' && !['transferencia','investimento','ativo_patrimonial'].includes(l.origem);
+  });
+
+  const porCategoria = {};
+  receitas.forEach(l=>{ porCategoria[l.categoria] = (porCategoria[l.categoria]||0) + l.valor; });
+
+  if(!state.categoriaMEI) state.categoriaMEI = {};
+  let totalComercioIndustria = 0, totalServicos = 0;
+  Object.entries(porCategoria).forEach(([cat, valor])=>{
+    const tipo = state.categoriaMEI[cat] || 'comercio_industria';
+    if(tipo==='servico') totalServicos += valor; else totalComercioIndustria += valor;
+  });
+  const totalGeral = totalComercioIndustria + totalServicos;
+  const pctLimite = Math.min(100, Math.round((totalGeral/MEI_LIMITE_ANUAL)*100));
+  const teveEmpregado = (state.meiEmpregadoPorAno && state.meiEmpregadoPorAno[ano]) || false;
+
+  return `
+    <div class="report-controls">
+      <select id="meiAno">${anosComDados.map(a=>`<option value="${a}" ${String(ano)===a?'selected':''}>${a}</option>`).join('')}</select>
+      <span style="font-size:12.5px;color:var(--text-soft);">Ano-calendário ${ano} · prazo de entrega: até 31/05/${parseInt(ano)+1}</span>
+    </div>
+
+    <div class="note" style="margin-top:0;">
+      Esse relatório organiza os números que a <strong>DASN-SIMEI</strong> pede, pra facilitar na hora de preencher no Portal do Simples Nacional (gov.br). O sistema não envia a declaração — só prepara os valores.
+    </div>
+
+    <div class="report-block">
+      <div class="report-title">Classifique cada categoria de receita</div>
+      ${Object.keys(porCategoria).length ? Object.entries(porCategoria).map(([cat,valor])=>`
+        <div class="report-line sub" style="align-items:center;">
+          <span>${escapeHTML(cat)} — ${brl(valor)}</span>
+          <select class="mei-cat-tipo" data-cat="${escapeHTML(cat)}" style="width:auto;padding:4px 8px;font-size:12px;">
+            <option value="comercio_industria" ${(state.categoriaMEI[cat]||'comercio_industria')==='comercio_industria'?'selected':''}>Comércio/Indústria</option>
+            <option value="servico" ${state.categoriaMEI[cat]==='servico'?'selected':''}>Serviços</option>
+          </select>
+        </div>
+      `).join('') : `<div class="report-line sub"><span>Nenhuma receita registrada em ${ano}</span><span class="v">${brl(0)}</span></div>`}
+    </div>
+
+    <div class="report-block">
+      <div class="report-title">Receita Bruta do Ano — ${ano}</div>
+      <div class="report-line"><span>Receita de Comércio e Indústria</span><span class="v">${brl(totalComercioIndustria)}</span></div>
+      <div class="report-line"><span>Receita de Serviços</span><span class="v">${brl(totalServicos)}</span></div>
+      <div class="report-line total"><span>(=) Receita Bruta Total</span><span class="v">${brl(totalGeral)}</span></div>
+      <div class="note" style="margin-top:10px;${pctLimite>=90?'border-color:var(--danger);':''}">
+        ${brl(totalGeral)} de ${brl(MEI_LIMITE_ANUAL)} do limite anual do MEI (${pctLimite}%)${pctLimite>=100?' — LIMITE ULTRAPASSADO' : pctLimite>=90 ? ' — atenção, perto do limite' : ''}.
+      </div>
+    </div>
+
+    <div class="report-block">
+      <div class="report-title">Teve empregado em ${ano}?</div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;">
+        <input type="checkbox" id="meiTeveEmpregado" style="width:auto;" ${teveEmpregado?'checked':''}> Sim, tive ao menos um empregado registrado durante o ano
+      </label>
+    </div>
   `;
 }
 
@@ -3126,8 +3194,9 @@ function attachViewHandlers(){
   const reportToggle = document.getElementById('reportToggle');
   if(reportToggle){
     let activeReport = 'dre';
+    let meiAnoAtual = new Date().getFullYear();
     const paint = ()=>{
-      document.getElementById('reportPanel').innerHTML = activeReport==='dre' ? renderDRE('mes') : renderBalanco();
+      document.getElementById('reportPanel').innerHTML = activeReport==='dre' ? renderDRE('mes') : activeReport==='balanco' ? renderBalanco() : renderMEI(meiAnoAtual);
       bindReportInner();
     };
     const bindReportInner = ()=>{
@@ -3141,6 +3210,27 @@ function attachViewHandlers(){
       if(dreAte) dreAte.addEventListener('change', ()=>{ document.getElementById('reportPanel').innerHTML = renderDRE('custom'); bindReportInner(); });
       const balancoData = document.getElementById('balancoData');
       if(balancoData) balancoData.addEventListener('change', ()=>{ document.getElementById('reportPanel').innerHTML = renderBalanco(); bindReportInner(); });
+      const meiAno = document.getElementById('meiAno');
+      if(meiAno) meiAno.addEventListener('change', ()=>{
+        meiAnoAtual = meiAno.value;
+        document.getElementById('reportPanel').innerHTML = renderMEI(meiAnoAtual);
+        bindReportInner();
+      });
+      document.querySelectorAll('.mei-cat-tipo').forEach(sel=>{
+        sel.addEventListener('change', ()=>{
+          if(!state.categoriaMEI) state.categoriaMEI = {};
+          state.categoriaMEI[sel.dataset.cat] = sel.value;
+          persist();
+          document.getElementById('reportPanel').innerHTML = renderMEI(meiAnoAtual);
+          bindReportInner();
+        });
+      });
+      const meiEmpregado = document.getElementById('meiTeveEmpregado');
+      if(meiEmpregado) meiEmpregado.addEventListener('change', ()=>{
+        if(!state.meiEmpregadoPorAno) state.meiEmpregadoPorAno = {};
+        state.meiEmpregadoPorAno[meiAnoAtual] = meiEmpregado.checked;
+        persist();
+      });
     };
     reportToggle.querySelectorAll('button').forEach(btn=>{
       btn.addEventListener('click', ()=>{
@@ -3152,7 +3242,8 @@ function attachViewHandlers(){
     });
     paint();
     document.getElementById('btnExportarRelatorioPDF')?.addEventListener('click', ()=>{
-      exportarRelatorioPDF(activeReport==='dre' ? 'DRE (Demonstrativo de Resultado)' : 'Balanço Patrimonial');
+      const titulos = { dre: 'DRE (Demonstrativo de Resultado)', balanco: 'Balanço Patrimonial', mei: `Declaração MEI — Ano ${meiAnoAtual}` };
+      exportarRelatorioPDF(titulos[activeReport]);
     });
   }
 
@@ -4939,7 +5030,7 @@ document.getElementById('fileImport').addEventListener('change', (e)=>{
     try{
       const data = JSON.parse(ev.target.result);
       if(!data.lancamentos) throw new Error('formato inválido');
-      state = { lancamentos:[], ativos:[], investimentos:[], forneiraConfig:null, contas:[], cartoes:[], comprasCartao:[], faturasFechadas:[], contasInvestimento:[], ativosInvestimento:[], categorias:null, ...data };
+      state = { lancamentos:[], ativos:[], investimentos:[], forneiraConfig:null, contas:[], cartoes:[], comprasCartao:[], faturasFechadas:[], contasInvestimento:[], ativosInvestimento:[], categorias:null, categoriaMEI:{}, meiEmpregadoPorAno:{}, ...data };
       if(state.contas.length===0) state.contas.push({ id:'conta_caixa', nome:'Caixa', banco:'Conta padrão', tipo:'caixa', saldoInicial:0, cor:CONTA_CORES[0] });
       const idPadrao = state.contas[0].id;
       state.lancamentos.forEach(l=>{ if(!l.contaId) l.contaId = idPadrao; });
