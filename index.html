@@ -202,13 +202,15 @@
 
   /* Ledger rows */
   .ledger-row{
-    display:grid;grid-template-columns:14px 90px 1fr 130px 110px 110px auto;
+    display:grid;grid-template-columns:14px 90px 1fr 110px 110px 110px;
     gap:10px;align-items:center;padding:7px 16px;border-bottom:1px solid var(--line);font-size:12px;
   }
   .ledger-row:last-child{border-bottom:none;}
   .ledger-row.head{color:var(--text-soft);font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;padding-top:7px;padding-bottom:7px;background:var(--bone);}
   .ledger-row.compact{grid-template-columns:12px 1fr 100px auto;gap:10px;padding:5px 16px;font-size:11.5px;}
   .ledger-row.compact .cat{font-size:10px;}
+  .desc-cell{min-width:0;overflow:hidden;}
+  .desc-cell > div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .desc-cell .cat{color:var(--text-soft);font-size:10.5px;margin-top:1px;}
   .extrato-dia{margin-bottom:14px;overflow:hidden;}
   .extrato-dia-head{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:var(--bone);border-bottom:1px solid var(--line);font-size:12px;font-weight:600;color:var(--ink);}
@@ -432,7 +434,7 @@
 
   @media (max-width: 900px){
     .cards{grid-template-columns:repeat(2,1fr);}
-    .ledger-row{grid-template-columns:14px 70px 1fr 90px auto;}
+    .ledger-row{grid-template-columns:10px 68px 1fr 90px;gap:8px;padding:8px 12px;}
     .ledger-row .col-cat, .ledger-row .col-status{display:none;}
 
     .sidebar{display:none;}
@@ -1019,8 +1021,9 @@ async function sincronizarPedidosVK(){
 
     pedidos.forEach(p=>{
       const cliente = clientes.find(c=>c.id===p.clienteId);
-      const descricaoPedido = `Pedido N° ${p.numero}${cliente ? ' — '+cliente.nome : ''}`;
-      const existente = state.lancamentos.find(l=>l.origem==='vk' && (l.vkPedidoId===p.id || l.descricao===descricaoPedido || l.descricao===`Pedido N° ${p.numero}`));
+      const descricaoPedido = `Pedido N° ${p.numero}`;
+      const existenteAntigo = `Pedido N° ${p.numero}${cliente ? ' — '+cliente.nome : ''}`;
+      const existente = state.lancamentos.find(l=>l.origem==='vk' && (l.vkPedidoId===p.id || l.descricao===descricaoPedido || l.descricao===existenteAntigo));
 
       if(p.status === 'cancelado'){
         cancelados++;
@@ -1630,21 +1633,16 @@ function rowHTML(l){
   const statusClass = l.status==='pendente' && l.dataVencimento && l.dataVencimento<todayISO() ? 'atrasado' : l.status;
   const statusLabel = {pago:'Pago', recebido:'Recebido', cancelado:'Cancelado', pendente: statusClass==='atrasado' ? 'Atrasado' : 'Pendente'}[l.status];
   return `
-    <div class="ledger-row" data-id="${l.id}">
+    <div class="ledger-row" data-id="${l.id}" data-action="abrir-lancamento" style="cursor:pointer;">
       <span class="dot ${l.tipo}"></span>
-      <span class="mono" style="font-size:12.5px;color:var(--text-soft)">${fmtDate(l.dataPagamento || l.dataVencimento)}</span>
-      <div class="desc-cell" data-action="ver-detalhe" data-id="${l.id}" style="cursor:pointer;">
-        <div>${escapeHTML(l.descricao)}${l.recebimentoParcial ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Já recebeu parte, resta o valor mostrado">🔸 Parcial</span>' : ''}${l.origem==='forneira' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Forneira</span>' : ''}${l.origem==='vk' ? ' <span style="color:var(--blue-accent);font-size:11px;">· VK Industrial</span>' : ''}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Ativo Patrimonial</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}${l.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${l.id}" style="cursor:pointer;font-size:11px;" title="Ver comprovante">📎</span>` : ''}</div>
-        <div class="cat"><span class="conta-tag"><span class="conta-swatch" style="background:${corConta(l.contaId)}"></span>${escapeHTML(nomeConta(l.contaId))}</span> · ${escapeHTML(l.categoria)}${l.fornecedor ? ' · '+escapeHTML(l.fornecedor) : ''}</div>
+      <span class="mono" style="font-size:12px;color:var(--text-soft)">${fmtDate(l.dataPagamento || l.dataVencimento)}</span>
+      <div class="desc-cell">
+        <div>${escapeHTML(l.descricao)}${l.recebimentoParcial ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Já recebeu parte, resta o valor mostrado">🔸 Parcial</span>' : ''}${l.origem==='forneira' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Forneira</span>' : ''}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Ativo Patrimonial</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}${l.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${l.id}" style="cursor:pointer;font-size:11px;" title="Ver comprovante">📎</span>` : ''}</div>
+        <div class="cat">${l.fornecedor ? escapeHTML(l.fornecedor) : `<span class="conta-tag"><span class="conta-swatch" style="background:${corConta(l.contaId)}"></span>${escapeHTML(nomeConta(l.contaId))}</span> · ${escapeHTML(l.categoria)}`}</div>
       </div>
       <span class="col-cat mono" style="font-size:11.5px;color:var(--text-soft)">${fmtDate(l.dataVencimento)}</span>
-      <span class="mono" style="font-weight:600;color:${l.tipo==='entrada'?'var(--success)':'var(--danger)'}">${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}</span>
       <span class="col-status status-chip ${statusClass}">${statusLabel}</span>
-      <div class="row-actions">
-        ${l.status==='pendente' ? `<button class="icon-btn" data-action="quitar" data-id="${l.id}" title="Registrar ${l.tipo==='entrada'?'recebimento':'pagamento'} (total ou parcial)">✓</button>` : ''}
-        ${l.origem!=='transferencia' ? `<button class="icon-btn" data-action="editar" data-id="${l.id}" title="Editar">✎</button>` : ''}
-        <button class="icon-btn" data-action="excluir" data-id="${l.id}" title="Excluir">✕</button>
-      </div>
+      <span class="mono" style="font-weight:600;color:${l.tipo==='entrada'?'var(--success)':'var(--danger)'};text-align:right;">${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}</span>
     </div>
   `;
 }
@@ -1678,7 +1676,7 @@ function viewLancamentos(tipo){
         </select>
       </div>
       <div class="ledger-row head">
-        <span></span><span>Vence</span><span>Descrição</span><span class="col-cat">Venc. orig.</span><span>Valor</span><span class="col-status">Status</span><span></span>
+        <span></span><span>Vence</span><span>Descrição</span><span class="col-cat">Venc. orig.</span><span class="col-status">Status</span><span style="text-align:right;">Valor</span>
       </div>
       <div class="panel-body" id="listaLancamentos">
         ${lista.length? lista.map(rowHTML).join('') : `<div class="empty">Nenhum lançamento em ${titulo.toLowerCase()} ainda.</div>`}
@@ -4423,6 +4421,9 @@ function attachViewHandlers(){
         excluirLancamento(id);
       } else if(action==='ver-detalhe'){
         openDetalheLancamentoModal(l);
+      } else if(action==='abrir-lancamento'){
+        if(l.origem==='transferencia') openDetalheLancamentoModal(l);
+        else openLancamentoModal(l.tipo, l);
       }
     });
   });
@@ -4450,6 +4451,10 @@ function attachViewHandlers(){
           else if(action==='editar'){ openLancamentoModal(l.tipo, l); }
           else if(action==='excluir'){ excluirLancamento(id); }
           else if(action==='ver-detalhe'){ openDetalheLancamentoModal(l); }
+          else if(action==='abrir-lancamento'){
+            if(l.origem==='transferencia') openDetalheLancamentoModal(l);
+            else openLancamentoModal(l.tipo, l);
+          }
         });
       });
     };
@@ -5370,6 +5375,12 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       <label>Observação (opcional)</label>
       <textarea id="fObservacao" rows="3" placeholder="Detalhes extras — ex: nome do cliente, itens do pedido, etc.">${existing?.observacao ? escapeHTML(existing.observacao) : ''}</textarea>
     </div>
+    ${isEdit ? `
+    <div class="modal-actions" style="justify-content:space-between;border-top:1px solid var(--line);padding-top:14px;margin-top:4px;">
+      <button class="btn ghost" id="btnExcluirDoEditar" style="color:var(--danger);border-color:#F3C6C2;">Excluir</button>
+      ${existing.status==='pendente' ? `<button class="btn ghost" id="btnEfetivarDoEditar">✓ Marcar como ${tipo==='entrada'?'recebido':'pago'}</button>` : ''}
+    </div>
+    ` : ''}
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       <button class="btn" id="btnSalvarLancamento">Salvar</button>
@@ -5377,6 +5388,14 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnExcluirDoEditar')?.addEventListener('click', ()=>{
+    closeModal();
+    excluirLancamento(existing.id);
+  });
+  document.getElementById('btnEfetivarDoEditar')?.addEventListener('click', ()=>{
+    closeModal();
+    abrirQuitarModal(existing.id);
+  });
   let comprovanteAtual = existing?.comprovanteFoto || null;
   document.getElementById('btnAnexarComprovante').addEventListener('click', ()=>document.getElementById('fComprovanteInput').click());
   document.getElementById('fComprovanteInput').addEventListener('change', async ()=>{
@@ -6849,13 +6868,15 @@ function openDetalheLancamentoModal(l){
     ${l.observacao ? `<div class="note" style="margin-top:14px;white-space:pre-wrap;">${escapeHTML(l.observacao)}</div>` : ''}
     <div class="modal-actions">
       <button class="btn ghost" id="btnFecharDetalhe">Fechar</button>
-      ${l.origem!=='transferencia' ? `<button class="btn" id="btnEditarDoDetalhe">Editar</button>` : ''}
+      ${l.origem!=='transferencia' ? `<button class="btn" id="btnEditarDoDetalhe">Editar</button>` : `<button class="btn ghost" id="btnExcluirDoDetalhe" style="color:var(--danger);border-color:#F3C6C2;">Excluir</button>`}
     </div>
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnFecharDetalhe').addEventListener('click', closeModal);
   const btnEditar = document.getElementById('btnEditarDoDetalhe');
   if(btnEditar) btnEditar.addEventListener('click', ()=>{ closeModal(); openLancamentoModal(l.tipo, l); });
+  const btnExcluirDetalhe = document.getElementById('btnExcluirDoDetalhe');
+  if(btnExcluirDetalhe) btnExcluirDetalhe.addEventListener('click', ()=>{ closeModal(); excluirLancamento(l.id); });
 }
 
 function openVendedorModal(existing){
