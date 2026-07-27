@@ -30,8 +30,7 @@
     font-family:'Inter',sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
-  html{overflow-x:hidden;max-width:100vw;}
-  body{background:var(--bone);color:var(--ink);min-height:100vh;overflow-x:hidden;max-width:100vw;}
+  body{background:var(--bone);color:var(--ink);min-height:100vh;}
   h1,h2,h3,.display{font-family:'Space Grotesk',sans-serif;font-weight:600;letter-spacing:-0.01em;}
   .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;}
 
@@ -149,7 +148,7 @@
   }
   .ledger-row:last-child{border-bottom:none;}
   .ledger-row.head{color:var(--text-soft);font-size:11px;text-transform:uppercase;letter-spacing:.04em;padding-top:9px;padding-bottom:9px;background:var(--bone);}
-  .ledger-row.compact{grid-template-columns:12px 1fr 95px 95px auto;gap:10px;padding:6px 16px;font-size:12px;}
+  .ledger-row.compact{grid-template-columns:12px 1fr 100px auto;gap:10px;padding:6px 16px;font-size:12px;}
   .ledger-row.compact .cat{font-size:10.5px;}
   .extrato-dia{margin-bottom:14px;overflow:hidden;}
   .extrato-dia-head{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:var(--bone);border-bottom:1px solid var(--line);font-size:12px;font-weight:600;color:var(--ink);}
@@ -1403,6 +1402,87 @@ function viewFluxo(){
   `;
 }
 
+function gerarExtratoPDF(contaId, dataDe, dataAte){
+  const conta = state.contas.find(c=>c.id===contaId);
+  if(!conta) return;
+  if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
+
+  let lista = state.lancamentos.filter(l=>l.contaId===contaId && (l.status==='pago'||l.status==='recebido'));
+  lista.sort((a,b)=> (a.dataPagamento||'').localeCompare(b.dataPagamento||''));
+
+  let saldo = conta.saldoInicial || 0;
+  const grupos = [];
+  let atual = null;
+  lista.forEach(l=>{
+    const dia = l.dataPagamento;
+    const dentroPeriodo = (!dataDe || dia>=dataDe) && (!dataAte || dia<=dataAte);
+    const saldoAntes = saldo;
+    saldo += l.tipo==='entrada' ? l.valor : -l.valor;
+    if(dentroPeriodo){
+      if(!atual || atual.dia!==dia){
+        atual = { dia, saldoInicial: saldoAntes, itens: [] };
+        grupos.push(atual);
+      }
+      atual.itens.push(l);
+      atual.saldoFinal = saldo;
+    }
+  });
+
+  if(!grupos.length){ showToast('Nenhuma movimentação no período selecionado'); return; }
+
+  const { jsPDF } = window.jspdf;
+  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+  const M = 18, W = 210 - M*2;
+  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
+  let y = 22;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
+  docPdf.text('Livro Caixa Financeiro VK', M, y);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
+  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
+  y += 7;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 9;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
+  docPdf.text(`Extrato — ${conta.nome}`, M, y);
+  y += 6;
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
+  const periodoTxt = (dataDe||dataAte) ? `Período: ${dataDe?fmtDate(dataDe):'início'} até ${dataAte?fmtDate(dataAte):'hoje'}` : 'Período: todas as movimentações';
+  docPdf.text(periodoTxt, M, y);
+  y += 9;
+
+  grupos.forEach(g=>{
+    if(y > 265){ docPdf.addPage(); y = 20; }
+    docPdf.setFillColor(245,247,250);
+    docPdf.rect(M, y-4.5, W, 7, 'F');
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(9.5); docPdf.setTextColor(...INK);
+    docPdf.text(fmtDate(g.dia), M+2, y);
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...SOFT);
+    docPdf.text(`Saldo inicial: ${brl(g.saldoInicial)}`, M+W-2, y, { align:'right' });
+    y += 7;
+
+    g.itens.forEach(l=>{
+      if(y > 270){ docPdf.addPage(); y = 20; }
+      docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...INK);
+      const desc = l.descricao.length>55 ? l.descricao.slice(0,55)+'…' : l.descricao;
+      docPdf.text(desc, M+2, y);
+      docPdf.setTextColor(...(l.tipo==='entrada'?SUCCESS:DANGER));
+      docPdf.text(`${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}`, M+W-2, y, { align:'right' });
+      y += 5.5;
+    });
+
+    docPdf.setDrawColor(...LINEC); docPdf.line(M, y-1.5, M+W, y-1.5);
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
+    docPdf.text('Saldo final do dia', M+2, y+3);
+    docPdf.text(brl(g.saldoFinal), M+W-2, y+3, { align:'right' });
+    y += 9;
+  });
+
+  docPdf.save(`extrato-${conta.nome.toLowerCase().replace(/\s+/g,'-')}${dataDe?'-'+dataDe:''}${dataAte?'-a-'+dataAte:''}.pdf`);
+  showToast('Extrato baixado em PDF');
+}
+
 function viewContas(){
   const total = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
   return `
@@ -1466,7 +1546,7 @@ function viewExtrato(contaId){
         <span class="extrato-dia-data">${fmtDate(g.dia)}</span>
         <span>Saldo inicial do dia: <strong class="mono">${brl(g.saldoInicial)}</strong></span>
       </div>
-      ${g.itens.slice().reverse().map(({l, saldoApos})=>`
+      ${g.itens.slice().reverse().map(({l})=>`
         <div class="ledger-row compact" data-id="${l.id}">
           <span class="dot ${l.tipo}"></span>
           <div class="desc-cell" data-action="ver-detalhe" data-id="${l.id}" style="cursor:pointer;">
@@ -1474,7 +1554,6 @@ function viewExtrato(contaId){
             <div class="cat">${escapeHTML(l.categoria)}</div>
           </div>
           <span class="mono" style="font-weight:600;font-size:12.5px;color:${l.tipo==='entrada'?'var(--success)':'var(--danger)'}">${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}</span>
-          <span class="mono" style="font-weight:600;font-size:12.5px;">${brl(saldoApos)}</span>
           <div class="row-actions">${l.origem!=='transferencia' ? `<button class="icon-btn" data-action="editar" data-id="${l.id}" title="Editar">✎</button>` : ''}<button class="icon-btn" data-action="excluir" data-id="${l.id}" title="Excluir">✕</button></div>
         </div>
       `).join('')}
@@ -1495,6 +1574,13 @@ function viewExtrato(contaId){
         <p>${escapeHTML(conta.banco||'')} · Saldo atual: <strong class="mono">${brl(saldoConta(contaId))}</strong></p>
       </div>
       <button class="btn" data-action="investir-conta" data-id="${contaId}">📈 Investir</button>
+    </div>
+    <div class="panel">
+      <div class="filter-bar">
+        <div class="field" style="margin:0;min-width:130px;"><label style="font-size:11px;">De</label><input type="date" id="extratoFiltroDe"></div>
+        <div class="field" style="margin:0;min-width:130px;"><label style="font-size:11px;">Até</label><input type="date" id="extratoFiltroAte"></div>
+        <button class="btn ghost" id="btnBaixarExtratoPDF" style="margin-top:16px;">📄 Baixar extrato em PDF</button>
+      </div>
     </div>
     ${grupos.length ? gruposHTML : `<div class="panel"><div class="empty">Nenhuma movimentação realizada nesta conta ainda.</div></div>`}
     ${pendentesConta.length ? `
@@ -3445,6 +3531,11 @@ function attachViewHandlers(){
     currentView = 'contas';
     document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view==='contas'));
     render();
+  });
+  document.getElementById('btnBaixarExtratoPDF')?.addEventListener('click', ()=>{
+    const dataDe = document.getElementById('extratoFiltroDe').value || null;
+    const dataAte = document.getElementById('extratoFiltroAte').value || null;
+    gerarExtratoPDF(extratoContaId, dataDe, dataAte);
   });
   const btnNovaTransferencia = document.getElementById('btnNovaTransferencia');
   if(btnNovaTransferencia) btnNovaTransferencia.addEventListener('click', ()=>openTransferenciaModal());
