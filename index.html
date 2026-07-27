@@ -494,6 +494,7 @@
       <div class="nav-item" data-view="ativos" title="Ativos Patrimoniais"><span class="nav-dot"></span><span class="nav-abbr">AP</span><span class="nav-label">Ativos Patrimoniais</span></div>
       <div class="nav-item" data-view="investimentos" title="Investimentos"><span class="nav-dot"></span><span class="nav-abbr">IV</span><span class="nav-label">Investimentos</span></div>
       <div class="nav-item" data-view="vk" title="Integração VK Industrial"><span class="nav-dot"></span><span class="nav-abbr">VK</span><span class="nav-label">Integração VK Industrial</span></div>
+      <div class="nav-item" data-view="processos" title="Integração Livro de Processos"><span class="nav-dot"></span><span class="nav-abbr">LP</span><span class="nav-label">Integração Livro de Processos</span></div>
     </nav>
     <div class="sidebar-footer">
       <button id="btnBackup"><span class="footer-icon">⇅</span><span class="footer-label">Backup / Restaurar</span></button>
@@ -535,6 +536,7 @@
       <div class="more-item" data-view="ativos"><span class="more-icon">📦</span>Ativos Patrimoniais</div>
       <div class="more-item" data-view="investimentos"><span class="more-icon">📈</span>Investimentos</div>
       <div class="more-item" data-view="vk"><span class="more-icon">🏭</span>Integração VK Industrial</div>
+      <div class="more-item" data-view="processos"><span class="more-icon">📁</span>Integração Livro de Processos</div>
     </div>
     <div class="more-drawer-footer">
       <button id="btnBackupMobile"><span class="footer-icon">⇅</span> Backup / Restaurar</button>
@@ -651,6 +653,9 @@ function aplicarMigracoes(s){
       },
       email: '', senha: '', contaId: '', categoria: 'Vendas', ultimaSincronizacao: null
     };
+  }
+  if(!s.processosConfig){
+    s.processosConfig = { firebaseConfig: null, email: '', senha: '', ultimaSincronizacao: null };
   }
   if(!s.contas) s.contas = [];
   // Migração: garante uma conta padrão e associa lançamentos antigos sem conta
@@ -828,6 +833,7 @@ function render(){
   else if(currentView==='ativos') main.innerHTML = viewAtivosPatrimoniais();
   else if(currentView==='ativo-detalhe') main.innerHTML = viewAtivoPatrimonialDetalhe(ativoPatrimonialDetalheId);
   else if(currentView==='vk') main.innerHTML = viewVK();
+  else if(currentView==='processos') main.innerHTML = viewProcessosConfig();
   attachViewHandlers();
 }
 
@@ -989,6 +995,7 @@ async function atualizarCotacoes(){
 
 /* --- Integração VK Industrial --- */
 let vkFirebaseApp = null;
+let processosFirebaseApp = null;
 function fmtQtdBR(n){ return (Number(n)||0).toLocaleString('pt-BR', { maximumFractionDigits: 3 }); }
 
 async function sincronizarPedidosVK(){
@@ -3551,6 +3558,22 @@ function viewAtivoPatrimonialDetalhe(id){
     </div>
 
     <div class="panel">
+      <div class="panel-head"><h2>📝 Ocorrências / Comentários</h2><span style="font-size:12px;color:var(--blue-accent);cursor:pointer;" id="btnAdicionarOcorrencia">+ Adicionar</span></div>
+      <div class="panel-body" style="padding:0;">
+        ${(a.ocorrencias||[]).length ? [...a.ocorrencias].reverse().map(o=>`
+          <div class="ficha-historico-row">
+            <div>
+              <div>${escapeHTML(o.texto)}${o.origem==='processo' ? ` <span style="color:var(--blue-accent);font-size:11px;font-weight:600;">· vindo do Livro de Processos${o.processoNome ? ' ('+escapeHTML(o.processoNome)+')' : ''}</span>` : ''}</div>
+              <div class="sub">${fmtDate(o.data)}</div>
+            </div>
+            <button class="icon-btn" data-action="excluir-ocorrencia" data-id="${o.id}" title="Excluir">✕</button>
+          </div>
+        `).join('') : `<div class="empty">Nenhuma ocorrência registrada ainda.</div>`}
+      </div>
+      <div class="note" style="margin:0;border-radius:0;border-top:1px solid var(--line);">Registre aqui problemas, decisões e situações do objeto ao longo do tempo — cada entrada fica com sua própria data, formando um histórico (diferente de uma observação única que se sobrescreve).</div>
+    </div>
+
+    <div class="panel">
       <div class="panel-head"><h2>Baixa do ativo</h2></div>
       <div class="panel-body" style="padding:16px 20px;">
         ${a.baixa ? `
@@ -3641,6 +3664,30 @@ function openManutencaoModal(ativo){
     }
     persist(); closeModal(); render();
     showToast('Manutenção registrada');
+  });
+}
+
+function openOcorrenciaModal(ativo){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Nova ocorrência — ${escapeHTML(ativo.nome)}</h3>
+    <div class="field"><label>Comentário</label><textarea id="ocTexto" rows="4" placeholder="Ex: A bateria não segura mais carga, mas o equipamento funciona bem pra outras funções."></textarea></div>
+    <div class="field"><label>Data</label><input type="date" id="ocData" value="${todayISO()}"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarOcorrencia">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarOcorrencia').addEventListener('click', ()=>{
+    const texto = document.getElementById('ocTexto').value.trim();
+    const data = document.getElementById('ocData').value || todayISO();
+    if(!texto){ showToast('Escreva o comentário'); return; }
+    if(!ativo.ocorrencias) ativo.ocorrencias = [];
+    ativo.ocorrencias.push({ id: uid(), texto, data, origem:'manual' });
+    persist(); closeModal(); render();
+    showToast('Ocorrência registrada');
   });
 }
 
@@ -3795,6 +3842,12 @@ function gerarFichaPatrimonialPDF(ativo){
   if(ativo.manutencoes && ativo.manutencoes.length){
     secao('Manutenções');
     ativo.manutencoes.forEach(m=>linha(`${fmtDate(m.data)} — ${m.descricao}`, m.custo ? brl(m.custo) : ''));
+    y += 3;
+  }
+
+  if(ativo.ocorrencias && ativo.ocorrencias.length){
+    secao('Ocorrências / Comentários');
+    ativo.ocorrencias.forEach(o=>linha(`${fmtDate(o.data)} — ${o.texto}${o.origem==='processo' ? ' (Livro de Processos)' : ''}`, ''));
     y += 3;
   }
 
@@ -4135,6 +4188,107 @@ async function sincronizarAtivosVK(){
     showToast(msg);
     render();
   }
+}
+
+async function sincronizarProcessos(){
+  const cfg = state.processosConfig;
+  if(!cfg.firebaseConfig){ showToast('Cole a configuração do Firebase do Livro de Processos antes de sincronizar'); render(); return; }
+  if(!cfg.email || !cfg.senha){ showToast('Informe o e-mail e a senha de acesso ao Livro de Processos'); render(); return; }
+  if(typeof firebase === 'undefined'){ showToast('Não foi possível carregar o Firebase — confira a internet'); render(); return; }
+
+  try{
+    if(!processosFirebaseApp){
+      processosFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'livro-processos');
+    }
+    const auth = processosFirebaseApp.auth();
+    if(!auth.currentUser){
+      await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
+    }
+    const db = processosFirebaseApp.firestore();
+    const snap = await db.collection('processos').get({ source: 'server' }).catch(()=>({docs:[]}));
+    const processos = snap.docs.map(d=>({ id: d.id, ...d.data() }));
+
+    let novasOcorrencias = 0, semDecisao = 0, semAtivoCorrespondente = 0;
+    processos.forEach(p=>{
+      if(!p.decisaoFinal || !['decidido','finalizado','concluido'].includes(p.status)){ semDecisao++; return; }
+      let ativo = null;
+      if(p.ativoPatrimonialId) ativo = state.ativosPatrimoniais.find(a=>a.id===p.ativoPatrimonialId || a.vkAtivoId===p.ativoPatrimonialId);
+      if(!ativo && p.ativoNome){
+        const termo = p.ativoNome.trim().toLowerCase();
+        ativo = state.ativosPatrimoniais.find(a=>a.nome.toLowerCase()===termo || a.nome.toLowerCase().includes(termo) || termo.includes(a.nome.toLowerCase()));
+      }
+      if(!ativo){ semAtivoCorrespondente++; return; }
+      if(!ativo.ocorrencias) ativo.ocorrencias = [];
+      const jaImportado = ativo.ocorrencias.some(o=>o.processoId===p.id);
+      if(jaImportado) return;
+      ativo.ocorrencias.push({
+        id: uid(), processoId: p.id, processoNome: p.titulo || p.nome || '',
+        texto: p.decisaoFinal, data: p.dataDecisao || todayISO(), origem: 'processo'
+      });
+      novasOcorrencias++;
+    });
+
+    cfg.ultimaSincronizacao = new Date().toISOString();
+    persist();
+    render();
+    const partes = [];
+    if(novasOcorrencias>0) partes.push(`${novasOcorrencias} ocorrência(s) nova(s) registrada(s)`);
+    if(semAtivoCorrespondente>0) partes.push(`${semAtivoCorrespondente} processo(s) sem ativo correspondente`);
+    showToast(partes.length ? partes.join(' · ') : 'Nada novo pra importar');
+  }catch(e){
+    console.error('Erro ao sincronizar com o Livro de Processos:', e);
+    let msg = 'Falha ao sincronizar';
+    if(e.code==='auth/wrong-password' || e.code==='auth/user-not-found' || e.code==='auth/invalid-credential') msg = 'E-mail ou senha incorretos';
+    else if(e.code==='permission-denied') msg = 'Sem permissão para ler os dados — confira o login';
+    else if(e.message) msg += ': ' + e.message;
+    showToast(msg);
+    render();
+  }
+}
+
+function viewProcessosConfig(){
+  const cfg = state.processosConfig;
+  const totalImportadas = state.ativosPatrimoniais.reduce((s,a)=>s+(a.ocorrencias||[]).filter(o=>o.origem==='processo').length,0);
+  return `
+    <div class="topbar">
+      <div><h1>Integração — Livro de Processos</h1><p>Decisões finais de processos vinculados a um ativo caem automaticamente como ocorrência na ficha dele</p></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Configuração</h2></div>
+      <div class="panel-body" style="padding:16px 20px;">
+        <div class="field">
+          <label>Configuração do Firebase do Livro de Processos (cole o objeto firebaseConfig)</label>
+          <textarea id="pcFirebaseConfig" rows="5" placeholder='{"apiKey":"...","projectId":"...", ...}'>${cfg.firebaseConfig ? JSON.stringify(cfg.firebaseConfig, null, 2) : ''}</textarea>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>E-mail de acesso</label><input type="text" id="pcEmail" value="${escapeHTML(cfg.email||'')}"></div>
+          <div class="field"><label>Senha</label><input type="password" id="pcSenha" value="${escapeHTML(cfg.senha||'')}"></div>
+        </div>
+        <button class="btn ghost" id="btnSalvarConfigProcessos">Salvar configuração</button>
+        <div class="note" style="margin-top:14px;">
+          ${cfg.ultimaSincronizacao ? `Última sincronização: ${new Date(cfg.ultimaSincronizacao).toLocaleString('pt-BR')}` : 'Ainda não sincronizado'} · ${totalImportadas} ocorrência(s) importada(s) até agora.
+        </div>
+      </div>
+      <div style="padding:0 20px 20px;">
+        <button class="btn" id="btnSincronizarProcessos">🔄 Sincronizar agora</button>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>O que o Livro de Processos precisa expor</h2></div>
+      <div class="panel-body" style="padding:16px 20px;font-size:12.5px;color:var(--text-soft);line-height:1.7;">
+        Uma coleção <strong>processos</strong> no Firestore, onde cada documento representa um processo e pode ter:
+        <div class="note" style="margin:10px 0;font-family:'IBM Plex Mono',monospace;font-size:11.5px;white-space:pre-wrap;">{
+  titulo: "Balança com defeito na bateria",
+  status: "decidido",
+  decisaoFinal: "Balança fica em uso — defeito registrado na ficha",
+  dataDecisao: "2026-07-27",
+  ativoPatrimonialId: "&lt;id do ativo no Livro Caixa, se souber&gt;",
+  ativoNome: "Balança" (alternativa, se não tiver o id — o sistema tenta achar pelo nome)
+}</div>
+        Quando <code>status</code> for <strong>decidido</strong>, <strong>finalizado</strong> ou <strong>concluido</strong> e tiver <code>decisaoFinal</code> preenchido, essa decisão vira automaticamente uma ocorrência na ficha do ativo correspondente, sem duplicar em sincronizações futuras.
+      </div>
+    </div>
+  `;
 }
 
 function viewVK(){
@@ -5058,6 +5212,14 @@ function attachViewHandlers(){
         persist(); render(); showToast('Manutenção excluída');
       });
     });
+    document.getElementById('btnAdicionarOcorrencia')?.addEventListener('click', ()=>openOcorrenciaModal(ativoDetalheAtual));
+    document.querySelectorAll('[data-action="excluir-ocorrencia"]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        if(!confirm('Excluir esta ocorrência?')) return;
+        ativoDetalheAtual.ocorrencias = (ativoDetalheAtual.ocorrencias||[]).filter(o=>o.id!==btn.dataset.id);
+        persist(); render(); showToast('Ocorrência excluída');
+      });
+    });
     document.getElementById('btnDarBaixa')?.addEventListener('click', ()=>openBaixaModal(ativoDetalheAtual));
     document.getElementById('btnReverterBaixa')?.addEventListener('click', ()=>{
       if(!confirm('Reverter a baixa deste ativo? Ele volta a ser contado como ativo normalmente.')) return;
@@ -5261,6 +5423,30 @@ function attachViewHandlers(){
     atualizarCotacoes().finally(()=>{});
   });
   document.getElementById('btnImportarNota')?.addEventListener('click', ()=>openImportarNotaModal());
+
+  const btnSalvarConfigProcessos = document.getElementById('btnSalvarConfigProcessos');
+  if(btnSalvarConfigProcessos) btnSalvarConfigProcessos.addEventListener('click', ()=>{
+    const txt = document.getElementById('pcFirebaseConfig').value.trim();
+    try{
+      state.processosConfig.firebaseConfig = txt ? JSON.parse(txt) : null;
+      state.processosConfig.email = document.getElementById('pcEmail').value.trim();
+      state.processosConfig.senha = document.getElementById('pcSenha').value;
+      persist(); showToast('Configuração salva'); render();
+    }catch(e){ showToast('JSON do Firebase inválido — confira o formato'); }
+  });
+  const btnSincronizarProcessos = document.getElementById('btnSincronizarProcessos');
+  if(btnSincronizarProcessos) btnSincronizarProcessos.addEventListener('click', ()=>{
+    const txt = document.getElementById('pcFirebaseConfig').value.trim();
+    try{
+      state.processosConfig.firebaseConfig = txt ? JSON.parse(txt) : null;
+    }catch(e){ showToast('JSON do Firebase inválido — confira o formato'); return; }
+    state.processosConfig.email = document.getElementById('pcEmail').value.trim();
+    state.processosConfig.senha = document.getElementById('pcSenha').value;
+    persist();
+    btnSincronizarProcessos.textContent = 'Sincronizando...';
+    btnSincronizarProcessos.disabled = true;
+    sincronizarProcessos();
+  });
 
   const btnSalvarConfigVK = document.getElementById('btnSalvarConfigVK');
   if(btnSalvarConfigVK) btnSalvarConfigVK.addEventListener('click', ()=>{
