@@ -100,6 +100,33 @@
   .value.pos{color:var(--success);}
   .value.neg{color:var(--danger);}
 
+  .hero-saldo-card{
+    background:linear-gradient(135deg, var(--blue-deep) 0%, var(--ink) 100%);
+    border-radius:16px;padding:26px 26px 24px;color:#fff;margin-bottom:20px;
+    position:relative;overflow:hidden;
+  }
+  .hero-saldo-card::after{
+    content:'';position:absolute;top:-40%;right:-10%;width:220px;height:220px;border-radius:50%;
+    background:radial-gradient(circle, rgba(59,111,224,.35), transparent 70%);pointer-events:none;
+  }
+  .hero-saldo-top{display:flex;justify-content:space-between;align-items:flex-start;position:relative;}
+  .hero-saldo-label{font-size:12px;font-weight:600;color:rgba(255,255,255,.65);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;}
+  .hero-saldo-value{font-family:'IBM Plex Mono',monospace;font-size:36px;font-weight:600;line-height:1.1;color:#fff;}
+  .hero-saldo-value.neg{color:#FF9385;}
+  .hero-saldo-sub{display:flex;gap:22px;margin-top:18px;font-size:12.5px;color:rgba(255,255,255,.7);flex-wrap:wrap;position:relative;}
+  .hero-saldo-sub strong{color:#fff;font-weight:600;font-family:'IBM Plex Mono',monospace;}
+  .btn-eye{
+    background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);color:#fff;
+    width:34px;height:34px;border-radius:9px;font-size:15px;flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;cursor:pointer;
+  }
+  .btn-eye:hover{background:rgba(255,255,255,.2);}
+
+  .dash-section-label{font-size:11.5px;font-weight:700;color:var(--text-soft);text-transform:uppercase;letter-spacing:.05em;margin:22px 0 10px;}
+
+  .valor-mask{transition:filter .15s ease;}
+  #main.saldos-ocultos .valor-mask{filter:blur(6px);user-select:none;}
+
   .panel{background:var(--white);border:1px solid var(--line);border-radius:10px;margin-bottom:22px;overflow:hidden;}
   .panel-head{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--line);}
   .panel-head h2{font-size:15.5px;}
@@ -693,6 +720,13 @@ document.getElementById('nav').addEventListener('click', (e)=>{
 const SIDEBAR_KEY = 'livrocaixa_sidebar_collapsed';
 const sidebarEl = document.getElementById('sidebar');
 if(localStorage.getItem(SIDEBAR_KEY) === '1') sidebarEl.classList.add('collapsed');
+
+/* Ocultar saldos */
+const SALDOS_OCULTOS_KEY = 'livrocaixa_saldos_ocultos';
+let saldosOcultos = localStorage.getItem(SALDOS_OCULTOS_KEY) === '1';
+if(saldosOcultos) document.getElementById('main').classList.add('saldos-ocultos');
+function vm(valorFormatado){ return `<span class="valor-mask">${valorFormatado}</span>`; }
+
 document.getElementById('btnToggleSidebar').addEventListener('click', ()=>{
   const collapsed = sidebarEl.classList.toggle('collapsed');
   localStorage.setItem(SIDEBAR_KEY, collapsed ? '1' : '0');
@@ -1282,7 +1316,7 @@ function orcadoRealizadoHTML(){
           <div style="margin-bottom:14px;">
             <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;">
               <span>${escapeHTML(l.cat)}</span>
-              <span class="mono">${brl(l.gasto)} / ${brl(l.orcado)}</span>
+              <span class="mono">${vm(brl(l.gasto)+' / '+brl(l.orcado))}</span>
             </div>
             <div style="background:var(--bone);border-radius:6px;height:7px;overflow:hidden;">
               <div style="width:${Math.min(100,l.pct)}%;height:100%;background:${l.cor};"></div>
@@ -1326,7 +1360,7 @@ function alertasInteligentesHTML(){
       ${alertas.map(a=>`
         <div class="alerta-linha">
           <span>📈 Gasto com <strong>${escapeHTML(a.cat)}</strong> projetado ${a.variacao}% acima da média dos últimos meses</span>
-          <span class="mono">${brl(a.projecao)} (méd. ${brl(a.media)})</span>
+          <span class="mono">${vm(brl(a.projecao)+' (méd. '+brl(a.media)+')')}</span>
         </div>
       `).join('')}
     </div>
@@ -1339,30 +1373,48 @@ function viewDashboard(){
   const pend = pendentesResumo();
   const venc = contasVencendoResumo();
   const contratosVenc = contratosVencendoResumo();
-  const recentes = [...state.lancamentos].sort((a,b)=> (b.dataPagamento||b.dataVencimento||'').localeCompare(a.dataPagamento||a.dataVencimento||'')).slice(0,6);
 
   return `
     <div class="topbar">
       <div><h1>Dashboard</h1><p>Visão geral da saúde financeira da empresa</p></div>
-      ${dropdownNovoHTML()}
+      <div style="display:flex;gap:8px;align-items:center;">
+        ${dropdownNovoHTML()}
+      </div>
     </div>
 
-    ${(venc.atrasadas.length || venc.venceEmBreve.length) ? `
+    <div class="hero-saldo-card">
+      <div class="hero-saldo-top">
+        <div>
+          <div class="hero-saldo-label">💰 Saldo em caixa</div>
+          <div class="hero-saldo-value ${t.saldo>=0?'':'neg'}">${vm(brl(t.saldo))}</div>
+        </div>
+        <button class="btn-eye" id="btnToggleSaldos" title="${saldosOcultos?'Mostrar valores':'Ocultar valores'}">${saldosOcultos?'🙈':'👁️'}</button>
+      </div>
+      <div class="hero-saldo-sub">
+        <span>📈 Entradas no mês <strong>${vm(brl(mes.entradas))}</strong></span>
+        <span>📉 Saídas no mês <strong>${vm(brl(mes.saidas))}</strong></span>
+      </div>
+    </div>
+
+    <div class="cards">
+      <div class="card"><div class="label">⏰ Contas atrasadas</div><div class="value mono ${pend.atrasados>0?'neg':''}">${pend.atrasados}</div></div>
+      <div class="card"><div class="label">📤 A pagar (pendente)</div><div class="value mono neg">${vm(brl(pend.aPagar))}</div></div>
+      <div class="card"><div class="label">📥 A receber (pendente)</div><div class="value mono pos">${vm(brl(pend.aReceber))}</div></div>
+    </div>
+
+    ${(venc.atrasadas.length || venc.venceEmBreve.length || contratosVenc.vencidos.length || contratosVenc.vencendo.length) ? `
+    <div class="dash-section-label">Avisos</div>
     <div class="panel alerta-panel">
       ${venc.atrasadas.length ? `
         <div class="alerta-linha atrasado" data-goto-alerta="atrasadas">
           <span>⚠️ ${venc.atrasadas.length} conta(s) <strong>atrasada(s)</strong></span>
-          <span class="mono">${brl(venc.atrasadas.reduce((s,l)=>s+l.valor,0))}</span>
+          <span class="mono">${vm(brl(venc.atrasadas.reduce((s,l)=>s+l.valor,0)))}</span>
         </div>` : ''}
       ${venc.venceEmBreve.length ? `
         <div class="alerta-linha" data-goto-alerta="venceEmBreve">
           <span>🔔 ${venc.venceEmBreve.length} conta(s) vence(m) nos próximos 7 dias</span>
-          <span class="mono">${brl(venc.venceEmBreve.reduce((s,l)=>s+l.valor,0))}</span>
+          <span class="mono">${vm(brl(venc.venceEmBreve.reduce((s,l)=>s+l.valor,0)))}</span>
         </div>` : ''}
-    </div>` : ''}
-
-    ${(contratosVenc.vencidos.length || contratosVenc.vencendo.length) ? `
-    <div class="panel alerta-panel">
       ${contratosVenc.vencidos.length ? `
         <div class="alerta-linha atrasado" data-goto="contratos">
           <span>📑 ${contratosVenc.vencidos.length} contrato(s) <strong>vencido(s)</strong></span>
@@ -1375,32 +1427,14 @@ function viewDashboard(){
 
     ${alertasInteligentesHTML()}
 
-    <div class="cards">
-      <div class="card saldo"><div class="label">Saldo em caixa</div><div class="value mono ${t.saldo>=0?'pos':'neg'}">${brl(t.saldo)}</div></div>
-      <div class="card"><div class="label">Entradas no mês</div><div class="value mono pos">${brl(mes.entradas)}</div></div>
-      <div class="card"><div class="label">Saídas no mês</div><div class="value mono neg">${brl(mes.saidas)}</div></div>
-      <div class="card"><div class="label">Contas atrasadas</div><div class="value mono ${pend.atrasados>0?'neg':''}">${pend.atrasados}</div></div>
-    </div>
-    <div class="cards" style="grid-template-columns:1fr 1fr;">
-      <div class="card"><div class="label">A pagar (pendente)</div><div class="value mono neg">${brl(pend.aPagar)}</div></div>
-      <div class="card"><div class="label">A receber (pendente)</div><div class="value mono pos">${brl(pend.aReceber)}</div></div>
-    </div>
-
+    <div class="dash-section-label">Entradas x Saídas — últimos 6 meses</div>
     <div class="panel">
-      <div class="panel-head"><h2>Entradas x Saídas — últimos 6 meses</h2></div>
       <div class="panel-body" style="padding:18px;">
         <canvas id="chartMeses" height="180"></canvas>
       </div>
     </div>
 
     ${orcadoRealizadoHTML()}
-
-    <div class="panel">
-      <div class="panel-head"><h2>Últimos lançamentos</h2><span style="font-size:12px;color:var(--text-soft);cursor:pointer;" data-goto="fluxo">Ver fluxo de caixa completo →</span></div>
-      <div class="panel-body">
-        ${recentes.length? recentes.map(rowHTML).join('') : `<div class="empty">Nenhum lançamento ainda. Clique em "+ Novo" para começar.</div>`}
-      </div>
-    </div>
   `;
 }
 
@@ -3771,6 +3805,14 @@ function excluirLancamento(id){
 function attachViewHandlers(){
   const chartMeses = document.getElementById('chartMeses');
   if(chartMeses) desenharGraficoMeses('chartMeses');
+
+  document.getElementById('btnToggleSaldos')?.addEventListener('click', (e)=>{
+    saldosOcultos = !saldosOcultos;
+    localStorage.setItem(SALDOS_OCULTOS_KEY, saldosOcultos ? '1' : '0');
+    document.getElementById('main').classList.toggle('saldos-ocultos', saldosOcultos);
+    e.currentTarget.textContent = saldosOcultos ? '🙈' : '👁️';
+    e.currentTarget.title = saldosOcultos ? 'Mostrar valores' : 'Ocultar valores';
+  });
 
   document.querySelectorAll('[data-action="ver-comprovante"]').forEach(el=>{
     el.addEventListener('click', (e)=>{
