@@ -1772,19 +1772,9 @@ function viewFluxo(){
 
   let lista = todosRealizados.filter(l=>(l.dataPagamento||'')>=deMes && (l.dataPagamento||'')<=ateMes);
   lista.sort((a,b)=> (a.dataPagamento||'').localeCompare(b.dataPagamento||''));
-  const rows = lista.map(l=>{
-    saldo += l.tipo==='entrada' ? l.valor : -l.valor;
-    return `
-      <div class="ledger-row" data-id="${l.id}">
-        <span class="dot ${l.tipo}"></span>
-        <span class="mono" style="font-size:12.5px;color:var(--text-soft)">${fmtDate(l.dataPagamento)}</span>
-        <div class="desc-cell" data-action="ver-detalhe" data-id="${l.id}" style="cursor:pointer;"><div>${escapeHTML(l.descricao)}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}</div><div class="cat">${escapeHTML(l.categoria)}</div></div>
-        <span class="mono" style="font-weight:600;color:${l.tipo==='entrada'?'var(--success)':'var(--danger)'}">${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}</span>
-        <span class="mono" style="font-weight:600;">${brl(saldo)}</span>
-        <span></span>
-      </div>
-    `;
-  }).join('');
+  lista.forEach(l=>{ saldo += l.tipo==='entrada' ? l.valor : -l.valor; });
+  const saldoFimMes = saldo;
+  const rows = lista.map(rowHTML).join('');
 
   const hoje = todayISO();
   const em60dias = new Date(); em60dias.setDate(em60dias.getDate()+60);
@@ -1792,20 +1782,8 @@ function viewFluxo(){
   let pendentes = state.lancamentos.filter(l=>l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento && l.dataVencimento<=em60ISO);
   pendentes.sort((a,b)=>(a.dataVencimento||'').localeCompare(b.dataVencimento||''));
   let saldoProjetado = saldo;
-  const rowsProjetado = pendentes.map(l=>{
-    saldoProjetado += l.tipo==='entrada' ? l.valor : -l.valor;
-    const atrasado = l.dataVencimento < hoje;
-    return `
-      <div class="ledger-row" data-id="${l.id}" style="opacity:.85;">
-        <span class="dot ${l.tipo}" style="opacity:.5;"></span>
-        <span class="mono" style="font-size:12.5px;color:${atrasado?'var(--danger)':'var(--text-soft)'}">${fmtDate(l.dataVencimento)}</span>
-        <div class="desc-cell" data-action="ver-detalhe" data-id="${l.id}" style="cursor:pointer;"><div>${escapeHTML(l.descricao)}</div><div class="cat">${escapeHTML(l.categoria)} · previsto</div></div>
-        <span class="mono" style="font-weight:600;color:${l.tipo==='entrada'?'var(--success)':'var(--danger)'}">${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}</span>
-        <span class="mono" style="font-weight:600;">${brl(saldoProjetado)}</span>
-        <span></span>
-      </div>
-    `;
-  }).join('');
+  pendentes.forEach(l=>{ saldoProjetado += l.tipo==='entrada' ? l.valor : -l.valor; });
+  const rowsProjetado = pendentes.map(rowHTML).join('');
 
   return `
     <div class="topbar">
@@ -1813,8 +1791,9 @@ function viewFluxo(){
     </div>
     ${mesNavHTML()}
     <div class="panel">
+      <div class="panel-head"><h2>Realizado no mês</h2><span style="font-size:12px;color:var(--text-soft);">Início: <span class="mono">${vm(brl(saldoInicioMes))}</span> · Fim: <span class="mono">${vm(brl(saldoFimMes))}</span></span></div>
       <div class="ledger-row head">
-        <span></span><span>Data</span><span>Descrição</span><span>Valor</span><span>Saldo</span><span></span>
+        <span></span><span>Data</span><span>Descrição</span><span class="col-cat">Venc. orig.</span><span class="col-status">Status</span><span style="text-align:right;">Valor</span>
       </div>
       <div class="panel-body">
         ${lista.length? rows : `<div class="empty">Nenhum lançamento realizado (pago/recebido) neste mês. Saldo início do mês: ${brl(saldoInicioMes)}</div>`}
@@ -1822,12 +1801,12 @@ function viewFluxo(){
     </div>
 
     <details class="panel-details" ${pendentes.length?'open':''}>
-      <summary>Fluxo de caixa projetado — próximos 60 dias (${pendentes.length} conta(s) pendente(s))</summary>
+      <summary>Fluxo de caixa projetado — próximos 60 dias (${pendentes.length} conta(s) pendente(s)) · Saldo previsto: ${brl(saldoProjetado)}</summary>
       <div>
         <div class="note" style="margin:0;border-radius:0;border-top:1px solid var(--line);">Projeção baseada nas contas a pagar e a receber já cadastradas com vencimento até 60 dias. Não considera contas que ainda não foram lançadas.</div>
         ${pendentes.length ? `
         <div class="ledger-row head">
-          <span></span><span>Vence em</span><span>Descrição</span><span>Valor</span><span>Saldo projetado</span><span></span>
+          <span></span><span>Vence</span><span>Descrição</span><span class="col-cat">Venc. orig.</span><span class="col-status">Status</span><span style="text-align:right;">Valor</span>
         </div>
         ${rowsProjetado}` : `<div class="empty">Nenhuma conta pendente nos próximos 60 dias.</div>`}
       </div>
