@@ -421,6 +421,8 @@
       <div class="nav-item" data-view="cartoes" title="Cartões de Crédito"><span class="nav-dot"></span><span class="nav-abbr">CC</span><span class="nav-label">Cartões de Crédito</span></div>
       <div class="nav-item" data-view="relatorios" title="Relatórios"><span class="nav-dot"></span><span class="nav-abbr">RL</span><span class="nav-label">Relatórios</span></div>
       <div class="nav-item" data-view="categorias" title="Categorias"><span class="nav-dot"></span><span class="nav-abbr">CT</span><span class="nav-label">Categorias</span></div>
+      <div class="nav-item" data-view="fornecedores" title="Fornecedores"><span class="nav-dot"></span><span class="nav-abbr">FN</span><span class="nav-label">Fornecedores</span></div>
+      <div class="nav-item" data-view="recorrencias" title="Lançamentos Recorrentes"><span class="nav-dot"></span><span class="nav-abbr">RC</span><span class="nav-label">Recorrentes</span></div>
       <div class="nav-item" data-view="comissoes" title="Comissões"><span class="nav-dot"></span><span class="nav-abbr">CM</span><span class="nav-label">Comissões</span></div>
       <div class="nav-item" data-view="ativos" title="Ativos Patrimoniais"><span class="nav-dot"></span><span class="nav-abbr">AP</span><span class="nav-label">Ativos Patrimoniais</span></div>
       <div class="nav-item" data-view="investimentos" title="Investimentos"><span class="nav-dot"></span><span class="nav-abbr">IV</span><span class="nav-label">Investimentos</span></div>
@@ -454,6 +456,8 @@
       <div class="more-item" data-view="cartoes"><span class="more-icon">💳</span>Cartões de Crédito</div>
       <div class="more-item" data-view="relatorios"><span class="more-icon">📊</span>Relatórios</div>
       <div class="more-item" data-view="categorias"><span class="more-icon">🏷️</span>Categorias</div>
+      <div class="more-item" data-view="fornecedores"><span class="more-icon">🚚</span>Fornecedores</div>
+      <div class="more-item" data-view="recorrencias"><span class="more-icon">🔁</span>Recorrentes</div>
       <div class="more-item" data-view="comissoes"><span class="more-icon">🤝</span>Comissões</div>
       <div class="more-item" data-view="ativos"><span class="more-icon">📦</span>Ativos Patrimoniais</div>
       <div class="more-item" data-view="investimentos"><span class="more-icon">📈</span>Investimentos</div>
@@ -640,6 +644,7 @@ function showToast(msg){
 /* ---------------- Navegação ---------------- */
 let currentView = 'dashboard';
 let extratoContaId = null;
+let lancamentosBuscaPreenchida = '';
 let ativoPatrimonialDetalheId = null;
 let faturaCartaoId = null;
 let faturaCompetenciaAtual = null;
@@ -710,6 +715,8 @@ function render(){
   else if(currentView==='ativos-inv') main.innerHTML = viewAtivosInvestimento(invContaId);
   else if(currentView==='relatorios') main.innerHTML = viewRelatorios();
   else if(currentView==='categorias') main.innerHTML = viewCategorias();
+  else if(currentView==='fornecedores') main.innerHTML = viewFornecedores();
+  else if(currentView==='recorrencias') main.innerHTML = viewRecorrencias();
   else if(currentView==='comissoes') main.innerHTML = viewComissoes();
   else if(currentView==='ativos') main.innerHTML = viewAtivosPatrimoniais();
   else if(currentView==='ativo-detalhe') main.innerHTML = viewAtivoPatrimonialDetalhe(ativoPatrimonialDetalheId);
@@ -1298,6 +1305,10 @@ function viewLancamentos(tipo){
   const titulo = tipo==='saida' ? 'Contas a Pagar' : 'Contas a Receber';
   const categorias = todasCategoriasFlat(tipo);
   let lista = state.lancamentos.filter(l=>l.tipo===tipo && l.origem!=='transferencia');
+  if(lancamentosBuscaPreenchida){
+    const termo = lancamentosBuscaPreenchida.toLowerCase();
+    lista = lista.filter(l=> l.descricao.toLowerCase().includes(termo) || (l.fornecedor||'').toLowerCase().includes(termo) || (l.observacao||'').toLowerCase().includes(termo));
+  }
   lista.sort((a,b)=> (a.dataVencimento||'').localeCompare(b.dataVencimento||''));
 
   return `
@@ -1307,7 +1318,7 @@ function viewLancamentos(tipo){
     </div>
     <div class="panel">
       <div class="filter-bar">
-        <input type="text" id="filtroBusca" placeholder="Buscar por descrição, nº do pedido..." style="flex:1;min-width:180px;border:1px solid var(--line);border-radius:7px;padding:8px 12px;font-size:12.5px;">
+        <input type="text" id="filtroBusca" value="${escapeHTML(lancamentosBuscaPreenchida)}" placeholder="Buscar por descrição, nº do pedido..." style="flex:1;min-width:180px;border:1px solid var(--line);border-radius:7px;padding:8px 12px;font-size:12.5px;">
         <select id="filtroStatus">
           <option value="todos">Todos os status</option>
           <option value="pendente">Pendentes</option>
@@ -1323,6 +1334,39 @@ function viewLancamentos(tipo){
       </div>
       <div class="panel-body" id="listaLancamentos">
         ${lista.length? lista.map(rowHTML).join('') : `<div class="empty">Nenhum lançamento em ${titulo.toLowerCase()} ainda.</div>`}
+      </div>
+    </div>
+    ${tipo==='entrada' ? relatorioInadimplenciaHTML() : ''}
+  `;
+}
+
+function relatorioInadimplenciaHTML(){
+  const hoje = todayISO();
+  const vencidas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.dataVencimento && l.dataVencimento<hoje);
+  if(!vencidas.length) return '';
+  const porCliente = {};
+  vencidas.forEach(l=>{
+    const cliente = l.fornecedor || 'Sem cliente identificado';
+    if(!porCliente[cliente]) porCliente[cliente] = { total:0, itens:[] };
+    porCliente[cliente].total += l.valor;
+    porCliente[cliente].itens.push(l);
+  });
+  const linhas = Object.entries(porCliente).sort((a,b)=>b[1].total-a[1].total);
+  const totalGeral = vencidas.reduce((s,l)=>s+l.valor,0);
+  return `
+    <div class="panel">
+      <div class="panel-head"><h2>⚠️ Inadimplência — ${vencidas.length} conta(s) vencida(s), total ${brl(totalGeral)}</h2></div>
+      <div class="panel-body">
+        ${linhas.map(([cliente,info])=>{
+          const diasMax = Math.max(...info.itens.map(l=>Math.floor((new Date(hoje)-new Date(l.dataVencimento))/86400000)));
+          return `
+          <div class="ledger-row" style="grid-template-columns:14px 1fr 110px 140px;">
+            <span class="dot saida"></span>
+            <div class="desc-cell"><div>${escapeHTML(cliente)}</div><div class="cat">${info.itens.length} conta(s) em aberto</div></div>
+            <span class="mono" style="font-weight:600;color:var(--danger);">${brl(info.total)}</span>
+            <span style="font-size:11.5px;color:var(--danger);font-weight:600;">${diasMax} dia(s) de atraso</span>
+          </div>`;
+        }).join('')}
       </div>
     </div>
   `;
@@ -3188,6 +3232,7 @@ function attachViewHandlers(){
     filtroStatus?.addEventListener('change', applyFilters);
     filtroCategoria?.addEventListener('change', applyFilters);
     filtroBusca?.addEventListener('input', applyFilters);
+    lancamentosBuscaPreenchida = '';
   }
 
   // Relatórios
@@ -3248,6 +3293,51 @@ function attachViewHandlers(){
   }
 
   // Categorias
+  // Recorrências
+  document.getElementById('btnNovaRecorrencia')?.addEventListener('click', ()=>openRecorrenciaModal());
+  document.querySelectorAll('[data-action="editar-recorrencia"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openRecorrenciaModal((state.recorrencias||[]).find(x=>x.id===btn.dataset.id)));
+  });
+  document.querySelectorAll('[data-action="pausar-recorrencia"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const r = (state.recorrencias||[]).find(x=>x.id===btn.dataset.id);
+      if(!r) return;
+      r.ativo = !r.ativo;
+      persist(); render();
+      showToast(r.ativo ? 'Recorrência reativada' : 'Recorrência pausada');
+    });
+  });
+  document.querySelectorAll('[data-action="excluir-recorrencia"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!confirm('Excluir esta recorrência? Os lançamentos já gerados não são apagados.')) return;
+      state.recorrencias = (state.recorrencias||[]).filter(r=>r.id!==btn.dataset.id);
+      persist(); render(); showToast('Recorrência excluída');
+    });
+  });
+
+  // Fornecedores
+  document.getElementById('btnNovoFornecedor')?.addEventListener('click', ()=>openFornecedorModal());
+  document.querySelectorAll('[data-action="ver-fornecedor"]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const f = (state.fornecedores||[]).find(x=>x.id===el.dataset.id);
+      if(!f) return;
+      lancamentosBuscaPreenchida = f.nome;
+      currentView = 'pagar';
+      document.querySelectorAll('.nav-item, .bottom-nav-item[data-view]').forEach(n=>n.classList.toggle('active', n.dataset.view===currentView));
+      render();
+    });
+  });
+  document.querySelectorAll('[data-action="editar-fornecedor"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openFornecedorModal((state.fornecedores||[]).find(x=>x.id===btn.dataset.id)));
+  });
+  document.querySelectorAll('[data-action="excluir-fornecedor"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!confirm('Excluir este fornecedor? Os lançamentos já feitos com ele não são apagados.')) return;
+      state.fornecedores = (state.fornecedores||[]).filter(f=>f.id!==btn.dataset.id);
+      persist(); render(); showToast('Fornecedor excluído');
+    });
+  });
+
   const categoriaToggle = document.getElementById('categoriaToggle');
   if(categoriaToggle){
     let tipoCatAtivo = categoriaTipoAtivo;
@@ -3841,7 +3931,16 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     <div class="field-row">
       <div class="field">
         <label>${tipo==='saida' ? 'Fornecedor (opcional)' : 'Cliente (opcional)'}</label>
-        <input type="text" id="fFornecedor" value="${existing?.fornecedor ? escapeHTML(existing.fornecedor) : ''}">
+        ${tipo==='saida' ? `
+          <select id="fFornecedorSelect">
+            <option value="">— nenhum —</option>
+            ${(state.fornecedores||[]).map(f=>`<option value="${escapeHTML(f.nome)}" ${existing?.fornecedor===f.nome?'selected':''}>${escapeHTML(f.nome)}</option>`).join('')}
+            <option value="__outro__" ${existing?.fornecedor && !(state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? 'selected' : ''}>Outro (digitar)</option>
+          </select>
+          <input type="text" id="fFornecedor" placeholder="Nome do fornecedor" style="margin-top:8px;${existing?.fornecedor && !(state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? '' : 'display:none;'}" value="${existing?.fornecedor && !(state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? escapeHTML(existing.fornecedor) : ''}">
+        ` : `
+          <input type="text" id="fFornecedor" value="${existing?.fornecedor ? escapeHTML(existing.fornecedor) : ''}">
+        `}
       </div>
       <div class="field">
         <label>Conta</label>
@@ -3873,17 +3972,30 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  const fFornecedorSelect = document.getElementById('fFornecedorSelect');
+  if(fFornecedorSelect){
+    const fFornecedorInput = document.getElementById('fFornecedor');
+    fFornecedorSelect.addEventListener('change', ()=>{
+      fFornecedorInput.style.display = fFornecedorSelect.value==='__outro__' ? 'block' : 'none';
+    });
+  }
   document.getElementById('btnSalvarLancamento').addEventListener('click', ()=>{
     const categoria = document.getElementById('fCategoria').value;
     const descricao = document.getElementById('fDescricao').value.trim() || categoria;
     const valor = numBR(document.getElementById('fValor').value);
     if(!valor || isNaN(valor) || valor<=0){ showToast('Preencha um valor válido'); return; }
     const status = document.getElementById('fStatus').value;
+    let fornecedorValor;
+    if(fFornecedorSelect){
+      fornecedorValor = fFornecedorSelect.value==='__outro__' ? document.getElementById('fFornecedor').value.trim() : fFornecedorSelect.value;
+    } else {
+      fornecedorValor = document.getElementById('fFornecedor').value.trim();
+    }
     const payload = {
       descricao,
       categoria,
       valor,
-      fornecedor: document.getElementById('fFornecedor').value.trim(),
+      fornecedor: fornecedorValor,
       observacao: document.getElementById('fObservacao').value.trim(),
       contaId: document.getElementById('fConta').value,
       dataVencimento: document.getElementById('fVencimento').value,
@@ -3901,6 +4013,205 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     showToast(isEdit ? 'Lançamento atualizado' : 'Lançamento criado');
   });
 }
+function totalGastoFornecedor(nome){
+  return state.lancamentos.filter(l=>l.tipo==='saida' && l.fornecedor===nome && l.status==='pago').reduce((s,l)=>s+l.valor,0);
+}
+
+function viewFornecedores(){
+  const lista = [...(state.fornecedores||[])].sort((a,b)=>a.nome.localeCompare(b.nome));
+  return `
+    <div class="topbar">
+      <div><h1>Fornecedores</h1><p>Cadastro de fornecedores e quanto já foi gasto com cada um</p></div>
+      <button class="btn" id="btnNovoFornecedor">+ Fornecedor</button>
+    </div>
+    <div class="panel">
+      <div class="ledger-row head" style="grid-template-columns:14px 1fr 160px 130px auto;">
+        <span></span><span>Nome</span><span>Contato</span><span>Total gasto</span><span></span>
+      </div>
+      <div class="panel-body">
+        ${lista.length ? lista.map(f=>{
+          const total = totalGastoFornecedor(f.nome);
+          return `
+          <div class="ledger-row" data-id="${f.id}" style="grid-template-columns:14px 1fr 160px 130px auto;">
+            <span class="dot" style="background:var(--text-soft);"></span>
+            <div class="desc-cell" data-action="ver-fornecedor" data-id="${f.id}" style="cursor:pointer;">
+              <div>${escapeHTML(f.nome)}</div>
+              <div class="cat">${escapeHTML(f.cnpjCpf||'sem CNPJ/CPF cadastrado')}</div>
+            </div>
+            <span style="font-size:12.5px;color:var(--text-soft);">${escapeHTML(f.telefone||f.email||'—')}</span>
+            <span class="mono" style="font-weight:600;">${brl(total)}</span>
+            <div class="row-actions">
+              <button class="icon-btn" data-action="editar-fornecedor" data-id="${f.id}" title="Editar">✎</button>
+              <button class="icon-btn" data-action="excluir-fornecedor" data-id="${f.id}" title="Excluir">✕</button>
+            </div>
+          </div>
+        `;}).join('') : `<div class="empty">Nenhum fornecedor cadastrado ainda.</div>`}
+      </div>
+    </div>
+  `;
+}
+
+function openFornecedorModal(existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit ? 'Editar fornecedor' : 'Novo fornecedor'}</h3>
+    <div class="field"><label>Nome</label><input type="text" id="fnNome" value="${existing?escapeHTML(existing.nome):''}" placeholder="Ex: Metalúrgica Sul"></div>
+    <div class="field-row">
+      <div class="field"><label>CNPJ/CPF (opcional)</label><input type="text" id="fnDoc" value="${existing?escapeHTML(existing.cnpjCpf||''):''}"></div>
+      <div class="field"><label>Telefone (opcional)</label><input type="text" id="fnTelefone" value="${existing?escapeHTML(existing.telefone||''):''}"></div>
+    </div>
+    <div class="field"><label>E-mail (opcional)</label><input type="email" id="fnEmail" value="${existing?escapeHTML(existing.email||''):''}"></div>
+    <div class="field"><label>Observação (opcional)</label><input type="text" id="fnObs" value="${existing?escapeHTML(existing.observacao||''):''}"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarFornecedor">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarFornecedor').addEventListener('click', ()=>{
+    const nome = document.getElementById('fnNome').value.trim();
+    if(!nome){ showToast('Digite o nome do fornecedor'); return; }
+    if(!state.fornecedores) state.fornecedores = [];
+    if(!isEdit && state.fornecedores.some(f=>f.nome.toLowerCase()===nome.toLowerCase())){ showToast('Já existe um fornecedor com esse nome'); return; }
+    const payload = {
+      nome,
+      cnpjCpf: document.getElementById('fnDoc').value.trim(),
+      telefone: document.getElementById('fnTelefone').value.trim(),
+      email: document.getElementById('fnEmail').value.trim(),
+      observacao: document.getElementById('fnObs').value.trim()
+    };
+    if(isEdit){
+      const nomeAntigo = existing.nome;
+      Object.assign(existing, payload);
+      if(nomeAntigo !== nome){
+        state.lancamentos.forEach(l=>{ if(l.fornecedor===nomeAntigo) l.fornecedor = nome; });
+      }
+    } else {
+      state.fornecedores.push({ id: uid(), ...payload });
+    }
+    persist(); closeModal(); render();
+    showToast(isEdit ? 'Fornecedor atualizado' : 'Fornecedor cadastrado');
+  });
+}
+
+function gerarLancamentosRecorrentes(){
+  if(!state.recorrencias || !state.recorrencias.length) return;
+  const hoje = new Date();
+  const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`;
+  let gerouAlgum = false;
+  state.recorrencias.forEach(r=>{
+    if(!r.ativo) return;
+    if(r.ultimoMesGerado === mesAtual) return;
+    const ultimoDiaMes = new Date(hoje.getFullYear(), hoje.getMonth()+1, 0).getDate();
+    const dia = Math.min(r.diaVencimento, ultimoDiaMes);
+    const dataVenc = `${mesAtual}-${String(dia).padStart(2,'0')}`;
+    state.lancamentos.push({
+      id: uid(), tipo: r.tipo, categoria: r.categoria, descricao: r.descricao,
+      valor: r.valor, contaId: r.contaId, status: 'pendente',
+      dataVencimento: dataVenc, dataPagamento: null,
+      origem: 'recorrencia', recorrenciaId: r.id, criadoEm: new Date().toISOString()
+    });
+    r.ultimoMesGerado = mesAtual;
+    gerouAlgum = true;
+  });
+  if(gerouAlgum) persist();
+}
+
+function viewRecorrencias(){
+  const lista = [...(state.recorrencias||[])].sort((a,b)=>a.descricao.localeCompare(b.descricao));
+  return `
+    <div class="topbar">
+      <div><h1>Lançamentos Recorrentes</h1><p>Contas que se repetem todo mês — aluguel, salários, assinaturas...</p></div>
+      <button class="btn" id="btnNovaRecorrencia">+ Nova recorrência</button>
+    </div>
+    <div class="panel">
+      <div class="ledger-row head" style="grid-template-columns:14px 1fr 110px 70px 80px auto;">
+        <span></span><span>Descrição</span><span>Valor</span><span>Dia</span><span>Status</span><span></span>
+      </div>
+      <div class="panel-body">
+        ${lista.length ? lista.map(r=>`
+          <div class="ledger-row" data-id="${r.id}" style="grid-template-columns:14px 1fr 110px 70px 80px auto;${r.ativo?'':'opacity:.55;'}">
+            <span class="dot ${r.tipo}"></span>
+            <div class="desc-cell"><div>${escapeHTML(r.descricao)}</div><div class="cat">${escapeHTML(r.categoria)}</div></div>
+            <span class="mono" style="font-size:12.5px;">${brl(r.valor)}</span>
+            <span style="font-size:12.5px;">Dia ${r.diaVencimento}</span>
+            <span style="font-size:11px;font-weight:600;color:${r.ativo?'var(--success)':'var(--text-soft)'}">${r.ativo?'Ativa':'Pausada'}</span>
+            <div class="row-actions">
+              <button class="icon-btn" data-action="pausar-recorrencia" data-id="${r.id}" title="${r.ativo?'Pausar':'Reativar'}">${r.ativo?'⏸':'▶'}</button>
+              <button class="icon-btn" data-action="editar-recorrencia" data-id="${r.id}" title="Editar">✎</button>
+              <button class="icon-btn" data-action="excluir-recorrencia" data-id="${r.id}" title="Excluir">✕</button>
+            </div>
+          </div>
+        `).join('') : `<div class="empty">Nenhuma recorrência cadastrada ainda.</div>`}
+      </div>
+    </div>
+    <div class="note" style="margin-top:0;">Os lançamentos do mês são criados sozinhos em Contas a Pagar/Receber sempre que você abrir o sistema — sem duplicar, mesmo abrindo várias vezes no mesmo mês.</div>
+  `;
+}
+
+function openRecorrenciaModal(existing){
+  const isEdit = !!existing;
+  const tipoInicial = existing?.tipo || 'saida';
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit?'Editar recorrência':'Nova recorrência'}</h3>
+    <div class="field">
+      <label>Tipo</label>
+      <div class="toggle-row" id="rcTipoToggle">
+        <button type="button" data-tipo="saida" class="${tipoInicial==='saida'?'active':''}">Despesa</button>
+        <button type="button" data-tipo="entrada" class="${tipoInicial==='entrada'?'active':''}">Receita</button>
+      </div>
+    </div>
+    <div class="field"><label>Descrição</label><input type="text" id="rcDescricao" value="${existing?escapeHTML(existing.descricao):''}" placeholder="Ex: Aluguel do galpão"></div>
+    <div class="field-row">
+      <div class="field"><label>Categoria</label><select id="rcCategoria">${opcoesCategoriaHTML(tipoInicial, existing?.categoria)}</select></div>
+      <div class="field"><label>Valor (R$)</label><input type="text" inputmode="decimal" id="rcValor" value="${existing?existing.valor:''}" placeholder="0,00"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Dia do vencimento</label><input type="number" min="1" max="31" id="rcDia" value="${existing?existing.diaVencimento:'10'}"></div>
+      <div class="field"><label>Conta</label><select id="rcConta">${state.contas.map(c=>`<option value="${c.id}" ${(existing?.contaId||state.contas[0]?.id)===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+    </div>
+    <div class="note" style="margin-top:0;">O lançamento desse mês (se já não tiver sido gerado) é criado assim que você salvar.</div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarRecorrencia">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  let tipoAtual = tipoInicial;
+  document.getElementById('rcTipoToggle').querySelectorAll('button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.getElementById('rcTipoToggle').querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      tipoAtual = btn.dataset.tipo;
+      document.getElementById('rcCategoria').innerHTML = opcoesCategoriaHTML(tipoAtual, null);
+    });
+  });
+  document.getElementById('btnSalvarRecorrencia').addEventListener('click', ()=>{
+    const descricao = document.getElementById('rcDescricao').value.trim();
+    const valor = numBR(document.getElementById('rcValor').value);
+    const diaVencimento = parseInt(document.getElementById('rcDia').value);
+    if(!descricao || isNaN(valor) || valor<=0 || isNaN(diaVencimento) || diaVencimento<1 || diaVencimento>31){ showToast('Preencha descrição, valor e um dia válido (1 a 31)'); return; }
+    const payload = {
+      tipo: tipoAtual, descricao, categoria: document.getElementById('rcCategoria').value,
+      valor, diaVencimento, contaId: document.getElementById('rcConta').value,
+      ativo: existing ? existing.ativo : true
+    };
+    if(isEdit){ Object.assign(existing, payload); }
+    else {
+      if(!state.recorrencias) state.recorrencias = [];
+      state.recorrencias.push({ id: uid(), ultimoMesGerado: null, criadoEm: new Date().toISOString(), ...payload });
+    }
+    persist();
+    gerarLancamentosRecorrentes();
+    closeModal(); render();
+    showToast(isEdit?'Recorrência atualizada':'Recorrência cadastrada');
+  });
+}
+
 function openContaModal(existing){
   const isEdit = !!existing;
   const modal = document.getElementById('modalContent');
@@ -5030,7 +5341,7 @@ document.getElementById('fileImport').addEventListener('change', (e)=>{
     try{
       const data = JSON.parse(ev.target.result);
       if(!data.lancamentos) throw new Error('formato inválido');
-      state = { lancamentos:[], ativos:[], investimentos:[], forneiraConfig:null, contas:[], cartoes:[], comprasCartao:[], faturasFechadas:[], contasInvestimento:[], ativosInvestimento:[], categorias:null, categoriaMEI:{}, meiEmpregadoPorAno:{}, ...data };
+      state = { lancamentos:[], ativos:[], investimentos:[], forneiraConfig:null, contas:[], cartoes:[], comprasCartao:[], faturasFechadas:[], contasInvestimento:[], ativosInvestimento:[], categorias:null, categoriaMEI:{}, meiEmpregadoPorAno:{}, fornecedores:[], recorrencias:[], ...data };
       if(state.contas.length===0) state.contas.push({ id:'conta_caixa', nome:'Caixa', banco:'Conta padrão', tipo:'caixa', saldoInicial:0, cor:CONTA_CORES[0] });
       const idPadrao = state.contas[0].id;
       state.lancamentos.forEach(l=>{ if(!l.contaId) l.contaId = idPadrao; });
@@ -5070,6 +5381,7 @@ auth.onAuthStateChanged(async user=>{
     try{
       state = await carregarDados();
       dadosCarregados = true;
+      gerarLancamentosRecorrentes();
       render();
     }catch(e){
       console.error('Erro ao carregar dados:', e);
