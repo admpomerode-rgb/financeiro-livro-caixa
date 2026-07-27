@@ -87,7 +87,7 @@
   .sidebar-footer button:hover{border-color:var(--blue-accent);color:var(--white);}
 
   .main{flex:1;padding:32px 40px;max-width:1200px;}
-  .topbar{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;}
+  .topbar{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:28px;}
   .topbar h1{font-size:22px;}
   .topbar p{color:var(--text-soft);font-size:13.5px;margin-top:4px;}
 
@@ -449,7 +449,13 @@
     .sidebar{display:none;}
     .main{padding:18px 14px calc(78px + env(safe-area-inset-bottom));max-width:100%;}
     .bottom-nav{display:flex;}
+    .topbar-actions-stack{width:100%;}
+    .topbar-actions-stack .btn{flex:1;min-width:0;}
+    .cards.cards-3{grid-template-columns:1fr 1fr;}
+    .cards.cards-3 .card:last-child{grid-column:1 / -1;}
   }
+
+  .topbar-actions-stack{display:flex;gap:8px;flex-wrap:wrap;}
 
   .login-overlay{
     position:fixed;inset:0;background:var(--ink);display:flex;align-items:center;justify-content:center;
@@ -2776,13 +2782,13 @@ function viewInvestimentos(){
   return `
     <div class="topbar">
       <div><h1>Investimentos</h1><p>Carteira de aplicações — renda fixa e renda variável</p></div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn ghost" id="btnImportarNota">📄 Importar nota de corretagem (PDF)</button>
+      <div class="topbar-actions-stack">
+        <button class="btn ghost" id="btnImportarNota">📄 Importar nota (PDF)</button>
         <button class="btn ghost" id="btnAtualizarCotacoes">⟳ Atualizar cotações</button>
       </div>
     </div>
-    <div class="cards">
-      <div class="card saldo"><div class="label">Total investido (valor atual)</div><div class="value mono">${brl(total)}</div></div>
+    <div class="cards cards-3">
+      <div class="card saldo"><div class="label">Total investido</div><div class="value mono">${brl(total)}</div></div>
       <div class="card"><div class="label">Custo de aquisição</div><div class="value mono">${brl(custo)}</div></div>
       <div class="card"><div class="label">Rendimento acumulado</div><div class="value mono ${rendimento>=0?'pos':'neg'}">${brl(rendimento)}</div></div>
     </div>
