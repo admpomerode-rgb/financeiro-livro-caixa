@@ -372,6 +372,15 @@
   /* Categorias */
   .categoria-item{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden;}
   .categoria-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--white);flex-wrap:wrap;gap:8px;}
+  .categoria-head-nome{display:flex;flex-direction:column;gap:2px;}
+  .categoria-head-nome .nome{font-weight:700;font-size:14.5px;cursor:pointer;}
+  .categoria-head-nome .nome:hover{color:var(--blue-accent);}
+  .categoria-total-linha{font-size:11.5px;color:var(--text-soft);}
+  .categoria-total-linha .mono{font-weight:600;color:var(--ink);}
+  .subcategoria-nome-wrap{display:flex;flex-direction:column;gap:2px;}
+  .subcategoria-nome-wrap .sub-nome{font-weight:600;font-size:13px;cursor:pointer;}
+  .subcategoria-nome-wrap .sub-nome:hover{color:var(--blue-accent);}
+  .subcategoria-nome-wrap .sub-nome::before{content:'— ';color:var(--text-soft);font-weight:400;}
   .categoria-head .nome{font-weight:600;font-size:14px;}
   .categoria-head .actions{display:flex;gap:6px;}
   .subcategoria-list{background:var(--bone);border-top:1px solid var(--line);}
@@ -2086,7 +2095,7 @@ function openItemSimulacaoModal(){
 function viewLancamentosCategoria(){
   if(!categoriaLancamentosAtual) return viewCategorias();
   const { tipo, categoria } = categoriaLancamentosAtual;
-  let lista = state.lancamentos.filter(l=>l.tipo===tipo && l.categoria===categoria && l.origem!=='transferencia');
+  let lista = state.lancamentos.filter(l=>l.tipo===tipo && l.origem!=='transferencia' && (l.categoria===categoria || l.categoria.startsWith(categoria+' / ')));
   lista.sort((a,b)=>(b.dataPagamento||b.dataVencimento||'').localeCompare(a.dataPagamento||a.dataVencimento||''));
   const totalRealizado = lista.filter(l=>l.status==='pago'||l.status==='recebido').reduce((s,l)=>s+l.valor,0);
   const totalPendente = lista.filter(l=>l.status==='pendente').reduce((s,l)=>s+l.valor,0);
@@ -2120,7 +2129,7 @@ function viewLancamentosCategoria(){
 
 function gerarExtratoCategoriaPDF(tipo, categoria, dataDe, dataAte){
   if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
-  let lista = state.lancamentos.filter(l=>l.tipo===tipo && l.origem!=='transferencia' && (!categoria || l.categoria===categoria));
+  let lista = state.lancamentos.filter(l=>l.tipo===tipo && l.origem!=='transferencia' && (!categoria || l.categoria===categoria || l.categoria.startsWith(categoria+' / ')));
   if(dataDe) lista = lista.filter(l=>(l.dataPagamento||l.dataVencimento||'')>=dataDe);
   if(dataAte) lista = lista.filter(l=>(l.dataPagamento||l.dataVencimento||'')<=dataAte);
   lista.sort((a,b)=>(a.dataPagamento||a.dataVencimento||'').localeCompare(b.dataPagamento||b.dataVencimento||''));
@@ -2173,6 +2182,73 @@ function gerarExtratoCategoriaPDF(tipo, categoria, dataDe, dataAte){
   showToast('Extrato baixado em PDF');
 }
 
+function gerarResumoCategoriaPDF(tipo, dataDe, dataAte){
+  if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
+  const tipos = tipo==='ambos' ? ['saida','entrada'] : [tipo];
+
+  const { jsPDF } = window.jspdf;
+  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+  const M = 18, W = 210 - M*2;
+  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
+  let y = 22;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
+  docPdf.text('Livro Caixa Financeiro VK', M, y);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
+  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
+  y += 7;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 9;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
+  docPdf.text('Resumo por Categoria', M, y);
+  y += 6;
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
+  docPdf.text((dataDe||dataAte) ? `Período: ${dataDe?fmtDate(dataDe):'início'} até ${dataAte?fmtDate(dataAte):'hoje'}` : 'Todas as movimentações', M, y);
+  y += 10;
+
+  let algumaLinha = false;
+  tipos.forEach(t=>{
+    const cor = t==='entrada' ? SUCCESS : DANGER;
+    const titulo = t==='entrada' ? 'Receitas' : 'Despesas';
+    let lista = state.lancamentos.filter(l=>l.tipo===t && l.origem!=='transferencia' && (l.status==='pago'||l.status==='recebido'));
+    if(dataDe) lista = lista.filter(l=>(l.dataPagamento||'')>=dataDe);
+    if(dataAte) lista = lista.filter(l=>(l.dataPagamento||'')<=dataAte);
+    if(!lista.length) return;
+    algumaLinha = true;
+
+    if(y>255){ docPdf.addPage(); y=20; }
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(11); docPdf.setTextColor(...INK);
+    docPdf.text(titulo, M, y); y+=6;
+    docPdf.setDrawColor(...LINEC); docPdf.line(M, y-3, M+W, y-3);
+    y += 2;
+
+    const porCategoria = {};
+    lista.forEach(l=>{ porCategoria[l.categoria] = (porCategoria[l.categoria]||0)+l.valor; });
+    const totalTipo = Object.values(porCategoria).reduce((a,b)=>a+b,0);
+    Object.entries(porCategoria).sort((a,b)=>b[1]-a[1]).forEach(([cat,valor])=>{
+      if(y>270){ docPdf.addPage(); y=20; }
+      docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...INK);
+      docPdf.text(cat, M+2, y);
+      docPdf.setTextColor(...cor);
+      docPdf.text(brl(valor), M+W, y, { align:'right' });
+      y += 5.5;
+    });
+    y += 2;
+    docPdf.setDrawColor(...LINEC); docPdf.line(M, y-3, M+W, y-3);
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(9.5); docPdf.setTextColor(...INK);
+    docPdf.text(`Total ${titulo}`, M+2, y+2);
+    docPdf.setTextColor(...cor);
+    docPdf.text(brl(totalTipo), M+W, y+2, { align:'right' });
+    y += 13;
+  });
+
+  if(!algumaLinha){ showToast('Nenhum lançamento no período selecionado'); return; }
+
+  docPdf.save('resumo-categorias.pdf');
+  showToast('Resumo por categoria baixado em PDF');
+}
+
 function openExportarExtratoModal(tipoInicial){
   const modal = document.getElementById('modalContent');
   const montarOpcoesCategoria = (tipo)=>{
@@ -2185,6 +2261,13 @@ function openExportarExtratoModal(tipoInicial){
   };
   modal.innerHTML = `
     <h3>Exportar extrato</h3>
+    <div class="field">
+      <label>Formato</label>
+      <div class="toggle-row" id="exFormatoToggle">
+        <button type="button" data-formato="completo" class="active">Completo (todos os lançamentos)</button>
+        <button type="button" data-formato="resumo">Resumo (só os totais por categoria)</button>
+      </div>
+    </div>
     <div class="field">
       <label>Tipo</label>
       <div class="toggle-row" id="exTipoToggle">
@@ -2209,21 +2292,35 @@ function openExportarExtratoModal(tipoInicial){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   let tipoAtual = tipoInicial==='entrada' ? 'entrada' : 'saida';
+  let formatoAtual = 'completo';
+  document.getElementById('exFormatoToggle').querySelectorAll('button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.getElementById('exFormatoToggle').querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      formatoAtual = btn.dataset.formato;
+      const grupo = document.getElementById('exCategoriaGrupo');
+      if(formatoAtual==='resumo'){ grupo.style.display = 'none'; }
+      else if(tipoAtual!=='ambos'){ grupo.style.display = 'block'; }
+    });
+  });
   document.getElementById('exTipoToggle').querySelectorAll('button').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       document.getElementById('exTipoToggle').querySelectorAll('button').forEach(b=>b.classList.remove('active'));
       btn.classList.add('active');
       tipoAtual = btn.dataset.tipo;
       const grupo = document.getElementById('exCategoriaGrupo');
-      if(tipoAtual==='ambos'){ grupo.style.display = 'none'; }
+      if(tipoAtual==='ambos' || formatoAtual==='resumo'){ grupo.style.display = 'none'; }
       else { grupo.style.display = 'block'; document.getElementById('exCategoria').innerHTML = montarOpcoesCategoria(tipoAtual); }
     });
   });
   document.getElementById('btnGerarExtratoSelecionado').addEventListener('click', ()=>{
     const dataDe = document.getElementById('exDe').value || null;
     const dataAte = document.getElementById('exAte').value || null;
-    if(tipoAtual==='ambos'){ gerarExtratoGeralPDF(dataDe, dataAte); }
-    else {
+    if(formatoAtual==='resumo'){
+      gerarResumoCategoriaPDF(tipoAtual, dataDe, dataAte);
+    } else if(tipoAtual==='ambos'){
+      gerarExtratoGeralPDF(dataDe, dataAte);
+    } else {
       const categoria = document.getElementById('exCategoria').value || null;
       gerarExtratoCategoriaPDF(tipoAtual, categoria, dataDe, dataAte);
     }
@@ -3937,7 +4034,17 @@ function totalCategoriaTodoHistorico(categoria, tipo){
   const statusOk = tipo==='entrada' ? 'recebido' : 'pago';
   let total = 0, qtd = 0;
   state.lancamentos.forEach(l=>{
-    if(l.categoria===categoria && l.tipo===tipo && l.status===statusOk){ total += l.valor; qtd++; }
+    if(l.tipo!==tipo || l.status!==statusOk) return;
+    if(l.categoria===categoria || l.categoria.startsWith(categoria+' / ')){ total += l.valor; qtd++; }
+  });
+  return { total, qtd };
+}
+function totalSubcategoriaTodoHistorico(categoriaNome, subNome, tipo){
+  const full = `${categoriaNome} / ${subNome}`;
+  const statusOk = tipo==='entrada' ? 'recebido' : 'pago';
+  let total = 0, qtd = 0;
+  state.lancamentos.forEach(l=>{
+    if(l.tipo===tipo && l.status===statusOk && l.categoria===full){ total += l.valor; qtd++; }
   });
   return { total, qtd };
 }
@@ -3954,28 +4061,38 @@ function renderCategoriaPanel(tipo){
       <div class="panel-body" style="padding:14px;">
         ${lista.length ? lista.map(c=>{
           const info = totalCategoriaTodoHistorico(c.nome, tipo);
+          const subsOrdenadas = [...(c.subcategorias||[])].sort((a,b)=>{
+            const ta = totalSubcategoriaTodoHistorico(c.nome, a.nome, tipo).total;
+            const tb = totalSubcategoriaTodoHistorico(c.nome, b.nome, tipo).total;
+            return tb - ta;
+          });
           return `
           <div class="categoria-item">
             <div class="categoria-head">
-              <div style="display:flex;flex-direction:column;">
-                <span class="nome" data-action="ver-lancamentos-categoria" data-tipo="${tipo}" data-cat="${escapeHTML(c.nome)}" style="cursor:pointer;text-decoration:underline;text-decoration-color:var(--line);">${escapeHTML(c.nome)}</span>
-                <span style="font-size:11px;color:var(--text-soft);margin-top:2px;">${info.qtd} lançamento(s) · ${brl(info.total)}</span>
+              <div class="categoria-head-nome">
+                <span class="nome" data-action="ver-lancamentos-categoria" data-tipo="${tipo}" data-cat="${escapeHTML(c.nome)}">${escapeHTML(c.nome)}</span>
+                <span class="categoria-total-linha">${info.qtd} lançamento(s) <span class="mono">${brl(info.total)}</span></span>
               </div>
-              <div class="actions" style="display:flex;align-items:center;gap:8px;">
+              <div class="actions">
                 <button class="icon-btn" data-action="editar-categoria" data-tipo="${tipo}" data-id="${c.id}" title="Editar">✎</button>
                 <button class="icon-btn" data-action="excluir-categoria" data-tipo="${tipo}" data-id="${c.id}" title="Excluir">✕</button>
               </div>
             </div>
             <div class="subcategoria-list">
-              ${(c.subcategorias||[]).map(sub=>`
+              ${subsOrdenadas.map(sub=>{
+                const subInfo = totalSubcategoriaTodoHistorico(c.nome, sub.nome, tipo);
+                return `
                 <div class="subcategoria-row">
-                  <span>${escapeHTML(sub.nome)}</span>
+                  <div class="subcategoria-nome-wrap">
+                    <span class="sub-nome" data-action="ver-lancamentos-categoria" data-tipo="${tipo}" data-cat="${escapeHTML(c.nome+' / '+sub.nome)}">${escapeHTML(sub.nome)}</span>
+                    <span class="categoria-total-linha">${subInfo.qtd} lançamento(s) <span class="mono">${brl(subInfo.total)}</span></span>
+                  </div>
                   <div class="actions">
                     <button class="icon-btn" data-action="editar-subcategoria" data-tipo="${tipo}" data-cat="${c.id}" data-id="${sub.id}" title="Editar">✎</button>
                     <button class="icon-btn" data-action="excluir-subcategoria" data-tipo="${tipo}" data-cat="${c.id}" data-id="${sub.id}" title="Excluir">✕</button>
                   </div>
                 </div>
-              `).join('')}
+              `;}).join('')}
               <div class="add-sub-row"><button data-action="nova-subcategoria" data-tipo="${tipo}" data-cat="${c.id}">+ Adicionar subcategoria</button></div>
             </div>
           </div>
