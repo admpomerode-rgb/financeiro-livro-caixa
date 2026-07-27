@@ -1224,6 +1224,83 @@ function ultimos6Meses(){
 }
 
 /* ---------------- Views ---------------- */
+function gastoCategoriaNoPeriodo(categoria, de, ate){
+  return state.lancamentos.filter(l=>l.categoria===categoria && l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+}
+
+function orcadoRealizadoHTML(){
+  const orc = state.orcamentoCategorias || {};
+  const categorias = Object.keys(orc);
+  if(!categorias.length) return '';
+  const hoje = new Date();
+  const de = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0,10);
+  const ate = todayISO();
+  const linhas = categorias.map(cat=>{
+    const gasto = gastoCategoriaNoPeriodo(cat, de, ate);
+    const orcado = orc[cat];
+    const pct = orcado>0 ? Math.round((gasto/orcado)*100) : 0;
+    const cor = pct>=100 ? 'var(--danger)' : pct>=80 ? 'var(--warn)' : 'var(--success)';
+    return { cat, gasto, orcado, pct, cor };
+  }).sort((a,b)=>b.pct-a.pct);
+  return `
+    <div class="panel">
+      <div class="panel-head"><h2>Orçado x Realizado — mês atual</h2><span style="font-size:12px;color:var(--text-soft);cursor:pointer;" data-goto="categorias">Ajustar orçamentos →</span></div>
+      <div class="panel-body" style="padding:16px 20px;">
+        ${linhas.map(l=>`
+          <div style="margin-bottom:14px;">
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;">
+              <span>${escapeHTML(l.cat)}</span>
+              <span class="mono">${brl(l.gasto)} / ${brl(l.orcado)}</span>
+            </div>
+            <div style="background:var(--bone);border-radius:6px;height:7px;overflow:hidden;">
+              <div style="width:${Math.min(100,l.pct)}%;height:100%;background:${l.cor};"></div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function alertasInteligentesHTML(){
+  const hoje = new Date();
+  const mesAtualDe = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0,10);
+  const mesAtualAte = todayISO();
+  const categorias = [...new Set(state.lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pago').map(l=>l.categoria))];
+  const alertas = [];
+  categorias.forEach(cat=>{
+    const gastoAtual = gastoCategoriaNoPeriodo(cat, mesAtualDe, mesAtualAte);
+    if(gastoAtual<=0) return;
+    let somaAnteriores = 0, mesesComDados = 0;
+    for(let i=1;i<=3;i++){
+      const d = new Date(hoje.getFullYear(), hoje.getMonth()-i, 1);
+      const de = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0,10);
+      const ate = new Date(d.getFullYear(), d.getMonth()+1, 0).toISOString().slice(0,10);
+      const g = gastoCategoriaNoPeriodo(cat, de, ate);
+      if(g>0){ somaAnteriores += g; mesesComDados++; }
+    }
+    if(mesesComDados<2) return;
+    const media = somaAnteriores/mesesComDados;
+    const diasCorridos = hoje.getDate();
+    const diasNoMes = new Date(hoje.getFullYear(), hoje.getMonth()+1, 0).getDate();
+    const projecao = gastoAtual / diasCorridos * diasNoMes;
+    if(projecao > media*1.3){
+      alertas.push({ cat, media, projecao, variacao: Math.round((projecao/media-1)*100) });
+    }
+  });
+  if(!alertas.length) return '';
+  return `
+    <div class="panel alerta-panel">
+      ${alertas.map(a=>`
+        <div class="alerta-linha">
+          <span>📈 Gasto com <strong>${escapeHTML(a.cat)}</strong> projetado ${a.variacao}% acima da média dos últimos meses</span>
+          <span class="mono">${brl(a.projecao)} (méd. ${brl(a.media)})</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
 function viewDashboard(){
   const t = totaisRealizados();
   const mes = totaisMesAtual();
@@ -1251,6 +1328,8 @@ function viewDashboard(){
         </div>` : ''}
     </div>` : ''}
 
+    ${alertasInteligentesHTML()}
+
     <div class="cards">
       <div class="card saldo"><div class="label">Saldo em caixa</div><div class="value mono ${t.saldo>=0?'pos':'neg'}">${brl(t.saldo)}</div></div>
       <div class="card"><div class="label">Entradas no mês</div><div class="value mono pos">${brl(mes.entradas)}</div></div>
@@ -1268,6 +1347,8 @@ function viewDashboard(){
         <canvas id="chartMeses" height="180"></canvas>
       </div>
     </div>
+
+    ${orcadoRealizadoHTML()}
 
     <div class="panel">
       <div class="panel-head"><h2>Últimos lançamentos</h2><span style="font-size:12px;color:var(--text-soft);cursor:pointer;" data-goto="fluxo">Ver fluxo de caixa completo →</span></div>
@@ -1942,6 +2023,7 @@ function viewRelatorios(){
       <button class="active" data-report="dre">DRE</button>
       <button data-report="balanco">Balanço Patrimonial</button>
       <button data-report="mei">Declaração MEI</button>
+      <button data-report="indicadores">Indicadores</button>
     </div>
     <div class="panel" id="reportPanel"></div>
   `;
@@ -2136,6 +2218,87 @@ function renderDRE(periodo){
       <div class="report-line total"><span>(=) Total de Despesas</span><span class="v">(${brl(totalDespesas)})</span></div>
 
       <div class="report-line result"><span>${resultado>=0?'Lucro':'Prejuízo'} do Período</span><span class="v" style="color:${resultado>=0?'var(--success)':'var(--danger)'}">${brl(resultado)}</span></div>
+    </div>
+  `;
+}
+
+function renderIndicadores(periodo){
+  let de, ate, label;
+  const hoje = new Date();
+  if(periodo==='mes'){
+    de = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0,10);
+    ate = todayISO();
+    label = 'Mês atual';
+  } else if(periodo==='ano'){
+    de = new Date(hoje.getFullYear(), 0, 1).toISOString().slice(0,10);
+    ate = todayISO();
+    label = 'Ano atual (' + hoje.getFullYear() + ')';
+  } else {
+    de = document.getElementById('indDe')?.value || todayISO();
+    ate = document.getElementById('indAte')?.value || todayISO();
+    label = 'Período personalizado';
+  }
+
+  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
+  const receitas = realizados.filter(l=>l.tipo==='entrada');
+  const despesas = realizados.filter(l=>l.tipo==='saida');
+  const totalReceitas = receitas.reduce((s,l)=>s+l.valor,0);
+  const totalDespesas = despesas.reduce((s,l)=>s+l.valor,0);
+  const lucro = totalReceitas - totalDespesas;
+  const margem = totalReceitas>0 ? (lucro/totalReceitas*100) : 0;
+
+  const ticketMedio = receitas.length>0 ? totalReceitas/receitas.length : 0;
+
+  const saldoCaixa = totaisRealizados().saldo;
+  const aReceberPendente = state.lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pendente').reduce((s,l)=>s+l.valor,0);
+  const aPagarPendente = state.lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente').reduce((s,l)=>s+l.valor,0);
+  const liquidez = aPagarPendente>0 ? (saldoCaixa+aReceberPendente)/aPagarPendente : null;
+
+  const pontoEquilibrio = (state.recorrencias||[]).filter(r=>r.ativo && r.tipo==='saida').reduce((s,r)=>s+r.valor,0);
+
+  const prazoMedio = (lista)=>{
+    const comAmbasDatas = lista.filter(l=>l.dataVencimento && l.dataPagamento);
+    if(!comAmbasDatas.length) return null;
+    const somaDias = comAmbasDatas.reduce((s,l)=>s + Math.round((new Date(l.dataPagamento)-new Date(l.dataVencimento))/86400000), 0);
+    return somaDias/comAmbasDatas.length;
+  };
+  const prazoRecebimento = prazoMedio(receitas);
+  const prazoPagamento = prazoMedio(despesas);
+
+  const fmtPrazo = (d)=> d===null ? '—' : (d<=0 ? `${Math.abs(Math.round(d))} dia(s) antes` : `${Math.round(d)} dia(s) depois`);
+
+  return `
+    <div class="report-controls">
+      <select id="indPeriodo">
+        <option value="mes" ${periodo==='mes'?'selected':''}>Mês atual</option>
+        <option value="ano" ${periodo==='ano'?'selected':''}>Ano atual</option>
+        <option value="custom" ${periodo==='custom'?'selected':''}>Personalizado</option>
+      </select>
+      ${periodo==='custom' ? `<input type="date" id="indDe" value="${de}"> <span style="color:var(--text-soft);font-size:12px;">até</span> <input type="date" id="indAte" value="${ate}">` : `<span style="font-size:12.5px;color:var(--text-soft);">${label}: ${fmtDate(de)} até ${fmtDate(ate)}</span>`}
+    </div>
+
+    <div class="report-block">
+      <div class="report-title">Rentabilidade</div>
+      <div class="report-line"><span>Receita Total</span><span class="v">${brl(totalReceitas)}</span></div>
+      <div class="report-line"><span>Despesa Total</span><span class="v">${brl(totalDespesas)}</span></div>
+      <div class="report-line total"><span>${lucro>=0?'Lucro':'Prejuízo'} do Período</span><span class="v" style="color:${lucro>=0?'var(--success)':'var(--danger)'}">${brl(lucro)}</span></div>
+      <div class="report-line"><span>Margem de Lucro</span><span class="v">${margem.toFixed(1)}%</span></div>
+      <div class="report-line"><span>Ticket Médio (receita)</span><span class="v">${brl(ticketMedio)}</span></div>
+    </div>
+
+    <div class="report-block">
+      <div class="report-title">Liquidez e Estrutura</div>
+      <div class="report-line"><span>Liquidez Corrente</span><span class="v">${liquidez===null?'—':liquidez.toFixed(2)}</span></div>
+      <div class="note" style="margin:6px 0 12px;">(Saldo em caixa + a receber pendente) ÷ a pagar pendente. Acima de 1 significa que dá pra cobrir as dívidas de curto prazo.</div>
+      <div class="report-line"><span>Ponto de Equilíbrio Mensal (estimado)</span><span class="v">${brl(pontoEquilibrio)}</span></div>
+      <div class="note" style="margin:6px 0 0;">Soma das suas despesas recorrentes ativas — é o mínimo que precisa entrar por mês só pra cobrir os custos fixos cadastrados.</div>
+    </div>
+
+    <div class="report-block">
+      <div class="report-title">Prazos Médios</div>
+      <div class="report-line"><span>Prazo Médio de Recebimento</span><span class="v">${fmtPrazo(prazoRecebimento)}</span></div>
+      <div class="report-line"><span>Prazo Médio de Pagamento</span><span class="v">${fmtPrazo(prazoPagamento)}</span></div>
+      <div class="note" style="margin:6px 0 0;">Comparando a data que venceu com a data que foi realmente pago/recebido, no período.</div>
     </div>
   `;
 }
@@ -2747,6 +2910,7 @@ function viewCategorias(){
 
 function renderCategoriaPanel(tipo){
   const lista = listaCategorias(tipo);
+  if(!state.orcamentoCategorias) state.orcamentoCategorias = {};
   return `
     <div class="panel">
       <div class="panel-body" style="padding:14px;">
@@ -2754,7 +2918,8 @@ function renderCategoriaPanel(tipo){
           <div class="categoria-item">
             <div class="categoria-head">
               <span class="nome">${escapeHTML(c.nome)}</span>
-              <div class="actions">
+              <div class="actions" style="display:flex;align-items:center;gap:10px;">
+                ${tipo==='saida' ? `<span style="display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--text-soft);">Orçamento/mês <input type="text" inputmode="decimal" class="orcamento-input" data-cat="${escapeHTML(c.nome)}" value="${state.orcamentoCategorias[c.nome]||''}" placeholder="0,00" style="width:80px;padding:4px 6px;font-size:11.5px;"></span>` : ''}
                 <button class="icon-btn" data-action="editar-categoria" data-tipo="${tipo}" data-id="${c.id}" title="Editar">✎</button>
                 <button class="icon-btn" data-action="excluir-categoria" data-tipo="${tipo}" data-id="${c.id}" title="Excluir">✕</button>
               </div>
@@ -3241,7 +3406,11 @@ function attachViewHandlers(){
     let activeReport = 'dre';
     let meiAnoAtual = new Date().getFullYear();
     const paint = ()=>{
-      document.getElementById('reportPanel').innerHTML = activeReport==='dre' ? renderDRE('mes') : activeReport==='balanco' ? renderBalanco() : renderMEI(meiAnoAtual);
+      document.getElementById('reportPanel').innerHTML =
+        activeReport==='dre' ? renderDRE('mes') :
+        activeReport==='balanco' ? renderBalanco() :
+        activeReport==='mei' ? renderMEI(meiAnoAtual) :
+        renderIndicadores('mes');
       bindReportInner();
     };
     const bindReportInner = ()=>{
@@ -3276,6 +3445,14 @@ function attachViewHandlers(){
         state.meiEmpregadoPorAno[meiAnoAtual] = meiEmpregado.checked;
         persist();
       });
+      const indPeriodo = document.getElementById('indPeriodo');
+      if(indPeriodo) indPeriodo.addEventListener('change', ()=>{
+        document.getElementById('reportPanel').innerHTML = renderIndicadores(indPeriodo.value);
+        bindReportInner();
+      });
+      const indDe = document.getElementById('indDe'), indAte = document.getElementById('indAte');
+      if(indDe) indDe.addEventListener('change', ()=>{ document.getElementById('reportPanel').innerHTML = renderIndicadores('custom'); bindReportInner(); });
+      if(indAte) indAte.addEventListener('change', ()=>{ document.getElementById('reportPanel').innerHTML = renderIndicadores('custom'); bindReportInner(); });
     };
     reportToggle.querySelectorAll('button').forEach(btn=>{
       btn.addEventListener('click', ()=>{
@@ -3287,7 +3464,7 @@ function attachViewHandlers(){
     });
     paint();
     document.getElementById('btnExportarRelatorioPDF')?.addEventListener('click', ()=>{
-      const titulos = { dre: 'DRE (Demonstrativo de Resultado)', balanco: 'Balanço Patrimonial', mei: `Declaração MEI — Ano ${meiAnoAtual}` };
+      const titulos = { dre: 'DRE (Demonstrativo de Resultado)', balanco: 'Balanço Patrimonial', mei: `Declaração MEI — Ano ${meiAnoAtual}`, indicadores: 'Indicadores Financeiros' };
       exportarRelatorioPDF(titulos[activeReport]);
     });
   }
@@ -3342,6 +3519,16 @@ function attachViewHandlers(){
   if(categoriaToggle){
     let tipoCatAtivo = categoriaTipoAtivo;
     const bindCategoriaPanel = ()=>{
+      document.querySelectorAll('.orcamento-input').forEach(inp=>{
+        inp.addEventListener('change', ()=>{
+          if(!state.orcamentoCategorias) state.orcamentoCategorias = {};
+          const v = numBR(inp.value);
+          if(inp.value.trim()==='' || isNaN(v) || v<=0){ delete state.orcamentoCategorias[inp.dataset.cat]; }
+          else { state.orcamentoCategorias[inp.dataset.cat] = v; }
+          persist();
+          showToast('Orçamento atualizado');
+        });
+      });
       document.querySelectorAll('[data-action="nova-categoria"]').forEach(btn=>{
         btn.addEventListener('click', ()=>openCategoriaModal(btn.dataset.tipo));
       });
@@ -5341,7 +5528,7 @@ document.getElementById('fileImport').addEventListener('change', (e)=>{
     try{
       const data = JSON.parse(ev.target.result);
       if(!data.lancamentos) throw new Error('formato inválido');
-      state = { lancamentos:[], ativos:[], investimentos:[], forneiraConfig:null, contas:[], cartoes:[], comprasCartao:[], faturasFechadas:[], contasInvestimento:[], ativosInvestimento:[], categorias:null, categoriaMEI:{}, meiEmpregadoPorAno:{}, fornecedores:[], recorrencias:[], ...data };
+      state = { lancamentos:[], ativos:[], investimentos:[], forneiraConfig:null, contas:[], cartoes:[], comprasCartao:[], faturasFechadas:[], contasInvestimento:[], ativosInvestimento:[], categorias:null, categoriaMEI:{}, meiEmpregadoPorAno:{}, fornecedores:[], recorrencias:[], orcamentoCategorias:{}, ...data };
       if(state.contas.length===0) state.contas.push({ id:'conta_caixa', nome:'Caixa', banco:'Conta padrão', tipo:'caixa', saldoInicial:0, cor:CONTA_CORES[0] });
       const idPadrao = state.contas[0].id;
       state.lancamentos.forEach(l=>{ if(!l.contaId) l.contaId = idPadrao; });
