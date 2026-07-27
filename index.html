@@ -4561,6 +4561,35 @@ function viewVK(){
 
 function escapeHTML(s){ const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
 
+function ajustarPosicaoDropdown(menu){
+  if(!menu || !menu.classList.contains('open')) return;
+  // Reseta ajustes anteriores e mede a posição real na tela
+  menu.style.left=''; menu.style.right=''; menu.style.maxWidth='';
+  const vw = document.documentElement.clientWidth;
+  const margem = 8;
+  menu.style.maxWidth = (vw - margem*2) + 'px';
+  let rect = menu.getBoundingClientRect();
+  if(rect.left < margem){
+    // Estourou pela esquerda (ex.: botão + Novo no canto esquerdo do celular): alinha à esquerda do botão
+    menu.style.right='auto'; menu.style.left='0';
+    rect = menu.getBoundingClientRect();
+    if(rect.left < margem){
+      // Botão colado na borda: empurra o menu pra dentro da tela
+      menu.style.left = (margem - rect.left) + 'px';
+    }
+    rect = menu.getBoundingClientRect();
+    if(rect.right > vw - margem){
+      menu.style.left = (parseFloat(menu.style.left)||0) - (rect.right - (vw - margem)) + 'px';
+    }
+  } else if(rect.right > vw - margem){
+    // Estourou pela direita: alinha à direita do botão
+    menu.style.left='auto'; menu.style.right='0';
+    rect = menu.getBoundingClientRect();
+    if(rect.right > vw - margem){
+      menu.style.right = (rect.right - (vw - margem)) + 'px';
+    }
+  }
+}
 function dropdownNovoHTML(){
   return `
     <div class="dropdown-wrap">
@@ -4708,6 +4737,7 @@ function attachViewHandlers(){
     btnNovoMenu.addEventListener('click', (e)=>{
       e.stopPropagation();
       novoMenu.classList.toggle('open');
+      ajustarPosicaoDropdown(novoMenu);
     });
     novoMenu.querySelectorAll('button[data-novo]').forEach(btn=>{
       btn.addEventListener('click', ()=>{
@@ -5450,6 +5480,7 @@ function attachViewHandlers(){
       const menu = document.querySelector(`[data-menu-conta="${btn.dataset.id}"]`);
       document.querySelectorAll('.dropdown-menu[data-menu-conta]').forEach(m=>{ if(m!==menu) m.classList.remove('open'); });
       menu?.classList.toggle('open');
+      if(menu) ajustarPosicaoDropdown(menu);
     });
   });
   document.querySelectorAll('[data-add]').forEach(btn=>{
