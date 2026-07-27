@@ -423,6 +423,7 @@
       <div class="nav-item" data-view="categorias" title="Categorias"><span class="nav-dot"></span><span class="nav-abbr">CT</span><span class="nav-label">Categorias</span></div>
       <div class="nav-item" data-view="fornecedores" title="Fornecedores"><span class="nav-dot"></span><span class="nav-abbr">FN</span><span class="nav-label">Fornecedores</span></div>
       <div class="nav-item" data-view="recorrencias" title="Lançamentos Recorrentes"><span class="nav-dot"></span><span class="nav-abbr">RC</span><span class="nav-label">Recorrentes</span></div>
+      <div class="nav-item" data-view="precificacao" title="Simulador de Precificação"><span class="nav-dot"></span><span class="nav-abbr">PR</span><span class="nav-label">Precificação</span></div>
       <div class="nav-item" data-view="comissoes" title="Comissões"><span class="nav-dot"></span><span class="nav-abbr">CM</span><span class="nav-label">Comissões</span></div>
       <div class="nav-item" data-view="ativos" title="Ativos Patrimoniais"><span class="nav-dot"></span><span class="nav-abbr">AP</span><span class="nav-label">Ativos Patrimoniais</span></div>
       <div class="nav-item" data-view="investimentos" title="Investimentos"><span class="nav-dot"></span><span class="nav-abbr">IV</span><span class="nav-label">Investimentos</span></div>
@@ -458,6 +459,7 @@
       <div class="more-item" data-view="categorias"><span class="more-icon">🏷️</span>Categorias</div>
       <div class="more-item" data-view="fornecedores"><span class="more-icon">🚚</span>Fornecedores</div>
       <div class="more-item" data-view="recorrencias"><span class="more-icon">🔁</span>Recorrentes</div>
+      <div class="more-item" data-view="precificacao"><span class="more-icon">🧮</span>Precificação</div>
       <div class="more-item" data-view="comissoes"><span class="more-icon">🤝</span>Comissões</div>
       <div class="more-item" data-view="ativos"><span class="more-icon">📦</span>Ativos Patrimoniais</div>
       <div class="more-item" data-view="investimentos"><span class="more-icon">📈</span>Investimentos</div>
@@ -602,6 +604,11 @@ function aplicarMigracoes(s){
   if(!s.comissoesPagas) s.comissoesPagas = [];
   if(!s.comissoesManuais) s.comissoesManuais = [];
   if(!s.ativosPatrimoniais) s.ativosPatrimoniais = [];
+  if(!s.categoriaMEI) s.categoriaMEI = {};
+  if(!s.meiEmpregadoPorAno) s.meiEmpregadoPorAno = {};
+  if(!s.fornecedores) s.fornecedores = [];
+  if(!s.recorrencias) s.recorrencias = [];
+  if(!s.orcamentoCategorias) s.orcamentoCategorias = {};
   return s;
 }
 async function carregarDados(){
@@ -717,6 +724,7 @@ function render(){
   else if(currentView==='categorias') main.innerHTML = viewCategorias();
   else if(currentView==='fornecedores') main.innerHTML = viewFornecedores();
   else if(currentView==='recorrencias') main.innerHTML = viewRecorrencias();
+  else if(currentView==='precificacao') main.innerHTML = viewPrecificacao();
   else if(currentView==='comissoes') main.innerHTML = viewComissoes();
   else if(currentView==='ativos') main.innerHTML = viewAtivosPatrimoniais();
   else if(currentView==='ativo-detalhe') main.innerHTML = viewAtivoPatrimonialDetalhe(ativoPatrimonialDetalheId);
@@ -1516,6 +1524,66 @@ function viewFluxo(){
         ${rowsProjetado}` : `<div class="empty">Nenhuma conta pendente nos próximos 60 dias.</div>`}
       </div>
     </details>
+
+    <details class="panel-details">
+      <summary>Projeção de fluxo de caixa — vários meses à frente, com cenários</summary>
+      <div id="projecaoMultiMesPanel" style="padding:16px 20px;"></div>
+    </details>
+  `;
+}
+
+function calcularProjecaoMultiMes(mesesAFrente, cenario){
+  const ajuste = { base: {r:1, d:1}, otimista: {r:1.1, d:0.9}, pessimista: {r:0.85, d:1.15} }[cenario];
+  const hoje = new Date();
+  let saldo = totaisRealizados().saldo;
+  const meses = [];
+  for(let i=0;i<mesesAFrente;i++){
+    const d = new Date(hoje.getFullYear(), hoje.getMonth()+i, 1);
+    const deMes = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0,10);
+    const ateMes = new Date(d.getFullYear(), d.getMonth()+1, 0).toISOString().slice(0,10);
+    const pendentesReceita = state.lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pendente'&&l.dataVencimento>=deMes&&l.dataVencimento<=ateMes).reduce((s,l)=>s+l.valor,0);
+    const pendentesDespesa = state.lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente'&&l.dataVencimento>=deMes&&l.dataVencimento<=ateMes).reduce((s,l)=>s+l.valor,0);
+    let recorrenciaReceita = 0, recorrenciaDespesa = 0;
+    if(i>0){
+      recorrenciaReceita = (state.recorrencias||[]).filter(r=>r.ativo&&r.tipo==='entrada').reduce((s,r)=>s+r.valor,0);
+      recorrenciaDespesa = (state.recorrencias||[]).filter(r=>r.ativo&&r.tipo==='saida').reduce((s,r)=>s+r.valor,0);
+    }
+    const entradasMes = (pendentesReceita + recorrenciaReceita) * ajuste.r;
+    const saidasMes = (pendentesDespesa + recorrenciaDespesa) * ajuste.d;
+    saldo += entradasMes - saidasMes;
+    meses.push({ label: d.toLocaleDateString('pt-BR',{month:'short',year:'2-digit'}), entradas: entradasMes, saidas: saidasMes, saldo });
+  }
+  return meses;
+}
+
+function projecaoMultiMesHTML(mesesAFrente, cenario){
+  const meses = calcularProjecaoMultiMes(mesesAFrente, cenario);
+  return `
+    <div class="toggle-row" id="projMesesToggle">
+      <button type="button" data-meses="3" class="${mesesAFrente===3?'active':''}">3 meses</button>
+      <button type="button" data-meses="6" class="${mesesAFrente===6?'active':''}">6 meses</button>
+      <button type="button" data-meses="12" class="${mesesAFrente===12?'active':''}">12 meses</button>
+    </div>
+    <div class="toggle-row" id="projCenarioToggle" style="margin-top:8px;">
+      <button type="button" data-cenario="pessimista" class="${cenario==='pessimista'?'active':''}">Pessimista</button>
+      <button type="button" data-cenario="base" class="${cenario==='base'?'active':''}">Base</button>
+      <button type="button" data-cenario="otimista" class="${cenario==='otimista'?'active':''}">Otimista</button>
+    </div>
+    <div class="note" style="margin-top:10px;">
+      ${cenario==='base' ? 'Usa os valores já cadastrados (contas pendentes + recorrências ativas), sem ajuste.' : cenario==='otimista' ? 'Cenário otimista: receitas 10% maiores e despesas 10% menores que o esperado.' : 'Cenário pessimista: receitas 15% menores e despesas 15% maiores que o esperado.'}
+      A partir do 2º mês, considera apenas as recorrências ativas — contas avulsas futuras ainda não cadastradas não entram na conta.
+    </div>
+    <div class="ledger-row head" style="grid-template-columns:1fr 110px 110px 130px;margin-top:10px;">
+      <span>Mês</span><span>Entradas</span><span>Saídas</span><span>Saldo projetado</span>
+    </div>
+    ${meses.map(m=>`
+      <div class="ledger-row" style="grid-template-columns:1fr 110px 110px 130px;">
+        <span style="text-transform:capitalize;">${m.label}</span>
+        <span class="mono" style="color:var(--success);font-size:12.5px;">${brl(m.entradas)}</span>
+        <span class="mono" style="color:var(--danger);font-size:12.5px;">${brl(m.saidas)}</span>
+        <span class="mono" style="font-weight:600;${m.saldo<0?'color:var(--danger);':''}">${brl(m.saldo)}</span>
+      </div>
+    `).join('')}
   `;
 }
 
@@ -2024,6 +2092,7 @@ function viewRelatorios(){
       <button data-report="balanco">Balanço Patrimonial</button>
       <button data-report="mei">Declaração MEI</button>
       <button data-report="indicadores">Indicadores</button>
+      <button data-report="produto">Por Produto</button>
     </div>
     <div class="panel" id="reportPanel"></div>
   `;
@@ -2300,6 +2369,56 @@ function renderIndicadores(periodo){
       <div class="report-line"><span>Prazo Médio de Pagamento</span><span class="v">${fmtPrazo(prazoPagamento)}</span></div>
       <div class="note" style="margin:6px 0 0;">Comparando a data que venceu com a data que foi realmente pago/recebido, no período.</div>
     </div>
+  `;
+}
+
+function renderRentabilidadeProduto(periodo){
+  let de, ate, label;
+  const hoje = new Date();
+  if(periodo==='mes'){
+    de = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0,10);
+    ate = todayISO();
+    label = 'Mês atual';
+  } else if(periodo==='ano'){
+    de = new Date(hoje.getFullYear(), 0, 1).toISOString().slice(0,10);
+    ate = todayISO();
+    label = 'Ano atual (' + hoje.getFullYear() + ')';
+  } else {
+    de = document.getElementById('rpDe')?.value || todayISO();
+    ate = document.getElementById('rpAte')?.value || todayISO();
+    label = 'Período personalizado';
+  }
+
+  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
+  const porProduto = {};
+  realizados.forEach(l=>{
+    const tag = l.produtoTag || 'Não classificado';
+    if(!porProduto[tag]) porProduto[tag] = { receita:0, custo:0 };
+    if(l.tipo==='entrada') porProduto[tag].receita += l.valor; else porProduto[tag].custo += l.valor;
+  });
+  const linhas = Object.entries(porProduto).map(([tag,v])=>({ tag, ...v, margem: v.receita-v.custo, pct: v.receita>0 ? ((v.receita-v.custo)/v.receita*100) : null })).sort((a,b)=>b.receita-a.receita);
+
+  return `
+    <div class="report-controls">
+      <select id="rpPeriodo">
+        <option value="mes" ${periodo==='mes'?'selected':''}>Mês atual</option>
+        <option value="ano" ${periodo==='ano'?'selected':''}>Ano atual</option>
+        <option value="custom" ${periodo==='custom'?'selected':''}>Personalizado</option>
+      </select>
+      ${periodo==='custom' ? `<input type="date" id="rpDe" value="${de}"> <span style="color:var(--text-soft);font-size:12px;">até</span> <input type="date" id="rpAte" value="${ate}">` : `<span style="font-size:12.5px;color:var(--text-soft);">${label}: ${fmtDate(de)} até ${fmtDate(ate)}</span>`}
+    </div>
+    ${!linhas.length ? `<div class="empty">Nenhum lançamento realizado no período.</div>` : `
+    <div class="report-block">
+      <div class="report-title">Receita e custo por produto/linha</div>
+      ${linhas.map(l=>`
+        <div class="report-line"><span><strong>${escapeHTML(l.tag)}</strong></span><span class="v"></span></div>
+        <div class="report-line sub"><span>Receita</span><span class="v">${brl(l.receita)}</span></div>
+        <div class="report-line sub"><span>Custo lançado nesse produto</span><span class="v">(${brl(l.custo)})</span></div>
+        <div class="report-line" style="border-top:1px solid var(--line);"><span>Margem</span><span class="v" style="font-weight:700;color:${l.margem>=0?'var(--success)':'var(--danger)'}">${brl(l.margem)}${l.pct!==null?' ('+l.pct.toFixed(0)+'%)':''}</span></div>
+      `).join('')}
+    </div>
+    <div class="note" style="margin-top:0;">"Não classificado" reúne os lançamentos sem produto marcado. Pra detalhar melhor, edite o lançamento e preencha o campo "Produto/linha".</div>
+    `}
   `;
 }
 
@@ -3410,6 +3529,7 @@ function attachViewHandlers(){
         activeReport==='dre' ? renderDRE('mes') :
         activeReport==='balanco' ? renderBalanco() :
         activeReport==='mei' ? renderMEI(meiAnoAtual) :
+        activeReport==='produto' ? renderRentabilidadeProduto('mes') :
         renderIndicadores('mes');
       bindReportInner();
     };
@@ -3453,6 +3573,14 @@ function attachViewHandlers(){
       const indDe = document.getElementById('indDe'), indAte = document.getElementById('indAte');
       if(indDe) indDe.addEventListener('change', ()=>{ document.getElementById('reportPanel').innerHTML = renderIndicadores('custom'); bindReportInner(); });
       if(indAte) indAte.addEventListener('change', ()=>{ document.getElementById('reportPanel').innerHTML = renderIndicadores('custom'); bindReportInner(); });
+      const rpPeriodo = document.getElementById('rpPeriodo');
+      if(rpPeriodo) rpPeriodo.addEventListener('change', ()=>{
+        document.getElementById('reportPanel').innerHTML = renderRentabilidadeProduto(rpPeriodo.value);
+        bindReportInner();
+      });
+      const rpDe = document.getElementById('rpDe'), rpAte = document.getElementById('rpAte');
+      if(rpDe) rpDe.addEventListener('change', ()=>{ document.getElementById('reportPanel').innerHTML = renderRentabilidadeProduto('custom'); bindReportInner(); });
+      if(rpAte) rpAte.addEventListener('change', ()=>{ document.getElementById('reportPanel').innerHTML = renderRentabilidadeProduto('custom'); bindReportInner(); });
     };
     reportToggle.querySelectorAll('button').forEach(btn=>{
       btn.addEventListener('click', ()=>{
@@ -3464,7 +3592,7 @@ function attachViewHandlers(){
     });
     paint();
     document.getElementById('btnExportarRelatorioPDF')?.addEventListener('click', ()=>{
-      const titulos = { dre: 'DRE (Demonstrativo de Resultado)', balanco: 'Balanço Patrimonial', mei: `Declaração MEI — Ano ${meiAnoAtual}`, indicadores: 'Indicadores Financeiros' };
+      const titulos = { dre: 'DRE (Demonstrativo de Resultado)', balanco: 'Balanço Patrimonial', mei: `Declaração MEI — Ano ${meiAnoAtual}`, indicadores: 'Indicadores Financeiros', produto: 'Rentabilidade por Produto' };
       exportarRelatorioPDF(titulos[activeReport]);
     });
   }
@@ -3491,6 +3619,55 @@ function attachViewHandlers(){
       persist(); render(); showToast('Recorrência excluída');
     });
   });
+
+  // Simulador de Precificação
+  const precCusto = document.getElementById('precCusto');
+  if(precCusto){
+    let precMetodo = 'margem';
+    const precPct = document.getElementById('precPct');
+    const precPctLabel = document.getElementById('precPctLabel');
+    const calcular = ()=>{
+      const custo = numBR(precCusto.value) || 0;
+      const pct = (numBR(precPct.value) || 0) / 100;
+      let preco;
+      if(precMetodo==='margem'){
+        preco = pct<1 ? custo / (1-pct) : 0;
+      } else {
+        preco = custo * (1+pct);
+      }
+      const lucro = preco - custo;
+      document.getElementById('precResultado').textContent = brl(preco);
+      document.getElementById('precLucro').textContent = brl(lucro);
+    };
+    precCusto.addEventListener('input', calcular);
+    precPct.addEventListener('input', calcular);
+    document.getElementById('precMetodoToggle').querySelectorAll('button').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        document.getElementById('precMetodoToggle').querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        precMetodo = btn.dataset.metodo;
+        precPctLabel.textContent = precMetodo==='margem' ? 'Margem de lucro desejada (%)' : 'Markup desejado sobre o custo (%)';
+        calcular();
+      });
+    });
+    calcular();
+  }
+
+  // Projeção multi-mês (Fluxo de Caixa)
+  const projecaoPanel = document.getElementById('projecaoMultiMesPanel');
+  if(projecaoPanel){
+    let projMeses = 6, projCenario = 'base';
+    const pintarProjecao = ()=>{
+      projecaoPanel.innerHTML = projecaoMultiMesHTML(projMeses, projCenario);
+      projecaoPanel.querySelectorAll('#projMesesToggle button').forEach(btn=>{
+        btn.addEventListener('click', ()=>{ projMeses = parseInt(btn.dataset.meses); pintarProjecao(); });
+      });
+      projecaoPanel.querySelectorAll('#projCenarioToggle button').forEach(btn=>{
+        btn.addEventListener('click', ()=>{ projCenario = btn.dataset.cenario; pintarProjecao(); });
+      });
+    };
+    pintarProjecao();
+  }
 
   // Fornecedores
   document.getElementById('btnNovoFornecedor')?.addEventListener('click', ()=>openFornecedorModal());
@@ -4149,6 +4326,10 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       </div>
     </div>
     <div class="field">
+      <label>Produto / linha (opcional — pra ver rentabilidade por produto nos relatórios)</label>
+      <input type="text" id="fProduto" value="${existing?.produtoTag ? escapeHTML(existing.produtoTag) : ''}" placeholder="Ex: Biscoito Amanteigado, Bolacha Recheada...">
+    </div>
+    <div class="field">
       <label>Observação (opcional)</label>
       <textarea id="fObservacao" rows="3" placeholder="Detalhes extras — ex: nome do cliente, itens do pedido, etc.">${existing?.observacao ? escapeHTML(existing.observacao) : ''}</textarea>
     </div>
@@ -4183,6 +4364,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       categoria,
       valor,
       fornecedor: fornecedorValor,
+      produtoTag: document.getElementById('fProduto').value.trim(),
       observacao: document.getElementById('fObservacao').value.trim(),
       contaId: document.getElementById('fConta').value,
       dataVencimento: document.getElementById('fVencimento').value,
@@ -4397,6 +4579,41 @@ function openRecorrenciaModal(existing){
     closeModal(); render();
     showToast(isEdit?'Recorrência atualizada':'Recorrência cadastrada');
   });
+}
+
+function viewPrecificacao(){
+  return `
+    <div class="topbar">
+      <div><h1>Simulador de Precificação</h1><p>Calcule o preço de venda ideal a partir do custo e da margem desejada</p></div>
+    </div>
+    <div class="panel">
+      <div class="panel-body" style="padding:20px;">
+        <div class="field">
+          <label>Custo do produto (R$)</label>
+          <input type="text" inputmode="decimal" id="precCusto" placeholder="0,00">
+        </div>
+        <div class="field">
+          <label>Método de cálculo</label>
+          <div class="toggle-row" id="precMetodoToggle">
+            <button type="button" data-metodo="margem" class="active">Margem sobre a venda</button>
+            <button type="button" data-metodo="markup">Markup sobre o custo</button>
+          </div>
+        </div>
+        <div class="field">
+          <label id="precPctLabel">Margem de lucro desejada (%)</label>
+          <input type="text" inputmode="decimal" id="precPct" placeholder="Ex: 30">
+        </div>
+        <div class="cards" style="grid-template-columns:1fr 1fr;margin-top:6px;">
+          <div class="card saldo"><div class="label">Preço de venda sugerido</div><div class="value mono pos" id="precResultado">R$ 0,00</div></div>
+          <div class="card"><div class="label">Lucro por unidade</div><div class="value mono" id="precLucro">R$ 0,00</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="note">
+      <strong>Margem sobre a venda:</strong> a margem é calculada em cima do preço final — é o jeito certo de saber "quanto % do que eu vendo vira lucro". Fórmula: Preço = Custo ÷ (1 − Margem).<br><br>
+      <strong>Markup sobre o custo:</strong> soma um percentual em cima do custo. Mais simples de calcular, mas costuma resultar numa margem real menor do que parece à primeira vista. Fórmula: Preço = Custo × (1 + Markup).
+    </div>
+  `;
 }
 
 function openContaModal(existing){
