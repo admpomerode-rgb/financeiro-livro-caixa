@@ -739,7 +739,7 @@ function showToast(msg){
 let currentView = 'dashboard';
 let extratoContaId = null;
 let relatorioAtivo = 'dre';
-let dashboardMesRef = todayISO().slice(0,7);
+let mesGlobalRef = todayISO().slice(0,7);
 let categoriaLancamentosAtual = null;
 let lancamentosBuscaPreenchida = '';
 let ativoPatrimonialDetalheId = null;
@@ -1421,6 +1421,19 @@ function alertasInteligentesHTML(){
   `;
 }
 
+function mesNavHTML(){
+  const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
+  const nomeMes = new Date(anoM, mesM-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
+  const ehMesAtual = mesGlobalRef === todayISO().slice(0,7);
+  return `
+    <div class="mes-nav">
+      <button type="button" id="btnMesAnterior" title="Mês anterior">‹</button>
+      <span class="mes-nav-label">${nomeMes}${ehMesAtual ? ' <span class="mes-nav-tag">atual</span>' : ''}</span>
+      <button type="button" id="btnMesProximo" title="Próximo mês">›</button>
+    </div>
+  `;
+}
+
 function totaisPorMesRef(mesRef){
   const [ano, mes] = mesRef.split('-').map(Number);
   const de = `${mesRef}-01`;
@@ -1547,13 +1560,13 @@ function resumoCartoesHTML(){
 }
 
 function viewDashboard(){
-  const t = totaisPorMesRef(dashboardMesRef);
+  const t = totaisPorMesRef(mesGlobalRef);
   const pend = pendentesResumo();
   const venc = contasVencendoResumo();
   const contratosVenc = contratosVencendoResumo();
-  const [anoM, mesM] = dashboardMesRef.split('-').map(Number);
-  const nomeMes = new Date(anoM, mesM-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
-  const ehMesAtual = dashboardMesRef === todayISO().slice(0,7);
+  const ehMesAtual = mesGlobalRef === todayISO().slice(0,7);
+  const [anoMD, mesMD] = mesGlobalRef.split('-').map(Number);
+  const nomeMes = new Date(anoMD, mesMD-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
 
   return `
     <div class="topbar">
@@ -1563,11 +1576,7 @@ function viewDashboard(){
       </div>
     </div>
 
-    <div class="mes-nav">
-      <button type="button" id="btnMesAnterior" title="Mês anterior">‹</button>
-      <span class="mes-nav-label">${nomeMes}${ehMesAtual ? ' <span class="mes-nav-tag">atual</span>' : ''}</span>
-      <button type="button" id="btnMesProximo" title="Próximo mês">›</button>
-    </div>
+    ${mesNavHTML()}
 
     <div class="hero-saldo-card">
       <div class="hero-saldo-top">
@@ -1593,7 +1602,7 @@ function viewDashboard(){
       <div class="card"><div class="label">📥 A receber</div><div class="value mono pos">${vm(brl(pend.aReceber))}</div></div>
     </div>
 
-    ${economiaMensalHTML(dashboardMesRef)}
+    ${economiaMensalHTML(mesGlobalRef)}
 
     ${(venc.atrasadas.length || venc.venceEmBreve.length || contratosVenc.vencidos.length || contratosVenc.vencendo.length) ? `
     <div class="dash-section-label">Avisos</div>
@@ -1628,11 +1637,11 @@ function viewDashboard(){
     </div>
 
     <div class="dash-section-label">Ranking de categorias — ${nomeMes}</div>
-    ${rankingCategoriasHTML(dashboardMesRef)}
+    ${rankingCategoriasHTML(mesGlobalRef)}
 
     ${resumoCartoesHTML()}
 
-    ${orcadoRealizadoHTML(dashboardMesRef)}
+    ${orcadoRealizadoHTML(mesGlobalRef)}
   `;
 }
 
@@ -1657,7 +1666,14 @@ function rowHTML(l){
 function viewLancamentos(tipo){
   const titulo = tipo==='saida' ? 'Contas a Pagar' : 'Contas a Receber';
   const categorias = todasCategoriasFlat(tipo);
-  let lista = state.lancamentos.filter(l=>l.tipo===tipo && l.origem!=='transferencia');
+  const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
+  const deMes = `${mesGlobalRef}-01`;
+  const ateMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
+  let lista = state.lancamentos.filter(l=>{
+    if(l.tipo!==tipo || l.origem==='transferencia') return false;
+    const refMes = l.dataVencimento || l.dataPagamento;
+    return refMes && refMes>=deMes && refMes<=ateMes;
+  });
   if(lancamentosBuscaPreenchida){
     const termo = lancamentosBuscaPreenchida.toLowerCase();
     lista = lista.filter(l=> l.descricao.toLowerCase().includes(termo) || (l.fornecedor||'').toLowerCase().includes(termo) || (l.observacao||'').toLowerCase().includes(termo));
@@ -1669,6 +1685,7 @@ function viewLancamentos(tipo){
       <div><h1>${titulo}</h1><p>${tipo==='saida' ? 'Obrigações e despesas da empresa' : 'Valores a receber de clientes e outras fontes'}</p></div>
       ${dropdownNovoHTML()}
     </div>
+    ${mesNavHTML()}
     <div class="panel">
       <div class="filter-bar">
         <input type="text" id="filtroBusca" value="${escapeHTML(lancamentosBuscaPreenchida)}" placeholder="Buscar por descrição, nº do pedido..." style="flex:1;min-width:180px;border:1px solid var(--line);border-radius:7px;padding:8px 12px;font-size:12.5px;">
@@ -1686,7 +1703,7 @@ function viewLancamentos(tipo){
         <span></span><span>Vence</span><span>Descrição</span><span class="col-cat">Venc. orig.</span><span class="col-status">Status</span><span style="text-align:right;">Valor</span>
       </div>
       <div class="panel-body" id="listaLancamentos">
-        ${lista.length? lista.map(rowHTML).join('') : `<div class="empty">Nenhum lançamento em ${titulo.toLowerCase()} ainda.</div>`}
+        ${lista.length? lista.map(rowHTML).join('') : `<div class="empty">Nenhum lançamento em ${titulo.toLowerCase()} neste mês.</div>`}
       </div>
     </div>
     ${tipo==='entrada' ? relatorioInadimplenciaHTML() : ''}
@@ -1726,9 +1743,17 @@ function relatorioInadimplenciaHTML(){
 }
 
 function viewFluxo(){
-  let lista = state.lancamentos.filter(l=>(l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
-  lista.sort((a,b)=> (a.dataPagamento||'').localeCompare(b.dataPagamento||''));
+  const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
+  const deMes = `${mesGlobalRef}-01`;
+  const ateMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
+
+  const todosRealizados = state.lancamentos.filter(l=>(l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
   let saldo = 0;
+  todosRealizados.filter(l=>(l.dataPagamento||'')<deMes).forEach(l=>{ saldo += l.tipo==='entrada' ? l.valor : -l.valor; });
+  const saldoInicioMes = saldo;
+
+  let lista = todosRealizados.filter(l=>(l.dataPagamento||'')>=deMes && (l.dataPagamento||'')<=ateMes);
+  lista.sort((a,b)=> (a.dataPagamento||'').localeCompare(b.dataPagamento||''));
   const rows = lista.map(l=>{
     saldo += l.tipo==='entrada' ? l.valor : -l.valor;
     return `
@@ -1768,12 +1793,13 @@ function viewFluxo(){
     <div class="topbar">
       <div><h1>Fluxo de Caixa</h1><p>Lançamentos realizados, em ordem cronológica, com saldo acumulado (transferências entre contas próprias não entram aqui — veja o extrato da conta)</p></div>
     </div>
+    ${mesNavHTML()}
     <div class="panel">
       <div class="ledger-row head">
         <span></span><span>Data</span><span>Descrição</span><span>Valor</span><span>Saldo</span><span></span>
       </div>
       <div class="panel-body">
-        ${lista.length? rows : `<div class="empty">Nenhum lançamento realizado (pago/recebido) ainda.</div>`}
+        ${lista.length? rows : `<div class="empty">Nenhum lançamento realizado (pago/recebido) neste mês. Saldo início do mês: ${brl(saldoInicioMes)}</div>`}
       </div>
     </div>
 
@@ -2754,6 +2780,7 @@ function viewRelatorios(){
     <div class="topbar">
       <div><h1>Central de Relatórios</h1><p>Escolha o relatório que você quer ver</p></div>
     </div>
+    ${mesNavHTML()}
     <div class="more-drawer-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;">
       ${cards.map(c=>`
         <div class="more-item" data-action="abrir-relatorio" data-relatorio="${c.id}" style="text-align:left;align-items:flex-start;padding:18px;cursor:pointer;">
@@ -2925,9 +2952,11 @@ function renderDRE(periodo){
   let de, ate, label;
   const hoje = new Date();
   if(periodo==='mes'){
-    de = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0,10);
-    ate = todayISO();
-    label = 'Mês atual';
+    const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
+    de = `${mesGlobalRef}-01`;
+    const ultimoDiaMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
+    ate = mesGlobalRef === todayISO().slice(0,7) ? todayISO() : ultimoDiaMes;
+    label = new Date(anoM, mesM-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
   } else if(periodo==='ano'){
     de = new Date(hoje.getFullYear(), 0, 1).toISOString().slice(0,10);
     ate = todayISO();
@@ -2978,7 +3007,7 @@ function renderDRE(periodo){
   return `
     <div class="report-controls">
       <select id="drePeriodo">
-        <option value="mes" ${periodo==='mes'?'selected':''}>Mês atual</option>
+        <option value="mes" ${periodo==='mes'?'selected':''}>Mês selecionado</option>
         <option value="ano" ${periodo==='ano'?'selected':''}>Ano atual</option>
         <option value="custom" ${periodo==='custom'?'selected':''}>Personalizado</option>
       </select>
@@ -3113,9 +3142,11 @@ function renderIndicadores(periodo){
   let de, ate, label;
   const hoje = new Date();
   if(periodo==='mes'){
-    de = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0,10);
-    ate = todayISO();
-    label = 'Mês atual';
+    const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
+    de = `${mesGlobalRef}-01`;
+    const ultimoDiaMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
+    ate = mesGlobalRef === todayISO().slice(0,7) ? todayISO() : ultimoDiaMes;
+    label = new Date(anoM, mesM-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
   } else if(periodo==='ano'){
     de = new Date(hoje.getFullYear(), 0, 1).toISOString().slice(0,10);
     ate = todayISO();
@@ -3157,7 +3188,7 @@ function renderIndicadores(periodo){
   return `
     <div class="report-controls">
       <select id="indPeriodo">
-        <option value="mes" ${periodo==='mes'?'selected':''}>Mês atual</option>
+        <option value="mes" ${periodo==='mes'?'selected':''}>Mês selecionado</option>
         <option value="ano" ${periodo==='ano'?'selected':''}>Ano atual</option>
         <option value="custom" ${periodo==='custom'?'selected':''}>Personalizado</option>
       </select>
@@ -3194,9 +3225,11 @@ function renderRentabilidadeProduto(periodo){
   let de, ate, label;
   const hoje = new Date();
   if(periodo==='mes'){
-    de = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0,10);
-    ate = todayISO();
-    label = 'Mês atual';
+    const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
+    de = `${mesGlobalRef}-01`;
+    const ultimoDiaMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
+    ate = mesGlobalRef === todayISO().slice(0,7) ? todayISO() : ultimoDiaMes;
+    label = new Date(anoM, mesM-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
   } else if(periodo==='ano'){
     de = new Date(hoje.getFullYear(), 0, 1).toISOString().slice(0,10);
     ate = todayISO();
@@ -3219,7 +3252,7 @@ function renderRentabilidadeProduto(periodo){
   return `
     <div class="report-controls">
       <select id="rpPeriodo">
-        <option value="mes" ${periodo==='mes'?'selected':''}>Mês atual</option>
+        <option value="mes" ${periodo==='mes'?'selected':''}>Mês selecionado</option>
         <option value="ano" ${periodo==='ano'?'selected':''}>Ano atual</option>
         <option value="custom" ${periodo==='custom'?'selected':''}>Personalizado</option>
       </select>
@@ -4495,15 +4528,15 @@ function attachViewHandlers(){
   if(chartMeses) desenharGraficoMeses('chartMeses');
 
   document.getElementById('btnMesAnterior')?.addEventListener('click', ()=>{
-    const [ano, mes] = dashboardMesRef.split('-').map(Number);
+    const [ano, mes] = mesGlobalRef.split('-').map(Number);
     const d = new Date(ano, mes-2, 1);
-    dashboardMesRef = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    mesGlobalRef = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     render();
   });
   document.getElementById('btnMesProximo')?.addEventListener('click', ()=>{
-    const [ano, mes] = dashboardMesRef.split('-').map(Number);
+    const [ano, mes] = mesGlobalRef.split('-').map(Number);
     const d = new Date(ano, mes, 1);
-    dashboardMesRef = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    mesGlobalRef = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     render();
   });
 
@@ -4590,7 +4623,14 @@ function attachViewHandlers(){
       const tipo = currentView==='receber' ? 'entrada' : 'saida';
       const fs = filtroStatus.value, fc = filtroCategoria.value;
       const termo = filtroBusca.value.trim().toLowerCase();
-      let lista = state.lancamentos.filter(l=>l.tipo===tipo && l.origem!=='transferencia');
+      const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
+      const deMes = `${mesGlobalRef}-01`;
+      const ateMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
+      let lista = state.lancamentos.filter(l=>{
+        if(l.tipo!==tipo || l.origem==='transferencia') return false;
+        const refMes = l.dataVencimento || l.dataPagamento;
+        return refMes && refMes>=deMes && refMes<=ateMes;
+      });
       if(fs!=='todos') lista = lista.filter(l=> fs==='pago' ? (l.status==='pago'||l.status==='recebido') : l.status===fs);
       if(fc!=='todas') lista = lista.filter(l=>l.categoria===fc);
       if(termo) lista = lista.filter(l=> l.descricao.toLowerCase().includes(termo) || (l.fornecedor||'').toLowerCase().includes(termo) || (l.observacao||'').toLowerCase().includes(termo));
@@ -4622,7 +4662,7 @@ function attachViewHandlers(){
   const reportToggle = document.getElementById('reportToggle');
   if(reportToggle){
     let meiAnoAtual = new Date().getFullYear();
-    let mensalMesRef = todayISO().slice(0,7);
+    let mensalMesRef = mesGlobalRef;
     const paint = ()=>{
       reportToggle.querySelectorAll('button').forEach(b=>b.classList.toggle('active', b.dataset.report===relatorioAtivo));
       document.getElementById('reportPanel').innerHTML =
