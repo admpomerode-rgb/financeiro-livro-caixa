@@ -486,6 +486,7 @@
       <div class="nav-item" data-view="contratos" title="Central de Contratos"><span class="nav-dot"></span><span class="nav-abbr">CN</span><span class="nav-label">Contratos</span></div>
       <div class="nav-item" data-view="metas" title="Metas de Reserva"><span class="nav-dot"></span><span class="nav-abbr">MT</span><span class="nav-label">Metas de Reserva</span></div>
       <div class="nav-item" data-view="simulacao" title="Simulação &quot;E Se&quot;"><span class="nav-dot"></span><span class="nav-abbr">SE</span><span class="nav-label">Simulação "E Se"</span></div>
+      <div class="nav-item" data-view="orcamento" title="Orçamento e Planejamento"><span class="nav-dot"></span><span class="nav-abbr">OR</span><span class="nav-label">Orçamento e Planejamento</span></div>
       <div class="nav-item" data-view="auditoria" title="Log de Auditoria"><span class="nav-dot"></span><span class="nav-abbr">LG</span><span class="nav-label">Log de Auditoria</span></div>
       <div class="nav-item" data-view="comissoes" title="Comissões"><span class="nav-dot"></span><span class="nav-abbr">CM</span><span class="nav-label">Comissões</span></div>
       <div class="nav-item" data-view="ativos" title="Ativos Patrimoniais"><span class="nav-dot"></span><span class="nav-abbr">AP</span><span class="nav-label">Ativos Patrimoniais</span></div>
@@ -526,6 +527,7 @@
       <div class="more-item" data-view="contratos"><span class="more-icon">📑</span>Contratos</div>
       <div class="more-item" data-view="metas"><span class="more-icon">🎯</span>Metas de Reserva</div>
       <div class="more-item" data-view="simulacao"><span class="more-icon">🔮</span>Simulação "E Se"</div>
+      <div class="more-item" data-view="orcamento"><span class="more-icon">🗂️</span>Orçamento e Planejamento</div>
       <div class="more-item" data-view="auditoria"><span class="more-icon">🕵️</span>Log de Auditoria</div>
       <div class="more-item" data-view="comissoes"><span class="more-icon">🤝</span>Comissões</div>
       <div class="more-item" data-view="ativos"><span class="more-icon">📦</span>Ativos Patrimoniais</div>
@@ -676,6 +678,7 @@ function aplicarMigracoes(s){
   if(!s.fornecedores) s.fornecedores = [];
   if(!s.recorrencias) s.recorrencias = [];
   if(!s.orcamentoCategorias) s.orcamentoCategorias = {};
+  if(!s.projecaoReceitaCategorias) s.projecaoReceitaCategorias = {};
   if(!s.logAuditoria) s.logAuditoria = [];
   if(!s.contratos) s.contratos = [];
   if(!s.metasReserva) s.metasReserva = [];
@@ -815,6 +818,7 @@ function render(){
   else if(currentView==='contratos') main.innerHTML = viewContratos();
   else if(currentView==='metas') main.innerHTML = viewMetasReserva();
   else if(currentView==='simulacao') main.innerHTML = viewSimulacao();
+  else if(currentView==='orcamento') main.innerHTML = viewOrcamentoPlanejamento();
   else if(currentView==='auditoria') main.innerHTML = viewLogAuditoria();
   else if(currentView==='comissoes') main.innerHTML = viewComissoes();
   else if(currentView==='ativos') main.innerHTML = viewAtivosPatrimoniais();
@@ -1012,8 +1016,9 @@ async function sincronizarPedidosVK(){
     let novos = 0, jaImportados = 0, cancelados = 0, marcadosCancelados = 0;
 
     pedidos.forEach(p=>{
-      const descricaoPedido = `Pedido N° ${p.numero}`;
-      const existente = state.lancamentos.find(l=>l.origem==='vk' && (l.vkPedidoId===p.id || l.descricao===descricaoPedido));
+      const cliente = clientes.find(c=>c.id===p.clienteId);
+      const descricaoPedido = `Pedido N° ${p.numero}${cliente ? ' — '+cliente.nome : ''}`;
+      const existente = state.lancamentos.find(l=>l.origem==='vk' && (l.vkPedidoId===p.id || l.descricao===descricaoPedido || l.descricao===`Pedido N° ${p.numero}`));
 
       if(p.status === 'cancelado'){
         cancelados++;
@@ -1027,7 +1032,6 @@ async function sincronizarPedidosVK(){
         return;
       }
 
-      const cliente = clientes.find(c=>c.id===p.clienteId);
       const itensTexto = (p.itens||[]).map(it=>{
         const prod = produtosVK.find(pr=>pr.nome===it.produto);
         const unidade = prod?.unidade || 'un';
@@ -1325,6 +1329,10 @@ function ultimos6Meses(){
 /* ---------------- Views ---------------- */
 function gastoCategoriaNoPeriodo(categoria, de, ate){
   return state.lancamentos.filter(l=>l.categoria===categoria && l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+}
+function totalCategoriaTipoNoPeriodo(categoria, tipo, de, ate){
+  const statusOk = tipo==='entrada' ? 'recebido' : 'pago';
+  return state.lancamentos.filter(l=>l.categoria===categoria && l.tipo===tipo && l.status===statusOk && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
 }
 
 function orcadoRealizadoHTML(mesRef){
@@ -1865,6 +1873,83 @@ function calcularProjecaoSimulacao(mesesAFrente, itensHipoteticos){
     meses.push({ label: d.toLocaleDateString('pt-BR',{month:'short',year:'2-digit'}), saldoBase, saldoSim, diferenca: saldoSim-saldoBase });
   }
   return meses;
+}
+
+function viewOrcamentoPlanejamento(){
+  const categoriasDespesa = todasCategoriasFlat('saida');
+  const categoriasReceita = todasCategoriasFlat('entrada');
+  const orc = state.orcamentoCategorias || {};
+  const proj = state.projecaoReceitaCategorias || {};
+
+  const totalProjetadoReceita = Object.values(proj).reduce((a,b)=>a+b,0);
+  const totalOrcadoDespesa = Object.values(orc).reduce((a,b)=>a+b,0);
+  const lucroProjetado = totalProjetadoReceita - totalOrcadoDespesa;
+
+  const hoje = new Date();
+  const de = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0,10);
+  const ate = todayISO();
+
+  const linhasComparacao = [
+    ...categoriasReceita.map(cat=>({cat, tipo:'entrada', planejado:proj[cat]||0})),
+    ...categoriasDespesa.map(cat=>({cat, tipo:'saida', planejado:orc[cat]||0}))
+  ].filter(x=>x.planejado>0);
+
+  return `
+    <div class="topbar">
+      <div><h1>Orçamento e Planejamento</h1><p>Metas de faturamento e orçamento de despesas por categoria, comparadas ao realizado no mês</p></div>
+    </div>
+
+    <div class="cards" style="grid-template-columns:1fr 1fr 1fr;">
+      <div class="card"><div class="label">📈 Receita Projetada/mês</div><div class="value mono pos">${vm(brl(totalProjetadoReceita))}</div></div>
+      <div class="card"><div class="label">📉 Despesa Orçada/mês</div><div class="value mono neg">${vm(brl(totalOrcadoDespesa))}</div></div>
+      <div class="card"><div class="label">💰 Lucro Projetado/mês</div><div class="value mono ${lucroProjetado>=0?'pos':'neg'}">${vm(brl(lucroProjetado))}</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>📈 Projeção de Faturamento — Receitas</h2></div>
+      <div class="panel-body" style="padding:6px 20px;">
+        ${categoriasReceita.length ? categoriasReceita.map(cat=>`
+          <div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);">
+            <div style="flex:1;font-size:13px;">${escapeHTML(cat)}</div>
+            <input type="text" inputmode="decimal" class="projecao-receita-input" data-cat="${escapeHTML(cat)}" value="${proj[cat]||''}" placeholder="0,00" style="width:110px;font-size:12.5px;padding:6px 8px;">
+          </div>
+        `).join('') : `<div class="empty">Nenhuma categoria de receita cadastrada ainda — crie em Categorias.</div>`}
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>📉 Orçamento de Despesas</h2></div>
+      <div class="panel-body" style="padding:6px 20px;">
+        ${categoriasDespesa.length ? categoriasDespesa.map(cat=>`
+          <div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);">
+            <div style="flex:1;font-size:13px;">${escapeHTML(cat)}</div>
+            <input type="text" inputmode="decimal" class="orcamento-despesa-input" data-cat="${escapeHTML(cat)}" value="${orc[cat]||''}" placeholder="0,00" style="width:110px;font-size:12.5px;padding:6px 8px;">
+          </div>
+        `).join('') : `<div class="empty">Nenhuma categoria de despesa cadastrada ainda — crie em Categorias.</div>`}
+      </div>
+    </div>
+
+    <div class="dash-section-label">Comparação com o mês atual</div>
+    <div class="panel">
+      <div class="panel-body" style="padding:16px 20px;">
+        ${linhasComparacao.length ? linhasComparacao.map(x=>{
+          const realizado = totalCategoriaTipoNoPeriodo(x.cat, x.tipo, de, ate);
+          const pct = x.planejado>0 ? Math.round(realizado/x.planejado*100) : 0;
+          const cor = x.tipo==='entrada' ? 'var(--blue-accent)' : (pct>=100?'var(--danger)':pct>=80?'var(--warn)':'var(--success)');
+          return `
+          <div style="margin-bottom:14px;">
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;">
+              <span>${escapeHTML(x.cat)} <span style="color:var(--text-soft);">(${x.tipo==='entrada'?'receita':'despesa'})</span></span>
+              <span class="mono">${vm(brl(realizado))} / ${vm(brl(x.planejado))} (${pct}%)</span>
+            </div>
+            <div style="background:var(--bone);border-radius:6px;height:7px;overflow:hidden;">
+              <div style="width:${Math.min(100,pct)}%;height:100%;background:${cor};"></div>
+            </div>
+          </div>`;
+        }).join('') : `<div class="empty">Defina metas de receita ou orçamento de despesa acima pra ver a comparação com o mês atual aqui.</div>`}
+      </div>
+    </div>
+  `;
 }
 
 function viewSimulacao(){
@@ -3943,6 +4028,7 @@ function dropdownNovoHTML(){
       <div class="dropdown-menu" id="novoMenu">
         <button type="button" data-novo="entrada"><span class="dropdown-dot" style="background:var(--success);"></span> Nova receita</button>
         <button type="button" data-novo="saida"><span class="dropdown-dot" style="background:var(--danger);"></span> Nova despesa</button>
+        <button type="button" data-novo="recorrente"><span class="dropdown-dot" style="background:#7B5CD6;"></span> Despesa recorrente</button>
         <button type="button" data-novo="transferencia" ${state.contas.length<2?'disabled title="Crie pelo menos 2 contas para transferir"':''}><span class="dropdown-dot" style="background:var(--blue-accent);"></span> Transferência entre contas</button>
       </div>
     </div>
@@ -3956,6 +4042,7 @@ function menuAdicionarContaHTML(contaId, flex){
       <div class="dropdown-menu" data-menu-conta="${contaId}">
         <button type="button" data-add="despesa" data-conta="${contaId}"><span class="dropdown-dot" style="background:var(--danger);"></span> Despesa</button>
         <button type="button" data-add="receita" data-conta="${contaId}"><span class="dropdown-dot" style="background:var(--success);"></span> Receita</button>
+        <button type="button" data-add="recorrente" data-conta="${contaId}"><span class="dropdown-dot" style="background:#7B5CD6;"></span> Despesa recorrente</button>
         <button type="button" data-add="cartao" data-conta="${contaId}"><span class="dropdown-dot" style="background:var(--warn);"></span> Despesa no cartão</button>
         <button type="button" data-add="transferencia" data-conta="${contaId}" ${state.contas.length<2?'disabled title="Crie pelo menos 2 contas para transferir"':''}><span class="dropdown-dot" style="background:#7B5CD6;"></span> Transferência</button>
         <button type="button" data-add="investimento" data-conta="${contaId}"><span class="dropdown-dot" style="background:var(--blue-accent);"></span> Aplicação financeira</button>
@@ -4036,6 +4123,7 @@ function attachViewHandlers(){
         novoMenu.classList.remove('open');
         const novoTipo = btn.dataset.novo;
         if(novoTipo==='transferencia') openTransferenciaModal();
+        else if(novoTipo==='recorrente') openRecorrenciaModal();
         else openLancamentoModal(novoTipo);
       });
     });
@@ -4250,6 +4338,28 @@ function attachViewHandlers(){
     });
     calcular();
   }
+
+  // Orçamento e Planejamento
+  document.querySelectorAll('.projecao-receita-input').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      if(!state.projecaoReceitaCategorias) state.projecaoReceitaCategorias = {};
+      const v = numBR(inp.value);
+      if(inp.value.trim()==='' || isNaN(v) || v<=0){ delete state.projecaoReceitaCategorias[inp.dataset.cat]; }
+      else { state.projecaoReceitaCategorias[inp.dataset.cat] = v; }
+      persist();
+      showToast('Projeção atualizada');
+    });
+  });
+  document.querySelectorAll('.orcamento-despesa-input').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      if(!state.orcamentoCategorias) state.orcamentoCategorias = {};
+      const v = numBR(inp.value);
+      if(inp.value.trim()==='' || isNaN(v) || v<=0){ delete state.orcamentoCategorias[inp.dataset.cat]; }
+      else { state.orcamentoCategorias[inp.dataset.cat] = v; }
+      persist();
+      showToast('Orçamento atualizado');
+    });
+  });
 
   // Simulação "E Se"
   document.getElementById('btnAddItemSimulacao')?.addEventListener('click', ()=>openItemSimulacaoModal());
@@ -4728,6 +4838,7 @@ function attachViewHandlers(){
       document.querySelectorAll('.dropdown-menu[data-menu-conta]').forEach(m=>m.classList.remove('open'));
       if(tipo==='despesa') openLancamentoModal('saida', null, contaId);
       else if(tipo==='receita') openLancamentoModal('entrada', null, contaId);
+      else if(tipo==='recorrente') openRecorrenciaModal(null, contaId);
       else if(tipo==='cartao'){
         if(!state.cartoes.length){ showToast('Cadastre um cartão de crédito primeiro'); currentView='cartoes'; render(); return; }
         if(state.cartoes.length===1) openCompraCartaoModal(state.cartoes[0].id);
@@ -5193,7 +5304,7 @@ function viewRecorrencias(){
   `;
 }
 
-function openRecorrenciaModal(existing){
+function openRecorrenciaModal(existing, contaPreSelecionadaId){
   const isEdit = !!existing;
   const tipoInicial = existing?.tipo || 'saida';
   const modal = document.getElementById('modalContent');
@@ -5213,7 +5324,7 @@ function openRecorrenciaModal(existing){
     </div>
     <div class="field-row">
       <div class="field"><label>Dia do vencimento</label><input type="number" min="1" max="31" id="rcDia" value="${existing?existing.diaVencimento:'10'}"></div>
-      <div class="field"><label>Conta</label><select id="rcConta">${state.contas.map(c=>`<option value="${c.id}" ${(existing?.contaId||state.contas[0]?.id)===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+      <div class="field"><label>Conta</label><select id="rcConta">${state.contas.map(c=>`<option value="${c.id}" ${(existing?.contaId||contaPreSelecionadaId||state.contas[0]?.id)===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select></div>
     </div>
     <div class="note" style="margin-top:0;">O lançamento desse mês (se já não tiver sido gerado) é criado assim que você salvar.</div>
     <div class="modal-actions">
