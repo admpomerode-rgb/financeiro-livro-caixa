@@ -308,7 +308,10 @@
   .conta-card .nome{font-weight:600;font-size:14px;margin-bottom:2px;}
   .conta-card .banco{font-size:12px;color:var(--text-soft);margin-bottom:12px;}
   .conta-card .saldo{font-size:20px;}
-  .conta-card .conta-actions{position:absolute;top:14px;right:14px;display:flex;gap:4px;}
+  .conta-card .conta-actions{position:absolute;top:14px;right:14px;display:flex;gap:4px;align-items:center;}
+  .drag-handle{display:none;color:var(--text-soft);font-size:11px;letter-spacing:-2px;cursor:grab;padding:4px 2px;user-select:none;}
+  .conta-card.dragging{opacity:.4;}
+  .conta-card.drag-over{outline:2px dashed var(--blue-accent);outline-offset:2px;}
   .conta-tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-soft);}
   .conta-swatch{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
   .color-pick{display:flex;gap:8px;margin-top:4px;}
@@ -445,6 +448,9 @@
 
   /* Desktop/notebook: fonte maior nas linhas de lançamento (Extrato, Pagar, Receber, Fluxo). Celular não é afetado. */
   @media (min-width: 901px){
+    /* Contas Bancárias: handle de arrastar visível e botão "+ Adicionar" repetido escondido (fica só o "+ Novo" do topo e o "Ver extrato") */
+    .drag-handle{display:inline-block;}
+    .conta-card-footer .dropdown-wrap{display:none;}
     .ledger-row{font-size:13.5px;padding-top:9px;padding-bottom:9px;}
     .ledger-row.head{font-size:11.5px;}
     .ledger-row.compact{font-size:13.5px;padding-top:8px;padding-bottom:8px;}
@@ -821,6 +827,14 @@ function numBR(v){
   return parseFloat(s);
 }
 function fmtDate(d){ if(!d) return '—'; const [y,m,day]=d.split('-'); return day+'/'+m+'/'+y; }
+function fmtDateExtenso(d){
+  if(!d) return '—';
+  const dt = new Date(d+'T12:00:00');
+  const semana = dt.toLocaleDateString('pt-BR', { weekday:'long' });
+  const mes = dt.toLocaleDateString('pt-BR', { month:'long' });
+  const semanaCap = semana.charAt(0).toUpperCase()+semana.slice(1);
+  return `${semanaCap}, ${dt.getDate()} de ${mes} de ${dt.getFullYear()}`;
+}
 function todayISO(){ return new Date().toISOString().slice(0,10); }
 
 function showToast(msg){
@@ -833,6 +847,7 @@ function showToast(msg){
 /* ---------------- Navegação ---------------- */
 let currentView = 'dashboard';
 let extratoContaId = null;
+let extratoBuscaTermo = '';
 let conciliacaoContaId = null;
 let pararCameraQRAtiva = null;
 let relatorioAtivo = 'dre';
@@ -2628,10 +2643,11 @@ function viewContas(){
         <div class="card saldo" style="padding:12px 18px;"><div class="label">Saldo total</div><div class="value mono ${total>=0?'pos':'neg'}" style="font-size:20px;">${brl(total)}</div></div>
       </div>
     </div>
-    <div class="conta-cards">
-      ${state.contas.map(c=>`
-        <div class="conta-card" style="--accent-c:${c.cor}">
+    <div class="conta-cards" id="contaCardsWrap">
+      ${state.contas.map((c,idx)=>`
+        <div class="conta-card" style="--accent-c:${c.cor}" draggable="true" data-conta-drag-id="${c.id}" data-conta-idx="${idx}">
           <div class="conta-actions">
+            <span class="drag-handle" title="Arrastar para reordenar">⠿⠿</span>
             <button class="icon-btn" data-action="editar-conta" data-id="${c.id}" title="Editar">✎</button>
             ${state.contas.length>1 ? `<button class="icon-btn" data-action="excluir-conta" data-id="${c.id}" title="Excluir">✕</button>` : ''}
           </div>
@@ -2643,7 +2659,7 @@ function viewContas(){
             </div>
           </div>
           <div class="saldo mono ${saldoConta(c.id)>=0?'pos':'neg'}">${brl(saldoConta(c.id))}</div>
-          <div style="display:flex;gap:8px;margin-top:12px;">
+          <div class="conta-card-footer" style="display:flex;gap:8px;margin-top:12px;">
             <button class="btn ghost sm" data-action="ver-extrato" data-id="${c.id}" style="flex:1;">Ver extrato</button>
             ${menuAdicionarContaHTML(c.id, true)}
           </div>
@@ -2799,10 +2815,17 @@ function renderResultadoConciliacao(resultado, conta){
   `;
 }
 
-function viewExtrato(contaId){
+function renderExtratoConteudo(contaId){
   const conta = state.contas.find(c=>c.id===contaId);
-  if(!conta) return viewContas();
+  if(!conta) return '';
   let lista = state.lancamentos.filter(l=>l.contaId===contaId && (l.status==='pago'||l.status==='recebido'));
+  let pendentesConta = state.lancamentos.filter(l=>l.contaId===contaId && l.status==='pendente');
+  if(extratoBuscaTermo){
+    const termo = extratoBuscaTermo.toLowerCase();
+    const bate = l => l.descricao.toLowerCase().includes(termo) || (l.fornecedor||'').toLowerCase().includes(termo) || (l.observacao||'').toLowerCase().includes(termo);
+    lista = lista.filter(bate);
+    pendentesConta = pendentesConta.filter(bate);
+  }
   lista.sort((a,b)=> (a.dataPagamento||'').localeCompare(b.dataPagamento||''));
 
   let saldo = conta.saldoInicial || 0;
@@ -2822,29 +2845,40 @@ function viewExtrato(contaId){
   const gruposHTML = grupos.slice().reverse().map(g=>`
     <div class="panel extrato-dia">
       <div class="extrato-dia-head">
-        <span class="extrato-dia-data">${fmtDate(g.dia)}</span>
-        <span>Saldo inicial do dia: <strong class="mono">${brl(g.saldoInicial)}</strong></span>
+        <span class="extrato-dia-data">${fmtDateExtenso(g.dia)}</span>
+        <span>Saldo final do dia: <strong class="mono">${brl(g.saldoFinal)}</strong></span>
       </div>
       ${g.itens.slice().reverse().map(({l})=>`
         <div class="ledger-row compact" data-id="${l.id}">
           <span class="dot ${l.tipo}"></span>
           <div class="desc-cell" data-action="ver-detalhe" data-id="${l.id}" style="cursor:pointer;">
             <div>${escapeHTML(l.descricao)}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Ativo Patrimonial</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:10.5px;" title="Tem observação">📝</span>' : ''}${l.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${l.id}" style="cursor:pointer;font-size:10.5px;" title="Ver comprovante">📎</span>` : ''}</div>
-            <div class="cat">${escapeHTML(l.categoria)}</div>
+            <div class="cat">${l.fornecedor ? escapeHTML(l.fornecedor) : escapeHTML(l.categoria)}</div>
           </div>
           <span class="mono" style="font-weight:600;font-size:12.5px;color:${l.tipo==='entrada'?'var(--success)':'var(--danger)'}">${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}</span>
           <div class="row-actions">${l.origem!=='transferencia' ? `<button class="icon-btn" data-action="editar" data-id="${l.id}" title="Editar">✎</button>` : ''}<button class="icon-btn" data-action="excluir" data-id="${l.id}" title="Excluir">✕</button></div>
         </div>
       `).join('')}
       <div class="extrato-dia-foot">
-        <span>Saldo final do dia</span>
-        <span class="mono">${brl(g.saldoFinal)}</span>
+        <span>Saldo inicial do dia</span>
+        <span class="mono">${brl(g.saldoInicial)}</span>
       </div>
     </div>
   `).join('');
 
-  const pendentesConta = state.lancamentos.filter(l=>l.contaId===contaId && l.status==='pendente');
+  return `
+    ${grupos.length ? gruposHTML : `<div class="panel"><div class="empty">${extratoBuscaTermo ? 'Nenhuma movimentação encontrada para essa busca.' : 'Nenhuma movimentação realizada nesta conta ainda.'}</div></div>`}
+    ${pendentesConta.length ? `
+    <div class="panel">
+      <div class="panel-head"><h2>Previsto (ainda pendente) nesta conta</h2></div>
+      <div class="panel-body">${pendentesConta.map(rowHTML).join('')}</div>
+    </div>` : ''}
+  `;
+}
 
+function viewExtrato(contaId){
+  const conta = state.contas.find(c=>c.id===contaId);
+  if(!conta) return viewContas();
   return `
     <div class="topbar">
       <div>
@@ -2856,17 +2890,13 @@ function viewExtrato(contaId){
     </div>
     <div class="panel">
       <div class="filter-bar" style="align-items:flex-end;">
+        <input type="text" id="extratoFiltroBusca" value="${escapeHTML(extratoBuscaTermo)}" placeholder="🔍 Buscar por descrição, cliente/fornecedor..." style="flex:1;min-width:180px;border:2px solid var(--blue-accent);border-radius:8px;padding:9px 12px;font-size:12.5px;background:var(--white);">
         <div class="field" style="margin:0;max-width:120px;"><label style="font-size:10.5px;">De</label><input type="date" id="extratoFiltroDe" style="padding:6px 8px;font-size:12px;"></div>
         <div class="field" style="margin:0;max-width:120px;"><label style="font-size:10.5px;">Até</label><input type="date" id="extratoFiltroAte" style="padding:6px 8px;font-size:12px;"></div>
         <button class="btn ghost sm" id="btnBaixarExtratoPDF">📄 Baixar PDF</button>
       </div>
     </div>
-    ${grupos.length ? gruposHTML : `<div class="panel"><div class="empty">Nenhuma movimentação realizada nesta conta ainda.</div></div>`}
-    ${pendentesConta.length ? `
-    <div class="panel">
-      <div class="panel-head"><h2>Previsto (ainda pendente) nesta conta</h2></div>
-      <div class="panel-body">${pendentesConta.map(rowHTML).join('')}</div>
-    </div>` : ''}
+    <div id="extratoConteudo">${renderExtratoConteudo(contaId)}</div>
   `;
 }
 
@@ -6977,6 +7007,40 @@ function attachViewHandlers(){
   // Contas bancárias
   const btnNovaConta = document.getElementById('btnNovaConta');
   if(btnNovaConta) btnNovaConta.addEventListener('click', ()=>openContaModal());
+  {
+    let arrastando = null;
+    document.querySelectorAll('[data-conta-drag-id]').forEach(card=>{
+      card.addEventListener('dragstart', (e)=>{
+        arrastando = card;
+        card.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      card.addEventListener('dragend', ()=>{
+        card.classList.remove('dragging');
+        document.querySelectorAll('[data-conta-drag-id]').forEach(c=>c.classList.remove('drag-over'));
+        arrastando = null;
+      });
+      card.addEventListener('dragover', (e)=>{
+        e.preventDefault();
+        if(card!==arrastando) card.classList.add('drag-over');
+      });
+      card.addEventListener('dragleave', ()=>card.classList.remove('drag-over'));
+      card.addEventListener('drop', (e)=>{
+        e.preventDefault();
+        card.classList.remove('drag-over');
+        if(!arrastando || card===arrastando) return;
+        const idOrigem = arrastando.dataset.contaDragId;
+        const idDestino = card.dataset.contaDragId;
+        const idxOrigem = state.contas.findIndex(c=>c.id===idOrigem);
+        const idxDestino = state.contas.findIndex(c=>c.id===idDestino);
+        if(idxOrigem<0 || idxDestino<0) return;
+        const [movida] = state.contas.splice(idxOrigem, 1);
+        state.contas.splice(idxDestino, 0, movida);
+        persist(); render();
+        showToast('Ordem das contas atualizada');
+      });
+    });
+  }
   document.querySelectorAll('[data-action="editar-conta"]').forEach(btn=>{
     btn.addEventListener('click', ()=>openContaModal(state.contas.find(c=>c.id===btn.dataset.id)));
   });
@@ -6994,6 +7058,7 @@ function attachViewHandlers(){
   document.querySelectorAll('[data-action="ver-extrato"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       extratoContaId = btn.dataset.id;
+      extratoBuscaTermo = '';
       currentView = 'extrato';
       render();
     });
@@ -7041,9 +7106,41 @@ function attachViewHandlers(){
   });
   const btnVoltarContas = document.getElementById('btnVoltarContas');
   if(btnVoltarContas) btnVoltarContas.addEventListener('click', ()=>{
+    extratoBuscaTermo = '';
     currentView = 'contas';
     document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view==='contas'));
     render();
+  });
+  document.getElementById('extratoFiltroBusca')?.addEventListener('input', (e)=>{
+    extratoBuscaTermo = e.target.value;
+    const wrap = document.getElementById('extratoConteudo');
+    if(!wrap) return;
+    wrap.innerHTML = renderExtratoConteudo(extratoContaId);
+    wrap.querySelectorAll('[data-action]').forEach(btn=>{
+      btn.addEventListener('click', (ev)=>{
+        const id = btn.dataset.id, action = btn.dataset.action;
+        if(action==='ver-comprovante'){
+          ev.stopPropagation();
+          const lc = state.lancamentos.find(x=>x.id===id);
+          if(!lc || !lc.comprovanteFoto) return;
+          const modal = document.getElementById('modalContent');
+          modal.innerHTML = `<h3>Comprovante</h3><img src="${lc.comprovanteFoto}" style="width:100%;border-radius:8px;margin-top:10px;"><div class="modal-actions"><button class="btn ghost" id="btnCancelarModal">Fechar</button></div>`;
+          document.getElementById('modalOverlay').classList.add('open');
+          document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+          return;
+        }
+        const l = state.lancamentos.find(x=>x.id===id);
+        if(!l) return;
+        if(action==='quitar'){ abrirQuitarModal(id); }
+        else if(action==='editar'){ openLancamentoModal(l.tipo, l); }
+        else if(action==='excluir'){ excluirLancamento(id); }
+        else if(action==='ver-detalhe'){ openDetalheLancamentoModal(l); }
+        else if(action==='abrir-lancamento'){
+          if(l.origem==='transferencia') openDetalheLancamentoModal(l);
+          else openLancamentoModal(l.tipo, l);
+        }
+      });
+    });
   });
   document.getElementById('btnBaixarExtratoPDF')?.addEventListener('click', ()=>{
     const dataDe = document.getElementById('extratoFiltroDe').value || null;
