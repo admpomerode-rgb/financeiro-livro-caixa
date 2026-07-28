@@ -1872,7 +1872,7 @@ function viewLancamentos(tipo){
     ${mesNavHTML()}
     <div class="panel">
       <div class="filter-bar">
-        <input type="text" id="filtroBusca" value="${escapeHTML(lancamentosBuscaPreenchida)}" placeholder="Buscar por descrição, nº do pedido..." style="flex:1;min-width:180px;border:1px solid var(--line);border-radius:7px;padding:8px 12px;font-size:12.5px;">
+        <input type="text" id="filtroBusca" value="${escapeHTML(lancamentosBuscaPreenchida)}" placeholder="🔍 Buscar por descrição, nº do pedido..." style="flex:1;min-width:180px;border:2px solid var(--blue-accent);border-radius:8px;padding:9px 12px;font-size:12.5px;background:var(--white);">
         <select id="filtroStatus">
           <option value="todos">Todos os status</option>
           <option value="pendente">Pendentes</option>
@@ -7236,6 +7236,11 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
         </select>
       </div>
     </div>
+    <div class="field" id="wrapDataEfetivacao" style="display:${(existing?.status==='pago'||existing?.status==='recebido')?'block':'none'};">
+      <label>Data de ${tipo==='saida'?'pagamento':'recebimento'} (quando efetivou de verdade)</label>
+      <input type="date" id="fDataEfetivacao" value="${existing?.dataPagamento || todayISO()}">
+      <div class="note" style="margin-top:6px;">Se foi ${tipo==='saida'?'pago':'recebido'} em outro dia (não hoje), ajuste aqui — não precisa lançar como pendente pra depois ir efetivar em Contas a ${tipo==='saida'?'Pagar':'Receber'}.</div>
+    </div>
     ${tipo==='saida' && !isEdit ? `
     <div class="field">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;">
@@ -7326,6 +7331,14 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
   const fFormaPagto = document.getElementById('fFormaPagto');
   const fRecorrente = document.getElementById('fRecorrente');
   const btnSalvarLancEl = document.getElementById('btnSalvarLancamento');
+  const fStatusEl = document.getElementById('fStatus');
+  const atualizarVisibilidadeEfetivacao = ()=>{
+    const wrap = document.getElementById('wrapDataEfetivacao');
+    if(!wrap) return;
+    const statusEfetivado = fStatusEl && (fStatusEl.value==='pago' || fStatusEl.value==='recebido');
+    wrap.style.display = (statusEfetivado && formaPagtoAtual!=='cartao') ? 'block' : 'none';
+  };
+  fStatusEl?.addEventListener('change', atualizarVisibilidadeEfetivacao);
   const atualizarModoLancamento = ()=>{
     const ehCartao = formaPagtoAtual==='cartao';
     const ehRecorrente = !!fRecorrente?.checked;
@@ -7346,6 +7359,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     const notaRec = document.getElementById('fRecorrenteNote');
     if(notaRec) notaRec.style.display = (ehRecorrente && !ehCartao) ? 'block' : 'none';
     if(btnSalvarLancEl) btnSalvarLancEl.textContent = ehCartao ? 'Lançar no cartão' : (ehRecorrente ? 'Salvar recorrência' : 'Salvar');
+    atualizarVisibilidadeEfetivacao();
   };
   if(fFormaPagto){
     fFormaPagto.querySelectorAll('button[data-forma]').forEach(btn=>{
@@ -7360,6 +7374,8 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     document.getElementById('fCartaoSelect')?.addEventListener('change', atualizarModoLancamento);
     fRecorrente?.addEventListener('change', atualizarModoLancamento);
     atualizarModoLancamento();
+  } else {
+    atualizarVisibilidadeEfetivacao();
   }
   const fCentroCusto = document.getElementById('fCentroCusto');
   if(fCentroCusto) fCentroCusto.addEventListener('change', ()=>{
@@ -7419,6 +7435,10 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     }
 
     const status = document.getElementById('fStatus').value;
+    const efetivado = status==='pago' || status==='recebido';
+    const dataEfetivacaoInput = document.getElementById('fDataEfetivacao');
+    const dataEfetivacao = efetivado ? (dataEfetivacaoInput?.value || todayISO()) : null;
+    const vencimentoInformado = document.getElementById('fVencimento').value;
     let fornecedorValor;
     if(fFornecedorSelect){
       fornecedorValor = fFornecedorSelect.value==='__outro__' ? document.getElementById('fFornecedor').value.trim() : fFornecedorSelect.value;
@@ -7435,9 +7455,9 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       comprovanteFoto: comprovanteAtual,
       observacao: document.getElementById('fObservacao').value.trim(),
       contaId: document.getElementById('fConta').value,
-      dataVencimento: document.getElementById('fVencimento').value,
+      dataVencimento: vencimentoInformado || dataEfetivacao || todayISO(),
       status,
-      dataPagamento: (status==='pago'||status==='recebido') ? (existing?.dataPagamento || todayISO()) : null,
+      dataPagamento: efetivado ? dataEfetivacao : null,
     };
     const cfgAprov = state.aprovacaoConfig || {};
     if(tipo==='saida' && cfgAprov.ativo && valor > (cfgAprov.limite||0) && existing?.aprovacao!=='aprovada'){
