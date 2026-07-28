@@ -6658,6 +6658,28 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
         <input type="text" inputmode="decimal" id="fValor" value="${existing ? existing.valor : ''}" placeholder="0,00">
       </div>
     </div>
+    ${tipo==='saida' && !isEdit ? `
+    <div class="field">
+      <label>Forma de pagamento</label>
+      <div class="toggle-row" id="fFormaPagto">
+        <button type="button" data-forma="conta" class="active">Conta bancária</button>
+        <button type="button" data-forma="cartao" ${!state.cartoes.length?'disabled title="Cadastre um cartão de crédito primeiro"':''}>💳 Cartão de crédito</button>
+      </div>
+    </div>
+    <div id="grupoCartaoDespesa" style="display:none;">
+      <div class="field-row">
+        <div class="field">
+          <label>Cartão</label>
+          <select id="fCartaoSelect">${state.cartoes.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select>
+        </div>
+        <div class="field">
+          <label>Parcelas</label>
+          <select id="fParcelasDespesa">${Array.from({length:12},(_,i)=>i+1).map(n=>`<option value="${n}">${n}x</option>`).join('')}</select>
+        </div>
+      </div>
+      <div class="note" id="fCartaoNote" style="margin-top:0;"></div>
+    </div>
+    ` : ''}
     <div class="field-row">
       <div class="field">
         <label>${tipo==='saida' ? 'Fornecedor (opcional)' : 'Cliente (opcional)'}</label>
@@ -6672,17 +6694,17 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
           <input type="text" id="fFornecedor" value="${existing?.fornecedor ? escapeHTML(existing.fornecedor) : ''}">
         `}
       </div>
-      <div class="field">
+      <div class="field" id="wrapContaDespesa">
         <label>Conta</label>
         <select id="fConta">${state.contas.map(c=>`<option value="${c.id}" ${(existing?.contaId||contaPreSelecionadaId||state.contas[0].id)===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
       </div>
     </div>
-    <div class="field-row">
+    <div class="field-row" id="wrapVencStatus">
       <div class="field">
-        <label>Vencimento</label>
+        <label id="lblVencimento">Vencimento</label>
         <input type="date" id="fVencimento" value="${existing?.dataVencimento || todayISO()}">
       </div>
-      <div class="field">
+      <div class="field" id="wrapStatusDespesa">
         <label>Status</label>
         <select id="fStatus">
           <option value="pendente" ${existing?.status==='pendente'?'selected':''}>Pendente</option>
@@ -6691,6 +6713,15 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
         </select>
       </div>
     </div>
+    ${tipo==='saida' && !isEdit ? `
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;">
+        <input type="checkbox" id="fRecorrente" style="width:17px;height:17px;">
+        🔁 Repetir todo mês (despesa recorrente)
+      </label>
+      <div class="note" id="fRecorrenteNote" style="display:none;margin-top:8px;">O dia do mês da data de vencimento vira o dia fixo da recorrência — a partir de agora ela é gerada automaticamente todo mês, sem precisar lançar de novo.</div>
+    </div>
+    ` : ''}
     <div class="field">
       <label>Produto / linha (opcional — pra ver rentabilidade por produto nos relatórios)</label>
       <input type="text" id="fProduto" value="${existing?.produtoTag ? escapeHTML(existing.produtoTag) : ''}" placeholder="Ex: Biscoito Amanteigado, Bolacha Recheada...">
@@ -6768,6 +6799,45 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       fFornecedorInput.style.display = fFornecedorSelect.value==='__outro__' ? 'block' : 'none';
     });
   }
+  let formaPagtoAtual = 'conta';
+  const fFormaPagto = document.getElementById('fFormaPagto');
+  const fRecorrente = document.getElementById('fRecorrente');
+  const btnSalvarLancEl = document.getElementById('btnSalvarLancamento');
+  const atualizarModoLancamento = ()=>{
+    const ehCartao = formaPagtoAtual==='cartao';
+    const ehRecorrente = !!fRecorrente?.checked;
+    document.getElementById('grupoCartaoDespesa')?.style && (document.getElementById('grupoCartaoDespesa').style.display = ehCartao ? 'block' : 'none');
+    document.getElementById('wrapContaDespesa')?.style && (document.getElementById('wrapContaDespesa').style.display = ehCartao ? 'none' : 'block');
+    document.getElementById('wrapStatusDespesa')?.style && (document.getElementById('wrapStatusDespesa').style.display = ehCartao ? 'none' : 'block');
+    const lbl = document.getElementById('lblVencimento');
+    if(lbl) lbl.textContent = ehCartao ? 'Data da compra' : (ehRecorrente ? 'Vencimento (define o dia fixo do mês)' : 'Vencimento');
+    const notaCartao = document.getElementById('fCartaoNote');
+    if(notaCartao){
+      const cartaoSel = state.cartoes.find(c=>c.id===document.getElementById('fCartaoSelect')?.value) || state.cartoes[0];
+      notaCartao.textContent = cartaoSel ? `A compra entra na fatura com base na data e no dia de fechamento (${cartaoSel.diaFechamento}) deste cartão. Parcelas seguintes caem nas faturas dos meses seguintes.` : '';
+    }
+    if(fRecorrente){
+      fRecorrente.disabled = ehCartao;
+      fRecorrente.closest('.field').style.opacity = ehCartao ? '.5' : '1';
+    }
+    const notaRec = document.getElementById('fRecorrenteNote');
+    if(notaRec) notaRec.style.display = (ehRecorrente && !ehCartao) ? 'block' : 'none';
+    if(btnSalvarLancEl) btnSalvarLancEl.textContent = ehCartao ? 'Lançar no cartão' : (ehRecorrente ? 'Salvar recorrência' : 'Salvar');
+  };
+  if(fFormaPagto){
+    fFormaPagto.querySelectorAll('button[data-forma]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        if(btn.disabled) return;
+        fFormaPagto.querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        formaPagtoAtual = btn.dataset.forma;
+        atualizarModoLancamento();
+      });
+    });
+    document.getElementById('fCartaoSelect')?.addEventListener('change', atualizarModoLancamento);
+    fRecorrente?.addEventListener('change', atualizarModoLancamento);
+    atualizarModoLancamento();
+  }
   const fCentroCusto = document.getElementById('fCentroCusto');
   if(fCentroCusto) fCentroCusto.addEventListener('change', ()=>{
     if(fCentroCusto.value!=='__novo__') return;
@@ -6788,6 +6858,43 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     const descricao = document.getElementById('fDescricao').value.trim() || categoria;
     const valor = numBR(document.getElementById('fValor').value);
     if(!valor || isNaN(valor) || valor<=0){ showToast('Preencha um valor válido'); return; }
+
+    if(formaPagtoAtual==='cartao'){
+      const cartaoId = document.getElementById('fCartaoSelect').value;
+      const cartao = state.cartoes.find(c=>c.id===cartaoId);
+      if(!cartao){ showToast('Escolha um cartão'); return; }
+      const dataCompra = document.getElementById('fVencimento').value || todayISO();
+      const parcelas = parseInt(document.getElementById('fParcelasDespesa').value) || 1;
+      const grupoId = uid();
+      const valorParcela = Math.round((valor/parcelas)*100)/100;
+      let compAtual = competenciaFromDate(cartao, dataCompra);
+      for(let i=1;i<=parcelas;i++){
+        state.comprasCartao.push({
+          id: uid(), cartaoId, grupoId, descricao, categoria,
+          valor: i===parcelas ? Math.round((valor - valorParcela*(parcelas-1))*100)/100 : valorParcela,
+          dataCompra, competencia: compAtual, parcela: i, totalParcelas: parcelas
+        });
+        compAtual = addMonthsComp(compAtual, 1);
+      }
+      registrarLog('Compra no cartão lançada', `"${descricao}" — ${brl(valor)}${parcelas>1?' em '+parcelas+'x':''} — ${cartao.nome}`);
+      persist(); closeModal(); render();
+      showToast(parcelas>1 ? `Lançado no cartão em ${parcelas}x` : 'Lançado no cartão');
+      return;
+    }
+
+    if(fRecorrente?.checked){
+      const diaVencimento = new Date((document.getElementById('fVencimento').value||todayISO())+'T12:00:00').getDate();
+      const contaId = document.getElementById('fConta').value;
+      if(!state.recorrencias) state.recorrencias = [];
+      state.recorrencias.push({ id: uid(), tipo:'saida', descricao, categoria, valor, diaVencimento, contaId, ativo:true, ultimoMesGerado:null, criadoEm: new Date().toISOString() });
+      registrarLog('Recorrência criada', `"${descricao}" — ${brl(valor)}/mês, todo dia ${diaVencimento}`);
+      persist();
+      gerarLancamentosRecorrentes();
+      closeModal(); render();
+      showToast('Despesa recorrente cadastrada — repete todo mês automaticamente');
+      return;
+    }
+
     const status = document.getElementById('fStatus').value;
     let fornecedorValor;
     if(fFornecedorSelect){
