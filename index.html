@@ -532,6 +532,7 @@
       <div class="nav-item" data-view="ativos" title="Ativos Patrimoniais"><span class="nav-dot"></span><span class="nav-abbr">AP</span><span class="nav-label">Ativos Patrimoniais</span></div>
       <div class="nav-item" data-view="investimentos" title="Investimentos"><span class="nav-dot"></span><span class="nav-abbr">IV</span><span class="nav-label">Investimentos</span></div>
       <div class="nav-item" data-view="integracoes" title="Central de Integrações"><span class="nav-dot"></span><span class="nav-abbr">IN</span><span class="nav-label">Central de Integrações</span></div>
+      <div class="nav-item" data-view="configuracoes" title="Configurações do Sistema"><span class="nav-dot"></span><span class="nav-abbr">CF</span><span class="nav-label">Configurações</span></div>
     </nav>
     <div class="sidebar-footer">
       <button id="btnBackup"><span class="footer-icon">⇅</span><span class="footer-label">Backup / Restaurar</span></button>
@@ -573,6 +574,7 @@
       <div class="more-item" data-view="ativos"><span class="more-icon">📦</span>Ativos Patrimoniais</div>
       <div class="more-item" data-view="investimentos"><span class="more-icon">📈</span>Investimentos</div>
       <div class="more-item" data-view="integracoes"><span class="more-icon">🔌</span>Central de Integrações</div>
+      <div class="more-item" data-view="configuracoes"><span class="more-icon">⚙️</span>Configurações</div>
     </div>
     <div class="more-drawer-footer">
       <button id="btnBackupMobile"><span class="footer-icon">⇅</span> Backup / Restaurar</button>
@@ -872,6 +874,7 @@ function render(){
   else if(currentView==='integracoes') main.innerHTML = viewIntegracoes();
   else if(currentView==='vk') main.innerHTML = viewVK();
   else if(currentView==='processos') main.innerHTML = viewProcessosConfig();
+  else if(currentView==='configuracoes') main.innerHTML = viewConfiguracoes();
   attachViewHandlers();
 }
 
@@ -4930,7 +4933,148 @@ function excluirLancamento(id){
   persist(); render(); showToast('Lançamento excluído');
 }
 
+/* ---------------- Configurações do Sistema ---------------- */
+const FIRESTORE_DOC_LIMITE = 1048576; // 1 MiB por documento
+
+function bytesLegivel(b){
+  if(b>=1048576) return (b/1048576).toLocaleString('pt-BR',{maximumFractionDigits:2})+' MB';
+  if(b>=1024) return (b/1024).toLocaleString('pt-BR',{maximumFractionDigits:1})+' KB';
+  return b.toLocaleString('pt-BR')+' bytes';
+}
+function tamanhoJSONBytes(obj){
+  try{ return new Blob([JSON.stringify(obj)]).size; }catch(e){ try{ return JSON.stringify(obj).length; }catch(e2){ return 0; } }
+}
+
+function viewConfiguracoes(){
+  const usado = tamanhoJSONBytes(state);
+  const pct = usado / FIRESTORE_DOC_LIMITE * 100;
+  const pctTxt = pct.toLocaleString('pt-BR',{maximumFractionDigits:1});
+  const cor = pct>=90 ? 'var(--danger)' : pct>=70 ? 'var(--warn)' : 'var(--success)';
+
+  const NOMES_MODULOS = {
+    lancamentos:'Lançamentos', ativos:'Ativos Patrimoniais (com fotos)', comprasCartao:'Compras no cartão',
+    faturasFechadas:'Faturas fechadas', contas:'Contas bancárias', cartoes:'Cartões de crédito',
+    contasInvestimento:'Contas de investimento', ativosInvestimento:'Ativos de investimento',
+    notasPendentes:'Notas de corretagem pendentes', categorias:'Categorias', fornecedores:'Fornecedores',
+    recorrencias:'Lançamentos recorrentes', orcamentoCategorias:'Orçamento', logAuditoria:'Log de auditoria',
+    contratos:'Contratos', metasReserva:'Metas de reserva', vkConfig:'Integração VK Industrial',
+    processosConfig:'Integração Livro de Processos', forneiraConfig:'Integração Forneira',
+    categoriaMEI:'Config. MEI', meiEmpregadoPorAno:'Config. MEI (empregado)', investimentos:'Investimentos (legado)'
+  };
+  const modulos = Object.entries(state)
+    .map(([k,v])=>({ k, nome: NOMES_MODULOS[k]||k, b: tamanhoJSONBytes(v), qtd: Array.isArray(v)?v.length:null }))
+    .filter(m=>m.b>2)
+    .sort((a,b)=>b.b-a.b);
+  const maiorModulo = modulos.length ? modulos[0].b : 0;
+
+  const contagens = [
+    ['Lançamentos', (state.lancamentos||[]).length],
+    ['Compras no cartão', (state.comprasCartao||[]).length],
+    ['Ativos patrimoniais', (state.ativos||[]).length],
+    ['Ativos de investimento', (state.ativosInvestimento||[]).length],
+    ['Notas pendentes', (state.notasPendentes||[]).length],
+    ['Fornecedores', (state.fornecedores||[]).length],
+    ['Recorrências', (state.recorrencias||[]).length],
+    ['Registros no log de auditoria', (state.logAuditoria||[]).length],
+  ];
+
+  return `
+    <div class="topbar">
+      <div><h1>Configurações do Sistema</h1><p>Saúde técnica do Livro Caixa — armazenamento, código e Firebase</p></div>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px;${pct>=70?`border-left:3px solid ${cor};`:''}">
+      <div class="panel-head"><h2>☁️ Armazenamento no Firestore</h2></div>
+      <div class="panel-body" style="padding:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;">
+          <span style="font-size:22px;font-weight:700;font-family:'Space Grotesk';color:${cor};">${pctTxt}% usado</span>
+          <span style="font-size:12.5px;color:var(--text-soft);" class="mono">${bytesLegivel(usado)} de ${bytesLegivel(FIRESTORE_DOC_LIMITE)}</span>
+        </div>
+        <div style="height:12px;border-radius:6px;background:var(--line);margin:10px 0 4px;overflow:hidden;">
+          <div style="height:100%;width:${Math.min(100, Math.max(1, pct)).toFixed(1)}%;background:${cor};border-radius:6px;transition:width .4s;"></div>
+        </div>
+        <div class="note" style="margin-top:8px;">Todos os dados do sistema ficam num único documento do Firestore, que tem limite de 1 MB. ${
+          pct>=90 ? '<strong style="color:var(--danger);">Atenção: o limite está quase estourando — acima de 100% o sistema para de salvar.</strong> Exporte um backup agora e vamos migrar as fotos dos ativos pro Firebase Storage ou dividir os dados em documentos separados.'
+          : pct>=70 ? '<strong style="color:var(--warn);">Aviso: já passou de 70% do limite.</strong> Ainda há folga, mas é bom planejar a próxima etapa — mover as fotos dos Ativos Patrimoniais pro Firebase Storage é o que mais libera espaço.'
+          : 'Tudo tranquilo por enquanto. O que mais consome espaço costuma ser foto de Ativo Patrimonial salva dentro dos dados — acompanhe a lista abaixo.'
+        }</div>
+        <label style="font-size:12.5px;font-weight:600;display:block;margin:14px 0 6px;">O que está ocupando espaço</label>
+        ${modulos.slice(0,12).map(m=>`
+          <div style="padding:6px 0;border-bottom:1px solid var(--line);">
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;">
+              <span>${escapeHTML(m.nome)}${m.qtd!==null?` <span style="color:var(--text-soft);font-size:11px;">· ${m.qtd} item(ns)</span>`:''}</span>
+              <span class="mono">${bytesLegivel(m.b)} <span style="color:var(--text-soft);font-size:11px;">(${(m.b/usado*100).toFixed(1)}%)</span></span>
+            </div>
+            <div style="height:4px;border-radius:2px;background:var(--line);margin-top:4px;overflow:hidden;"><div style="height:100%;width:${maiorModulo>0?Math.max(1,Math.round(m.b/maiorModulo*100)):0}%;background:var(--blue-accent);border-radius:2px;"></div></div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-head"><h2>🧩 Código do sistema</h2></div>
+      <div class="panel-body" style="padding:16px;">
+        <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:0;">
+          <div class="card"><div class="label">Linhas de código</div><div class="value mono" id="cfgLinhas">calculando…</div></div>
+          <div class="card"><div class="label">Tamanho do arquivo</div><div class="value mono" id="cfgArquivo">…</div></div>
+          <div class="card"><div class="label">Linhas de JavaScript</div><div class="value mono" id="cfgLinhasJS">…</div></div>
+          <div class="card"><div class="label">Linhas de CSS</div><div class="value mono" id="cfgLinhasCSS">…</div></div>
+        </div>
+        <div class="note">O sistema inteiro roda num único arquivo index.html — o código não ocupa espaço no Firestore, só os dados. Pode crescer à vontade.</div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-head"><h2>🔥 Firebase</h2></div>
+      <div class="panel-body" style="padding:16px;">
+        <div class="report-line"><span>Projeto</span><span class="v mono">${escapeHTML(LIVRO_CAIXA_FIREBASE_CONFIG.projectId)}</span></div>
+        <div class="report-line"><span>Documento dos dados</span><span class="v mono">livro-caixa/dados</span></div>
+        <div class="report-line"><span>Usuário conectado</span><span class="v">${escapeHTML((auth.currentUser && auth.currentUser.email) || '—')}</span></div>
+        <label style="font-size:12.5px;font-weight:600;display:block;margin:14px 0 4px;">Registros salvos</label>
+        ${contagens.map(([nome,qtd])=>`<div class="report-line sub"><span>${nome}</span><span class="v mono">${qtd.toLocaleString('pt-BR')}</span></div>`).join('')}
+        <label style="font-size:12.5px;font-weight:600;display:block;margin:14px 0 4px;">Limites do plano gratuito (Spark)</label>
+        <div class="report-line sub"><span>Armazenamento total do Firestore</span><span class="v mono">1 GB</span></div>
+        <div class="report-line sub"><span>Leituras de documentos</span><span class="v mono">50.000 / dia</span></div>
+        <div class="report-line sub"><span>Escritas de documentos</span><span class="v mono">20.000 / dia</span></div>
+        <div class="note">Cada vez que o sistema salva, conta como 1 escrita (as alterações são agrupadas antes de salvar, então o consumo é baixo). O uso exato de leituras e escritas do dia só aparece no console do Firebase.</div>
+        <button class="btn ghost" id="btnConsoleFirebase" style="margin-top:10px;">Abrir console do Firebase ↗</button>
+      </div>
+    </div>
+  `;
+}
+
+async function preencherEstatisticasCodigo(){
+  const set = (id,v)=>{ const el = document.getElementById(id); if(el) el.textContent = v; };
+  try{
+    let texto = '';
+    try{
+      const r = await fetch(window.location.href, { cache:'no-store' });
+      if(!r.ok) throw new Error('http '+r.status);
+      texto = await r.text();
+    }catch(e){
+      texto = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+    }
+    const linhas = texto.split('\n').length;
+    set('cfgLinhas', linhas.toLocaleString('pt-BR'));
+    set('cfgArquivo', bytesLegivel(new Blob([texto]).size));
+    const css = (texto.match(/<style>[\s\S]*?<\/style>/)||[''])[0];
+    let js = '';
+    const re = /<script(?![^>]*src)[^>]*>([\s\S]*?)<\/script>/g; let m;
+    while((m = re.exec(texto))) js += m[1] + '\n';
+    set('cfgLinhasJS', js ? js.split('\n').length.toLocaleString('pt-BR') : '—');
+    set('cfgLinhasCSS', css ? css.split('\n').length.toLocaleString('pt-BR') : '—');
+  }catch(e){
+    set('cfgLinhas','—'); set('cfgArquivo','—'); set('cfgLinhasJS','—'); set('cfgLinhasCSS','—');
+  }
+}
+
 function attachViewHandlers(){
+  if(currentView==='configuracoes'){
+    preencherEstatisticasCodigo();
+    document.getElementById('btnConsoleFirebase')?.addEventListener('click', ()=>{
+      window.open('https://console.firebase.google.com/project/'+LIVRO_CAIXA_FIREBASE_CONFIG.projectId+'/usage', '_blank');
+    });
+  }
   const chartMeses = document.getElementById('chartMeses');
   if(chartMeses) desenharGraficoMeses('chartMeses');
 
