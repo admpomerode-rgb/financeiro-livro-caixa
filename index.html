@@ -321,13 +321,15 @@
   .add-conta-card:hover{border-color:var(--blue-accent);color:var(--blue-accent);}
 
   /* Cartões de crédito */
-  .cartao-card{background:linear-gradient(145deg, var(--ink), #1B2430);color:var(--white);border-radius:12px;padding:18px 20px;position:relative;overflow:hidden;border-top:3px solid var(--accent-c, var(--blue-accent));}
+  .cartao-card{background:linear-gradient(145deg, var(--ink), #1B2430);color:var(--white);border-radius:14px;padding:20px 20px 18px;position:relative;overflow:hidden;border-top:8px solid var(--accent-c, var(--blue-accent));}
+  .cartao-card .card-menu-wrap{position:absolute;top:14px;right:14px;z-index:2;}
+  .cartao-card .card-menu-wrap > .icon-btn{background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.18);color:#E4E7EC;font-weight:700;}
+  .cartao-card .card-menu-wrap > .icon-btn:hover{border-color:var(--white);color:var(--white);background:rgba(255,255,255,0.18);}
+  .cartao-card .card-menu-wrap .dropdown-menu{right:0;left:auto;min-width:150px;}
   .cartao-card .card-top{display:flex;align-items:center;gap:10px;margin-bottom:16px;}
   .cartao-card .card-top .bank-logo{background:rgba(255,255,255,0.9);}
   .cartao-card .nome{font-weight:600;font-size:14px;}
   .cartao-card .banco{font-size:11.5px;color:#9AA4B3;}
-  .cartao-card .conta-actions .icon-btn{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.16);color:#C7CCD4;}
-  .cartao-card .conta-actions .icon-btn:hover{border-color:var(--white);color:var(--white);}
   .cartao-card .fatura-label{font-size:11px;color:#9AA4B3;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;}
   .cartao-card .fatura-valor{font-size:20px;font-weight:600;margin-bottom:12px;}
   .limit-bar{height:6px;background:rgba(255,255,255,0.12);border-radius:4px;overflow:hidden;margin-bottom:6px;}
@@ -2901,9 +2903,12 @@ function viewCartoes(){
         const usoPct = c.limite>0 ? Math.min(100, Math.round(((c.limite-disponivel)/c.limite)*100)) : 0;
         return `
         <div class="cartao-card" style="--accent-c:${c.cor}">
-          <div class="conta-actions">
-            <button class="icon-btn" data-action="editar-cartao" data-id="${c.id}" title="Editar">✎</button>
-            <button class="icon-btn" data-action="excluir-cartao" data-id="${c.id}" title="Excluir">✕</button>
+          <div class="dropdown-wrap card-menu-wrap">
+            <button class="icon-btn" data-action="toggle-menu-cartao" data-id="${c.id}" title="Mais opções">⋮</button>
+            <div class="dropdown-menu" data-menu-cartao="${c.id}">
+              <button type="button" data-cartao-menu="editar" data-id="${c.id}">✎ Editar cartão</button>
+              <button type="button" data-cartao-menu="excluir" data-id="${c.id}" style="color:var(--danger);">✕ Excluir cartão</button>
+            </div>
           </div>
           <div class="card-top">
             ${bankLogoHTML({ cor:c.cor, banco:c.bandeira, bancoDominio:c.bandeiraDominio, nome:c.nome }, 34)}
@@ -3429,6 +3434,7 @@ function viewRelatorios(){
     { id:'produto', icone:'🍪', nome:'Rentabilidade por Produto', desc:'Receita, custo e margem por produto ou linha' },
     { id:'investimentos', icone:'💰', nome:'Relatório de Investimentos', desc:'Total aplicado no mês (renda fixa + variável), ativos mais investidos e custos das operações' },
     { id:'liquidez', icone:'💧', nome:'Índices de Liquidez', desc:'Liquidez imediata, seca, corrente e geral + capital de giro, endividamento e solvência' },
+    { id:'cartoes', icone:'💳', nome:'Cartões de Crédito', desc:'Uso do limite por cartão, gastos por categoria, comprometido futuro e maiores compras' },
     { id:'aging', icone:'⏳', nome:'Aging — Vencidos por Faixa', desc:'Contas a receber e a pagar por faixa de atraso, com ranking de inadimplentes' },
     { id:'dfc', icone:'🔄', nome:'DFC — Fluxo de Caixa', desc:'Demonstração do fluxo de caixa pelo método direto: operacional, investimento e financiamento' },
     { id:'mei', icone:'🧾', nome:'Declaração MEI', desc:'Números prontos pra DASN-SIMEI' },
@@ -3453,7 +3459,7 @@ function viewRelatorios(){
 
 const RELATORIOS_NOMES = {
   dre:'DRE', balanco:'Balanço Patrimonial', mei:'Declaração MEI', indicadores:'Indicadores Financeiros',
-  produto:'Rentabilidade por Produto', investimentos:'Relatório de Investimentos', liquidez:'Índices de Liquidez', aging:'Aging — Vencidos por Faixa', dfc:'DFC — Fluxo de Caixa', mensal:'Super Relatório Mensal'
+  produto:'Rentabilidade por Produto', investimentos:'Relatório de Investimentos', liquidez:'Índices de Liquidez', aging:'Aging — Vencidos por Faixa', dfc:'DFC — Fluxo de Caixa', cartoes:'Cartões de Crédito', mensal:'Super Relatório Mensal'
 };
 
 function viewRelatorioDetalhe(){
@@ -4309,6 +4315,85 @@ function renderDFC(){
       <div class="report-line total"><span>Saldo de caixa no fim do mês</span><span class="v">${brl(saldoFinal)}</span></div>
       <div class="note">Lançamentos com "empréstimo" ou "financiamento" na categoria/descrição entram em Financiamento; aplicações, resgates e compras de ativos entram em Investimento; o resto é Operacional. Transferências entre contas próprias não afetam o caixa total e ficam de fora.</div>
     </div>
+  `;
+}
+
+function renderRelatorioCartoes(){
+  if(!state.cartoes.length) return `<div class="panel"><div class="empty">Nenhum cartão cadastrado ainda.</div></div>`;
+  const hoje = todayISO();
+  const corPct = pct => pct>=80 ? 'var(--danger)' : pct>=50 ? 'var(--warn)' : 'var(--success)';
+
+  const limiteTotal = state.cartoes.reduce((s,c)=>s+(c.limite||0),0);
+  const usadoTotal = state.cartoes.reduce((s,c)=>s+dividaCartaoAberta(c.id),0);
+  const pctTotal = limiteTotal>0 ? Math.min(100, usadoTotal/limiteTotal*100) : 0;
+
+  const comprasDoMes = [];
+  state.cartoes.forEach(c=>{
+    const comp = competenciaAtual(c);
+    state.comprasCartao.filter(p=>p.cartaoId===c.id && p.competencia===comp).forEach(p=>comprasDoMes.push({ ...p, cartaoNome:c.nome }));
+  });
+  const rankingCompras = [...comprasDoMes].sort((a,b)=>b.valor-a.valor).slice(0,8);
+
+  const blocosCartao = state.cartoes.map(c=>{
+    const comp = competenciaAtual(c);
+    const faturaAtual = totalCompetencia(c.id, comp);
+    const usado = dividaCartaoAberta(c.id);
+    const disponivel = limiteDisponivel(c);
+    const pct = c.limite>0 ? Math.min(100, usado/c.limite*100) : 0;
+    const porCategoria = {};
+    state.comprasCartao.filter(p=>p.cartaoId===c.id && p.competencia===comp).forEach(p=>{
+      porCategoria[p.categoria] = (porCategoria[p.categoria]||0) + p.valor;
+    });
+    const categoriasOrdenadas = Object.entries(porCategoria).sort((a,b)=>b[1]-a[1]);
+    const maiorCat = categoriasOrdenadas.length ? categoriasOrdenadas[0][1] : 0;
+    const futuro = state.comprasCartao.filter(p=>p.cartaoId===c.id && p.competencia>comp).reduce((s,p)=>s+p.valor,0);
+
+    return `
+      <div class="panel" style="margin-bottom:16px;border-left:4px solid ${c.cor};">
+        <div class="panel-head"><h2>${escapeHTML(c.nome)} <span style="font-weight:400;font-size:11.5px;color:var(--text-soft);">· ${escapeHTML(c.bandeira||'')}</span></h2></div>
+        <div class="panel-body" style="padding:16px;">
+          <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:12px;">
+            <div class="card"><div class="label">Fatura atual</div><div class="value mono">${brl(faturaAtual)}</div></div>
+            <div class="card"><div class="label">Usado do limite</div><div class="value mono" style="color:${corPct(pct)};">${pct.toFixed(0)}%</div></div>
+            <div class="card"><div class="label">Disponível</div><div class="value mono">${brl(disponivel)}</div></div>
+            <div class="card"><div class="label">Comprometido (próx. meses)</div><div class="value mono">${brl(futuro)}</div></div>
+          </div>
+          <div style="height:10px;border-radius:5px;background:var(--line);overflow:hidden;margin-bottom:12px;">
+            <div style="height:100%;width:${pct.toFixed(1)}%;background:${corPct(pct)};border-radius:5px;"></div>
+          </div>
+          ${pct>=80 ? `<div class="note" style="margin-top:0;"><strong style="color:var(--danger);">Atenção:</strong> esse cartão já usou ${pct.toFixed(0)}% do limite (contando fatura atual + parcelas futuras).</div>` : ''}
+          <label style="font-size:12.5px;font-weight:600;display:block;margin:10px 0 6px;">Gastos por categoria (fatura de ${competenciaLabel(comp)})</label>
+          ${categoriasOrdenadas.length ? categoriasOrdenadas.map(([cat,v])=>`
+            <div style="padding:5px 0;border-bottom:1px solid var(--line);">
+              <div style="display:flex;justify-content:space-between;font-size:12.5px;"><span>${escapeHTML(cat)}</span><span class="mono">${brl(v)}</span></div>
+              <div style="height:4px;border-radius:2px;background:var(--line);margin-top:4px;overflow:hidden;"><div style="height:100%;width:${maiorCat>0?Math.round(v/maiorCat*100):0}%;background:${c.cor};border-radius:2px;"></div></div>
+            </div>
+          `).join('') : `<div class="empty">Nenhuma compra nessa fatura.</div>`}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="report-controls"><span style="font-size:12.5px;color:var(--text-soft);">Cartões de Crédito — posição de hoje (${fmtDate(hoje)})</span></div>
+    <div class="report-block">
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
+        <div class="card saldo"><div class="label">Limite total (todos os cartões)</div><div class="value mono">${brl(limiteTotal)}</div></div>
+        <div class="card"><div class="label">Usado do limite</div><div class="value mono" style="color:${corPct(pctTotal)};">${brl(usadoTotal)} <span style="font-size:11px;">(${pctTotal.toFixed(0)}%)</span></div></div>
+        <div class="card"><div class="label">Disponível total</div><div class="value mono">${brl(Math.max(0,limiteTotal-usadoTotal))}</div></div>
+      </div>
+      <div class="note">O "usado do limite" soma toda a dívida em aberto de cada cartão — fatura atual mais as parcelas futuras já compromissadas — não só a fatura deste mês. É o que realmente ocupa o seu limite disponível.</div>
+    </div>
+    ${blocosCartao}
+    ${rankingCompras.length ? `
+    <div class="panel">
+      <div class="panel-head"><h2>🏆 Maiores compras do mês (todos os cartões)</h2></div>
+      <div class="panel-body">
+        ${rankingCompras.map((p,i)=>`
+          <div class="report-line sub"><span>${i+1}º &nbsp;${escapeHTML(p.descricao)} <span style="font-size:11px;color:var(--text-soft);">· ${escapeHTML(p.cartaoNome)} · ${escapeHTML(p.categoria)}</span></span><span class="v">${brl(p.valor)}</span></div>
+        `).join('')}
+      </div>
+    </div>` : ''}
   `;
 }
 
@@ -6231,6 +6316,7 @@ function attachViewHandlers(){
         relatorioAtivo==='liquidez' ? renderRelatorioLiquidez() :
         relatorioAtivo==='aging' ? renderAging() :
         relatorioAtivo==='dfc' ? renderDFC() :
+        relatorioAtivo==='cartoes' ? renderRelatorioCartoes() :
         relatorioAtivo==='mensal' ? renderSuperRelatorioMensal(mensalMesRef) :
         renderIndicadores('mes');
       bindReportInner();
@@ -6319,7 +6405,7 @@ function attachViewHandlers(){
     });
     paint();
     document.getElementById('btnExportarRelatorioPDF')?.addEventListener('click', ()=>{
-      const titulos = { dre: 'DRE (Demonstrativo de Resultado)', balanco: 'Balanço Patrimonial', mei: `Declaração MEI — Ano ${meiAnoAtual}`, indicadores: 'Indicadores Financeiros', produto: 'Rentabilidade por Produto', mensal: `Super Relatório Mensal — ${mensalMesRef}`, investimentos: `Relatório de Investimentos — ${mesGlobalRef}`, liquidez: 'Índices de Liquidez e Endividamento', aging: 'Aging — Vencidos por Faixa', dfc: `DFC — Fluxo de Caixa — ${mesGlobalRef}` };
+      const titulos = { dre: 'DRE (Demonstrativo de Resultado)', balanco: 'Balanço Patrimonial', mei: `Declaração MEI — Ano ${meiAnoAtual}`, indicadores: 'Indicadores Financeiros', produto: 'Rentabilidade por Produto', mensal: `Super Relatório Mensal — ${mensalMesRef}`, investimentos: `Relatório de Investimentos — ${mesGlobalRef}`, liquidez: 'Índices de Liquidez e Endividamento', aging: 'Aging — Vencidos por Faixa', dfc: `DFC — Fluxo de Caixa — ${mesGlobalRef}`, cartoes: 'Relatório de Cartões de Crédito' };
       exportarRelatorioPDF(titulos[relatorioAtivo]);
     });
   }
@@ -6970,19 +7056,33 @@ function attachViewHandlers(){
   // Cartões de crédito
   const btnNovoCartao = document.getElementById('btnNovoCartao');
   if(btnNovoCartao) btnNovoCartao.addEventListener('click', ()=>openCartaoModal());
-  document.querySelectorAll('[data-action="editar-cartao"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>openCartaoModal(state.cartoes.find(c=>c.id===btn.dataset.id)));
-  });
-  document.querySelectorAll('[data-action="excluir-cartao"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      const id = btn.dataset.id;
-      const usado = state.comprasCartao.some(p=>p.cartaoId===id);
-      if(usado && !confirm('Este cartão tem compras lançadas. Excluí-lo também remove o histórico de compras dele. Continuar?')) return;
-      state.cartoes = state.cartoes.filter(c=>c.id!==id);
-      state.comprasCartao = state.comprasCartao.filter(p=>p.cartaoId!==id);
-      state.faturasFechadas = state.faturasFechadas.filter(f=>f.cartaoId!==id);
-      persist(); render(); showToast('Cartão excluído');
+  document.querySelectorAll('[data-action="toggle-menu-cartao"]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const menu = document.querySelector(`[data-menu-cartao="${btn.dataset.id}"]`);
+      document.querySelectorAll('.dropdown-menu[data-menu-cartao]').forEach(m=>{ if(m!==menu) m.classList.remove('open'); });
+      menu?.classList.toggle('open');
+      if(menu) ajustarPosicaoDropdown(menu);
     });
+  });
+  document.querySelectorAll('[data-cartao-menu]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('.dropdown-menu[data-menu-cartao]').forEach(m=>m.classList.remove('open'));
+      const id = btn.dataset.id;
+      if(btn.dataset.cartaoMenu==='editar'){
+        openCartaoModal(state.cartoes.find(c=>c.id===id));
+      } else {
+        const usado = state.comprasCartao.some(p=>p.cartaoId===id);
+        if(usado && !confirm('Este cartão tem compras lançadas. Excluí-lo também remove o histórico de compras dele. Continuar?')) return;
+        state.cartoes = state.cartoes.filter(c=>c.id!==id);
+        state.comprasCartao = state.comprasCartao.filter(p=>p.cartaoId!==id);
+        state.faturasFechadas = state.faturasFechadas.filter(f=>f.cartaoId!==id);
+        persist(); render(); showToast('Cartão excluído');
+      }
+    });
+  });
+  document.addEventListener('click', ()=>{
+    document.querySelectorAll('.dropdown-menu[data-menu-cartao]').forEach(m=>m.classList.remove('open'));
   });
   document.querySelectorAll('[data-action="lancar-compra"]').forEach(btn=>{
     btn.addEventListener('click', ()=>openCompraCartaoModal(btn.dataset.id));
