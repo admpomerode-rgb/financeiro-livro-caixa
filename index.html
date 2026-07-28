@@ -469,14 +469,15 @@
     .cards.cards-3{grid-template-columns:1fr 1fr;}
     .cards.cards-3 .card:last-child{grid-column:1 / -1;}
 
-    /* Dashboard no celular: sem título, mês alinhado no topo e botão + em bolinha azul clara à esquerda */
+    /* Dashboard no celular: sem título, mês alinhado no topo e botão + flutuante no canto inferior direito */
     .dash-topbar{margin-bottom:0;height:0;min-height:0;overflow:visible;position:relative;gap:0;}
     .dash-titulo{display:none;}
-    .dash-acao{position:absolute;top:0;left:0;z-index:46;}
-    .dash-acao #btnNovoMenu{width:46px;height:46px;border-radius:50%;padding:0;display:flex;align-items:center;justify-content:center;background:#82ABF2;box-shadow:0 4px 14px rgba(43,108,238,.35);}
-    .dash-acao #btnNovoMenu .novo-plus{font-size:27px;font-weight:600;line-height:1;margin-top:-2px;}
+    .dash-acao{position:fixed;right:16px;bottom:calc(88px + env(safe-area-inset-bottom));z-index:46;}
+    .dash-acao #btnNovoMenu{width:56px;height:56px;border-radius:50%;padding:0;display:flex;align-items:center;justify-content:center;background:#82ABF2;box-shadow:0 6px 18px rgba(43,108,238,.45);}
+    .dash-acao #btnNovoMenu .novo-plus{font-size:30px;font-weight:600;line-height:1;margin-top:-2px;}
     .dash-acao #btnNovoMenu .novo-label{display:none;}
-    .dash-topbar ~ .mes-nav{min-height:46px;margin-bottom:16px;padding:0 48px;}
+    .dash-acao .dropdown-menu{top:auto;bottom:calc(100% + 12px);}
+    .dash-topbar ~ .mes-nav{margin-bottom:16px;}
 
     /* Nota de corretagem no celular: cada operação vira um cartão com campos grandes */
     .nota-op-row{display:grid !important;grid-template-columns:1fr 1fr;gap:8px;border:1px solid var(--line);border-radius:10px;padding:12px;padding-top:16px;margin-bottom:12px;position:relative;background:var(--bone);}
