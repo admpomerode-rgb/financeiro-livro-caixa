@@ -832,6 +832,7 @@ function showToast(msg){
 let currentView = 'dashboard';
 let extratoContaId = null;
 let conciliacaoContaId = null;
+let pararCameraQRAtiva = null;
 let relatorioAtivo = 'dre';
 let configAtivo = 'armazenamento';
 let dreAnaliseAtiva = 'horizontal';
@@ -2644,12 +2645,11 @@ function viewContas(){
             <button class="btn ghost sm" data-action="ver-extrato" data-id="${c.id}" style="flex:1;">Ver extrato</button>
             ${menuAdicionarContaHTML(c.id, true)}
           </div>
-          <button class="btn ghost sm" data-action="abrir-conciliacao" data-id="${c.id}" style="width:100%;margin-top:8px;">🔄 Conciliar extrato (OFX)</button>
         </div>
       `).join('')}
       <div class="add-conta-card" id="btnNovaConta">+ Adicionar conta</div>
     </div>
-    <div class="note" style="margin-top:0;">As contas aqui são uma representação simplificada — não há integração bancária automática (open finance). A conciliação por OFX compara o extrato que você baixar do banco com os lançamentos já registrados.</div>
+    <div class="note" style="margin-top:0;">As contas aqui são uma representação simplificada — não há integração bancária automática (open finance). Pra comparar o extrato do banco com os lançamentos, use a Conciliação Bancária em Configurações do Sistema.</div>
   `;
 }
 
@@ -2701,6 +2701,31 @@ function conciliarOFX(contaId, transacoesOfx){
   return { conciliados, soNoBanco, soNoSistema };
 }
 
+function abrirConciliacaoEscolherConta(){
+  if(!state.contas.length){ showToast('Cadastre uma conta bancária primeiro'); return; }
+  const irPara = (contaId)=>{
+    conciliacaoContaId = contaId;
+    window.__conciliacaoResultado = null;
+    window.__conciliacaoContaAtual = null;
+    currentView = 'conciliacao';
+    render();
+  };
+  if(state.contas.length===1){ irPara(state.contas[0].id); return; }
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Conciliar qual conta?</h3>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
+      ${state.contas.map(c=>`<button type="button" class="btn ghost" data-conta-conc-id="${c.id}" style="justify-content:flex-start;">${escapeHTML(c.nome)}</button>`).join('')}
+    </div>
+    <div class="modal-actions"><button class="btn ghost" id="btnCancelarModal">Cancelar</button></div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  modal.querySelectorAll('[data-conta-conc-id]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ closeModal(); irPara(btn.dataset.contaConcId); });
+  });
+}
+
 function viewConciliacao(contaId){
   const conta = state.contas.find(c=>c.id===contaId);
   if(!conta) return viewContas();
@@ -2709,7 +2734,7 @@ function viewConciliacao(contaId){
   return `
     <div class="topbar">
       <div>
-        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" id="btnVoltarConciliacao">← Contas Bancárias</span>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" id="btnVoltarConciliacao">← Configurações do Sistema</span>
         <h1 style="margin-top:6px;">Conciliação Bancária — ${escapeHTML(conta.nome)}</h1>
         <p>Compare o extrato baixado do banco (arquivo .ofx) com os lançamentos já registrados</p>
       </div>
@@ -5751,6 +5776,7 @@ function viewConfiguracoes(){
     { id:'codigo', icone:'🧩', nome:'Código do Sistema', desc:'Linhas de código, tamanho do arquivo e composição JS/CSS' },
     { id:'aprovacao', icone:'✅', nome:'Aprovação de Despesas', desc:'Exigir aprovação para despesas acima de um valor limite' },
     { id:'firebase', icone:'🔥', nome:'Firebase', desc:'Projeto, usuário conectado, registros salvos e limites do plano' },
+    { id:'conciliacao', icone:'🔄', nome:'Conciliação Bancária', desc:'Compare o extrato do banco (OFX) com os lançamentos já registrados' },
   ];
   return `
     <div class="topbar">
@@ -5937,8 +5963,8 @@ function attachViewHandlers(){
   atualizarSelecaoUI();
   if(currentView==='conciliacao'){
     document.getElementById('btnVoltarConciliacao')?.addEventListener('click', ()=>{
-      currentView = 'contas';
-      document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view==='contas'));
+      currentView = 'configuracoes';
+      document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view==='configuracoes'));
       render();
     });
     const bindConciliacaoResultado = ()=>{
@@ -6004,6 +6030,7 @@ function attachViewHandlers(){
   }
   document.querySelectorAll('[data-action="abrir-configuracao"]').forEach(card=>{
     card.addEventListener('click', ()=>{
+      if(card.dataset.config==='conciliacao'){ abrirConciliacaoEscolherConta(); return; }
       configAtivo = card.dataset.config;
       currentView = 'configuracao-detalhe';
       render();
@@ -7455,13 +7482,14 @@ function viewFornecedores(){
           return `
           <div class="ledger-row" data-id="${f.id}" style="grid-template-columns:14px 1fr 160px 130px auto;">
             <span class="dot" style="background:var(--text-soft);"></span>
-            <div class="desc-cell" data-action="ver-fornecedor" data-id="${f.id}" style="cursor:pointer;">
+            <div class="desc-cell" data-action="editar-fornecedor" data-id="${f.id}" style="cursor:pointer;">
               <div>${escapeHTML(f.nome)}</div>
               <div class="cat">${escapeHTML(f.cnpjCpf||'sem CNPJ/CPF cadastrado')}</div>
             </div>
             <span style="font-size:12.5px;color:var(--text-soft);">${escapeHTML(f.telefone||f.email||'—')}</span>
             <span class="mono" style="font-weight:600;">${brl(total)}</span>
             <div class="row-actions">
+              <button class="icon-btn" data-action="ver-fornecedor" data-id="${f.id}" title="Ver lançamentos">📋</button>
               <button class="icon-btn" data-action="editar-fornecedor" data-id="${f.id}" title="Editar">✎</button>
               <button class="icon-btn" data-action="excluir-fornecedor" data-id="${f.id}" title="Excluir">✕</button>
             </div>
@@ -7478,18 +7506,18 @@ function openFornecedorModal(existing){
   modal.innerHTML = `
     <h3>${isEdit ? 'Editar fornecedor' : 'Novo fornecedor'}</h3>
     <div class="field"><label>Nome</label><input type="text" id="fnNome" value="${existing?escapeHTML(existing.nome):''}" placeholder="Ex: Metalúrgica Sul"></div>
-    <div class="field-row">
-      <div class="field">
-        <label>CNPJ/CPF (opcional)</label>
-        <div style="display:flex;gap:6px;">
-          <input type="text" id="fnDoc" value="${existing?escapeHTML(existing.cnpjCpf||''):''}" placeholder="00.000.000/0000-00" style="flex:1;">
-          <button type="button" class="btn ghost sm" id="btnBuscarCNPJ" style="white-space:nowrap;">🔎 Buscar</button>
-        </div>
+    <div class="field">
+      <label>CNPJ/CPF (opcional)</label>
+      <div style="display:flex;gap:6px;">
+        <input type="text" id="fnDoc" value="${existing?escapeHTML(existing.cnpjCpf||''):''}" placeholder="00.000.000/0000-00" style="flex:1;min-width:0;">
+        <button type="button" class="btn ghost sm" id="btnBuscarCNPJ" style="white-space:nowrap;">🔎 Buscar</button>
       </div>
-      <div class="field"><label>Telefone (opcional)</label><input type="text" id="fnTelefone" value="${existing?escapeHTML(existing.telefone||''):''}"></div>
     </div>
     <div id="fnBuscaStatus" class="note" style="display:none;margin-top:0;"></div>
-    <div class="field"><label>E-mail (opcional)</label><input type="email" id="fnEmail" value="${existing?escapeHTML(existing.email||''):''}"></div>
+    <div class="field-row">
+      <div class="field"><label>Telefone (opcional)</label><input type="text" id="fnTelefone" value="${existing?escapeHTML(existing.telefone||''):''}"></div>
+      <div class="field"><label>E-mail (opcional)</label><input type="email" id="fnEmail" value="${existing?escapeHTML(existing.email||''):''}"></div>
+    </div>
     <div class="field"><label>Endereço (opcional)</label><input type="text" id="fnEndereco" value="${existing?escapeHTML(existing.endereco||''):''}"></div>
     <div class="field"><label>Observação (opcional)</label><input type="text" id="fnObs" value="${existing?escapeHTML(existing.observacao||''):''}"></div>
     <div class="modal-actions">
@@ -8744,11 +8772,17 @@ function openLerQRNotaModal(){
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
     <h3>Ler QR Code da nota fiscal</h3>
-    <div class="field">
-      <label>Foto ou imagem do QR Code</label>
+    <div id="qrCameraWrap" style="position:relative;border-radius:10px;overflow:hidden;background:#000;display:none;">
+      <video id="qrVideo" autoplay playsinline muted style="width:100%;display:block;max-height:320px;object-fit:cover;"></video>
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">
+        <div style="width:62%;aspect-ratio:1;border:3px solid rgba(255,255,255,.85);border-radius:14px;box-shadow:0 0 0 999px rgba(0,0,0,.35);"></div>
+      </div>
+    </div>
+    <div id="qrNotaStatus" class="note" style="margin-top:${'0'};">Abrindo a câmera... aponte para o QR Code da nota — a leitura acontece sozinha, sem precisar tirar foto.</div>
+    <div class="field" id="qrFallbackWrap" style="display:none;">
+      <label>Ou envie uma imagem do QR Code</label>
       <input type="file" id="qrNotaFileInput" accept="image/*" capture="environment">
     </div>
-    <div id="qrNotaStatus" class="note" style="margin-top:0;">Tire uma foto do QR Code impresso no cupom/nota, ou envie uma imagem salva. O sistema identifica a chave de acesso automaticamente — o valor e os itens da nota normalmente não vêm no QR Code, então você completa isso ao lançar a despesa.</div>
     <div id="qrNotaResultado" style="display:none;">
       <div class="field"><label>Chave de acesso (44 dígitos)</label><input type="text" id="qrChaveAcesso" class="mono" readonly></div>
     </div>
@@ -8759,8 +8793,81 @@ function openLerQRNotaModal(){
     </div>
   `;
   document.getElementById('modalOverlay').classList.add('open');
-  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  let urlLida = '', chaveLida = '';
+
+  let urlLida = '', chaveLida = '', streamAtual = null, scanAtivo = false, scanFrameId = null;
+  const pararCamera = ()=>{
+    scanAtivo = false;
+    if(scanFrameId) cancelAnimationFrame(scanFrameId);
+    if(streamAtual){ streamAtual.getTracks().forEach(t=>t.stop()); streamAtual = null; }
+    pararCameraQRAtiva = null;
+  };
+  pararCameraQRAtiva = pararCamera;
+  document.getElementById('btnCancelarModal').addEventListener('click', ()=>{ pararCamera(); closeModal(); });
+
+  const processarConteudoQR = (conteudo)=>{
+    const dados = parseNFeQR(conteudo);
+    if(!dados.chave){
+      document.getElementById('qrNotaStatus').textContent = 'Encontrei um QR Code, mas não parece ser de uma nota fiscal (não achei a chave de acesso de 44 dígitos). Tente de novo ou envie outra imagem.';
+      return false;
+    }
+    pararCamera();
+    document.getElementById('qrCameraWrap').style.display = 'none';
+    urlLida = dados.url || ''; chaveLida = dados.chave;
+    document.getElementById('qrChaveAcesso').value = chaveLida;
+    document.getElementById('qrNotaResultado').style.display = 'block';
+    document.getElementById('btnUsarDadosQR').style.display = 'inline-flex';
+    document.getElementById('btnAbrirSefaz').style.display = urlLida ? 'inline-flex' : 'none';
+    document.getElementById('qrNotaStatus').textContent = 'Chave de acesso identificada. Valor e itens não vêm no QR Code — abra na Sefaz pra conferir os detalhes, se precisar, e complete o lançamento manualmente.';
+    return true;
+  };
+
+  const mostrarFallback = (msg)=>{
+    pararCamera();
+    document.getElementById('qrCameraWrap').style.display = 'none';
+    document.getElementById('qrFallbackWrap').style.display = 'block';
+    document.getElementById('qrNotaStatus').textContent = msg;
+  };
+
+  const loopScan = ()=>{
+    if(!scanAtivo) return;
+    const video = document.getElementById('qrVideo');
+    if(video && video.readyState===video.HAVE_ENOUGH_DATA && typeof jsQR!=='undefined'){
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      try{
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imageData.data, canvas.width, canvas.height);
+        if(code && code.data){ processarConteudoQR(code.data); return; }
+      }catch(e){ /* frame ainda não pronto — ignora e tenta o próximo */ }
+    }
+    scanFrameId = requestAnimationFrame(loopScan);
+  };
+
+  const iniciarCamera = async ()=>{
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      mostrarFallback('Esse navegador não tem acesso à câmera pra leitura automática. Envie uma imagem do QR Code abaixo.');
+      return;
+    }
+    if(typeof jsQR === 'undefined'){
+      mostrarFallback('A biblioteca de leitura de QR Code não carregou — verifique a internet. Você ainda pode enviar uma imagem manualmente.');
+      return;
+    }
+    try{
+      streamAtual = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } });
+      const video = document.getElementById('qrVideo');
+      video.srcObject = streamAtual;
+      document.getElementById('qrCameraWrap').style.display = 'block';
+      document.getElementById('qrNotaStatus').textContent = 'Aponte a câmera para o QR Code da nota — a leitura acontece sozinha.';
+      scanAtivo = true;
+      scanFrameId = requestAnimationFrame(loopScan);
+    }catch(e){
+      console.error('Erro ao acessar a câmera:', e);
+      mostrarFallback('Não consegui acessar a câmera (permissão negada ou indisponível). Envie uma imagem do QR Code abaixo.');
+    }
+  };
+  iniciarCamera();
 
   document.getElementById('qrNotaFileInput').addEventListener('change', async ()=>{
     const file = document.getElementById('qrNotaFileInput').files[0];
@@ -8770,25 +8877,18 @@ function openLerQRNotaModal(){
     try{
       const conteudo = await decodeQRFromFile(file);
       if(!conteudo) throw new Error('não decodificado');
-      const dados = parseNFeQR(conteudo);
-      if(!dados.chave){
-        status.textContent = 'Encontrei um QR Code na imagem, mas não parece ser de uma nota fiscal (não achei a chave de acesso de 44 dígitos). Confira a foto e tente de novo.';
-        return;
+      if(!processarConteudoQR(conteudo)){
+        document.getElementById('qrFallbackWrap').style.display = 'block';
       }
-      urlLida = dados.url || '';
-      chaveLida = dados.chave;
-      document.getElementById('qrChaveAcesso').value = chaveLida;
-      document.getElementById('qrNotaResultado').style.display = 'block';
-      document.getElementById('btnUsarDadosQR').style.display = 'inline-flex';
-      document.getElementById('btnAbrirSefaz').style.display = urlLida ? 'inline-flex' : 'none';
-      status.textContent = 'Chave de acesso identificada. Valor e itens não vêm no QR Code — abra na Sefaz pra conferir os detalhes, se precisar, e complete o lançamento manualmente.';
     }catch(e){
       console.error('Erro ao ler QR Code:', e);
       status.textContent = 'Não consegui identificar um QR Code nessa imagem. Tente uma foto mais nítida, bem enquadrada e com boa luz.';
+      document.getElementById('qrFallbackWrap').style.display = 'block';
     }
   });
   document.getElementById('btnAbrirSefaz').addEventListener('click', ()=>{ if(urlLida) window.open(urlLida, '_blank'); });
   document.getElementById('btnUsarDadosQR').addEventListener('click', ()=>{
+    pararCamera();
     closeModal();
     openLancamentoModal('saida');
     const desc = document.getElementById('fDescricao');
@@ -9327,6 +9427,7 @@ function openAtualizarValorModal(a){
 }
 
 function closeModal(){
+  if(typeof pararCameraQRAtiva==='function') pararCameraQRAtiva();
   document.getElementById('modalOverlay').classList.remove('open');
   document.getElementById('modalContent').innerHTML = '';
 }
