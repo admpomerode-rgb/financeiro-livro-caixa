@@ -644,6 +644,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
 <script>
   if(typeof pdfjsLib !== 'undefined'){
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -761,6 +762,7 @@ function aplicarMigracoes(s){
   if(!s.centrosCusto) s.centrosCusto = [];
   if(!s.provisoes) s.provisoes = [];
   if(!s.aprovacaoConfig) s.aprovacaoConfig = { ativo:false, limite:0 };
+  if(!s.faturasPendentes) s.faturasPendentes = [];
   if(!s.categorias){
     s.categorias = {
       saida: CATEGORIAS_SAIDA.map(nome=>({ id: uid(), nome, subcategorias: [] })),
@@ -829,7 +831,9 @@ function showToast(msg){
 /* ---------------- Navegação ---------------- */
 let currentView = 'dashboard';
 let extratoContaId = null;
+let conciliacaoContaId = null;
 let relatorioAtivo = 'dre';
+let configAtivo = 'armazenamento';
 let dreAnaliseAtiva = 'horizontal';
 let dreCentroAtivo = 'todos';
 let mesGlobalRef = todayISO().slice(0,7);
@@ -988,6 +992,7 @@ function render(){
   else if(currentView==='fluxo') main.innerHTML = viewFluxo();
   else if(currentView==='contas') main.innerHTML = viewContas();
   else if(currentView==='extrato') main.innerHTML = viewExtrato(extratoContaId);
+  else if(currentView==='conciliacao') main.innerHTML = viewConciliacao(conciliacaoContaId);
   else if(currentView==='cartoes') main.innerHTML = viewCartoes();
   else if(currentView==='fatura') main.innerHTML = viewFatura(faturaCartaoId, faturaCompetenciaAtual);
   else if(currentView==='investimentos') main.innerHTML = viewInvestimentos();
@@ -1011,6 +1016,7 @@ function render(){
   else if(currentView==='vk') main.innerHTML = viewVK();
   else if(currentView==='processos') main.innerHTML = viewProcessosConfig();
   else if(currentView==='configuracoes') main.innerHTML = viewConfiguracoes();
+  else if(currentView==='configuracao-detalhe') main.innerHTML = viewConfiguracaoDetalhe();
   attachViewHandlers();
 }
 
@@ -2638,11 +2644,131 @@ function viewContas(){
             <button class="btn ghost sm" data-action="ver-extrato" data-id="${c.id}" style="flex:1;">Ver extrato</button>
             ${menuAdicionarContaHTML(c.id, true)}
           </div>
+          <button class="btn ghost sm" data-action="abrir-conciliacao" data-id="${c.id}" style="width:100%;margin-top:8px;">🔄 Conciliar extrato (OFX)</button>
         </div>
       `).join('')}
       <div class="add-conta-card" id="btnNovaConta">+ Adicionar conta</div>
     </div>
-    <div class="note" style="margin-top:0;">As contas aqui são uma representação simplificada — servem para separar saldo entre bancos/caixa, sem integração bancária automática (open finance, extratos, etc).</div>
+    <div class="note" style="margin-top:0;">As contas aqui são uma representação simplificada — não há integração bancária automática (open finance). A conciliação por OFX compara o extrato que você baixar do banco com os lançamentos já registrados.</div>
+  `;
+}
+
+// Conciliação Bancária — lê extrato OFX (padrão universal dos bancos) e casa cada
+// transação com um lançamento já pago/recebido pela mesma conta (mesmo valor, data
+// próxima). Funciona com OFX 1.x (SGML, sem fechamento de tag) e OFX 2.x (XML).
+function parseOFX(texto){
+  const blocos = texto.split(/<STMTTRN>/i).slice(1).map(b=>b.split(/<\/STMTTRN>/i)[0]);
+  const pega = (bloco, tag) => {
+    const m = bloco.match(new RegExp('<'+tag+'>([^<\r\n]*)','i'));
+    return m ? m[1].trim() : '';
+  };
+  return blocos.map(b=>{
+    const dtRaw = pega(b,'DTPOSTED');
+    const data = dtRaw && dtRaw.length>=8 ? `${dtRaw.slice(0,4)}-${dtRaw.slice(4,6)}-${dtRaw.slice(6,8)}` : '';
+    const valor = parseFloat(pega(b,'TRNAMT').replace(',','.')) || 0;
+    const memo = (pega(b,'MEMO') || pega(b,'NAME') || 'Transação bancária').replace(/\s+/g,' ').trim();
+    const fitid = pega(b,'FITID');
+    return { data, valor, memo, fitid };
+  }).filter(t=>t.data && t.valor);
+}
+
+function conciliarOFX(contaId, transacoesOfx){
+  if(!transacoesOfx.length) return { conciliados:[], soNoBanco:[], soNoSistema:[] };
+  const datas = transacoesOfx.map(t=>t.data).sort();
+  const deJanela = new Date(datas[0]); deJanela.setDate(deJanela.getDate()-3);
+  const ateJanela = new Date(datas[datas.length-1]); ateJanela.setDate(ateJanela.getDate()+3);
+  const deISO = deJanela.toISOString().slice(0,10), ateISO = ateJanela.toISOString().slice(0,10);
+
+  const candidatos = state.lancamentos.filter(l=>
+    l.contaId===contaId && (l.status==='pago'||l.status==='recebido') && !l.conciliado &&
+    l.dataPagamento && l.dataPagamento>=deISO && l.dataPagamento<=ateISO
+  );
+  const usados = new Set();
+  const conciliados = [];
+  const soNoBanco = [];
+  transacoesOfx.forEach(t=>{
+    const match = candidatos.find(l=>{
+      if(usados.has(l.id)) return false;
+      const valorLanc = l.tipo==='entrada' ? l.valor : -l.valor;
+      if(Math.abs(valorLanc - t.valor) > 0.01) return false;
+      const dias = Math.abs((new Date(l.dataPagamento) - new Date(t.data)) / 86400000);
+      return dias <= 3;
+    });
+    if(match){ usados.add(match.id); conciliados.push({ ofx:t, lancamento:match }); }
+    else soNoBanco.push(t);
+  });
+  const soNoSistema = candidatos.filter(l=>!usados.has(l.id));
+  return { conciliados, soNoBanco, soNoSistema };
+}
+
+function viewConciliacao(contaId){
+  const conta = state.contas.find(c=>c.id===contaId);
+  if(!conta) return viewContas();
+  const resultado = window.__conciliacaoResultado && window.__conciliacaoContaAtual===contaId ? window.__conciliacaoResultado : null;
+
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" id="btnVoltarConciliacao">← Contas Bancárias</span>
+        <h1 style="margin-top:6px;">Conciliação Bancária — ${escapeHTML(conta.nome)}</h1>
+        <p>Compare o extrato baixado do banco (arquivo .ofx) com os lançamentos já registrados</p>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-body" style="padding:18px 20px;">
+        <div class="field" style="max-width:360px;">
+          <label>Arquivo do extrato (.ofx)</label>
+          <input type="file" id="ofxFileInput" accept=".ofx,.qfx,text/plain">
+        </div>
+        <div id="ofxStatus" class="note" style="margin-top:0;">Baixe o extrato em formato OFX no aplicativo ou site do seu banco (a maioria chama de "extrato para gerenciador financeiro" ou "OFX") e envie aqui.</div>
+      </div>
+    </div>
+    <div id="conciliacaoResultado">${resultado ? renderResultadoConciliacao(resultado, conta) : ''}</div>
+  `;
+}
+
+function renderResultadoConciliacao(resultado, conta){
+  const { conciliados, soNoBanco, soNoSistema } = resultado;
+  return `
+    <div class="panel" style="margin-top:16px;border-left:3px solid var(--success);">
+      <div class="panel-head"><h2>✅ Conciliados automaticamente (${conciliados.length})</h2></div>
+      ${conciliados.length ? `<div class="panel-body">
+        ${conciliados.map(c=>`
+          <div class="report-line sub"><span>${fmtDate(c.ofx.data)} — ${escapeHTML(c.lancamento.descricao)}</span><span class="v">${brl(c.lancamento.valor)}</span></div>
+        `).join('')}
+      </div>` : `<div class="empty">Nenhuma correspondência encontrada ainda — envie o arquivo OFX acima.</div>`}
+    </div>
+    ${soNoBanco.length ? `
+    <div class="panel" style="margin-top:16px;border-left:3px solid var(--warn);">
+      <div class="panel-head"><h2>🏦 No banco, mas não no sistema (${soNoBanco.length})</h2></div>
+      <div class="panel-body">
+        <div class="note" style="margin-top:0;">Essas movimentações aparecem no extrato do banco mas não têm lançamento correspondente. Lance cada uma na categoria certa, ou ignore se já souber do que se trata.</div>
+        ${soNoBanco.map((t,i)=>`
+          <div class="ledger-row compact" style="grid-template-columns:12px 1fr auto auto auto;align-items:center;">
+            <span class="dot ${t.valor>=0?'entrada':'saida'}"></span>
+            <div class="desc-cell"><div>${escapeHTML(t.memo)}</div><div class="cat">${fmtDate(t.data)}</div></div>
+            <select class="ofx-categoria" data-idx="${i}" style="font-size:11.5px;">${opcoesCategoriaHTML(t.valor>=0?'entrada':'saida')}</select>
+            <span class="mono" style="font-weight:600;color:${t.valor>=0?'var(--success)':'var(--danger)'};">${brl(t.valor)}</span>
+            <button class="btn ghost sm" data-action="lancar-ofx" data-idx="${i}">+ Lançar</button>
+          </div>
+        `).join('')}
+      </div>
+    </div>` : ''}
+    ${soNoSistema.length ? `
+    <div class="panel" style="margin-top:16px;border-left:3px solid var(--danger);">
+      <div class="panel-head"><h2>📋 No sistema, mas não no banco (${soNoSistema.length})</h2></div>
+      <div class="panel-body">
+        <div class="note" style="margin-top:0;">Esses lançamentos estão pagos/recebidos no sistema, mas não apareceram no extrato do período — vale conferir se a data ou o valor estão certos.</div>
+        ${soNoSistema.map(l=>`
+          <div class="ledger-row compact" style="grid-template-columns:12px 1fr auto auto;align-items:center;">
+            <span class="dot ${l.tipo}"></span>
+            <div class="desc-cell"><div>${escapeHTML(l.descricao)}</div><div class="cat">${fmtDate(l.dataPagamento)}</div></div>
+            <span class="mono" style="font-weight:600;">${brl(l.valor)}</span>
+            <button class="btn ghost sm" data-action="marcar-conciliado" data-id="${l.id}">✓ Já confirmei</button>
+          </div>
+        `).join('')}
+      </div>
+    </div>` : ''}
   `;
 }
 
@@ -2722,6 +2848,26 @@ function viewCartoes(){
     <div class="topbar">
       <div><h1>Cartões de Crédito</h1><p>Cadastro de cartões, compras parceladas e controle de fatura</p></div>
     </div>
+    ${(state.faturasPendentes||[]).length ? `
+    <div class="panel" style="margin-bottom:16px;border-left:3px solid var(--warn);">
+      <div class="panel-head"><h2>📋 Faturas aguardando revisão (${state.faturasPendentes.length})</h2></div>
+      <div class="panel-body">
+        ${state.faturasPendentes.map(f=>{
+          const cartaoF = state.cartoes.find(c=>c.id===f.cartaoId);
+          const totalF = (f.itens||[]).reduce((s,it)=>s+(numBR(String(it.valor))||0),0);
+          return `
+          <div class="ledger-row compact" data-action="revisar-fatura" data-id="${f.id}" style="cursor:pointer;grid-template-columns:12px 1fr auto auto;">
+            <span class="dot pendente"></span>
+            <div class="desc-cell">
+              <div>Fatura${cartaoF?' — '+escapeHTML(cartaoF.nome):''}${f.arquivoNome?' · '+escapeHTML(f.arquivoNome):''}</div>
+              <div class="cat">${(f.itens||[]).length} lançamento(s) identificado(s)</div>
+            </div>
+            <span class="mono" style="font-weight:600;">${brl(totalF)}</span>
+            <button class="btn ghost sm" style="pointer-events:none;">Revisar</button>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>` : ''}
     <div class="conta-cards">
       ${state.cartoes.map(c=>{
         const comp = competenciaAtual(c);
@@ -2749,6 +2895,7 @@ function viewCartoes(){
             <button class="btn" data-action="lancar-compra" data-id="${c.id}">+ Lançar compra</button>
             <button class="btn ghost" data-action="ver-fatura" data-id="${c.id}">Ver fatura</button>
           </div>
+          <button class="btn ghost sm" data-action="importar-fatura" data-id="${c.id}" style="width:100%;margin-top:8px;">📄 Importar fatura (PDF)</button>
         </div>
       `;}).join('')}
       <div class="add-conta-card" id="btnNovoCartao">+ Adicionar cartão</div>
@@ -2914,6 +3061,198 @@ function parseNotaCorretagem(linhas){
   const liquido = valorNaLinhaContendo(/l[ií]quido\s+para/i);
 
   return { dataPregao, operacoes, taxas, liquido };
+}
+
+// Fatura de cartão: extrai linhas "dd/mm  descrição  valor" — formato comum à maioria
+// dos bancos (Nubank, Inter, C6, Itaú, Bradesco...), aceitando parcela "01/03" embutida
+// na descrição e valores negativos (estornos/créditos) marcados com "-" no fim da linha.
+function parseFaturaCartao(linhas, anoReferencia){
+  const itens = [];
+  const regexLinha = /^(\d{2}\/\d{2})(?:\/\d{2,4})?\s+(.+?)\s+(-?)\s*R?\$?\s*([\d.]+,\d{2})\s*(-)?$/;
+  const ignorar = /total (da |desta )?fatura|saldo (anterior|em atraso)|pagamento (efetuado|recebido)|limite dispon|encargos|iof\s|juros rotativo/i;
+  linhas.forEach(linha=>{
+    if(ignorar.test(linha)) return;
+    const m = linha.match(regexLinha);
+    if(!m) return;
+    const [diaStr, mesStr] = m[1].split('/');
+    const ano = anoReferencia || new Date().getFullYear();
+    const data = `${ano}-${mesStr}-${diaStr}`;
+    let descricao = m[2].trim().replace(/\s{2,}/g,' ');
+    const parcelaMatch = descricao.match(/(\d{1,2})\s*\/\s*(\d{1,2})\s*$/);
+    let parcela = null, totalParcelas = null;
+    if(parcelaMatch && parseInt(parcelaMatch[1])<=parseInt(parcelaMatch[2])){
+      parcela = parseInt(parcelaMatch[1]); totalParcelas = parseInt(parcelaMatch[2]);
+      descricao = descricao.slice(0, parcelaMatch.index).trim().replace(/[-–]\s*$/,'').trim();
+    }
+    const negativo = !!m[3] || !!m[5];
+    let valor = numBR(m[4]);
+    if(negativo) valor = -Math.abs(valor);
+    if(!descricao || !valor) return;
+    itens.push({ data, descricao, valor, categoria:'Outros', parcela, totalParcelas });
+  });
+  return itens;
+}
+
+function openImportarFaturaModal(cartaoId, faturaPendenteId){
+  const faturaEmRevisao = faturaPendenteId ? (state.faturasPendentes||[]).find(f=>f.id===faturaPendenteId) : null;
+  const cartaoAlvo = state.cartoes.find(c=>c.id===(faturaEmRevisao?faturaEmRevisao.cartaoId:cartaoId));
+  if(!cartaoAlvo) return;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${faturaEmRevisao ? 'Revisar fatura' : 'Importar fatura (PDF)'} — ${escapeHTML(cartaoAlvo.nome)}</h3>
+    ${faturaEmRevisao ? `
+    <div class="note" style="margin-top:0;">Fatura aguardando revisão${faturaEmRevisao.arquivoNome?' — <strong>'+escapeHTML(faturaEmRevisao.arquivoNome)+'</strong>':''}. Corrija categoria, descrição e valores, remova o que não for despesa, e publique quando estiver certo.</div>
+    ` : `
+    <div class="field">
+      <label>Arquivo PDF da fatura</label>
+      <input type="file" id="faturaFileInput" accept="application/pdf">
+    </div>
+    <div id="faturaStatus" class="note" style="margin-top:0;">O sistema tenta identificar cada lançamento da fatura (data, descrição e valor) automaticamente. O formato varia de banco pra banco, então confira tudo antes de publicar.</div>
+    `}
+    <div id="faturaRevisao" style="display:${faturaEmRevisao?'block':'none'};">
+      <label style="font-size:12.5px;font-weight:600;display:block;margin:10px 0 6px;">Lançamentos identificados</label>
+      <div id="faturaItensTable"></div>
+      <button type="button" class="btn ghost sm" id="btnAdicionarLinhaFatura" style="margin-top:8px;">+ Adicionar linha</button>
+      <div class="note" style="margin-top:12px;" id="faturaTotalNota"></div>
+    </div>
+    <div class="modal-actions">
+      ${faturaEmRevisao ? `<button class="btn danger-o" id="btnExcluirFatura">Excluir</button>` : ''}
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      ${faturaEmRevisao
+        ? `<button class="btn ghost" id="btnSalvarFatura">Salvar alterações</button><button class="btn" id="btnPublicarFatura">✓ Publicar na fatura</button>`
+        : `<button class="btn" id="btnConfirmarFatura" style="display:none;">Enviar para revisão</button>`}
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+
+  let itensAtuais = faturaEmRevisao ? (faturaEmRevisao.itens||[]).map(it=>({...it})) : [];
+  let arquivoNomeAtual = faturaEmRevisao ? (faturaEmRevisao.arquivoNome||'') : '';
+
+  const linhaItemHTML = (it, idx)=>`
+    <div class="field-row fatura-item-row" data-idx="${idx}" style="align-items:flex-end;">
+      <div class="field" style="max-width:120px;"><label>Data</label><input type="date" class="fi-data" value="${it.data||todayISO()}"></div>
+      <div class="field"><label>Descrição</label><input type="text" class="fi-descricao" value="${escapeHTML(it.descricao||'')}"></div>
+      <div class="field" style="max-width:150px;"><label>Categoria</label><select class="fi-categoria">${opcoesCategoriaHTML('saida', it.categoria)}</select></div>
+      <div class="field" style="max-width:110px;"><label>Valor (R$)</label><input type="text" inputmode="decimal" class="fi-valor" value="${it.valor!=null && it.valor!==''?String(it.valor).replace('.',','):''}"></div>
+      <button type="button" class="icon-btn btn-remover-fi" style="margin-bottom:14px;">✕</button>
+    </div>
+  `;
+  const lerItensDoDOM = ()=>[...document.querySelectorAll('.fatura-item-row')].map(row=>({
+    data: row.querySelector('.fi-data').value,
+    descricao: row.querySelector('.fi-descricao').value.trim(),
+    categoria: row.querySelector('.fi-categoria').value,
+    valor: numBR(row.querySelector('.fi-valor').value)
+  }));
+  const pintarTotal = ()=>{
+    const itens = lerItensDoDOM();
+    const totalNota = document.getElementById('faturaTotalNota');
+    if(totalNota) totalNota.textContent = `Total: ${brl(itens.reduce((s,i)=>s+(i.valor||0),0))} — ${itens.length} lançamento(s)`;
+  };
+  const pintarItens = ()=>{
+    document.getElementById('faturaItensTable').innerHTML = itensAtuais.map((it,i)=>linhaItemHTML(it,i)).join('') || `<div class="empty">Nenhum lançamento identificado — adicione manualmente.</div>`;
+    document.querySelectorAll('.btn-remover-fi').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const idx = parseInt(btn.closest('.fatura-item-row').dataset.idx);
+        itensAtuais = lerItensDoDOM();
+        itensAtuais.splice(idx,1);
+        pintarItens();
+      });
+    });
+    document.querySelectorAll('.fi-valor, .fi-descricao').forEach(inp=>inp.addEventListener('input', pintarTotal));
+    pintarTotal();
+  };
+
+  document.getElementById('btnAdicionarLinhaFatura').addEventListener('click', ()=>{
+    itensAtuais = lerItensDoDOM();
+    itensAtuais.push({ data: todayISO(), descricao:'', categoria:'Outros', valor:'' });
+    pintarItens();
+  });
+
+  if(faturaEmRevisao){
+    pintarItens();
+    document.getElementById('btnSalvarFatura').addEventListener('click', ()=>{
+      faturaEmRevisao.itens = lerItensDoDOM();
+      faturaEmRevisao.atualizadoEm = new Date().toISOString();
+      registrarLog('Fatura editada', `Fatura de ${cartaoAlvo.nome} atualizada (segue aguardando revisão)`);
+      persist(); closeModal(); render();
+      showToast('Alterações salvas — a fatura segue aguardando revisão');
+    });
+    document.getElementById('btnPublicarFatura').addEventListener('click', ()=>{
+      faturaEmRevisao.itens = lerItensDoDOM();
+      publicarFaturaCartao(faturaEmRevisao);
+    });
+    document.getElementById('btnExcluirFatura').addEventListener('click', ()=>{
+      if(!confirm('Excluir esta fatura pendente? Nenhuma compra foi lançada, então nada muda na fatura do cartão.')) return;
+      state.faturasPendentes = (state.faturasPendentes||[]).filter(f=>f.id!==faturaEmRevisao.id);
+      registrarLog('Fatura excluída', `Fatura pendente de ${cartaoAlvo.nome} descartada sem publicar`);
+      persist(); closeModal(); render();
+      showToast('Fatura pendente excluída');
+    });
+    return;
+  }
+
+  document.getElementById('faturaFileInput').addEventListener('change', async ()=>{
+    const file = document.getElementById('faturaFileInput').files[0];
+    if(!file) return;
+    arquivoNomeAtual = file.name || '';
+    const status = document.getElementById('faturaStatus');
+    status.textContent = 'Lendo o PDF...';
+    try{
+      const linhas = await extrairLinhasPDF(file);
+      itensAtuais = parseFaturaCartao(linhas);
+      pintarItens();
+      document.getElementById('faturaRevisao').style.display = 'block';
+      document.getElementById('btnConfirmarFatura').style.display = 'inline-flex';
+      status.textContent = itensAtuais.length
+        ? `${itensAtuais.length} lançamento(s) identificado(s). Confira datas, descrições e valores — e ajuste a categoria de cada um antes de enviar.`
+        : 'Não consegui identificar lançamentos automaticamente nesse PDF — adicione as linhas manualmente abaixo.';
+    }catch(e){
+      console.error('Erro ao ler PDF da fatura:', e);
+      status.textContent = 'Não consegui ler esse PDF automaticamente. Você pode preencher tudo manualmente abaixo.';
+      itensAtuais = [];
+      pintarItens();
+      document.getElementById('faturaRevisao').style.display = 'block';
+      document.getElementById('btnConfirmarFatura').style.display = 'inline-flex';
+    }
+  });
+
+  document.getElementById('btnConfirmarFatura').addEventListener('click', ()=>{
+    const itens = lerItensDoDOM().filter(it=>it.descricao && it.valor);
+    if(!itens.length){ showToast('Adicione ao menos um lançamento válido'); return; }
+    if(!state.faturasPendentes) state.faturasPendentes = [];
+    const fatura = { id: uid(), cartaoId: cartaoAlvo.id, arquivoNome: arquivoNomeAtual, itens, criadoEm: new Date().toISOString() };
+    state.faturasPendentes.push(fatura);
+    registrarLog('Fatura recebida', `Fatura de ${cartaoAlvo.nome} salva para revisão — ${itens.length} lançamento(s)`);
+    persist(); closeModal();
+    currentView = 'cartoes';
+    document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view==='cartoes'));
+    render();
+    showToast('Fatura salva — revise e publique no painel "Faturas aguardando revisão"');
+  });
+}
+
+function publicarFaturaCartao(fatura){
+  const cartao = state.cartoes.find(c=>c.id===fatura.cartaoId);
+  if(!cartao) return;
+  const itens = (fatura.itens||[]).filter(it=>it.descricao && it.valor);
+  if(!itens.length){ showToast('Adicione ao menos um lançamento válido antes de publicar'); return false; }
+  const grupoId = uid();
+  itens.forEach(it=>{
+    const data = it.data || todayISO();
+    state.comprasCartao.push({
+      id: uid(), cartaoId: cartao.id, grupoId,
+      descricao: it.descricao, categoria: it.categoria || 'Outros',
+      valor: Math.round(it.valor*100)/100,
+      dataCompra: data, competencia: competenciaFromDate(cartao, data),
+      parcela: it.parcela || 1, totalParcelas: it.totalParcelas || 1
+    });
+  });
+  state.faturasPendentes = (state.faturasPendentes||[]).filter(f=>f.id!==fatura.id);
+  registrarLog('Fatura publicada', `Fatura de ${cartao.nome}: ${itens.length} lançamento(s) na fatura`);
+  persist(); closeModal(); render();
+  showToast(`${itens.length} lançamento(s) publicado(s) na fatura de ${cartao.nome}`);
+  return true;
 }
 
 function viewInvestimentos(){
@@ -5235,6 +5574,7 @@ function dropdownNovoHTML(){
         <button type="button" data-novo="recorrente"><span class="dropdown-dot" style="background:#7B5CD6;"></span> Despesa recorrente</button>
         <button type="button" data-novo="transferencia" ${state.contas.length<2?'disabled title="Crie pelo menos 2 contas para transferir"':''}><span class="dropdown-dot" style="background:var(--blue-accent);"></span> Transferência entre contas</button>
         <button type="button" data-novo="investimento"><span class="dropdown-dot" style="background:var(--warn);"></span> Aplicação financeira</button>
+        <button type="button" data-novo="qrnota"><span class="dropdown-dot" style="background:#00A884;"></span> 🧾 Ler nota fiscal (QR Code)</button>
       </div>
     </div>
   `;
@@ -5406,6 +5746,54 @@ function tamanhoJSONBytes(obj){
 }
 
 function viewConfiguracoes(){
+  const cards = [
+    { id:'armazenamento', icone:'☁️', nome:'Armazenamento no Firestore', desc:'Uso do banco de dados, limite de 1 MB e o que está ocupando espaço' },
+    { id:'codigo', icone:'🧩', nome:'Código do Sistema', desc:'Linhas de código, tamanho do arquivo e composição JS/CSS' },
+    { id:'aprovacao', icone:'✅', nome:'Aprovação de Despesas', desc:'Exigir aprovação para despesas acima de um valor limite' },
+    { id:'firebase', icone:'🔥', nome:'Firebase', desc:'Projeto, usuário conectado, registros salvos e limites do plano' },
+  ];
+  return `
+    <div class="topbar">
+      <div><h1>Configurações do Sistema</h1><p>Escolha o que você quer ver</p></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px;">
+      ${cards.map(c=>`
+        <div class="more-item" data-action="abrir-configuracao" data-config="${c.id}" style="flex-direction:row;text-align:left;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;">
+          <span style="font-size:22px;flex-shrink:0;">${c.icone}</span>
+          <div style="min-width:0;">
+            <div style="font-weight:600;font-size:13px;">${c.nome}</div>
+            <div style="font-size:11px;color:var(--text-soft);margin-top:2px;line-height:1.35;">${c.desc}</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+const CONFIG_NOMES = {
+  armazenamento:'Armazenamento no Firestore', codigo:'Código do Sistema',
+  aprovacao:'Aprovação de Despesas', firebase:'Firebase'
+};
+
+function viewConfiguracaoDetalhe(){
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="configuracoes">← Configurações do Sistema</span>
+        <h1 style="margin-top:6px;" id="configTitulo">${CONFIG_NOMES[configAtivo]||'Configurações'}</h1>
+      </div>
+    </div>
+    <div class="field" style="max-width:420px;">
+      <label>Escolha a seção</label>
+      <select id="configSelect">
+        ${Object.entries(CONFIG_NOMES).map(([id,nome])=>`<option value="${id}" ${configAtivo===id?'selected':''}>${nome}</option>`).join('')}
+      </select>
+    </div>
+    <div class="panel" id="configPanel"></div>
+  `;
+}
+
+function renderConfigArmazenamento(){
   const usado = tamanhoJSONBytes(state);
   const pct = usado / FIRESTORE_DOC_LIMITE * 100;
   const pctTxt = pct.toLocaleString('pt-BR',{maximumFractionDigits:1});
@@ -5413,12 +5801,13 @@ function viewConfiguracoes(){
 
   const NOMES_MODULOS = {
     lancamentos:'Lançamentos', ativos:'Ativos Patrimoniais (com fotos)', comprasCartao:'Compras no cartão',
-    faturasFechadas:'Faturas fechadas', contas:'Contas bancárias', cartoes:'Cartões de crédito',
+    faturasFechadas:'Faturas fechadas', faturasPendentes:'Faturas de cartão aguardando revisão',
+    contas:'Contas bancárias', cartoes:'Cartões de crédito',
     contasInvestimento:'Contas de investimento', ativosInvestimento:'Ativos de investimento',
     notasPendentes:'Notas de corretagem pendentes', categorias:'Categorias', fornecedores:'Fornecedores',
     recorrencias:'Lançamentos recorrentes', orcamentoCategorias:'Orçamento', logAuditoria:'Log de auditoria',
-    contratos:'Contratos', metasReserva:'Metas de reserva', vkConfig:'Integração VK Industrial',
-    processosConfig:'Integração Livro de Processos', forneiraConfig:'Integração Forneira',
+    contratos:'Contratos', metasReserva:'Metas de reserva', provisoes:'Provisões', centrosCusto:'Centros de custo',
+    vkConfig:'Integração VK Industrial', processosConfig:'Integração Livro de Processos', forneiraConfig:'Integração Forneira',
     categoriaMEI:'Config. MEI', meiEmpregadoPorAno:'Config. MEI (empregado)', investimentos:'Investimentos (legado)'
   };
   const modulos = Object.entries(state)
@@ -5427,93 +5816,93 @@ function viewConfiguracoes(){
     .sort((a,b)=>b.b-a.b);
   const maiorModulo = modulos.length ? modulos[0].b : 0;
 
+  return `
+    <div class="panel-head"><h2>☁️ Armazenamento no Firestore</h2></div>
+    <div class="panel-body" style="padding:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;">
+        <span style="font-size:22px;font-weight:700;font-family:'Space Grotesk';color:${cor};">${pctTxt}% usado</span>
+        <span style="font-size:12.5px;color:var(--text-soft);" class="mono">${bytesLegivel(usado)} de ${bytesLegivel(FIRESTORE_DOC_LIMITE)}</span>
+      </div>
+      <div style="height:12px;border-radius:6px;background:var(--line);margin:10px 0 4px;overflow:hidden;">
+        <div style="height:100%;width:${Math.min(100, Math.max(1, pct)).toFixed(1)}%;background:${cor};border-radius:6px;transition:width .4s;"></div>
+      </div>
+      <div class="note" style="margin-top:8px;">Todos os dados do sistema ficam num único documento do Firestore, que tem limite de 1 MB. ${
+        pct>=90 ? '<strong style="color:var(--danger);">Atenção: o limite está quase estourando — acima de 100% o sistema para de salvar.</strong> Exporte um backup agora e vamos migrar as fotos dos ativos pro Firebase Storage ou dividir os dados em documentos separados.'
+        : pct>=70 ? '<strong style="color:var(--warn);">Aviso: já passou de 70% do limite.</strong> Ainda há folga, mas é bom planejar a próxima etapa — mover as fotos dos Ativos Patrimoniais pro Firebase Storage é o que mais libera espaço.'
+        : 'Tudo tranquilo por enquanto. O que mais consome espaço costuma ser foto de Ativo Patrimonial salva dentro dos dados — acompanhe a lista abaixo.'
+      }</div>
+      <label style="font-size:12.5px;font-weight:600;display:block;margin:14px 0 6px;">O que está ocupando espaço</label>
+      ${modulos.slice(0,12).map(m=>`
+        <div style="padding:6px 0;border-bottom:1px solid var(--line);">
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;">
+            <span>${escapeHTML(m.nome)}${m.qtd!==null?` <span style="color:var(--text-soft);font-size:11px;">· ${m.qtd} item(ns)</span>`:''}</span>
+            <span class="mono">${bytesLegivel(m.b)} <span style="color:var(--text-soft);font-size:11px;">(${(m.b/usado*100).toFixed(1)}%)</span></span>
+          </div>
+          <div style="height:4px;border-radius:2px;background:var(--line);margin-top:4px;overflow:hidden;"><div style="height:100%;width:${maiorModulo>0?Math.max(1,Math.round(m.b/maiorModulo*100)):0}%;background:var(--blue-accent);border-radius:2px;"></div></div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderConfigCodigo(){
+  return `
+    <div class="panel-head"><h2>🧩 Código do sistema</h2></div>
+    <div class="panel-body" style="padding:16px;">
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:0;">
+        <div class="card"><div class="label">Linhas de código</div><div class="value mono" id="cfgLinhas">calculando…</div></div>
+        <div class="card"><div class="label">Tamanho do arquivo</div><div class="value mono" id="cfgArquivo">…</div></div>
+        <div class="card"><div class="label">Linhas de JavaScript</div><div class="value mono" id="cfgLinhasJS">…</div></div>
+        <div class="card"><div class="label">Linhas de CSS</div><div class="value mono" id="cfgLinhasCSS">…</div></div>
+      </div>
+      <div class="note">O sistema inteiro roda num único arquivo index.html — o código não ocupa espaço no Firestore, só os dados. Pode crescer à vontade.</div>
+    </div>
+  `;
+}
+
+function renderConfigAprovacao(){
+  return `
+    <div class="panel-head"><h2>✅ Aprovação de despesas</h2></div>
+    <div class="panel-body" style="padding:16px;">
+      <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;margin-bottom:10px;">
+        <input type="checkbox" id="cfgAprovAtivo" style="width:17px;height:17px;" ${state.aprovacaoConfig?.ativo?'checked':''}>
+        Exigir aprovação para despesas acima de um valor
+      </label>
+      <div class="field" style="max-width:260px;">
+        <label>Valor limite (R$) — acima disso, precisa aprovar</label>
+        <input type="text" inputmode="decimal" id="cfgAprovLimite" value="${state.aprovacaoConfig?.limite||''}" placeholder="Ex: 500,00">
+      </div>
+      <div class="note" style="margin-top:0;">Despesas novas acima do limite entram como "aguardando aprovação" e não podem ser marcadas como pagas até serem aprovadas (o botão de aprovar fica no modal de editar da despesa). Tudo registrado no Log de Auditoria.</div>
+    </div>
+  `;
+}
+
+function renderConfigFirebase(){
   const contagens = [
     ['Lançamentos', (state.lancamentos||[]).length],
     ['Compras no cartão', (state.comprasCartao||[]).length],
     ['Ativos patrimoniais', (state.ativos||[]).length],
     ['Ativos de investimento', (state.ativosInvestimento||[]).length],
     ['Notas pendentes', (state.notasPendentes||[]).length],
+    ['Faturas aguardando revisão', (state.faturasPendentes||[]).length],
     ['Fornecedores', (state.fornecedores||[]).length],
     ['Recorrências', (state.recorrencias||[]).length],
     ['Registros no log de auditoria', (state.logAuditoria||[]).length],
   ];
-
   return `
-    <div class="topbar">
-      <div><h1>Configurações do Sistema</h1><p>Saúde técnica do Livro Caixa — armazenamento, código e Firebase</p></div>
-    </div>
-
-    <div class="panel" style="margin-bottom:16px;${pct>=70?`border-left:3px solid ${cor};`:''}">
-      <div class="panel-head"><h2>☁️ Armazenamento no Firestore</h2></div>
-      <div class="panel-body" style="padding:16px;">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;">
-          <span style="font-size:22px;font-weight:700;font-family:'Space Grotesk';color:${cor};">${pctTxt}% usado</span>
-          <span style="font-size:12.5px;color:var(--text-soft);" class="mono">${bytesLegivel(usado)} de ${bytesLegivel(FIRESTORE_DOC_LIMITE)}</span>
-        </div>
-        <div style="height:12px;border-radius:6px;background:var(--line);margin:10px 0 4px;overflow:hidden;">
-          <div style="height:100%;width:${Math.min(100, Math.max(1, pct)).toFixed(1)}%;background:${cor};border-radius:6px;transition:width .4s;"></div>
-        </div>
-        <div class="note" style="margin-top:8px;">Todos os dados do sistema ficam num único documento do Firestore, que tem limite de 1 MB. ${
-          pct>=90 ? '<strong style="color:var(--danger);">Atenção: o limite está quase estourando — acima de 100% o sistema para de salvar.</strong> Exporte um backup agora e vamos migrar as fotos dos ativos pro Firebase Storage ou dividir os dados em documentos separados.'
-          : pct>=70 ? '<strong style="color:var(--warn);">Aviso: já passou de 70% do limite.</strong> Ainda há folga, mas é bom planejar a próxima etapa — mover as fotos dos Ativos Patrimoniais pro Firebase Storage é o que mais libera espaço.'
-          : 'Tudo tranquilo por enquanto. O que mais consome espaço costuma ser foto de Ativo Patrimonial salva dentro dos dados — acompanhe a lista abaixo.'
-        }</div>
-        <label style="font-size:12.5px;font-weight:600;display:block;margin:14px 0 6px;">O que está ocupando espaço</label>
-        ${modulos.slice(0,12).map(m=>`
-          <div style="padding:6px 0;border-bottom:1px solid var(--line);">
-            <div style="display:flex;justify-content:space-between;font-size:12.5px;">
-              <span>${escapeHTML(m.nome)}${m.qtd!==null?` <span style="color:var(--text-soft);font-size:11px;">· ${m.qtd} item(ns)</span>`:''}</span>
-              <span class="mono">${bytesLegivel(m.b)} <span style="color:var(--text-soft);font-size:11px;">(${(m.b/usado*100).toFixed(1)}%)</span></span>
-            </div>
-            <div style="height:4px;border-radius:2px;background:var(--line);margin-top:4px;overflow:hidden;"><div style="height:100%;width:${maiorModulo>0?Math.max(1,Math.round(m.b/maiorModulo*100)):0}%;background:var(--blue-accent);border-radius:2px;"></div></div>
-          </div>
-        `).join('')}
-      </div>
-    </div>
-
-    <div class="panel" style="margin-bottom:16px;">
-      <div class="panel-head"><h2>🧩 Código do sistema</h2></div>
-      <div class="panel-body" style="padding:16px;">
-        <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:0;">
-          <div class="card"><div class="label">Linhas de código</div><div class="value mono" id="cfgLinhas">calculando…</div></div>
-          <div class="card"><div class="label">Tamanho do arquivo</div><div class="value mono" id="cfgArquivo">…</div></div>
-          <div class="card"><div class="label">Linhas de JavaScript</div><div class="value mono" id="cfgLinhasJS">…</div></div>
-          <div class="card"><div class="label">Linhas de CSS</div><div class="value mono" id="cfgLinhasCSS">…</div></div>
-        </div>
-        <div class="note">O sistema inteiro roda num único arquivo index.html — o código não ocupa espaço no Firestore, só os dados. Pode crescer à vontade.</div>
-      </div>
-    </div>
-
-    <div class="panel" style="margin-bottom:16px;">
-      <div class="panel-head"><h2>✅ Aprovação de despesas</h2></div>
-      <div class="panel-body" style="padding:16px;">
-        <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;margin-bottom:10px;">
-          <input type="checkbox" id="cfgAprovAtivo" style="width:17px;height:17px;" ${state.aprovacaoConfig?.ativo?'checked':''}>
-          Exigir aprovação para despesas acima de um valor
-        </label>
-        <div class="field" style="max-width:260px;">
-          <label>Valor limite (R$) — acima disso, precisa aprovar</label>
-          <input type="text" inputmode="decimal" id="cfgAprovLimite" value="${state.aprovacaoConfig?.limite||''}" placeholder="Ex: 500,00">
-        </div>
-        <div class="note" style="margin-top:0;">Despesas novas acima do limite entram como "aguardando aprovação" e não podem ser marcadas como pagas até serem aprovadas (o botão de aprovar fica no modal de editar da despesa). Tudo registrado no Log de Auditoria.</div>
-      </div>
-    </div>
-
-    <div class="panel" style="margin-bottom:16px;">
-      <div class="panel-head"><h2>🔥 Firebase</h2></div>
-      <div class="panel-body" style="padding:16px;">
-        <div class="report-line"><span>Projeto</span><span class="v mono">${escapeHTML(LIVRO_CAIXA_FIREBASE_CONFIG.projectId)}</span></div>
-        <div class="report-line"><span>Documento dos dados</span><span class="v mono">livro-caixa/dados</span></div>
-        <div class="report-line"><span>Usuário conectado</span><span class="v">${escapeHTML((auth.currentUser && auth.currentUser.email) || '—')}</span></div>
-        <label style="font-size:12.5px;font-weight:600;display:block;margin:14px 0 4px;">Registros salvos</label>
-        ${contagens.map(([nome,qtd])=>`<div class="report-line sub"><span>${nome}</span><span class="v mono">${qtd.toLocaleString('pt-BR')}</span></div>`).join('')}
-        <label style="font-size:12.5px;font-weight:600;display:block;margin:14px 0 4px;">Limites do plano gratuito (Spark)</label>
-        <div class="report-line sub"><span>Armazenamento total do Firestore</span><span class="v mono">1 GB</span></div>
-        <div class="report-line sub"><span>Leituras de documentos</span><span class="v mono">50.000 / dia</span></div>
-        <div class="report-line sub"><span>Escritas de documentos</span><span class="v mono">20.000 / dia</span></div>
-        <div class="note">Cada vez que o sistema salva, conta como 1 escrita (as alterações são agrupadas antes de salvar, então o consumo é baixo). O uso exato de leituras e escritas do dia só aparece no console do Firebase.</div>
-        <button class="btn ghost" id="btnConsoleFirebase" style="margin-top:10px;">Abrir console do Firebase ↗</button>
-      </div>
+    <div class="panel-head"><h2>🔥 Firebase</h2></div>
+    <div class="panel-body" style="padding:16px;">
+      <div class="report-line"><span>Projeto</span><span class="v mono">${escapeHTML(LIVRO_CAIXA_FIREBASE_CONFIG.projectId)}</span></div>
+      <div class="report-line"><span>Documento dos dados</span><span class="v mono">livro-caixa/dados</span></div>
+      <div class="report-line"><span>Usuário conectado</span><span class="v">${escapeHTML((auth.currentUser && auth.currentUser.email) || '—')}</span></div>
+      <label style="font-size:12.5px;font-weight:600;display:block;margin:14px 0 4px;">Registros salvos</label>
+      ${contagens.map(([nome,qtd])=>`<div class="report-line sub"><span>${nome}</span><span class="v mono">${qtd.toLocaleString('pt-BR')}</span></div>`).join('')}
+      <label style="font-size:12.5px;font-weight:600;display:block;margin:14px 0 4px;">Limites do plano gratuito (Spark)</label>
+      <div class="report-line sub"><span>Armazenamento total do Firestore</span><span class="v mono">1 GB</span></div>
+      <div class="report-line sub"><span>Leituras de documentos</span><span class="v mono">50.000 / dia</span></div>
+      <div class="report-line sub"><span>Escritas de documentos</span><span class="v mono">20.000 / dia</span></div>
+      <div class="note">Cada vez que o sistema salva, conta como 1 escrita (as alterações são agrupadas antes de salvar, então o consumo é baixo). O uso exato de leituras e escritas do dia só aparece no console do Firebase.</div>
+      <button class="btn ghost" id="btnConsoleFirebase" style="margin-top:10px;">Abrir console do Firebase ↗</button>
     </div>
   `;
 }
@@ -5546,21 +5935,112 @@ async function preencherEstatisticasCodigo(){
 function attachViewHandlers(){
   if(currentView!==selecaoViewOrigem){ selecaoLancIds.clear(); selecaoViewOrigem = currentView; }
   atualizarSelecaoUI();
-  if(currentView==='configuracoes'){
-    preencherEstatisticasCodigo();
-    document.getElementById('btnConsoleFirebase')?.addEventListener('click', ()=>{
-      window.open('https://console.firebase.google.com/project/'+LIVRO_CAIXA_FIREBASE_CONFIG.projectId+'/usage', '_blank');
+  if(currentView==='conciliacao'){
+    document.getElementById('btnVoltarConciliacao')?.addEventListener('click', ()=>{
+      currentView = 'contas';
+      document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view==='contas'));
+      render();
     });
-    const salvarAprovConfig = ()=>{
-      state.aprovacaoConfig = {
-        ativo: document.getElementById('cfgAprovAtivo').checked,
-        limite: numBR(document.getElementById('cfgAprovLimite').value)||0
-      };
-      persist();
-      showToast(state.aprovacaoConfig.ativo ? `Aprovação exigida pra despesas acima de ${brl(state.aprovacaoConfig.limite)}` : 'Aprovação de despesas desativada');
+    const bindConciliacaoResultado = ()=>{
+      document.querySelectorAll('[data-action="lancar-ofx"]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const resultado = window.__conciliacaoResultado;
+          if(!resultado) return;
+          const idx = parseInt(btn.dataset.idx);
+          const t = resultado.soNoBanco[idx];
+          if(!t) return;
+          const categoria = document.querySelector(`.ofx-categoria[data-idx="${idx}"]`)?.value || 'Outros';
+          const tipo = t.valor>=0 ? 'entrada' : 'saida';
+          state.lancamentos.push({
+            id: uid(), tipo, categoria, descricao: t.memo, valor: Math.abs(t.valor),
+            contaId: conciliacaoContaId, status: tipo==='entrada'?'recebido':'pago',
+            dataVencimento: t.data, dataPagamento: t.data,
+            origem:'manual', conciliado:true, conciliadoFitId: t.fitid,
+            criadoEm: new Date().toISOString()
+          });
+          registrarLog('Lançamento criado via conciliação', `${t.memo} — ${brl(Math.abs(t.valor))} (${fmtDate(t.data)})`);
+          resultado.soNoBanco.splice(idx,1);
+          persist();
+          document.getElementById('conciliacaoResultado').innerHTML = renderResultadoConciliacao(resultado, state.contas.find(c=>c.id===conciliacaoContaId));
+          bindConciliacaoResultado();
+          showToast('Lançamento criado e já conciliado');
+        });
+      });
+      document.querySelectorAll('[data-action="marcar-conciliado"]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const l = state.lancamentos.find(x=>x.id===btn.dataset.id);
+          if(!l) return;
+          l.conciliado = true;
+          const resultado = window.__conciliacaoResultado;
+          if(resultado) resultado.soNoSistema = resultado.soNoSistema.filter(x=>x.id!==l.id);
+          persist();
+          document.getElementById('conciliacaoResultado').innerHTML = renderResultadoConciliacao(resultado, state.contas.find(c=>c.id===conciliacaoContaId));
+          bindConciliacaoResultado();
+          showToast('Marcado como conciliado');
+        });
+      });
     };
-    document.getElementById('cfgAprovAtivo')?.addEventListener('change', salvarAprovConfig);
-    document.getElementById('cfgAprovLimite')?.addEventListener('change', salvarAprovConfig);
+    bindConciliacaoResultado();
+    document.getElementById('ofxFileInput')?.addEventListener('change', async ()=>{
+      const file = document.getElementById('ofxFileInput').files[0];
+      if(!file) return;
+      const status = document.getElementById('ofxStatus');
+      status.textContent = 'Lendo o arquivo...';
+      try{
+        const texto = await file.text();
+        const transacoes = parseOFX(texto);
+        if(!transacoes.length){ status.textContent = 'Não encontrei transações nesse arquivo — confira se é mesmo um OFX exportado pelo banco.'; return; }
+        const resultado = conciliarOFX(conciliacaoContaId, transacoes);
+        window.__conciliacaoResultado = resultado;
+        window.__conciliacaoContaAtual = conciliacaoContaId;
+        status.textContent = `${transacoes.length} transação(ões) lidas do extrato — ${resultado.conciliados.length} conciliada(s) automaticamente.`;
+        document.getElementById('conciliacaoResultado').innerHTML = renderResultadoConciliacao(resultado, state.contas.find(c=>c.id===conciliacaoContaId));
+        bindConciliacaoResultado();
+      }catch(e){
+        console.error('Erro ao ler OFX:', e);
+        status.textContent = 'Não consegui ler esse arquivo. Confira se é um OFX válido exportado pelo internet banking do seu banco.';
+      }
+    });
+  }
+  document.querySelectorAll('[data-action="abrir-configuracao"]').forEach(card=>{
+    card.addEventListener('click', ()=>{
+      configAtivo = card.dataset.config;
+      currentView = 'configuracao-detalhe';
+      render();
+    });
+  });
+  if(currentView==='configuracao-detalhe'){
+    const configSelect = document.getElementById('configSelect');
+    const bindConfigInner = ()=>{
+      document.getElementById('btnConsoleFirebase')?.addEventListener('click', ()=>{
+        window.open('https://console.firebase.google.com/project/'+LIVRO_CAIXA_FIREBASE_CONFIG.projectId+'/usage', '_blank');
+      });
+      const salvarAprovConfig = ()=>{
+        state.aprovacaoConfig = {
+          ativo: document.getElementById('cfgAprovAtivo').checked,
+          limite: numBR(document.getElementById('cfgAprovLimite').value)||0
+        };
+        persist();
+        showToast(state.aprovacaoConfig.ativo ? `Aprovação exigida pra despesas acima de ${brl(state.aprovacaoConfig.limite)}` : 'Aprovação de despesas desativada');
+      };
+      document.getElementById('cfgAprovAtivo')?.addEventListener('change', salvarAprovConfig);
+      document.getElementById('cfgAprovLimite')?.addEventListener('change', salvarAprovConfig);
+      if(configAtivo==='codigo') preencherEstatisticasCodigo();
+    };
+    const paintConfig = ()=>{
+      const tituloEl = document.getElementById('configTitulo');
+      if(tituloEl) tituloEl.textContent = CONFIG_NOMES[configAtivo] || 'Configurações';
+      document.getElementById('configPanel').innerHTML =
+        configAtivo==='codigo' ? renderConfigCodigo() :
+        configAtivo==='aprovacao' ? renderConfigAprovacao() :
+        configAtivo==='firebase' ? renderConfigFirebase() :
+        renderConfigArmazenamento();
+      bindConfigInner();
+    };
+    if(configSelect){
+      configSelect.addEventListener('change', ()=>{ configAtivo = configSelect.value; paintConfig(); });
+    }
+    paintConfig();
   }
   const chartMeses = document.getElementById('chartMeses');
   if(chartMeses) desenharGraficoMeses('chartMeses');
@@ -5627,6 +6107,7 @@ function attachViewHandlers(){
         if(novoTipo==='transferencia') openTransferenciaModal();
         else if(novoTipo==='recorrente') openRecorrenciaModal();
         else if(novoTipo==='investimento') openEscolherContaInvestirModal();
+        else if(novoTipo==='qrnota') openLerQRNotaModal();
         else openLancamentoModal(novoTipo);
       });
     });
@@ -6404,6 +6885,15 @@ function attachViewHandlers(){
       render();
     });
   });
+  document.querySelectorAll('[data-action="abrir-conciliacao"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      conciliacaoContaId = btn.dataset.id;
+      window.__conciliacaoResultado = null;
+      window.__conciliacaoContaAtual = null;
+      currentView = 'conciliacao';
+      render();
+    });
+  });
   document.querySelectorAll('[data-action="investir-conta"]').forEach(btn=>{
     btn.addEventListener('click', ()=>openInvestirModal(btn.dataset.id));
   });
@@ -6469,6 +6959,12 @@ function attachViewHandlers(){
   });
   document.querySelectorAll('[data-action="lancar-compra"]').forEach(btn=>{
     btn.addEventListener('click', ()=>openCompraCartaoModal(btn.dataset.id));
+  });
+  document.querySelectorAll('[data-action="importar-fatura"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openImportarFaturaModal(btn.dataset.id));
+  });
+  document.querySelectorAll('[data-action="revisar-fatura"]').forEach(row=>{
+    row.addEventListener('click', ()=>openImportarFaturaModal(null, row.dataset.id));
   });
   document.querySelectorAll('[data-action="ver-fatura"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -6983,10 +7479,18 @@ function openFornecedorModal(existing){
     <h3>${isEdit ? 'Editar fornecedor' : 'Novo fornecedor'}</h3>
     <div class="field"><label>Nome</label><input type="text" id="fnNome" value="${existing?escapeHTML(existing.nome):''}" placeholder="Ex: Metalúrgica Sul"></div>
     <div class="field-row">
-      <div class="field"><label>CNPJ/CPF (opcional)</label><input type="text" id="fnDoc" value="${existing?escapeHTML(existing.cnpjCpf||''):''}"></div>
+      <div class="field">
+        <label>CNPJ/CPF (opcional)</label>
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="fnDoc" value="${existing?escapeHTML(existing.cnpjCpf||''):''}" placeholder="00.000.000/0000-00" style="flex:1;">
+          <button type="button" class="btn ghost sm" id="btnBuscarCNPJ" style="white-space:nowrap;">🔎 Buscar</button>
+        </div>
+      </div>
       <div class="field"><label>Telefone (opcional)</label><input type="text" id="fnTelefone" value="${existing?escapeHTML(existing.telefone||''):''}"></div>
     </div>
+    <div id="fnBuscaStatus" class="note" style="display:none;margin-top:0;"></div>
     <div class="field"><label>E-mail (opcional)</label><input type="email" id="fnEmail" value="${existing?escapeHTML(existing.email||''):''}"></div>
+    <div class="field"><label>Endereço (opcional)</label><input type="text" id="fnEndereco" value="${existing?escapeHTML(existing.endereco||''):''}"></div>
     <div class="field"><label>Observação (opcional)</label><input type="text" id="fnObs" value="${existing?escapeHTML(existing.observacao||''):''}"></div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
@@ -6995,6 +7499,32 @@ function openFornecedorModal(existing){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnBuscarCNPJ').addEventListener('click', async ()=>{
+    const doc = document.getElementById('fnDoc').value.replace(/\D/g,'');
+    const status = document.getElementById('fnBuscaStatus');
+    status.style.display = 'block';
+    if(doc.length!==14){ status.textContent = 'Digite um CNPJ completo (14 números) pra buscar os dados públicos.'; return; }
+    status.textContent = 'Buscando dados públicos do CNPJ...';
+    try{
+      const resp = await fetch('https://brasilapi.com.br/api/cnpj/v1/'+doc);
+      if(!resp.ok) throw new Error('não encontrado');
+      const dados = await resp.json();
+      const nomeAtual = document.getElementById('fnNome').value.trim();
+      if(!nomeAtual) document.getElementById('fnNome').value = dados.nome_fantasia || dados.razao_social || '';
+      const telAtual = document.getElementById('fnTelefone').value.trim();
+      if(!telAtual && dados.ddd_telefone_1) document.getElementById('fnTelefone').value = dados.ddd_telefone_1;
+      const emailAtual = document.getElementById('fnEmail').value.trim();
+      if(!emailAtual && dados.email) document.getElementById('fnEmail').value = dados.email;
+      const enderecoAtual = document.getElementById('fnEndereco').value.trim();
+      if(!enderecoAtual){
+        const partes = [dados.logradouro, dados.numero, dados.bairro, dados.municipio, dados.uf].filter(Boolean);
+        document.getElementById('fnEndereco').value = partes.join(', ');
+      }
+      status.textContent = `Dados encontrados: ${dados.razao_social || dados.nome_fantasia || 'CNPJ ativo'}. Campos em branco foram preenchidos — confira antes de salvar.`;
+    }catch(e){
+      status.textContent = 'Não encontrei esse CNPJ nos dados públicos — confira o número ou preencha manualmente.';
+    }
+  });
   document.getElementById('btnSalvarFornecedor').addEventListener('click', ()=>{
     const nome = document.getElementById('fnNome').value.trim();
     if(!nome){ showToast('Digite o nome do fornecedor'); return; }
@@ -7005,6 +7535,7 @@ function openFornecedorModal(existing){
       cnpjCpf: document.getElementById('fnDoc').value.trim(),
       telefone: document.getElementById('fnTelefone').value.trim(),
       email: document.getElementById('fnEmail').value.trim(),
+      endereco: document.getElementById('fnEndereco').value.trim(),
       observacao: document.getElementById('fnObs').value.trim()
     };
     if(isEdit){
@@ -8172,6 +8703,99 @@ function publicarNotaCorretagem(nota){
   persist(); closeModal(); render();
   showToast(jaDebitou ? 'Nota publicada — operações e custos lançados nas categorias certas' : `Nota publicada — lançamentos ficam pendentes até o débito em ${fmtDate ? fmtDate(dataDebito) : dataDebito}`);
   return true;
+}
+
+// Leitura de QR Code de nota fiscal — decodifica a imagem com jsQR e extrai a chave
+// de acesso (44 dígitos). Importante: o QR da NFC-e/NFe normalmente NÃO carrega valor
+// nem itens da nota, só a chave e um link de consulta — por isso o valor e a categoria
+// continuam sendo preenchidos manualmente ao lançar a despesa.
+function decodeQRFromFile(file){
+  return new Promise((resolve, reject)=>{
+    if(typeof jsQR === 'undefined'){ reject(new Error('Biblioteca de leitura de QR Code não carregou — verifique a internet')); return; }
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = (e)=>{
+      img.onload = ()=>{
+        try{
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const code = jsQR(imageData.data, canvas.width, canvas.height);
+          resolve(code ? code.data : null);
+        }catch(err){ reject(err); }
+      };
+      img.onerror = ()=>reject(new Error('Não consegui abrir essa imagem'));
+      img.src = e.target.result;
+    };
+    reader.onerror = ()=>reject(new Error('Não consegui ler o arquivo'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function parseNFeQR(conteudo){
+  const chaveMatch = conteudo.match(/(\d{44})/);
+  const url = /^https?:\/\//i.test(conteudo) ? conteudo : null;
+  return { chave: chaveMatch ? chaveMatch[1] : null, url };
+}
+
+function openLerQRNotaModal(){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Ler QR Code da nota fiscal</h3>
+    <div class="field">
+      <label>Foto ou imagem do QR Code</label>
+      <input type="file" id="qrNotaFileInput" accept="image/*" capture="environment">
+    </div>
+    <div id="qrNotaStatus" class="note" style="margin-top:0;">Tire uma foto do QR Code impresso no cupom/nota, ou envie uma imagem salva. O sistema identifica a chave de acesso automaticamente — o valor e os itens da nota normalmente não vêm no QR Code, então você completa isso ao lançar a despesa.</div>
+    <div id="qrNotaResultado" style="display:none;">
+      <div class="field"><label>Chave de acesso (44 dígitos)</label><input type="text" id="qrChaveAcesso" class="mono" readonly></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn ghost" id="btnAbrirSefaz" style="display:none;">Abrir na Sefaz ↗</button>
+      <button class="btn" id="btnUsarDadosQR" style="display:none;">Lançar despesa com esses dados</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  let urlLida = '', chaveLida = '';
+
+  document.getElementById('qrNotaFileInput').addEventListener('change', async ()=>{
+    const file = document.getElementById('qrNotaFileInput').files[0];
+    if(!file) return;
+    const status = document.getElementById('qrNotaStatus');
+    status.textContent = 'Lendo o QR Code...';
+    try{
+      const conteudo = await decodeQRFromFile(file);
+      if(!conteudo) throw new Error('não decodificado');
+      const dados = parseNFeQR(conteudo);
+      if(!dados.chave){
+        status.textContent = 'Encontrei um QR Code na imagem, mas não parece ser de uma nota fiscal (não achei a chave de acesso de 44 dígitos). Confira a foto e tente de novo.';
+        return;
+      }
+      urlLida = dados.url || '';
+      chaveLida = dados.chave;
+      document.getElementById('qrChaveAcesso').value = chaveLida;
+      document.getElementById('qrNotaResultado').style.display = 'block';
+      document.getElementById('btnUsarDadosQR').style.display = 'inline-flex';
+      document.getElementById('btnAbrirSefaz').style.display = urlLida ? 'inline-flex' : 'none';
+      status.textContent = 'Chave de acesso identificada. Valor e itens não vêm no QR Code — abra na Sefaz pra conferir os detalhes, se precisar, e complete o lançamento manualmente.';
+    }catch(e){
+      console.error('Erro ao ler QR Code:', e);
+      status.textContent = 'Não consegui identificar um QR Code nessa imagem. Tente uma foto mais nítida, bem enquadrada e com boa luz.';
+    }
+  });
+  document.getElementById('btnAbrirSefaz').addEventListener('click', ()=>{ if(urlLida) window.open(urlLida, '_blank'); });
+  document.getElementById('btnUsarDadosQR').addEventListener('click', ()=>{
+    closeModal();
+    openLancamentoModal('saida');
+    const desc = document.getElementById('fDescricao');
+    if(desc) desc.value = 'Nota Fiscal — chave final ' + chaveLida.slice(-6);
+    const obs = document.getElementById('fObservacao');
+    if(obs) obs.value = `Nota fiscal lida por QR Code — chave de acesso: ${chaveLida}${urlLida ? '\nConsulta: '+urlLida : ''}`;
+  });
 }
 
 function openEscolherContaInvestirModal(){
