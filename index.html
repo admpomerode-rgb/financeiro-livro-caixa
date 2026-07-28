@@ -469,6 +469,15 @@
     .cards.cards-3{grid-template-columns:1fr 1fr;}
     .cards.cards-3 .card:last-child{grid-column:1 / -1;}
 
+    /* Dashboard no celular: sem título, mês alinhado no topo e botão + em bolinha azul clara à esquerda */
+    .dash-topbar{margin-bottom:0;height:0;min-height:0;overflow:visible;position:relative;gap:0;}
+    .dash-titulo{display:none;}
+    .dash-acao{position:absolute;top:0;left:0;z-index:46;}
+    .dash-acao #btnNovoMenu{width:46px;height:46px;border-radius:50%;padding:0;display:flex;align-items:center;justify-content:center;background:#82ABF2;box-shadow:0 4px 14px rgba(43,108,238,.35);}
+    .dash-acao #btnNovoMenu .novo-plus{font-size:27px;font-weight:600;line-height:1;margin-top:-2px;}
+    .dash-acao #btnNovoMenu .novo-label{display:none;}
+    .dash-topbar ~ .mes-nav{min-height:46px;margin-bottom:16px;padding:0 48px;}
+
     /* Nota de corretagem no celular: cada operação vira um cartão com campos grandes */
     .nota-op-row{display:grid !important;grid-template-columns:1fr 1fr;gap:8px;border:1px solid var(--line);border-radius:10px;padding:12px;padding-top:16px;margin-bottom:12px;position:relative;background:var(--bone);}
     .nota-op-row .field{max-width:none !important;margin-bottom:0;}
@@ -491,6 +500,11 @@
   .selecao-bar .dropdown-menu{z-index:60;}
   .ledger-row{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;}
   .ledger-row.selecionado{background:rgba(43,108,238,.14) !important;box-shadow:inset 3px 0 0 var(--blue-accent);}
+
+  /* Penumbra atrás do menu + Novo */
+  .menu-penumbra{position:fixed;inset:0;background:rgba(11,15,20,.45);z-index:45;display:none;}
+  .menu-penumbra.open{display:block;}
+  .dropdown-wrap.menu-aberto{position:relative;z-index:46;}
 
   .topbar-actions-stack{display:flex;gap:8px;flex-wrap:wrap;}
 
@@ -596,6 +610,8 @@
     </div>
   </div>
 </div>
+
+<div class="menu-penumbra" id="novoPenumbra"></div>
 
 <div class="selecao-bar" id="selecaoBar">
   <button id="selCancelar" title="Cancelar seleção">✕</button>
@@ -915,6 +931,12 @@ document.getElementById('selMenuBtn').addEventListener('click', (e)=>{
   document.getElementById('selMenuDrop').classList.toggle('open');
 });
 document.addEventListener('click', ()=>document.getElementById('selMenuDrop')?.classList.remove('open'));
+document.addEventListener('click', ()=>{
+  const m = document.getElementById('novoMenu');
+  if(m) m.classList.remove('open');
+  document.getElementById('novoPenumbra')?.classList.remove('open');
+  document.querySelector('.dropdown-wrap.menu-aberto')?.classList.remove('menu-aberto');
+});
 document.querySelectorAll('#selMenuDrop [data-sel-acao]').forEach(btn=>{
   btn.addEventListener('click', (e)=>{
     e.stopPropagation();
@@ -1717,9 +1739,9 @@ function viewDashboard(){
   const nomeMes = new Date(anoMD, mesMD-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
 
   return `
-    <div class="topbar">
-      <div><h1>Dashboard</h1><p>Visão geral da saúde financeira da empresa</p></div>
-      <div style="display:flex;gap:8px;align-items:center;">
+    <div class="topbar dash-topbar">
+      <div class="dash-titulo"><h1>Dashboard</h1><p>Visão geral da saúde financeira da empresa</p></div>
+      <div class="dash-acao" style="display:flex;gap:8px;align-items:center;">
         ${dropdownNovoHTML()}
       </div>
     </div>
@@ -4945,7 +4967,7 @@ function ajustarPosicaoDropdown(menu){
 function dropdownNovoHTML(){
   return `
     <div class="dropdown-wrap">
-      <button class="btn" id="btnNovoMenu">+ Novo ▾</button>
+      <button class="btn" id="btnNovoMenu"><span class="novo-plus">+</span><span class="novo-label"> Novo ▾</span></button>
       <div class="dropdown-menu" id="novoMenu">
         <button type="button" data-novo="entrada"><span class="dropdown-dot" style="background:var(--success);"></span> Nova receita</button>
         <button type="button" data-novo="saida"><span class="dropdown-dot" style="background:var(--danger);"></span> Nova despesa</button>
@@ -5296,14 +5318,21 @@ function attachViewHandlers(){
   const btnNovoMenu = document.getElementById('btnNovoMenu');
   const novoMenu = document.getElementById('novoMenu');
   if(btnNovoMenu && novoMenu){
+    const novoPenumbra = document.getElementById('novoPenumbra');
+    const setNovoMenuAberto = (aberto)=>{
+      novoMenu.classList.toggle('open', aberto);
+      if(novoPenumbra) novoPenumbra.classList.toggle('open', aberto);
+      btnNovoMenu.closest('.dropdown-wrap')?.classList.toggle('menu-aberto', aberto);
+      if(aberto) ajustarPosicaoDropdown(novoMenu);
+    };
     btnNovoMenu.addEventListener('click', (e)=>{
       e.stopPropagation();
-      novoMenu.classList.toggle('open');
-      ajustarPosicaoDropdown(novoMenu);
+      setNovoMenuAberto(!novoMenu.classList.contains('open'));
     });
+    if(novoPenumbra) novoPenumbra.onclick = (e)=>{ e.stopPropagation(); setNovoMenuAberto(false); };
     novoMenu.querySelectorAll('button[data-novo]').forEach(btn=>{
       btn.addEventListener('click', ()=>{
-        novoMenu.classList.remove('open');
+        setNovoMenuAberto(false);
         const novoTipo = btn.dataset.novo;
         if(novoTipo==='transferencia') openTransferenciaModal();
         else if(novoTipo==='recorrente') openRecorrenciaModal();
@@ -5311,7 +5340,6 @@ function attachViewHandlers(){
         else openLancamentoModal(novoTipo);
       });
     });
-    document.addEventListener('click', ()=>novoMenu.classList.remove('open'));
   }
 
   document.querySelectorAll('[data-goto]').forEach(el=>{
