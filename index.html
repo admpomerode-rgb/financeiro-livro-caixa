@@ -468,6 +468,14 @@
     .topbar-actions-stack .btn{flex:1;min-width:0;}
     .cards.cards-3{grid-template-columns:1fr 1fr;}
     .cards.cards-3 .card:last-child{grid-column:1 / -1;}
+
+    /* Nota de corretagem no celular: cada operação vira um cartão com campos grandes */
+    .nota-op-row{display:grid !important;grid-template-columns:1fr 1fr;gap:8px;border:1px solid var(--line);border-radius:10px;padding:12px;padding-top:16px;margin-bottom:12px;position:relative;background:var(--bone);}
+    .nota-op-row .field{max-width:none !important;margin-bottom:0;}
+    .nota-op-row .field label{font-size:12px;}
+    .nota-op-row .field input, .nota-op-row .field select{font-size:16px;padding:11px 10px;background:var(--white);}
+    .nota-op-row .field:nth-child(3){grid-column:1 / -1;} /* Ticker ocupa a linha inteira */
+    .nota-op-row .btn-remover-op{position:absolute;top:-10px;right:-6px;margin-bottom:0 !important;background:var(--white);box-shadow:0 1px 4px rgba(0,0,0,.12);}
   }
 
   .topbar-actions-stack{display:flex;gap:8px;flex-wrap:wrap;}
@@ -698,6 +706,7 @@ function aplicarMigracoes(s){
   if(!s.faturasFechadas) s.faturasFechadas = [];
   if(!s.contasInvestimento) s.contasInvestimento = [];
   if(!s.ativosInvestimento) s.ativosInvestimento = [];
+  if(!s.notasPendentes) s.notasPendentes = [];
   if(!s.categorias){
     s.categorias = {
       saida: CATEGORIAS_SAIDA.map(nome=>({ id: uid(), nome, subcategorias: [] })),
@@ -2785,6 +2794,28 @@ function viewInvestimentos(){
       <div class="card"><div class="label">Custo de aquisição</div><div class="value mono">${brl(custo)}</div></div>
       <div class="card"><div class="label">Rendimento acumulado</div><div class="value mono ${rendimento>=0?'pos':'neg'}">${brl(rendimento)}</div></div>
     </div>
+    ${(state.notasPendentes||[]).length ? `
+    <div class="panel" style="margin-bottom:16px;border-left:3px solid var(--warn);">
+      <div class="panel-head"><h2>📋 Notas aguardando aprovação (${state.notasPendentes.length})</h2></div>
+      <div class="panel-body">
+        ${state.notasPendentes.map(n=>{
+          const ops = (n.operacoes||[]).filter(o=>o.ticker && numBR(String(o.quantidade))>0 && numBR(String(o.preco))>0);
+          const totalOps = ops.reduce((s,o)=>s+numBR(String(o.quantidade))*numBR(String(o.preco)),0);
+          const tx = n.taxas||{};
+          const totalTx = (tx.corretagem||0)+(tx.liquidacao||0)+(tx.emolumentos||0)+(tx.registro||0)+(tx.iss||0)+(tx.irrf||0)+(tx.outras||0);
+          return `
+          <div class="ledger-row compact" data-action="revisar-nota" data-id="${n.id}" style="cursor:pointer;grid-template-columns:12px 1fr auto auto;">
+            <span class="dot pendente"></span>
+            <div class="desc-cell">
+              <div>Nota${n.corretora?' — '+escapeHTML(n.corretora):''}${n.arquivoNome?' · '+escapeHTML(n.arquivoNome):''}</div>
+              <div class="cat">Pregão ${fmtDate(n.dataPregao)} · débito em ${fmtDate(n.dataDebito||n.dataPregao)} · ${ops.length} operação(ões)${totalTx>0?' · custos '+brl(totalTx):''}</div>
+            </div>
+            <span class="mono" style="font-weight:600;">${brl(totalOps)}</span>
+            <button class="btn ghost sm" style="pointer-events:none;">Revisar</button>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>` : ''}
     <div class="conta-cards">
       ${state.contasInvestimento.map(c=>{
         const v = valorContaInvestimento(c.id);
@@ -2893,6 +2924,7 @@ function viewRelatorios(){
     { id:'balanco', icone:'⚖️', nome:'Balanço Patrimonial', desc:'Ativos, passivos e patrimônio líquido' },
     { id:'indicadores', icone:'📈', nome:'Indicadores Financeiros', desc:'Margem, liquidez, ticket médio, ponto de equilíbrio e mais' },
     { id:'produto', icone:'🍪', nome:'Rentabilidade por Produto', desc:'Receita, custo e margem por produto ou linha' },
+    { id:'investimentos', icone:'💰', nome:'Relatório de Investimentos', desc:'Total aplicado no mês (renda fixa + variável), ativos mais investidos e custos das operações' },
     { id:'mei', icone:'🧾', nome:'Declaração MEI', desc:'Números prontos pra DASN-SIMEI' },
   ];
   return `
@@ -2927,6 +2959,7 @@ function viewRelatorioDetalhe(){
       <button data-report="mei">Declaração MEI</button>
       <button data-report="indicadores">Indicadores</button>
       <button data-report="produto">Por Produto</button>
+      <button data-report="investimentos">Investimentos</button>
       <button data-report="mensal">Super Mensal</button>
     </div>
     <div class="panel" id="reportPanel"></div>
@@ -3063,8 +3096,138 @@ function exportarRelatorioPDF(titulo){
   docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8); docPdf.setTextColor(...SOFT);
   docPdf.text('VIERGUTZ E KRUEGER PARTICIPAÇÕES E EMPREENDIMENTOS', M, y);
 
-  docPdf.save(`${titulo.includes('DRE')?'dre':'balanco'}-${todayISO()}.pdf`);
+  const slugPdf = titulo.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40);
+  docPdf.save(`${slugPdf}-${todayISO()}.pdf`);
   showToast('PDF gerado');
+}
+
+function renderRelatorioInvestimentos(){
+  // Período: mês do navegador global (mesmo padrão do DRE)
+  const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
+  const de = `${mesGlobalRef}-01`;
+  const ate = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
+  const label = new Date(anoM, mesM-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
+
+  const parseBRL = s => { const m = String(s).replace(/\./g,'').replace(',','.'); const n = parseFloat(m); return isNaN(n)?0:n; };
+  const rotuloClasse = t => ({ renda_fixa:'Renda Fixa', renda_variavel:'Renda Variável', interno:'Na Empresa' })[t] || 'Outros';
+
+  // Movimentos de investimento do mês (pagos/recebidos)
+  const movs = state.lancamentos.filter(l=>{
+    const ref = l.dataPagamento || l.dataVencimento;
+    return l.origem==='investimento' && ref && ref>=de && ref<=ate && (l.status==='pago'||l.status==='recebido');
+  });
+
+  const ehCusto = l => l.tipo==='saida' && /taxas e custos|taxa de liquida|emolumentos|tarifas diversas/i.test(l.descricao||'');
+  const aportes = movs.filter(l=>l.tipo==='saida' && !ehCusto(l));
+  const custosLanc = movs.filter(ehCusto);
+  const resgates = movs.filter(l=>l.tipo==='entrada');
+
+  const totalAportado = aportes.reduce((s,l)=>s+l.valor,0);
+  const totalCustos = custosLanc.reduce((s,l)=>s+l.valor,0);
+  const totalResgates = resgates.reduce((s,l)=>s+l.valor,0);
+
+  // Ranking de ativos mais investidos no mês + total por classe
+  const porAtivo = {}; // chave -> { nome, classe, valor }
+  const porClasse = { renda_fixa:0, renda_variavel:0, interno:0, outros:0 };
+  const addAporte = (nome, classe, valor) => {
+    if(!valor) return;
+    const chave = (classe||'outros')+'|'+nome;
+    if(!porAtivo[chave]) porAtivo[chave] = { nome, classe, valor:0 };
+    porAtivo[chave].valor += valor;
+    porClasse[classe in porClasse ? classe : 'outros'] += valor;
+  };
+  aportes.forEach(l=>{
+    if(l.investimentoAtivoId){
+      const a = state.ativosInvestimento.find(x=>x.id===l.investimentoAtivoId);
+      const conta = a ? state.contasInvestimento.find(c=>c.id===a.contaId) : null;
+      const nome = a ? (a.ticker || a.nome) : (l.descricao||'').replace(/^Aplicação — /,'') || 'Investimento';
+      addAporte(nome, conta?.tipo || (a?.tipoAtivo==='rendafixa'?'renda_fixa':a?.tipoAtivo==='interno'?'interno':'renda_variavel'), l.valor);
+    } else if(/^Compra de ativos/i.test(l.descricao||'') && l.observacao){
+      // Nota de corretagem: "Operações: 100 PETR4 a R$ 32,50, 10 ITUB4 a R$ 28,00"
+      const ops = [...l.observacao.matchAll(/([\d.,]+)\s+([A-Z0-9]{4,7})\s+a\s+R\$\s*([\d.,]+)/g)]
+        .map(m=>({ qtd: parseBRL(m[1]), ticker: m[2], preco: parseBRL(m[3]) }))
+        .filter(o=>o.qtd>0 && o.preco>0);
+      const somaOps = ops.reduce((s,o)=>s+o.qtd*o.preco,0);
+      if(ops.length && somaOps>0){
+        ops.forEach(o=>addAporte(o.ticker, 'renda_variavel', l.valor * (o.qtd*o.preco/somaOps)));
+      } else {
+        addAporte((l.descricao||'Compra de ativos').replace(/ \(nota de corretagem\)$/,''), 'renda_variavel', l.valor);
+      }
+    } else {
+      const nome = (l.descricao||'').replace(/^Aplicação — /,'') || l.descricao || 'Investimento';
+      const a = state.ativosInvestimento.find(x=>(x.ticker||x.nome)===nome);
+      const conta = a ? state.contasInvestimento.find(c=>c.id===a.contaId) : null;
+      addAporte(nome, conta?.tipo || 'outros', l.valor);
+    }
+  });
+  const ranking = Object.values(porAtivo).sort((a,b)=>b.valor-a.valor);
+  const maiorAporte = ranking.length ? ranking[0].valor : 0;
+
+  // Custos detalhados (parse das observações das notas: "Corretagem: R$ 1,50 · ISS: R$ 0,10")
+  const custosDetalhe = {};
+  custosLanc.forEach(l=>{
+    [...(l.observacao||'').matchAll(/([A-Za-zÀ-ú ]+):\s*R\$\s*([\d.,]+)/g)].forEach(m=>{
+      const tipo = m[1].trim();
+      custosDetalhe[tipo] = (custosDetalhe[tipo]||0) + parseBRL(m[2]);
+    });
+  });
+  const somaDetalhe = Object.values(custosDetalhe).reduce((a,b)=>a+b,0);
+
+  // Carteira atual (posição hoje, independente do mês)
+  const carteira = { renda_fixa:{v:0,c:0}, renda_variavel:{v:0,c:0}, interno:{v:0,c:0} };
+  state.ativosInvestimento.forEach(a=>{
+    const conta = state.contasInvestimento.find(c=>c.id===a.contaId);
+    const t = conta?.tipo in carteira ? conta.tipo : (a.tipoAtivo==='rendafixa'?'renda_fixa':a.tipoAtivo==='interno'?'interno':'renda_variavel');
+    carteira[t].v += valorAtivo(a);
+    carteira[t].c += custoAtivo(a);
+  });
+  const carteiraTotal = carteira.renda_fixa.v + carteira.renda_variavel.v + carteira.interno.v;
+  const carteiraCusto = carteira.renda_fixa.c + carteira.renda_variavel.c + carteira.interno.c;
+  const resultadoCarteira = carteiraTotal - carteiraCusto;
+
+  const barra = (v,max) => max>0 ? `<div style="height:5px;border-radius:3px;background:var(--line);margin-top:5px;overflow:hidden;"><div style="height:100%;width:${Math.max(2,Math.round(v/max*100))}%;background:var(--blue-accent);border-radius:3px;"></div></div>` : '';
+
+  return `
+    <div class="report-controls"><span style="font-size:12.5px;color:var(--text-soft);">Relatório de Investimentos — ${label}</span></div>
+    <div class="report-block">
+      <div class="report-title">Resumo do mês</div>
+      <div class="report-line"><span>Total aplicado no mês</span><span class="v">${brl(totalAportado)}</span></div>
+      <div class="report-line sub"><span>Renda Fixa</span><span class="v">${brl(porClasse.renda_fixa)}</span></div>
+      <div class="report-line sub"><span>Renda Variável</span><span class="v">${brl(porClasse.renda_variavel)}</span></div>
+      ${porClasse.interno>0?`<div class="report-line sub"><span>Investimentos na Empresa</span><span class="v">${brl(porClasse.interno)}</span></div>`:''}
+      ${porClasse.outros>0?`<div class="report-line sub"><span>Não classificado</span><span class="v">${brl(porClasse.outros)}</span></div>`:''}
+      <div class="report-line"><span>Custos e taxas das operações</span><span class="v" style="color:var(--danger);">${brl(totalCustos)}</span></div>
+      ${totalResgates>0?`<div class="report-line"><span>Resgates e vendas no mês</span><span class="v" style="color:var(--success);">${brl(totalResgates)}</span></div>`:''}
+      <div class="report-line total"><span>Saída líquida com investimentos</span><span class="v">${brl(totalAportado + totalCustos - totalResgates)}</span></div>
+
+      <div class="report-title">Ativos mais investidos no mês</div>
+      ${ranking.length ? ranking.map((r,i)=>`
+        <div class="report-line" style="display:block;border-bottom:1px solid var(--line);">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span>${i+1}º &nbsp;${escapeHTML(r.nome)} <span style="font-size:11px;color:var(--text-soft);">· ${rotuloClasse(r.classe)}</span></span>
+            <span class="v">${brl(r.valor)} <span style="font-size:11px;color:var(--text-soft);">(${totalAportado>0?Math.round(r.valor/totalAportado*100):0}%)</span></span>
+          </div>
+          ${barra(r.valor, maiorAporte)}
+        </div>
+      `).join('') : `<div class="report-line sub"><span>Nenhum aporte registrado em ${label}</span><span class="v">${brl(0)}</span></div>`}
+
+      <div class="report-title">Custos dos investimentos</div>
+      ${Object.keys(custosDetalhe).length ? Object.entries(custosDetalhe).sort((a,b)=>b[1]-a[1]).map(([tipo,v])=>`
+        <div class="report-line sub"><span>${escapeHTML(tipo)}</span><span class="v">${brl(v)}</span></div>
+      `).join('') : ''}
+      ${totalCustos>somaDetalhe+0.005?`<div class="report-line sub"><span>${Object.keys(custosDetalhe).length?'Demais custos (sem detalhamento)':'Custos lançados (sem detalhamento)'}</span><span class="v">${brl(totalCustos-somaDetalhe)}</span></div>`:''}
+      <div class="report-line total"><span>Total de custos no mês</span><span class="v">${brl(totalCustos)}</span></div>
+      ${totalAportado>0?`<div class="report-line sub"><span>Custo sobre o valor aportado</span><span class="v">${(totalCustos/totalAportado*100).toLocaleString('pt-BR',{maximumFractionDigits:2})}%</span></div>`:''}
+
+      <div class="report-title">Carteira atual (posição de hoje)</div>
+      <div class="report-line"><span>Renda Fixa</span><span class="v">${brl(carteira.renda_fixa.v)}</span></div>
+      <div class="report-line"><span>Renda Variável</span><span class="v">${brl(carteira.renda_variavel.v)}</span></div>
+      ${carteira.interno.v>0?`<div class="report-line"><span>Investimentos na Empresa</span><span class="v">${brl(carteira.interno.v)}</span></div>`:''}
+      <div class="report-line total"><span>Total da carteira</span><span class="v">${brl(carteiraTotal)}</span></div>
+      <div class="report-line sub"><span>Custo total investido</span><span class="v">${brl(carteiraCusto)}</span></div>
+      <div class="report-line result"><span>Resultado da carteira</span><span class="v" style="color:${resultadoCarteira>=0?'var(--success)':'var(--danger)'};">${brl(resultadoCarteira)}</span></div>
+    </div>
+  `;
 }
 
 function renderDRE(periodo){
@@ -4039,6 +4202,71 @@ function gerarFichaPatrimonialPDF(ativo){
   showToast(`Ficha Nº ${numero} gerada`);
 }
 
+function openMoverLancamentosModal(tipo, catNome){
+  const pertence = l => l.categoria===catNome || (l.categoria||'').startsWith(catNome+' / ');
+  const lista = state.lancamentos
+    .filter(l=>l.tipo===tipo && pertence(l))
+    .sort((a,b)=>(b.dataVencimento||'').localeCompare(a.dataVencimento||''));
+  if(!lista.length){ showToast('Nenhum lançamento nessa categoria pra mover'); return; }
+
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Mover lançamentos — ${escapeHTML(catNome)}</h3>
+    <div class="field">
+      <label>Mover para qual categoria?</label>
+      <select id="moverDestino">${opcoesCategoriaHTML(tipo)}</select>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;padding:8px 0;border-bottom:1px solid var(--line);cursor:pointer;">
+      <input type="checkbox" id="moverTodos" style="width:17px;height:17px;"> Selecionar todos (${lista.length})
+    </label>
+    <div id="moverLista" style="max-height:300px;overflow-y:auto;">
+      ${lista.map(l=>`
+        <label style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);cursor:pointer;font-size:12.5px;">
+          <input type="checkbox" class="mover-check" data-id="${l.id}" style="width:17px;height:17px;flex-shrink:0;">
+          <span style="color:var(--text-soft);flex-shrink:0;" class="mono">${fmtDate(l.dataVencimento)}</span>
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHTML(l.descricao||'—')}${l.categoria!==catNome?` <span style="font-size:10.5px;color:var(--text-soft);">· ${escapeHTML(l.categoria)}</span>`:''}</span>
+          <span class="mono" style="flex-shrink:0;font-weight:600;">${brl(l.valor)}</span>
+        </label>
+      `).join('')}
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarMover" disabled>Mover selecionados</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+
+  const btnConfirmar = document.getElementById('btnConfirmarMover');
+  const checks = ()=>[...document.querySelectorAll('.mover-check')];
+  const atualizarBotao = ()=>{
+    const n = checks().filter(c=>c.checked).length;
+    btnConfirmar.disabled = n===0;
+    btnConfirmar.textContent = n>0 ? `Mover ${n} lançamento(s)` : 'Mover selecionados';
+    const todos = document.getElementById('moverTodos');
+    todos.checked = n===lista.length;
+    todos.indeterminate = n>0 && n<lista.length;
+  };
+  document.getElementById('moverTodos').addEventListener('change', (e)=>{
+    checks().forEach(c=>{ c.checked = e.target.checked; });
+    atualizarBotao();
+  });
+  checks().forEach(c=>c.addEventListener('change', atualizarBotao));
+
+  btnConfirmar.addEventListener('click', ()=>{
+    const destino = document.getElementById('moverDestino').value;
+    const ids = checks().filter(c=>c.checked).map(c=>c.dataset.id);
+    if(!ids.length){ showToast('Selecione ao menos um lançamento'); return; }
+    let movidos = 0;
+    state.lancamentos.forEach(l=>{
+      if(ids.includes(l.id) && l.categoria!==destino){ l.categoria = destino; movidos++; }
+    });
+    registrarLog('Lançamentos movidos de categoria', `${movidos} lançamento(s) de "${catNome}" para "${destino}"`);
+    persist(); closeModal(); render();
+    showToast(movidos ? `${movidos} lançamento(s) movido(s) para "${destino}"` : 'Nada pra mover — os selecionados já estavam nessa categoria');
+  });
+}
+
 function viewCategorias(){
   return `
     <div class="topbar">
@@ -4096,6 +4324,7 @@ function renderCategoriaPanel(tipo){
                 <span class="categoria-total-linha">${info.qtd} lançamento(s) <span class="mono">${brl(info.total)}</span></span>
               </div>
               <div class="actions">
+                <button class="icon-btn" data-action="mover-lancamentos" data-tipo="${tipo}" data-cat="${escapeHTML(c.nome)}" title="Mover lançamentos para outra categoria">⇄</button>
                 <button class="icon-btn" data-action="editar-categoria" data-tipo="${tipo}" data-id="${c.id}" title="Editar">✎</button>
                 <button class="icon-btn" data-action="excluir-categoria" data-tipo="${tipo}" data-id="${c.id}" title="Excluir">✕</button>
               </div>
@@ -4110,6 +4339,7 @@ function renderCategoriaPanel(tipo){
                     <span class="categoria-total-linha">${subInfo.qtd} lançamento(s) <span class="mono">${brl(subInfo.total)}</span></span>
                   </div>
                   <div class="actions">
+                    <button class="icon-btn" data-action="mover-lancamentos" data-tipo="${tipo}" data-cat="${escapeHTML(c.nome+' / '+sub.nome)}" title="Mover lançamentos para outra categoria">⇄</button>
                     <button class="icon-btn" data-action="editar-subcategoria" data-tipo="${tipo}" data-cat="${c.id}" data-id="${sub.id}" title="Editar">✎</button>
                     <button class="icon-btn" data-action="excluir-subcategoria" data-tipo="${tipo}" data-cat="${c.id}" data-id="${sub.id}" title="Excluir">✕</button>
                   </div>
@@ -4611,6 +4841,7 @@ function dropdownNovoHTML(){
         <button type="button" data-novo="saida"><span class="dropdown-dot" style="background:var(--danger);"></span> Nova despesa</button>
         <button type="button" data-novo="recorrente"><span class="dropdown-dot" style="background:#7B5CD6;"></span> Despesa recorrente</button>
         <button type="button" data-novo="transferencia" ${state.contas.length<2?'disabled title="Crie pelo menos 2 contas para transferir"':''}><span class="dropdown-dot" style="background:var(--blue-accent);"></span> Transferência entre contas</button>
+        <button type="button" data-novo="investimento"><span class="dropdown-dot" style="background:var(--warn);"></span> Aplicação financeira</button>
       </div>
     </div>
   `;
@@ -4757,6 +4988,7 @@ function attachViewHandlers(){
         const novoTipo = btn.dataset.novo;
         if(novoTipo==='transferencia') openTransferenciaModal();
         else if(novoTipo==='recorrente') openRecorrenciaModal();
+        else if(novoTipo==='investimento') openEscolherContaInvestirModal();
         else openLancamentoModal(novoTipo);
       });
     });
@@ -4847,6 +5079,7 @@ function attachViewHandlers(){
         relatorioAtivo==='balanco' ? renderBalanco() :
         relatorioAtivo==='mei' ? renderMEI(meiAnoAtual) :
         relatorioAtivo==='produto' ? renderRentabilidadeProduto('mes') :
+        relatorioAtivo==='investimentos' ? renderRelatorioInvestimentos() :
         relatorioAtivo==='mensal' ? renderSuperRelatorioMensal(mensalMesRef) :
         renderIndicadores('mes');
       bindReportInner();
@@ -4914,7 +5147,7 @@ function attachViewHandlers(){
     });
     paint();
     document.getElementById('btnExportarRelatorioPDF')?.addEventListener('click', ()=>{
-      const titulos = { dre: 'DRE (Demonstrativo de Resultado)', balanco: 'Balanço Patrimonial', mei: `Declaração MEI — Ano ${meiAnoAtual}`, indicadores: 'Indicadores Financeiros', produto: 'Rentabilidade por Produto', mensal: `Super Relatório Mensal — ${mensalMesRef}` };
+      const titulos = { dre: 'DRE (Demonstrativo de Resultado)', balanco: 'Balanço Patrimonial', mei: `Declaração MEI — Ano ${meiAnoAtual}`, indicadores: 'Indicadores Financeiros', produto: 'Rentabilidade por Produto', mensal: `Super Relatório Mensal — ${mensalMesRef}`, investimentos: `Relatório de Investimentos — ${mesGlobalRef}` };
       exportarRelatorioPDF(titulos[relatorioAtivo]);
     });
   }
@@ -5112,6 +5345,9 @@ function attachViewHandlers(){
           currentView = 'lancamentos-categoria';
           render();
         });
+      });
+      document.querySelectorAll('[data-action="mover-lancamentos"]').forEach(btn=>{
+        btn.addEventListener('click', ()=>openMoverLancamentosModal(btn.dataset.tipo, btn.dataset.cat));
       });
       document.querySelectorAll('[data-action="nova-categoria"]').forEach(btn=>{
         btn.addEventListener('click', ()=>openCategoriaModal(btn.dataset.tipo));
@@ -5647,6 +5883,9 @@ function attachViewHandlers(){
     atualizarCotacoes().finally(()=>{});
   });
   document.getElementById('btnImportarNota')?.addEventListener('click', ()=>openImportarNotaModal());
+  document.querySelectorAll('[data-action="revisar-nota"]').forEach(row=>{
+    row.addEventListener('click', ()=>openImportarNotaModal(null, row.dataset.id));
+  });
 
   const btnSalvarConfigProcessos = document.getElementById('btnSalvarConfigProcessos');
   if(btnSalvarConfigProcessos) btnSalvarConfigProcessos.addEventListener('click', ()=>{
@@ -6668,20 +6907,27 @@ function openContaInvestimentoModal(existing){
   });
 }
 
-function openImportarNotaModal(contaPreSelecionadaId){
+function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
+  const notaEmRevisao = notaPendenteId ? (state.notasPendentes||[]).find(n=>n.id===notaPendenteId) : null;
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
-    <h3>Importar nota de corretagem</h3>
+    <h3>${notaEmRevisao ? 'Revisar nota de corretagem' : 'Importar nota de corretagem'}</h3>
+    ${notaEmRevisao ? `
+    <div class="note" style="margin-top:0;">Nota aguardando aprovação${notaEmRevisao.arquivoNome ? ` — <strong>${escapeHTML(notaEmRevisao.arquivoNome)}</strong>` : ''}. Edite e confira tudo — nada entra no caixa até você publicar.</div>
+    ` : `
     <div class="field">
       <label>Arquivo PDF da nota de corretagem</label>
       <input type="file" id="notaFileInput" accept="application/pdf">
     </div>
-    <div id="notaStatus" class="note" style="margin-top:0;">Escolha o PDF da nota — o sistema tenta ler as operações e as taxas automaticamente. Confira tudo antes de confirmar, porque o formato varia de corretora pra corretora.</div>
-    <div id="notaRevisao" style="display:none;">
+    <div id="notaStatus" class="note" style="margin-top:0;">Escolha o PDF da nota — o sistema tenta ler as operações e as taxas automaticamente. Depois ela fica salva aguardando aprovação: você revisa com calma e publica quando estiver tudo certo.</div>
+    `}
+    <div id="notaRevisao" style="display:${notaEmRevisao?'block':'none'};">
       <div class="field-row">
         <div class="field"><label>Data do pregão</label><input type="date" id="notaData"></div>
-        <div class="field"><label>Corretora</label><input type="text" id="notaCorretora" placeholder="Ex: XP Investimentos"></div>
+        <div class="field"><label>Data de débito na conta</label><input type="date" id="notaDataDebito"></div>
       </div>
+      <div class="note" style="margin-top:0;">A data de débito é quando o valor realmente sai (ou entra) da conta bancária — na B3 a liquidação normalmente é 2 dias úteis depois do pregão. Se cair no futuro, o lançamento fica como pendente até lá.</div>
+      <div class="field"><label>Corretora</label><input type="text" id="notaCorretora" placeholder="Ex: XP Investimentos"></div>
       <label style="font-size:12.5px;font-weight:600;display:block;margin:10px 0 6px;">Operações identificadas</label>
       <div id="notaOperacoesTable"></div>
       <button type="button" class="btn ghost sm" id="btnAdicionarLinhaOp" style="margin-top:8px;">+ Adicionar linha</button>
@@ -6700,22 +6946,27 @@ function openImportarNotaModal(contaPreSelecionadaId){
         <div class="field"><label>IRRF</label><input type="text" inputmode="decimal" id="notaTxIrrf"></div>
       </div>
       <div class="field"><label>Outras taxas</label><input type="text" inputmode="decimal" id="notaTxOutras"></div>
+      <div class="note" style="margin-top:0;">Ao publicar, os custos entram automaticamente nas categorias <strong>Taxa de Liquidação</strong>, <strong>Emolumentos</strong> e <strong>Tarifas Diversas B3</strong> (subcategorias de Investimentos).</div>
 
       <div class="field"><label>Valor líquido da nota (R$) — o que efetivamente sai/entra da conta</label><input type="text" inputmode="decimal" id="notaLiquido"></div>
       <div class="note" id="notaTipoNota" style="margin-top:0;"></div>
       <div class="field"><label>Conta bancária de origem/destino</label>
-        <select id="notaContaBancaria">${state.contas.map(c=>`<option value="${c.id}" ${contaPreSelecionadaId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
+        <select id="notaContaBancaria">${state.contas.map(c=>`<option value="${c.id}" ${(notaEmRevisao?notaEmRevisao.contaBancariaId===c.id:contaPreSelecionadaId===c.id)?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
       </div>
     </div>
     <div class="modal-actions">
+      ${notaEmRevisao ? `<button class="btn danger-o" id="btnExcluirNota">Excluir</button>` : ''}
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
-      <button class="btn" id="btnConfirmarNota" style="display:none;">Confirmar e lançar</button>
+      ${notaEmRevisao
+        ? `<button class="btn ghost" id="btnSalvarNota">Salvar alterações</button><button class="btn" id="btnPublicarNota">✓ Publicar</button>`
+        : `<button class="btn" id="btnConfirmarNota" style="display:none;">Enviar para aprovação</button>`}
     </div>
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
 
-  let operacoesAtuais = [];
+  let operacoesAtuais = notaEmRevisao ? (notaEmRevisao.operacoes||[]).map(o=>({ ...o })) : [];
+  let arquivoNomeAtual = notaEmRevisao ? (notaEmRevisao.arquivoNome||'') : '';
 
   const linhaOperacaoHTML = (op, idx)=>`
     <div class="field-row nota-op-row" data-idx="${idx}" style="align-items:flex-end;">
@@ -6727,8 +6978,8 @@ function openImportarNotaModal(contaPreSelecionadaId){
       </div>
       <div class="field" style="max-width:90px;"><label>Tipo</label>
         <select class="op-tipoativo">
-          <option value="acao">Ação</option>
-          <option value="fii">FII</option>
+          <option value="acao" ${op.tipoAtivo!=='fii'?'selected':''}>Ação</option>
+          <option value="fii" ${op.tipoAtivo==='fii'?'selected':''}>FII</option>
         </select>
       </div>
       <div class="field"><label>Ticker</label><input type="text" class="op-ticker mono" style="text-transform:uppercase;" value="${escapeHTML(op.ticker||'')}"></div>
@@ -6737,11 +6988,19 @@ function openImportarNotaModal(contaPreSelecionadaId){
       <button type="button" class="icon-btn btn-remover-op" style="margin-bottom:14px;">✕</button>
     </div>
   `;
+  const lerOperacoesDoDOM = ()=>[...document.querySelectorAll('.nota-op-row')].map(row=>({
+    tipo: row.querySelector('.op-tipo').value,
+    tipoAtivo: row.querySelector('.op-tipoativo').value,
+    ticker: row.querySelector('.op-ticker').value.trim().toUpperCase(),
+    quantidade: row.querySelector('.op-qtd').value,
+    preco: row.querySelector('.op-preco').value
+  }));
   const pintarOperacoes = ()=>{
     document.getElementById('notaOperacoesTable').innerHTML = operacoesAtuais.map((op,i)=>linhaOperacaoHTML(op,i)).join('') || `<div class="empty">Nenhuma operação identificada — adicione manualmente.</div>`;
     document.querySelectorAll('.btn-remover-op').forEach(btn=>{
       btn.addEventListener('click', ()=>{
         const idx = parseInt(btn.closest('.nota-op-row').dataset.idx);
+        operacoesAtuais = lerOperacoesDoDOM();
         operacoesAtuais.splice(idx,1);
         pintarOperacoes();
       });
@@ -6749,13 +7008,76 @@ function openImportarNotaModal(contaPreSelecionadaId){
   };
 
   document.getElementById('btnAdicionarLinhaOp').addEventListener('click', ()=>{
-    operacoesAtuais.push({ tipo:'C', ticker:'', quantidade:'', preco:'' });
+    operacoesAtuais = lerOperacoesDoDOM();
+    operacoesAtuais.push({ tipo:'C', tipoAtivo:'acao', ticker:'', quantidade:'', preco:'' });
     pintarOperacoes();
   });
+
+  // Data de débito acompanha o pregão (D+2 úteis) até o usuário mexer nela manualmente
+  let debitoEditadoManualmente = !!(notaEmRevisao && notaEmRevisao.dataDebito);
+  document.getElementById('notaDataDebito').addEventListener('input', ()=>{ debitoEditadoManualmente = true; });
+  document.getElementById('notaData').addEventListener('change', ()=>{
+    if(!debitoEditadoManualmente) document.getElementById('notaDataDebito').value = addDiasUteis(document.getElementById('notaData').value, 2);
+  });
+
+  const coletarNotaFormulario = ()=>({
+    dataPregao: document.getElementById('notaData').value || todayISO(),
+    dataDebito: document.getElementById('notaDataDebito').value || document.getElementById('notaData').value || todayISO(),
+    corretora: document.getElementById('notaCorretora').value.trim(),
+    operacoes: lerOperacoesDoDOM(),
+    taxas: {
+      corretagem: numBR(document.getElementById('notaTxCorretagem').value) || 0,
+      liquidacao: numBR(document.getElementById('notaTxLiquidacao').value) || 0,
+      emolumentos: numBR(document.getElementById('notaTxEmolumentos').value) || 0,
+      registro: numBR(document.getElementById('notaTxRegistro').value) || 0,
+      iss: numBR(document.getElementById('notaTxIss').value) || 0,
+      irrf: numBR(document.getElementById('notaTxIrrf').value) || 0,
+      outras: numBR(document.getElementById('notaTxOutras').value) || 0
+    },
+    liquido: numBR(document.getElementById('notaLiquido').value) || 0,
+    contaBancariaId: document.getElementById('notaContaBancaria').value,
+    arquivoNome: arquivoNomeAtual
+  });
+
+  if(notaEmRevisao){
+    document.getElementById('notaData').value = notaEmRevisao.dataPregao || todayISO();
+    document.getElementById('notaDataDebito').value = notaEmRevisao.dataDebito || addDiasUteis(notaEmRevisao.dataPregao, 2);
+    document.getElementById('notaCorretora').value = notaEmRevisao.corretora || '';
+    const t = notaEmRevisao.taxas || {};
+    document.getElementById('notaTxCorretagem').value = t.corretagem || 0;
+    document.getElementById('notaTxLiquidacao').value = t.liquidacao || 0;
+    document.getElementById('notaTxEmolumentos').value = t.emolumentos || 0;
+    document.getElementById('notaTxRegistro').value = t.registro || 0;
+    document.getElementById('notaTxIss').value = t.iss || 0;
+    document.getElementById('notaTxIrrf').value = t.irrf || 0;
+    document.getElementById('notaTxOutras').value = t.outras || 0;
+    document.getElementById('notaLiquido').value = notaEmRevisao.liquido || 0;
+    pintarOperacoes();
+
+    document.getElementById('btnSalvarNota').addEventListener('click', ()=>{
+      Object.assign(notaEmRevisao, coletarNotaFormulario(), { atualizadoEm: new Date().toISOString() });
+      registrarLog('Nota de corretagem editada', `Nota${notaEmRevisao.corretora?' — '+notaEmRevisao.corretora:''} de ${notaEmRevisao.dataPregao} atualizada (segue aguardando aprovação)`);
+      persist(); closeModal(); render();
+      showToast('Alterações salvas — a nota segue aguardando aprovação');
+    });
+    document.getElementById('btnPublicarNota').addEventListener('click', ()=>{
+      Object.assign(notaEmRevisao, coletarNotaFormulario(), { atualizadoEm: new Date().toISOString() });
+      publicarNotaCorretagem(notaEmRevisao);
+    });
+    document.getElementById('btnExcluirNota').addEventListener('click', ()=>{
+      if(!confirm('Excluir esta nota pendente? Nenhum lançamento foi criado, então nada muda no caixa.')) return;
+      state.notasPendentes = (state.notasPendentes||[]).filter(n=>n.id!==notaEmRevisao.id);
+      registrarLog('Nota de corretagem excluída', `Nota pendente${notaEmRevisao.corretora?' — '+notaEmRevisao.corretora:''} de ${notaEmRevisao.dataPregao} descartada sem publicar`);
+      persist(); closeModal(); render();
+      showToast('Nota pendente excluída');
+    });
+    return;
+  }
 
   document.getElementById('notaFileInput').addEventListener('change', async ()=>{
     const file = document.getElementById('notaFileInput').files[0];
     if(!file) return;
+    arquivoNomeAtual = file.name || '';
     const status = document.getElementById('notaStatus');
     status.textContent = 'Lendo o PDF...';
     try{
@@ -6763,6 +7085,7 @@ function openImportarNotaModal(contaPreSelecionadaId){
       const dados = parseNotaCorretagem(linhas);
       operacoesAtuais = dados.operacoes;
       document.getElementById('notaData').value = dados.dataPregao;
+      document.getElementById('notaDataDebito').value = addDiasUteis(dados.dataPregao, 2);
       document.getElementById('notaTxCorretagem').value = dados.taxas.corretagem || 0;
       document.getElementById('notaTxLiquidacao').value = dados.taxas.liquidacao || 0;
       document.getElementById('notaTxEmolumentos').value = dados.taxas.emolumentos || 0;
@@ -6775,7 +7098,7 @@ function openImportarNotaModal(contaPreSelecionadaId){
       document.getElementById('notaRevisao').style.display = 'block';
       document.getElementById('btnConfirmarNota').style.display = 'inline-flex';
       status.textContent = operacoesAtuais.length
-        ? `${operacoesAtuais.length} operação(ões) identificada(s). Confira todos os campos — se o campo "Ticker" mostrar o nome da empresa em vez do código (ex: "PETROBRAS PN" em vez de "PETR4"), corrija ali antes de confirmar.`
+        ? `${operacoesAtuais.length} operação(ões) identificada(s). Confira todos os campos — se o campo "Ticker" mostrar o nome da empresa em vez do código (ex: "PETROBRAS PN" em vez de "PETR4"), corrija ali antes de enviar.`
         : 'Não consegui identificar operações automaticamente nessa nota — adicione as linhas manualmente abaixo.';
     }catch(e){
       console.error('Erro ao ler PDF da nota:', e);
@@ -6783,106 +7106,177 @@ function openImportarNotaModal(contaPreSelecionadaId){
       operacoesAtuais = [];
       pintarOperacoes();
       document.getElementById('notaData').value = todayISO();
+      document.getElementById('notaDataDebito').value = addDiasUteis(todayISO(), 2);
       document.getElementById('notaRevisao').style.display = 'block';
       document.getElementById('btnConfirmarNota').style.display = 'inline-flex';
     }
   });
 
   document.getElementById('btnConfirmarNota').addEventListener('click', ()=>{
-    const linhas = [...document.querySelectorAll('.nota-op-row')].map(row=>({
-      tipo: row.querySelector('.op-tipo').value,
-      tipoAtivo: row.querySelector('.op-tipoativo').value,
-      ticker: row.querySelector('.op-ticker').value.trim().toUpperCase(),
-      quantidade: numBR(row.querySelector('.op-qtd').value),
-      preco: numBR(row.querySelector('.op-preco').value)
-    })).filter(op=>op.ticker && op.quantidade>0 && op.preco>0);
-
-    if(!linhas.length){ showToast('Adicione ao menos uma operação válida'); return; }
-
-    const dataPregao = document.getElementById('notaData').value || todayISO();
-    const corretora = document.getElementById('notaCorretora').value.trim();
-    const taxaCorretagem = numBR(document.getElementById('notaTxCorretagem').value) || 0;
-    const taxaLiquidacao = numBR(document.getElementById('notaTxLiquidacao').value) || 0;
-    const taxaEmolumentos = numBR(document.getElementById('notaTxEmolumentos').value) || 0;
-    const taxaRegistro = numBR(document.getElementById('notaTxRegistro').value) || 0;
-    const taxaIss = numBR(document.getElementById('notaTxIss').value) || 0;
-    const taxaOutras = numBR(document.getElementById('notaTxOutras').value) || 0;
-    const taxasTotal = taxaCorretagem + taxaLiquidacao + taxaEmolumentos + taxaRegistro + taxaIss + taxaOutras;
-    const irrf = numBR(document.getElementById('notaTxIrrf').value) || 0;
-    const custosTotal = Math.round((taxasTotal + irrf)*100)/100;
-    const contaBancariaId = document.getElementById('notaContaBancaria').value;
-
-    const totalCompras = linhas.filter(l=>l.tipo==='C').reduce((s,l)=>s+l.quantidade*l.preco,0);
-    const totalVendas = linhas.filter(l=>l.tipo==='V').reduce((s,l)=>s+l.quantidade*l.preco,0);
-
-    let contaInv = state.contasInvestimento.find(c=>c.tipo==='renda_variavel');
-    if(!contaInv){
-      contaInv = { id: uid(), nome:'Renda Variável', instituicao:'', instituicaoDominio:'', tipo:'renda_variavel', cor: CONTA_CORES[state.contasInvestimento.length % CONTA_CORES.length] };
-      state.contasInvestimento.push(contaInv);
-    }
-
-    linhas.forEach(l=>{
-      const taxaProporcional = totalCompras>0 ? (l.quantidade*l.preco/totalCompras)*taxasTotal : 0;
-      let ativo = state.ativosInvestimento.find(a=>a.contaId===contaInv.id && a.ticker===l.ticker && !a.manual);
-      if(l.tipo==='C'){
-        if(ativo){
-          const custoAntigo = (ativo.quantidade||0) * (ativo.precoMedio||0);
-          const custoNovo = l.quantidade*l.preco + taxaProporcional;
-          ativo.quantidade = (ativo.quantidade||0) + l.quantidade;
-          ativo.precoMedio = Math.round(((custoAntigo+custoNovo)/ativo.quantidade)*100)/100;
-        } else {
-          const precoMedio = Math.round(((l.quantidade*l.preco + taxaProporcional)/l.quantidade)*100)/100;
-          state.ativosInvestimento.push({ id: uid(), tipoAtivo: l.tipoAtivo, contaId: contaInv.id, ticker: l.ticker, nome: l.ticker, quantidade: l.quantidade, precoMedio, precoAtual: null, dataUltimaCotacao: null, corretora });
-        }
-      } else {
-        if(ativo){
-          ativo.quantidade = Math.max(0, (ativo.quantidade||0) - l.quantidade);
-        }
-      }
-    });
-
-    if(totalCompras>0){
-      state.lancamentos.push({
-        id: uid(), tipo:'saida', categoria:'Investimentos',
-        descricao: `Compra de ativos${corretora ? ' — '+corretora : ''} (nota de corretagem)`,
-        valor: Math.round(totalCompras*100)/100, contaId: contaBancariaId, status:'pago',
-        dataVencimento: dataPregao, dataPagamento: dataPregao,
-        origem:'investimento', observacao: 'Operações: '+linhas.filter(l=>l.tipo==='C').map(l=>`${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', '),
-        criadoEm: new Date().toISOString()
-      });
-    }
-    if(totalVendas>0){
-      state.lancamentos.push({
-        id: uid(), tipo:'entrada', categoria:'Outros',
-        descricao: `Venda de ativos${corretora ? ' — '+corretora : ''} (nota de corretagem)`,
-        valor: Math.round(totalVendas*100)/100, contaId: contaBancariaId, status:'recebido',
-        dataVencimento: dataPregao, dataPagamento: dataPregao,
-        origem:'investimento', observacao: 'Operações: '+linhas.filter(l=>l.tipo==='V').map(l=>`${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', '),
-        criadoEm: new Date().toISOString()
-      });
-    }
-    if(custosTotal>0){
-      const partesCusto = [];
-      if(taxaCorretagem) partesCusto.push(`Corretagem: ${brl(taxaCorretagem)}`);
-      if(taxaLiquidacao) partesCusto.push(`Liquidação: ${brl(taxaLiquidacao)}`);
-      if(taxaEmolumentos) partesCusto.push(`Emolumentos: ${brl(taxaEmolumentos)}`);
-      if(taxaRegistro) partesCusto.push(`Registro: ${brl(taxaRegistro)}`);
-      if(taxaIss) partesCusto.push(`ISS: ${brl(taxaIss)}`);
-      if(taxaOutras) partesCusto.push(`Outras: ${brl(taxaOutras)}`);
-      if(irrf) partesCusto.push(`IRRF: ${brl(irrf)}`);
-      state.lancamentos.push({
-        id: uid(), tipo:'saida', categoria:'Investimentos',
-        descricao: `Taxas e custos — nota de corretagem${corretora ? ' — '+corretora : ''}`,
-        valor: custosTotal, contaId: contaBancariaId, status:'pago',
-        dataVencimento: dataPregao, dataPagamento: dataPregao,
-        origem:'investimento', observacao: partesCusto.join(' · '),
-        criadoEm: new Date().toISOString()
-      });
-    }
-
-    persist(); closeModal(); render();
-    showToast('Nota de corretagem lançada — operação e taxas registradas separadamente');
+    const nota = { id: uid(), ...coletarNotaFormulario(), criadoEm: new Date().toISOString() };
+    if(!state.notasPendentes) state.notasPendentes = [];
+    state.notasPendentes.push(nota);
+    registrarLog('Nota de corretagem recebida', `Nota${nota.corretora?' — '+nota.corretora:''} de ${nota.dataPregao} salva para aprovação (débito previsto em ${nota.dataDebito})`);
+    persist(); closeModal();
+    currentView = 'investimentos';
+    document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view==='investimentos'));
+    render();
+    showToast('Nota salva — revise e publique no painel "Notas aguardando aprovação"');
   });
+}
+
+function garantirCategoriasNotaCorretagem(){
+  let cat = state.categorias.saida.find(c=>c.nome==='Investimentos');
+  if(!cat){ cat = { id: uid(), nome:'Investimentos', subcategorias: [] }; state.categorias.saida.push(cat); }
+  if(!cat.subcategorias) cat.subcategorias = [];
+  ['Taxa de Liquidação','Emolumentos','Tarifas Diversas B3'].forEach(nome=>{
+    if(!cat.subcategorias.some(s=>s.nome===nome)) cat.subcategorias.push({ id: uid(), nome });
+  });
+}
+
+function publicarNotaCorretagem(nota){
+  const linhas = (nota.operacoes||[]).map(op=>({
+    tipo: op.tipo==='V' ? 'V' : 'C',
+    tipoAtivo: op.tipoAtivo==='fii' ? 'fii' : 'acao',
+    ticker: String(op.ticker||'').trim().toUpperCase(),
+    quantidade: typeof op.quantidade==='number' ? op.quantidade : numBR(op.quantidade),
+    preco: typeof op.preco==='number' ? op.preco : numBR(op.preco)
+  })).filter(op=>op.ticker && op.quantidade>0 && op.preco>0);
+
+  if(!linhas.length){ showToast('Adicione ao menos uma operação válida antes de publicar'); return false; }
+
+  const dataPregao = nota.dataPregao || todayISO();
+  const dataDebito = nota.dataDebito || dataPregao;
+  const corretora = nota.corretora || '';
+  const t = nota.taxas || {};
+  const taxaCorretagem = t.corretagem || 0;
+  const taxaLiquidacao = t.liquidacao || 0;
+  const taxaEmolumentos = t.emolumentos || 0;
+  const taxaRegistro = t.registro || 0;
+  const taxaIss = t.iss || 0;
+  const taxaOutras = t.outras || 0;
+  const irrf = t.irrf || 0;
+  const taxasTotal = taxaCorretagem + taxaLiquidacao + taxaEmolumentos + taxaRegistro + taxaIss + taxaOutras;
+  const contaBancariaId = nota.contaBancariaId || (state.contas[0] && state.contas[0].id);
+
+  const jaDebitou = dataDebito <= todayISO();
+  const statusSaida = jaDebitou ? 'pago' : 'pendente';
+  const statusEntrada = jaDebitou ? 'recebido' : 'pendente';
+  const dataPagamento = jaDebitou ? dataDebito : null;
+
+  const totalCompras = linhas.filter(l=>l.tipo==='C').reduce((s,l)=>s+l.quantidade*l.preco,0);
+  const totalVendas = linhas.filter(l=>l.tipo==='V').reduce((s,l)=>s+l.quantidade*l.preco,0);
+
+  let contaInv = state.contasInvestimento.find(c=>c.tipo==='renda_variavel');
+  if(!contaInv){
+    contaInv = { id: uid(), nome:'Renda Variável', instituicao:'', instituicaoDominio:'', tipo:'renda_variavel', cor: CONTA_CORES[state.contasInvestimento.length % CONTA_CORES.length] };
+    state.contasInvestimento.push(contaInv);
+  }
+
+  linhas.forEach(l=>{
+    const taxaProporcional = totalCompras>0 ? (l.quantidade*l.preco/totalCompras)*taxasTotal : 0;
+    let ativo = state.ativosInvestimento.find(a=>a.contaId===contaInv.id && a.ticker===l.ticker && !a.manual);
+    if(l.tipo==='C'){
+      if(ativo){
+        const custoAntigo = (ativo.quantidade||0) * (ativo.precoMedio||0);
+        const custoNovo = l.quantidade*l.preco + taxaProporcional;
+        ativo.quantidade = (ativo.quantidade||0) + l.quantidade;
+        ativo.precoMedio = Math.round(((custoAntigo+custoNovo)/ativo.quantidade)*100)/100;
+      } else {
+        const precoMedio = Math.round(((l.quantidade*l.preco + taxaProporcional)/l.quantidade)*100)/100;
+        state.ativosInvestimento.push({ id: uid(), tipoAtivo: l.tipoAtivo, contaId: contaInv.id, ticker: l.ticker, nome: l.ticker, quantidade: l.quantidade, precoMedio, precoAtual: null, dataUltimaCotacao: null, corretora });
+      }
+    } else {
+      if(ativo){
+        ativo.quantidade = Math.max(0, (ativo.quantidade||0) - l.quantidade);
+      }
+    }
+  });
+
+  if(totalCompras>0){
+    state.lancamentos.push({
+      id: uid(), tipo:'saida', categoria:'Investimentos',
+      descricao: `Compra de ativos${corretora ? ' — '+corretora : ''} (nota de corretagem)`,
+      valor: Math.round(totalCompras*100)/100, contaId: contaBancariaId, status: statusSaida,
+      dataVencimento: dataDebito, dataPagamento,
+      origem:'investimento', observacao: 'Operações: '+linhas.filter(l=>l.tipo==='C').map(l=>`${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', '),
+      criadoEm: new Date().toISOString()
+    });
+  }
+  if(totalVendas>0){
+    state.lancamentos.push({
+      id: uid(), tipo:'entrada', categoria:'Outros',
+      descricao: `Venda de ativos${corretora ? ' — '+corretora : ''} (nota de corretagem)`,
+      valor: Math.round(totalVendas*100)/100, contaId: contaBancariaId, status: statusEntrada,
+      dataVencimento: dataDebito, dataPagamento,
+      origem:'investimento', observacao: 'Operações: '+linhas.filter(l=>l.tipo==='V').map(l=>`${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', '),
+      criadoEm: new Date().toISOString()
+    });
+  }
+
+  // Custos da nota — lançados automaticamente nas categorias próprias (editáveis como qualquer outra)
+  const temCustos = taxasTotal + irrf > 0;
+  if(temCustos){
+    garantirCategoriasNotaCorretagem();
+    const baseCusto = {
+      tipo:'saida', contaId: contaBancariaId, status: statusSaida,
+      dataVencimento: dataDebito, dataPagamento,
+      origem:'investimento', criadoEm: new Date().toISOString()
+    };
+    if(taxaLiquidacao>0){
+      state.lancamentos.push({ ...baseCusto, id: uid(), categoria:'Investimentos / Taxa de Liquidação',
+        descricao: `Taxa de liquidação — nota de corretagem${corretora ? ' — '+corretora : ''}`,
+        valor: Math.round(taxaLiquidacao*100)/100, observacao: `Liquidação: ${brl(taxaLiquidacao)}` });
+    }
+    if(taxaEmolumentos>0){
+      state.lancamentos.push({ ...baseCusto, id: uid(), categoria:'Investimentos / Emolumentos',
+        descricao: `Emolumentos — nota de corretagem${corretora ? ' — '+corretora : ''}`,
+        valor: Math.round(taxaEmolumentos*100)/100, observacao: `Emolumentos: ${brl(taxaEmolumentos)}` });
+    }
+    const tarifasDiversas = Math.round((taxaCorretagem + taxaRegistro + taxaIss + taxaOutras + irrf)*100)/100;
+    if(tarifasDiversas>0){
+      const partes = [];
+      if(taxaCorretagem) partes.push(`Corretagem: ${brl(taxaCorretagem)}`);
+      if(taxaRegistro) partes.push(`Registro: ${brl(taxaRegistro)}`);
+      if(taxaIss) partes.push(`ISS: ${brl(taxaIss)}`);
+      if(taxaOutras) partes.push(`Outras: ${brl(taxaOutras)}`);
+      if(irrf) partes.push(`IRRF: ${brl(irrf)}`);
+      state.lancamentos.push({ ...baseCusto, id: uid(), categoria:'Investimentos / Tarifas Diversas B3',
+        descricao: `Tarifas diversas B3 — nota de corretagem${corretora ? ' — '+corretora : ''}`,
+        valor: tarifasDiversas, observacao: partes.join(' · ') });
+    }
+  }
+
+  state.notasPendentes = (state.notasPendentes||[]).filter(n=>n.id!==nota.id);
+  registrarLog('Nota de corretagem publicada', `Nota${corretora?' — '+corretora:''} de ${dataPregao}: ${linhas.length} operação(ões), débito em ${dataDebito}${temCustos?', custos categorizados automaticamente':''}`);
+  persist(); closeModal(); render();
+  showToast(jaDebitou ? 'Nota publicada — operações e custos lançados nas categorias certas' : `Nota publicada — lançamentos ficam pendentes até o débito em ${fmtDate ? fmtDate(dataDebito) : dataDebito}`);
+  return true;
+}
+
+function openEscolherContaInvestirModal(){
+  if(!state.contas.length){ showToast('Cadastre uma conta bancária primeiro'); return; }
+  if(state.contas.length===1){ openInvestirModal(state.contas[0].id); return; }
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Investir a partir de qual conta?</h3>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
+      ${state.contas.map(c=>`<button type="button" class="btn ghost" data-conta-inv-id="${c.id}" style="justify-content:space-between;">${escapeHTML(c.nome)} <span class="mono" style="font-size:12px;color:var(--text-soft);">${brl(saldoConta(c.id))}</span></button>`).join('')}
+    </div>
+    <div class="modal-actions"><button class="btn ghost" id="btnCancelarModal">Cancelar</button></div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  modal.querySelectorAll('[data-conta-inv-id]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openInvestirModal(btn.dataset.contaInvId));
+  });
+}
+
+function addDiasUteis(isoDate, dias){
+  const d = new Date((isoDate||todayISO())+'T12:00:00');
+  let n = 0;
+  while(n<dias){ d.setDate(d.getDate()+1); const dw = d.getDay(); if(dw!==0 && dw!==6) n++; }
+  return d.toISOString().slice(0,10);
 }
 
 function openInvestirModal(contaBancariaId){
@@ -7428,7 +7822,7 @@ document.getElementById('fileImport').addEventListener('change', (e)=>{
     try{
       const data = JSON.parse(ev.target.result);
       if(!data.lancamentos) throw new Error('formato inválido');
-      state = { lancamentos:[], ativos:[], investimentos:[], forneiraConfig:null, contas:[], cartoes:[], comprasCartao:[], faturasFechadas:[], contasInvestimento:[], ativosInvestimento:[], categorias:null, categoriaMEI:{}, meiEmpregadoPorAno:{}, fornecedores:[], recorrencias:[], orcamentoCategorias:{}, ...data };
+      state = { lancamentos:[], ativos:[], investimentos:[], forneiraConfig:null, contas:[], cartoes:[], comprasCartao:[], faturasFechadas:[], contasInvestimento:[], ativosInvestimento:[], notasPendentes:[], categorias:null, categoriaMEI:{}, meiEmpregadoPorAno:{}, fornecedores:[], recorrencias:[], orcamentoCategorias:{}, ...data };
       if(state.contas.length===0) state.contas.push({ id:'conta_caixa', nome:'Caixa', banco:'Conta padrão', tipo:'caixa', saldoInicial:0, cor:CONTA_CORES[0] });
       const idPadrao = state.contas[0].id;
       state.lancamentos.forEach(l=>{ if(!l.contaId) l.contaId = idPadrao; });
