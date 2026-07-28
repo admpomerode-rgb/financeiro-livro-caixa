@@ -757,6 +757,7 @@ function aplicarMigracoes(s){
   if(!s.contasInvestimento) s.contasInvestimento = [];
   if(!s.ativosInvestimento) s.ativosInvestimento = [];
   if(!s.notasPendentes) s.notasPendentes = [];
+  if(!s.balancoManual) s.balancoManual = { estoques:0, realizavelLP:0, passivoNaoCirculante:0 };
   if(!s.categorias){
     s.categorias = {
       saida: CATEGORIAS_SAIDA.map(nome=>({ id: uid(), nome, subcategorias: [] })),
@@ -3058,6 +3059,7 @@ function viewRelatorios(){
     { id:'indicadores', icone:'📈', nome:'Indicadores Financeiros', desc:'Margem, liquidez, ticket médio, ponto de equilíbrio e mais' },
     { id:'produto', icone:'🍪', nome:'Rentabilidade por Produto', desc:'Receita, custo e margem por produto ou linha' },
     { id:'investimentos', icone:'💰', nome:'Relatório de Investimentos', desc:'Total aplicado no mês (renda fixa + variável), ativos mais investidos e custos das operações' },
+    { id:'liquidez', icone:'💧', nome:'Índices de Liquidez', desc:'Liquidez imediata, seca, corrente e geral + capital de giro, endividamento e solvência' },
     { id:'mei', icone:'🧾', nome:'Declaração MEI', desc:'Números prontos pra DASN-SIMEI' },
   ];
   return `
@@ -3093,6 +3095,7 @@ function viewRelatorioDetalhe(){
       <button data-report="indicadores">Indicadores</button>
       <button data-report="produto">Por Produto</button>
       <button data-report="investimentos">Investimentos</button>
+      <button data-report="liquidez">Liquidez</button>
       <button data-report="mensal">Super Mensal</button>
     </div>
     <div class="panel" id="reportPanel"></div>
@@ -3685,6 +3688,108 @@ function renderRentabilidadeProduto(periodo){
     </div>
     <div class="note" style="margin-top:0;">"Não classificado" reúne os lançamentos sem produto marcado. Pra detalhar melhor, edite o lançamento e preencha o campo "Produto/linha".</div>
     `}
+  `;
+}
+
+function renderRelatorioLiquidez(){
+  const bm = state.balancoManual || { estoques:0, realizavelLP:0, passivoNaoCirculante:0 };
+  const disponivel = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+  const aReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente').reduce((s,l)=>s+l.valor,0);
+  const aPagar = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente').reduce((s,l)=>s+l.valor,0);
+  const cartoesAbertos = state.cartoes.reduce((s,c)=>{
+    const comp = competenciaAtual(c);
+    return s + (faturaStatus(c.id, comp)==='aberta' ? totalCompetencia(c.id, comp) : 0);
+  }, 0);
+  const investimentos = totalInvestimentos();
+  const imobilizado = totalAtivosPatrimoniais();
+  const estoques = bm.estoques || 0;
+  const realizavelLP = bm.realizavelLP || 0;
+  const passivoLP = bm.passivoNaoCirculante || 0;
+
+  const ativoCirculante = disponivel + aReceber + investimentos + estoques;
+  const passivoCirculante = aPagar + cartoesAbertos;
+  const ativoTotal = ativoCirculante + realizavelLP + imobilizado;
+  const passivoTotal = passivoCirculante + passivoLP;
+  const patrimonioLiquido = ativoTotal - passivoTotal;
+  const ccl = ativoCirculante - passivoCirculante;
+
+  const razao = (num, den) => den > 0 ? num/den : null;
+  const fmtIdx = v => v===null ? '—' : v.toLocaleString('pt-BR',{minimumFractionDigits:2, maximumFractionDigits:2});
+  const semDividaCurta = passivoCirculante<=0;
+  const semDividaTotal = passivoTotal<=0;
+
+  const liqImediata = razao(disponivel, passivoCirculante);
+  const liqSeca = razao(ativoCirculante - estoques, passivoCirculante);
+  const liqCorrente = razao(ativoCirculante, passivoCirculante);
+  const liqGeral = razao(ativoCirculante + realizavelLP, passivoTotal);
+
+  const endividamentoGeral = ativoTotal>0 && passivoTotal>0 ? passivoTotal/ativoTotal : null;
+  const composicaoEndiv = passivoTotal>0 ? passivoCirculante/passivoTotal : null;
+  const capitalTerceiros = patrimonioLiquido>0 && passivoTotal>0 ? passivoTotal/patrimonioLiquido : null;
+  const imobilizacaoPL = patrimonioLiquido>0 ? imobilizado/patrimonioLiquido : null;
+  const solvencia = passivoTotal>0 ? ativoTotal/passivoTotal : null;
+
+  const corIdx = (v, ruim, atencao) => v===null ? 'var(--text-soft)' : v < ruim ? 'var(--danger)' : v < atencao ? 'var(--warn)' : 'var(--success)';
+  const corInversa = (v, bom, atencao) => v===null ? 'var(--text-soft)' : v <= bom ? 'var(--success)' : v <= atencao ? 'var(--warn)' : 'var(--danger)';
+
+  const linhaIndice = (nome, formula, valor, cor, interpretacao) => `
+    <div class="report-line" style="display:block;border-bottom:1px solid var(--line);padding:10px 0;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;">
+        <span style="font-weight:600;">${nome} <span style="font-weight:400;font-size:11px;color:var(--text-soft);">· ${formula}</span></span>
+        <span class="v mono" style="font-size:16px;font-weight:700;color:${cor};">${fmtIdx(valor)}</span>
+      </div>
+      <div style="font-size:11.5px;color:var(--text-soft);margin-top:3px;line-height:1.45;">${interpretacao}</div>
+    </div>
+  `;
+  const porReal = v => v===null ? '' : `Pra cada R$ 1,00 de dívida, há <strong>${brl(v)}</strong> `;
+
+  return `
+    <div class="report-controls"><span style="font-size:12.5px;color:var(--text-soft);">Índices de Liquidez e Endividamento — posição de hoje (${fmtDate(todayISO())})</span></div>
+    <div class="report-block">
+      <div class="report-title">Base de cálculo</div>
+      <div class="report-line sub"><span>Disponível (caixa e bancos)</span><span class="v">${brl(disponivel)}</span></div>
+      <div class="report-line sub"><span>Contas a receber (pendentes)</span><span class="v">${brl(aReceber)}</span></div>
+      <div class="report-line sub"><span>Investimentos financeiros</span><span class="v">${brl(investimentos)}</span></div>
+      <div class="report-line sub"><span>Estoques (informado abaixo)</span><span class="v">${brl(estoques)}</span></div>
+      <div class="report-line total"><span>Ativo Circulante</span><span class="v">${brl(ativoCirculante)}</span></div>
+      <div class="report-line sub"><span>Contas a pagar (pendentes)</span><span class="v">${brl(aPagar)}</span></div>
+      <div class="report-line sub"><span>Faturas de cartão em aberto</span><span class="v">${brl(cartoesAbertos)}</span></div>
+      <div class="report-line total"><span>Passivo Circulante</span><span class="v">${brl(passivoCirculante)}</span></div>
+      <div class="report-line result"><span>Capital Circulante Líquido (AC − PC)</span><span class="v" style="color:${ccl>=0?'var(--success)':'var(--danger)'};">${brl(ccl)}</span></div>
+
+      <div class="report-title">Dados complementares (o sistema não controla — informe se tiver)</div>
+      <div class="field-row">
+        <div class="field"><label>Estoques (R$)</label><input type="text" inputmode="decimal" id="liqEstoques" value="${estoques||''}" placeholder="0,00"></div>
+        <div class="field"><label>Realizável a longo prazo (R$)</label><input type="text" inputmode="decimal" id="liqRealizavelLP" value="${realizavelLP||''}" placeholder="0,00"></div>
+        <div class="field"><label>Dívidas de longo prazo (R$)</label><input type="text" inputmode="decimal" id="liqPassivoLP" value="${passivoLP||''}" placeholder="0,00"></div>
+      </div>
+      <div class="note" style="margin-top:0;">Estoques: matéria-prima + produto acabado. Dívidas de longo prazo: empréstimos e financiamentos com vencimento acima de 12 meses. Os valores ficam salvos.</div>
+
+      <div class="report-title">Índices de liquidez</div>
+      ${semDividaCurta ? `<div class="note" style="margin-top:0;">Sem dívidas de curto prazo no momento — os índices de curto prazo não se aplicam (situação confortável). Eles passam a valer quando houver contas a pagar pendentes.</div>` : ''}
+      ${linhaIndice('Liquidez Imediata', 'Disponível ÷ Passivo Circulante', liqImediata, corIdx(liqImediata, 0.2, 0.5),
+        liqImediata===null ? 'Não se aplica sem passivo circulante.' : `${porReal(liqImediata)}em dinheiro na mão, sem depender de receber ninguém. Referência: acima de 0,20 já é saudável — muito acima de 1,00 pode indicar caixa parado que poderia render mais investido.`)}
+      ${linhaIndice('Liquidez Seca', '(Ativo Circ. − Estoques) ÷ Passivo Circ.', liqSeca, corIdx(liqSeca, 0.8, 1),
+        liqSeca===null ? 'Não se aplica sem passivo circulante.' : `${porReal(liqSeca)}sem contar com a venda de estoque. Referência: acima de 1,00 é confortável; abaixo de 0,80 acende alerta, porque estoque parado não paga boleto.`)}
+      ${linhaIndice('Liquidez Corrente', 'Ativo Circulante ÷ Passivo Circulante', liqCorrente, corIdx(liqCorrente, 1, 1.5),
+        liqCorrente===null ? 'Não se aplica sem passivo circulante.' : `${porReal(liqCorrente)}em recursos de curto prazo. É o índice mais usado por bancos e fornecedores. Referência: abaixo de 1,00 é sinal vermelho; entre 1,00 e 1,50 requer atenção; acima de 1,50 é confortável.`)}
+      ${linhaIndice('Liquidez Geral', '(AC + Realizável LP) ÷ (PC + Exigível LP)', liqGeral, corIdx(liqGeral, 1, 1.2),
+        liqGeral===null ? (semDividaTotal ? 'Não se aplica — a empresa não tem dívidas registradas.' : 'Não se aplica.') : `${porReal(liqGeral)}considerando também o longo prazo. Mostra a saúde financeira estrutural, não só o mês que vem. Referência: acima de 1,00.`)}
+
+      <div class="report-title">Estrutura de capital e endividamento</div>
+      ${linhaIndice('Endividamento Geral', 'Passivo Total ÷ Ativo Total', endividamentoGeral, corInversa(endividamentoGeral, 0.4, 0.6),
+        endividamentoGeral===null ? 'Não se aplica sem dívidas.' : `<strong>${(endividamentoGeral*100).toLocaleString('pt-BR',{maximumFractionDigits:1})}%</strong> dos bens da empresa são financiados por terceiros. Referência: até 40% é conservador; acima de 60% merece cuidado.`)}
+      ${linhaIndice('Composição do Endividamento', 'Passivo Circ. ÷ Passivo Total', composicaoEndiv, corInversa(composicaoEndiv, 0.5, 0.8),
+        composicaoEndiv===null ? 'Não se aplica sem dívidas.' : `<strong>${(composicaoEndiv*100).toLocaleString('pt-BR',{maximumFractionDigits:1})}%</strong> das dívidas vencem no curto prazo. Quanto menor, mais fôlego — dívida concentrada no curto prazo pressiona o caixa.`)}
+      ${linhaIndice('Participação de Capital de Terceiros', 'Passivo Total ÷ Patrimônio Líquido', capitalTerceiros, corInversa(capitalTerceiros, 0.5, 1),
+        capitalTerceiros===null ? (patrimonioLiquido<=0 ? 'Não se aplica — o patrimônio líquido está zerado ou negativo.' : 'Não se aplica sem dívidas.') : `Pra cada R$ 1,00 de capital próprio, há <strong>${brl(capitalTerceiros)}</strong> de capital de terceiros. Referência: abaixo de 1,00 significa que a empresa se financia mais com recursos próprios.`)}
+      ${linhaIndice('Imobilização do Patrimônio Líquido', 'Imobilizado ÷ Patrimônio Líquido', imobilizacaoPL, corInversa(imobilizacaoPL, 0.5, 1),
+        imobilizacaoPL===null ? 'Não se aplica — o patrimônio líquido está zerado ou negativo.' : `<strong>${(imobilizacaoPL*100).toLocaleString('pt-BR',{maximumFractionDigits:1})}%</strong> do capital próprio está preso em máquinas, equipamentos e imóveis. Acima de 100% significa que até o capital de giro depende de dinheiro de terceiros.`)}
+      ${linhaIndice('Solvência Geral', 'Ativo Total ÷ Passivo Total', solvencia, corIdx(solvencia, 1, 1.5),
+        solvencia===null ? 'Não se aplica sem dívidas.' : `Se a empresa vendesse tudo hoje, cobriria as dívidas <strong>${fmtIdx(solvencia)}</strong> vez(es). Abaixo de 1,00 indica passivo a descoberto — situação grave.`)}
+
+      <div class="note">Os índices usam a posição de hoje: saldos das contas, pendências de pagar/receber, investimentos e ativos patrimoniais já depreciados. Bancos costumam pedir exatamente esses indicadores em análise de crédito.</div>
+    </div>
   `;
 }
 
@@ -5429,11 +5534,23 @@ function attachViewHandlers(){
         relatorioAtivo==='mei' ? renderMEI(meiAnoAtual) :
         relatorioAtivo==='produto' ? renderRentabilidadeProduto('mes') :
         relatorioAtivo==='investimentos' ? renderRelatorioInvestimentos() :
+        relatorioAtivo==='liquidez' ? renderRelatorioLiquidez() :
         relatorioAtivo==='mensal' ? renderSuperRelatorioMensal(mensalMesRef) :
         renderIndicadores('mes');
       bindReportInner();
     };
     const bindReportInner = ()=>{
+      ['liqEstoques','liqRealizavelLP','liqPassivoLP'].forEach(idc=>{
+        document.getElementById(idc)?.addEventListener('change', ()=>{
+          state.balancoManual = state.balancoManual || {};
+          state.balancoManual.estoques = numBR(document.getElementById('liqEstoques').value) || 0;
+          state.balancoManual.realizavelLP = numBR(document.getElementById('liqRealizavelLP').value) || 0;
+          state.balancoManual.passivoNaoCirculante = numBR(document.getElementById('liqPassivoLP').value) || 0;
+          persist();
+          document.getElementById('reportPanel').innerHTML = renderRelatorioLiquidez();
+          bindReportInner();
+        });
+      });
       const drePeriodo = document.getElementById('drePeriodo');
       if(drePeriodo) drePeriodo.addEventListener('change', ()=>{
         document.getElementById('reportPanel').innerHTML = renderDRE(drePeriodo.value);
@@ -5496,7 +5613,7 @@ function attachViewHandlers(){
     });
     paint();
     document.getElementById('btnExportarRelatorioPDF')?.addEventListener('click', ()=>{
-      const titulos = { dre: 'DRE (Demonstrativo de Resultado)', balanco: 'Balanço Patrimonial', mei: `Declaração MEI — Ano ${meiAnoAtual}`, indicadores: 'Indicadores Financeiros', produto: 'Rentabilidade por Produto', mensal: `Super Relatório Mensal — ${mensalMesRef}`, investimentos: `Relatório de Investimentos — ${mesGlobalRef}` };
+      const titulos = { dre: 'DRE (Demonstrativo de Resultado)', balanco: 'Balanço Patrimonial', mei: `Declaração MEI — Ano ${meiAnoAtual}`, indicadores: 'Indicadores Financeiros', produto: 'Rentabilidade por Produto', mensal: `Super Relatório Mensal — ${mensalMesRef}`, investimentos: `Relatório de Investimentos — ${mesGlobalRef}`, liquidez: 'Índices de Liquidez e Endividamento' };
       exportarRelatorioPDF(titulos[relatorioAtivo]);
     });
   }
