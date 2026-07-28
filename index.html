@@ -827,6 +827,7 @@ function showToast(msg){
 let currentView = 'dashboard';
 let extratoContaId = null;
 let relatorioAtivo = 'dre';
+let dreAnaliseAtiva = 'horizontal';
 let mesGlobalRef = todayISO().slice(0,7);
 let categoriaLancamentosAtual = null;
 let lancamentosBuscaPreenchida = '';
@@ -3416,13 +3417,16 @@ function renderDRE(periodo){
   const totalDespesasAnt = listaAnterior.filter(l=>l.tipo==='saida').reduce((s,l)=>s+l.valor,0);
   const resultadoAnt = totalReceitasAnt - totalDespesasAnt;
 
-  const pctVertical = (v)=> totalReceitas>0 ? ` <span style="color:var(--text-soft);font-size:11px;">(${(v/totalReceitas*100).toFixed(1)}%)</span>` : '';
-  const variacaoHTML = (atual, anterior)=>{
+  const mostraVertical = dreAnaliseAtiva==='vertical';
+  const pctVerticalBase = (v)=> totalReceitas>0 ? ` <span style="color:var(--text-soft);font-size:11px;">(${(v/totalReceitas*100).toFixed(1)}%)</span>` : '';
+  const pctVertical = (v)=> mostraVertical ? pctVerticalBase(v) : '';
+  const variacaoHTMLBase = (atual, anterior)=>{
     if(anterior===0) return atual===0 ? '' : ` <span style="font-size:11px;color:var(--text-soft);">(sem período anterior pra comparar)</span>`;
     const pct = ((atual-anterior)/Math.abs(anterior))*100;
     const cor = pct>=0 ? 'var(--success)' : 'var(--danger)';
     return ` <span style="font-size:11px;color:${cor};">(${pct>=0?'+':''}${pct.toFixed(1)}% vs período anterior)</span>`;
   };
+  const variacaoHTML = (atual, anterior)=> mostraVertical ? pctVerticalBase(atual) : variacaoHTMLBase(atual, anterior);
 
   return `
     <div class="report-controls">
@@ -3431,9 +3435,15 @@ function renderDRE(periodo){
         <option value="ano" ${periodo==='ano'?'selected':''}>Ano atual</option>
         <option value="custom" ${periodo==='custom'?'selected':''}>Personalizado</option>
       </select>
+      <select id="dreAnalise">
+        <option value="horizontal" ${!mostraVertical?'selected':''}>Análise horizontal</option>
+        <option value="vertical" ${mostraVertical?'selected':''}>Análise vertical</option>
+      </select>
       ${periodo==='custom' ? `<input type="date" id="dreDe" value="${de}"> <span style="color:var(--text-soft);font-size:12px;">até</span> <input type="date" id="dreAte" value="${ate}">` : `<span style="font-size:12.5px;color:var(--text-soft);">${label}: ${fmtDate(de)} até ${fmtDate(ate)}</span>`}
     </div>
-    <div class="note" style="margin-top:0;">Análise vertical: % de cada linha sobre o total de receitas. Análise horizontal: variação comparada ao período anterior de mesma duração (${fmtDate(deAnterior)} a ${fmtDate(ateAnterior)}).</div>
+    <div class="note" style="margin-top:0;">${mostraVertical
+      ? 'Análise vertical: cada linha mostra o % que representa sobre o total de receitas do período.'
+      : `Análise horizontal: variação de cada total comparada ao período anterior de mesma duração (${fmtDate(deAnterior)} a ${fmtDate(ateAnterior)}).`}</div>
     <div class="report-block">
       <div class="report-title">Receita Operacional</div>
       ${Object.keys(receitas).length ? Object.entries(receitas).map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">${brl(v)}${pctVertical(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma receita no período</span><span class="v">${brl(0)}</span></div>`}
@@ -5556,6 +5566,12 @@ function attachViewHandlers(){
         });
       });
       const drePeriodo = document.getElementById('drePeriodo');
+      const dreAnaliseSel = document.getElementById('dreAnalise');
+      if(dreAnaliseSel) dreAnaliseSel.addEventListener('change', ()=>{
+        dreAnaliseAtiva = dreAnaliseSel.value;
+        document.getElementById('reportPanel').innerHTML = renderDRE(document.getElementById('drePeriodo')?.value || 'mes');
+        bindReportInner();
+      });
       if(drePeriodo) drePeriodo.addEventListener('change', ()=>{
         document.getElementById('reportPanel').innerHTML = renderDRE(drePeriodo.value);
         bindReportInner();
