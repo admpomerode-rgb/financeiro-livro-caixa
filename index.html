@@ -3079,24 +3079,25 @@ function viewRelatorios(){
   `;
 }
 
+const RELATORIOS_NOMES = {
+  dre:'DRE', balanco:'Balanço Patrimonial', mei:'Declaração MEI', indicadores:'Indicadores Financeiros',
+  produto:'Rentabilidade por Produto', investimentos:'Relatório de Investimentos', liquidez:'Índices de Liquidez', mensal:'Super Relatório Mensal'
+};
+
 function viewRelatorioDetalhe(){
   return `
     <div class="topbar">
       <div>
         <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="relatorios">← Central de Relatórios</span>
-        <h1 style="margin-top:6px;">Relatórios</h1>
+        <h1 style="margin-top:6px;" id="reportTitulo">${RELATORIOS_NOMES[relatorioAtivo]||'Relatórios'}</h1>
       </div>
       <button class="btn ghost" id="btnExportarRelatorioPDF">📄 Exportar PDF</button>
     </div>
-    <div class="toggle-row" id="reportToggle">
-      <button data-report="dre">DRE</button>
-      <button data-report="balanco">Balanço Patrimonial</button>
-      <button data-report="mei">Declaração MEI</button>
-      <button data-report="indicadores">Indicadores</button>
-      <button data-report="produto">Por Produto</button>
-      <button data-report="investimentos">Investimentos</button>
-      <button data-report="liquidez">Liquidez</button>
-      <button data-report="mensal">Super Mensal</button>
+    <div class="field" style="max-width:420px;">
+      <label>Escolha o relatório</label>
+      <select id="reportSelect">
+        ${Object.entries(RELATORIOS_NOMES).map(([id,nome])=>`<option value="${id}" ${relatorioAtivo===id?'selected':''}>${nome}</option>`).join('')}
+      </select>
     </div>
     <div class="panel" id="reportPanel"></div>
   `;
@@ -5522,12 +5523,14 @@ function attachViewHandlers(){
   }
 
   // Relatórios
-  const reportToggle = document.getElementById('reportToggle');
-  if(reportToggle){
+  const reportSelect = document.getElementById('reportSelect');
+  if(reportSelect){
     let meiAnoAtual = new Date().getFullYear();
     let mensalMesRef = mesGlobalRef;
     const paint = ()=>{
-      reportToggle.querySelectorAll('button').forEach(b=>b.classList.toggle('active', b.dataset.report===relatorioAtivo));
+      reportSelect.value = relatorioAtivo;
+      const tituloEl = document.getElementById('reportTitulo');
+      if(tituloEl) tituloEl.textContent = RELATORIOS_NOMES[relatorioAtivo] || 'Relatórios';
       document.getElementById('reportPanel').innerHTML =
         relatorioAtivo==='dre' ? renderDRE('mes') :
         relatorioAtivo==='balanco' ? renderBalanco() :
@@ -5605,11 +5608,9 @@ function attachViewHandlers(){
         bindReportInner();
       });
     };
-    reportToggle.querySelectorAll('button').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        relatorioAtivo = btn.dataset.report;
-        paint();
-      });
+    reportSelect.addEventListener('change', ()=>{
+      relatorioAtivo = reportSelect.value;
+      paint();
     });
     paint();
     document.getElementById('btnExportarRelatorioPDF')?.addEventListener('click', ()=>{
