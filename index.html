@@ -236,6 +236,8 @@
   .ledger-row.head{color:var(--text-soft);font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;padding-top:7px;padding-bottom:7px;background:var(--bone);}
   .ledger-row.compact{grid-template-columns:12px 1fr 100px auto;gap:10px;padding:5px 16px;font-size:11.5px;}
   .ledger-row.compact .cat{font-size:10px;}
+  .fornecedor-row{grid-template-columns:14px 1fr 160px 130px auto;}
+  .log-row{grid-template-columns:130px 160px 1fr;}
   .desc-cell{min-width:0;overflow:hidden;}
   .desc-cell > div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .desc-cell .cat{color:var(--text-soft);font-size:10.5px;margin-top:1px;}
@@ -403,20 +405,20 @@
 
   /* Categorias */
   .categoria-item{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;overflow:hidden;}
-  .categoria-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--white);flex-wrap:wrap;gap:8px;}
-  .categoria-head-nome{display:flex;flex-direction:column;gap:2px;}
-  .categoria-head-nome .nome{font-weight:700;font-size:14.5px;cursor:pointer;}
+  .categoria-head{display:flex;align-items:center;padding:12px 14px;background:var(--white);flex-wrap:wrap;gap:10px;}
+  .categoria-head-nome{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;}
+  .categoria-head-nome .nome{font-weight:700;font-size:15px;cursor:pointer;}
   .categoria-head-nome .nome:hover{color:var(--blue-accent);}
-  .categoria-total-linha{font-size:11.5px;color:var(--text-soft);}
+  .categoria-total-linha{font-size:11.5px;color:var(--text-soft);white-space:nowrap;}
   .categoria-total-linha .mono{font-weight:600;color:var(--ink);}
-  .subcategoria-nome-wrap{display:flex;flex-direction:column;gap:2px;}
-  .subcategoria-nome-wrap .sub-nome{font-weight:600;font-size:13px;cursor:pointer;}
+  .categoria-menu-wrap{margin-left:auto;flex-shrink:0;}
+  .subcategoria-nome-wrap{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;}
+  .subcategoria-nome-wrap .sub-nome{font-weight:400;font-size:13px;cursor:pointer;}
   .subcategoria-nome-wrap .sub-nome:hover{color:var(--blue-accent);}
-  .subcategoria-nome-wrap .sub-nome::before{content:'— ';color:var(--text-soft);font-weight:400;}
   .categoria-head .nome{font-weight:600;font-size:14px;}
   .categoria-head .actions{display:flex;gap:6px;}
   .subcategoria-list{background:var(--bone);border-top:1px solid var(--line);}
-  .subcategoria-row{display:flex;align-items:center;justify-content:space-between;padding:9px 14px 9px 30px;font-size:13px;border-bottom:1px solid var(--line);}
+  .subcategoria-row{display:flex;align-items:center;gap:10px;padding:9px 14px 9px 30px;font-size:13px;border-bottom:1px solid var(--line);flex-wrap:wrap;}
   .subcategoria-row:last-child{border-bottom:none;}
   .subcategoria-row::before{content:'—';color:var(--text-soft);margin-right:8px;}
   .subcategoria-row .actions{display:flex;gap:6px;}
@@ -509,6 +511,14 @@
     .card.saldo .value{font-size:19px;}
     .ledger-row{grid-template-columns:10px 68px 1fr 90px;gap:8px;padding:8px 12px;}
     .ledger-row .col-cat, .ledger-row .col-status{display:none;}
+    .fornecedor-row{grid-template-columns:10px 1fr 85px auto !important;gap:8px;padding:10px 12px;}
+    .fornecedor-row .fornecedor-contato{display:none;}
+    .log-row{display:block !important;padding:10px 12px;}
+    .log-row-data{display:block;}
+    .log-row-acao{display:block;margin-top:2px;}
+    .log-row-detalhe{display:block;margin-top:2px;}
+    .extrato-dia-head{flex-wrap:wrap;gap:4px 10px;font-size:12.5px;}
+    .extrato-dia-foot{flex-wrap:wrap;gap:4px 10px;}
 
     .sidebar{display:none;}
     .main{padding:18px 14px calc(78px + env(safe-area-inset-bottom));max-width:100%;}
@@ -726,6 +736,7 @@ const MOTIVOS_BAIXA = ['Venda','Perda','Quebra','Doação','Outro'];
 const CATEGORIAS_ENTRADA = ['Vendas', 'Serviços', 'Recebimento de cliente', 'Rendimentos', 'Outros'];
 
 const CONTA_CORES = ['#3B6FE0','#1E9E6B','#D98F2B','#8A5CF6','#D5473F','#0F9BB0'];
+const CATEGORIA_CORES = ['#3B6FE0','#1E9E6B','#D98F2B','#8A5CF6','#D5473F','#0F9BB0','#E0507A','#6B7280'];
 const BANCOS_BR = [
   { nome: 'Banco Inter', dominio: 'bancointer.com.br' },
   { nome: 'PicPay', dominio: 'picpay.com' },
@@ -822,6 +833,10 @@ function aplicarMigracoes(s){
   if(!s.categoriasFixas) s.categoriasFixas = [];
   if(!s.valuationConfig) s.valuationConfig = { multEbitda:4, multFaturamento:1 };
   if(!s.dashboardConfig) s.dashboardConfig = { cidade:'Pomerode', ativos:['PETR4','VALE3','ITUB4'], brapiToken:'' };
+  if(!s.orcamentoAlertaPct) s.orcamentoAlertaPct = {};
+  ['saida','entrada'].forEach(tipo=>{
+    (s.categorias?.[tipo]||[]).forEach((c,i)=>{ if(!c.cor) c.cor = CATEGORIA_CORES[i % CATEGORIA_CORES.length]; });
+  });
   if(!s.provisoes) s.provisoes = [];
   if(!s.aprovacaoConfig) s.aprovacaoConfig = { ativo:false, limite:0 };
   if(!s.faturasPendentes) s.faturasPendentes = [];
@@ -915,6 +930,43 @@ let ativoPatrimonialDetalheId = null;
 let faturaCartaoId = null;
 let faturaCompetenciaAtual = null;
 let invContaId = null;
+
+/* Histórico de navegação — permite usar o botão "voltar" do celular pra navegar entre telas */
+let __navHistoria = [];
+let __navHistoriaIdx = -1;
+let __ultimaViewRenderizada = null;
+let __restaurandoHistoria = false;
+let __primeiroRenderFeito = false;
+function __snapshotNav(){
+  return {
+    view: currentView, extratoContaId, conciliacaoContaId, relatorioAtivo, configAtivo,
+    categoriaLancamentosAtual, ativoPatrimonialDetalheId, faturaCartaoId, faturaCompetenciaAtual, invContaId
+  };
+}
+function __restaurarNav(snap){
+  currentView = snap.view;
+  extratoContaId = snap.extratoContaId;
+  conciliacaoContaId = snap.conciliacaoContaId;
+  relatorioAtivo = snap.relatorioAtivo;
+  configAtivo = snap.configAtivo;
+  categoriaLancamentosAtual = snap.categoriaLancamentosAtual;
+  ativoPatrimonialDetalheId = snap.ativoPatrimonialDetalheId;
+  faturaCartaoId = snap.faturaCartaoId;
+  faturaCompetenciaAtual = snap.faturaCompetenciaAtual;
+  invContaId = snap.invContaId;
+}
+if(typeof window!=='undefined'){
+  window.addEventListener('popstate', (e)=>{
+    if(!e.state || typeof e.state.idx!=='number') return;
+    const snap = __navHistoria[e.state.idx];
+    if(!snap) return;
+    __navHistoriaIdx = e.state.idx;
+    __restaurandoHistoria = true;
+    __restaurarNav(snap);
+    render();
+    __restaurandoHistoria = false;
+  });
+}
 let categoriaTipoAtivo = 'saida';
 let comissaoVendedorSelecionado = '';
 let comissaoDataDeSelecionada = null;
@@ -1056,6 +1108,19 @@ document.getElementById('btnSairMobile').addEventListener('click', ()=>{
 });
 
 function render(){
+  const __viewAnterior = __ultimaViewRenderizada;
+  if(!__restaurandoHistoria && typeof history!=='undefined' && history.pushState){
+    const snap = __snapshotNav();
+    const atual = __navHistoriaIdx>=0 ? __navHistoria[__navHistoriaIdx] : null;
+    const mudou = !atual || JSON.stringify(atual)!==JSON.stringify(snap);
+    if(mudou){
+      __navHistoria = __navHistoria.slice(0, __navHistoriaIdx+1);
+      __navHistoria.push(snap);
+      __navHistoriaIdx = __navHistoria.length-1;
+      if(!__primeiroRenderFeito){ history.replaceState({idx:__navHistoriaIdx}, '', location.href); __primeiroRenderFeito = true; }
+      else history.pushState({idx:__navHistoriaIdx}, '', location.href);
+    }
+  }
   document.querySelectorAll('.nav-item, .bottom-nav-item[data-view]').forEach(n=>n.classList.toggle('active', n.dataset.view===currentView));
   const main = document.getElementById('main');
   if(currentView==='dashboard') main.innerHTML = viewDashboard();
@@ -1090,6 +1155,12 @@ function render(){
   else if(currentView==='configuracoes') main.innerHTML = viewConfiguracoes();
   else if(currentView==='configuracao-detalhe') main.innerHTML = viewConfiguracaoDetalhe();
   attachViewHandlers();
+  if(__viewAnterior!==currentView && typeof window!=='undefined'){
+    window.scrollTo(0,0);
+    if(document.documentElement) document.documentElement.scrollTop = 0;
+    if(document.body) document.body.scrollTop = 0;
+  }
+  __ultimaViewRenderizada = currentView;
 }
 
 /* ---------------- Cálculos ---------------- */
@@ -2044,7 +2115,7 @@ function rowHTML(l){
       <span class="dot ${l.tipo}"></span>
       <span class="mono" style="font-size:12px;color:var(--text-soft)">${fmtDate(l.dataPagamento || l.dataVencimento)}</span>
       <div class="desc-cell">
-        <div>${escapeHTML(l.descricao)}${l.recebimentoParcial ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Já recebeu parte, resta o valor mostrado">🔸 Parcial</span>' : ''}${l.origem==='forneira' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Forneira</span>' : ''}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Ativo Patrimonial</span>' : ''}${l.aprovacao==='pendente' ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Aguardando aprovação — não pode ser paga ainda">⏳ aprovação</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}${l.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${l.id}" style="cursor:pointer;font-size:11px;" title="Ver comprovante">📎</span>` : ''}</div>
+        <div>${escapeHTML(l.descricao)}${l.recebimentoParcial ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Já recebeu parte, resta o valor mostrado">🔸 Parcial</span>' : ''}${l.origem==='forneira' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Forneira</span>' : ''}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Ativo Patrimonial</span>' : ''}${l.grupoDivisaoId ? ' <span style="color:#7B5CD6;font-size:11px;" title="Faz parte de uma despesa dividida em várias categorias">🏷️ Dividida</span>' : ''}${l.aprovacao==='pendente' ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Aguardando aprovação — não pode ser paga ainda">⏳ aprovação</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}${l.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${l.id}" style="cursor:pointer;font-size:11px;" title="Ver comprovante">📎</span>` : ''}</div>
         <div class="cat">${l.fornecedor ? escapeHTML(l.fornecedor) : `<span class="conta-tag"><span class="conta-swatch" style="background:${corConta(l.contaId)}"></span>${escapeHTML(nomeConta(l.contaId))}</span> · ${escapeHTML(l.categoria)}`}</div>
       </div>
       <span class="col-cat mono" style="font-size:11.5px;color:var(--text-soft)">${fmtDate(l.dataVencimento)}</span>
@@ -2278,29 +2349,58 @@ function calcularProjecaoSimulacao(mesesAFrente, itensHipoteticos){
   return meses;
 }
 
+function previstoCategoriaNoPeriodo(categoria, tipo, de, ateReal, ateMes){
+  const realizado = totalCategoriaTipoNoPeriodo(categoria, tipo, de, ateReal);
+  const pendente = state.lancamentos.filter(l=>l.categoria===categoria && l.tipo===tipo && l.status==='pendente' && l.dataVencimento>=de && l.dataVencimento<=ateMes).reduce((s,l)=>s+l.valor,0);
+  return realizado + pendente;
+}
+
 function viewOrcamentoPlanejamento(){
   const categoriasDespesa = todasCategoriasFlat('saida');
   const categoriasReceita = todasCategoriasFlat('entrada');
   const orc = state.orcamentoCategorias || {};
+  const alertaPct = state.orcamentoAlertaPct || {};
   const proj = state.projecaoReceitaCategorias || {};
 
   const totalProjetadoReceita = Object.values(proj).reduce((a,b)=>a+b,0);
   const totalOrcadoDespesa = Object.values(orc).reduce((a,b)=>a+b,0);
   const lucroProjetado = totalProjetadoReceita - totalOrcadoDespesa;
 
-  const hoje = new Date();
-  const de = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0,10);
-  const ate = todayISO();
+  const t = totaisPorMesRef(mesGlobalRef);
+  const hoje = todayISO();
+  const mesAtualRef = hoje.slice(0,7);
+  const ateReal = mesGlobalRef === mesAtualRef ? hoje : (mesGlobalRef < mesAtualRef ? t.ateMes : t.de);
+
+  const categoriasOrcadas = Object.keys(orc).filter(cat=>orc[cat]>0);
+  const linhasOrcamento = categoriasOrcadas.map(cat=>{
+    const realizado = totalCategoriaTipoNoPeriodo(cat, 'saida', t.de, ateReal);
+    const previsto = previstoCategoriaNoPeriodo(cat, 'saida', t.de, ateReal, t.ateMes);
+    const orcado = orc[cat];
+    const pctRealizado = orcado>0 ? Math.round(realizado/orcado*100) : 0;
+    const pctPrevisto = orcado>0 ? Math.round(previsto/orcado*100) : 0;
+    const limite = alertaPct[cat] || 80;
+    const estourou = pctRealizado>=100;
+    const alertou = pctPrevisto>=limite;
+    return { cat, realizado, previsto, orcado, pctRealizado, pctPrevisto, limite, estourou, alertou };
+  }).sort((a,b)=>b.pctPrevisto-a.pctPrevisto);
+
+  const alertasAtivos = linhasOrcamento.filter(l=>l.alertou);
+  const categoriasDisponiveis = categoriasDespesa.filter(c=>!categoriasOrcadas.includes(c));
+  const totalRealizadoOrcado = linhasOrcamento.reduce((s,l)=>s+l.realizado,0);
+  const totalPrevistoOrcado = linhasOrcamento.reduce((s,l)=>s+l.previsto,0);
+  const pctRealizadoGeral = totalOrcadoDespesa>0 ? Math.round(totalRealizadoOrcado/totalOrcadoDespesa*100) : 0;
+  const pctPrevistoGeral = totalOrcadoDespesa>0 ? Math.round(totalPrevistoOrcado/totalOrcadoDespesa*100) : 0;
 
   const linhasComparacao = [
     ...categoriasReceita.map(cat=>({cat, tipo:'entrada', planejado:proj[cat]||0})),
-    ...categoriasDespesa.map(cat=>({cat, tipo:'saida', planejado:orc[cat]||0}))
   ].filter(x=>x.planejado>0);
 
   return `
     <div class="topbar">
-      <div><h1>Orçamento e Planejamento</h1><p>Metas de faturamento e orçamento de despesas por categoria, comparadas ao realizado no mês</p></div>
+      <div><h1>Orçamento e Planejamento</h1><p>Metas de faturamento e orçamento de despesas por categoria, comparados ao mês selecionado</p></div>
     </div>
+
+    ${mesNavHTML()}
 
     <div class="cards" style="grid-template-columns:1fr 1fr 1fr;">
       <div class="card"><div class="label">📈 Receita Projetada/mês</div><div class="value mono pos">${vm(brl(totalProjetadoReceita))}</div></div>
@@ -2308,7 +2408,63 @@ function viewOrcamentoPlanejamento(){
       <div class="card"><div class="label">💰 Lucro Projetado/mês</div><div class="value mono ${lucroProjetado>=0?'pos':'neg'}">${vm(brl(lucroProjetado))}</div></div>
     </div>
 
-    <div class="panel">
+    ${linhasOrcamento.length ? `
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-head"><h2>📊 Orçado x Realizado x Previsto — ${competenciaLabel(mesGlobalRef)}</h2></div>
+      <div class="panel-body" style="padding:16px 20px;">
+        <div class="cards" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:12px;">
+          <div class="card"><div class="label">Orçado (todas as categorias)</div><div class="value mono">${vm(brl(totalOrcadoDespesa))}</div></div>
+          <div class="card"><div class="label">Realizado até hoje</div><div class="value mono" style="color:${pctRealizadoGeral>=100?'var(--danger)':'var(--ink)'};">${vm(brl(totalRealizadoOrcado))} <span style="font-size:11px;color:var(--text-soft);">(${pctRealizadoGeral}%)</span></div></div>
+          <div class="card"><div class="label">Previsto até o fim do mês</div><div class="value mono" style="color:${pctPrevistoGeral>=100?'var(--danger)':pctPrevistoGeral>=80?'var(--warn)':'var(--success)'};">${vm(brl(totalPrevistoOrcado))} <span style="font-size:11px;color:var(--text-soft);">(${pctPrevistoGeral}%)</span></div></div>
+        </div>
+        <div style="background:var(--bone);border-radius:6px;height:10px;overflow:hidden;">
+          <div style="width:${Math.min(100,pctPrevistoGeral)}%;height:100%;background:${pctPrevistoGeral>=100?'var(--danger)':pctPrevistoGeral>=80?'var(--warn)':'var(--success)'};"></div>
+        </div>
+        <div class="note" style="margin-top:8px;">Soma de todas as categorias que você colocou no orçamento — dá a visão geral de quanto já foi gasto e quanto se projeta gastar até o fim do mês, comparado com o total orçado.</div>
+      </div>
+    </div>` : ''}
+
+    ${alertasAtivos.length ? `
+    <div class="panel" style="margin-bottom:16px;border-left:3px solid var(--warn);">
+      <div class="panel-head"><h2>🔔 Alertas de Orçamento (${competenciaLabel(mesGlobalRef)})</h2></div>
+      <div class="panel-body" style="padding:12px 20px;">
+        ${alertasAtivos.map(l=>`
+          <div style="padding:6px 0;font-size:12.5px;display:flex;justify-content:space-between;align-items:center;">
+            <span>${l.estourou ? '🚨' : '⚠️'} <strong>${escapeHTML(l.cat)}</strong> ${l.estourou ? 'já estourou o orçamento' : `já passou de ${l.limite}% do orçado (limite que você definiu)`}</span>
+            <span class="mono" style="color:${l.estourou?'var(--danger)':'var(--warn)'};font-weight:600;">${l.pctPrevisto}%</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>` : ''}
+
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-head"><h2>📉 Orçamento de Despesas por Categoria</h2><button class="btn sm" id="btnAdicionarOrcamento">+ Adicionar categoria</button></div>
+      <div class="panel-body" style="padding:6px 20px;">
+        ${linhasOrcamento.length ? linhasOrcamento.map(l=>`
+          <div style="padding:12px 0;border-bottom:1px solid var(--line);">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;">
+              <span style="font-size:13px;font-weight:600;cursor:pointer;" data-action="editar-orcamento" data-cat="${escapeHTML(l.cat)}">${escapeHTML(l.cat)}</span>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <span style="font-size:11px;color:var(--text-soft);">alertar em</span>
+                <input type="text" inputmode="numeric" class="orcamento-alerta-input" data-cat="${escapeHTML(l.cat)}" value="${l.limite}" style="width:42px;font-size:11.5px;padding:3px 4px;text-align:center;">
+                <span style="font-size:11px;color:var(--text-soft);">%</span>
+                <button class="icon-btn" data-action="remover-orcamento" data-cat="${escapeHTML(l.cat)}" title="Remover do orçamento">✕</button>
+              </div>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-soft);margin-bottom:5px;">
+              <span>Realizado: <strong class="mono" style="color:var(--ink);">${vm(brl(l.realizado))}</strong> · Previsto: <strong class="mono" style="color:var(--ink);">${vm(brl(l.previsto))}</strong></span>
+              <span class="mono">de ${vm(brl(l.orcado))}</span>
+            </div>
+            <div style="background:var(--bone);border-radius:6px;height:8px;overflow:hidden;position:relative;">
+              <div style="width:${Math.min(100,l.pctPrevisto)}%;height:100%;background:${l.estourou?'var(--danger)':l.alertou?'var(--warn)':'var(--success)'};"></div>
+            </div>
+            <div style="font-size:10.5px;color:var(--text-soft);margin-top:3px;text-align:right;">${l.pctRealizado}% realizado · ${l.pctPrevisto}% previsto até o fim do mês</div>
+          </div>
+        `).join('') : `<div class="empty">Nenhuma categoria no orçamento ainda. Clique em "+ Adicionar categoria" pra escolher quais acompanhar.</div>`}
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px;">
       <div class="panel-head"><h2>📈 Projeção de Faturamento — Receitas</h2></div>
       <div class="panel-body" style="padding:6px 20px;">
         ${categoriasReceita.length ? categoriasReceita.map(cat=>`
@@ -2320,39 +2476,76 @@ function viewOrcamentoPlanejamento(){
       </div>
     </div>
 
-    <div class="panel">
-      <div class="panel-head"><h2>📉 Orçamento de Despesas</h2></div>
-      <div class="panel-body" style="padding:6px 20px;">
-        ${categoriasDespesa.length ? categoriasDespesa.map(cat=>`
-          <div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);">
-            <div style="flex:1;font-size:13px;">${escapeHTML(cat)}</div>
-            <input type="text" inputmode="decimal" class="orcamento-despesa-input" data-cat="${escapeHTML(cat)}" value="${orc[cat]||''}" placeholder="0,00" style="width:110px;font-size:12.5px;padding:6px 8px;">
-          </div>
-        `).join('') : `<div class="empty">Nenhuma categoria de despesa cadastrada ainda — crie em Categorias.</div>`}
-      </div>
-    </div>
-
-    <div class="dash-section-label">Comparação com o mês atual</div>
+    ${linhasComparacao.length ? `
+    <div class="dash-section-label">Metas de receita — comparação com o mês selecionado</div>
     <div class="panel">
       <div class="panel-body" style="padding:16px 20px;">
-        ${linhasComparacao.length ? linhasComparacao.map(x=>{
-          const realizado = totalCategoriaTipoNoPeriodo(x.cat, x.tipo, de, ate);
+        ${linhasComparacao.map(x=>{
+          const realizado = totalCategoriaTipoNoPeriodo(x.cat, x.tipo, t.de, ateReal);
           const pct = x.planejado>0 ? Math.round(realizado/x.planejado*100) : 0;
-          const cor = x.tipo==='entrada' ? 'var(--blue-accent)' : (pct>=100?'var(--danger)':pct>=80?'var(--warn)':'var(--success)');
           return `
           <div style="margin-bottom:14px;">
             <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;">
-              <span>${escapeHTML(x.cat)} <span style="color:var(--text-soft);">(${x.tipo==='entrada'?'receita':'despesa'})</span></span>
+              <span>${escapeHTML(x.cat)} <span style="color:var(--text-soft);">(receita)</span></span>
               <span class="mono">${vm(brl(realizado))} / ${vm(brl(x.planejado))} (${pct}%)</span>
             </div>
             <div style="background:var(--bone);border-radius:6px;height:7px;overflow:hidden;">
-              <div style="width:${Math.min(100,pct)}%;height:100%;background:${cor};"></div>
+              <div style="width:${Math.min(100,pct)}%;height:100%;background:var(--blue-accent);"></div>
             </div>
           </div>`;
-        }).join('') : `<div class="empty">Defina metas de receita ou orçamento de despesa acima pra ver a comparação com o mês atual aqui.</div>`}
+        }).join('')}
       </div>
+    </div>` : ''}
+  `;
+}
+
+function openAdicionarOrcamentoModal(categoriaExistente){
+  const isEdit = !!categoriaExistente;
+  const orc = state.orcamentoCategorias || {};
+  const alertaPct = state.orcamentoAlertaPct || {};
+  const todasCategorias = todasCategoriasFlat('saida');
+  const disponiveis = isEdit ? [categoriaExistente] : todasCategorias.filter(c=>!(orc[c]>0));
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit ? 'Editar orçamento' : 'Adicionar categoria ao orçamento'}</h3>
+    <div class="field">
+      <label>Categoria</label>
+      <select id="orcCategoriaSelect" ${isEdit?'disabled':''}>
+        ${disponiveis.length ? disponiveis.map(c=>`<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join('') : `<option value="">— nenhuma categoria disponível —</option>`}
+      </select>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Valor orçado por mês (R$)</label><input type="text" inputmode="decimal" id="orcValorInput" value="${isEdit?orc[categoriaExistente]||'':''}" placeholder="0,00"></div>
+      <div class="field"><label>Alertar ao atingir (%)</label><input type="text" inputmode="numeric" id="orcAlertaInput" value="${isEdit?(alertaPct[categoriaExistente]||80):80}"></div>
+    </div>
+    <div class="note" style="margin-top:0;">O alerta considera o "previsto" (já realizado + o que ainda está pendente no mês) — assim você é avisado antes mesmo de o gasto todo acontecer.</div>
+    <div class="modal-actions">
+      ${isEdit ? `<button class="btn danger-o" id="btnRemoverOrcModal">Remover</button>` : ''}
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarOrcamentoModal">${isEdit?'Salvar':'Adicionar'}</button>
     </div>
   `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnRemoverOrcModal')?.addEventListener('click', ()=>{
+    delete state.orcamentoCategorias[categoriaExistente];
+    if(state.orcamentoAlertaPct) delete state.orcamentoAlertaPct[categoriaExistente];
+    persist(); closeModal(); render();
+    showToast('Categoria removida do orçamento');
+  });
+  document.getElementById('btnSalvarOrcamentoModal').addEventListener('click', ()=>{
+    const cat = document.getElementById('orcCategoriaSelect').value;
+    const valor = numBR(document.getElementById('orcValorInput').value);
+    const alerta = parseInt(document.getElementById('orcAlertaInput').value) || 80;
+    if(!cat){ showToast('Escolha uma categoria'); return; }
+    if(!valor || valor<=0){ showToast('Informe um valor de orçamento válido'); return; }
+    if(!state.orcamentoCategorias) state.orcamentoCategorias = {};
+    if(!state.orcamentoAlertaPct) state.orcamentoAlertaPct = {};
+    state.orcamentoCategorias[cat] = valor;
+    state.orcamentoAlertaPct[cat] = alerta;
+    persist(); closeModal(); render();
+    showToast(isEdit ? 'Orçamento atualizado' : 'Categoria adicionada ao orçamento');
+  });
 }
 
 function viewSimulacao(){
@@ -2829,7 +3022,9 @@ function viewContas(){
     <div class="topbar">
       <div><h1>Contas Bancárias</h1></div>
       <div style="display:flex;gap:10px;align-items:center;">
-        ${dropdownNovoHTML()}
+        <div class="dash-acao" style="display:flex;gap:8px;align-items:center;">
+          ${dropdownNovoHTML()}
+        </div>
         <div class="card saldo" style="padding:12px 18px;"><div class="label">Saldo total</div><div class="value mono ${total>=0?'pos':'neg'}" style="font-size:20px;">${brl(total)}</div></div>
       </div>
     </div>
@@ -3005,6 +3200,12 @@ function renderResultadoConciliacao(resultado, conta){
   `;
 }
 
+function fmtDateCurta(d){
+  if(!d) return '—';
+  const [y,m,day] = d.split('-');
+  return `${day}/${m}/${y.slice(2)}`;
+}
+
 function renderExtratoConteudo(contaId){
   const conta = state.contas.find(c=>c.id===contaId);
   if(!conta) return '';
@@ -3019,6 +3220,7 @@ function renderExtratoConteudo(contaId){
     pendentesConta.sort((a,b)=> (a.dataVencimento||'').localeCompare(b.dataVencimento||''));
   }
   lista.sort((a,b)=> (a.dataPagamento||'').localeCompare(b.dataPagamento||''));
+  const ehMobile = typeof window!=='undefined' && window.innerWidth <= 900;
 
   let saldo = conta.saldoInicial || 0;
   const grupos = [];
@@ -3037,13 +3239,13 @@ function renderExtratoConteudo(contaId){
   const gruposHTML = grupos.slice().reverse().map(g=>`
     <div class="panel extrato-dia">
       <div class="extrato-dia-head">
-        <span class="extrato-dia-data">${fmtDateExtenso(g.dia)}</span>
+        <span class="extrato-dia-data">${ehMobile ? fmtDateCurta(g.dia) : fmtDateExtenso(g.dia)}</span>
         <span>Saldo final do dia: <strong class="mono">${brl(g.saldoFinal)}</strong></span>
       </div>
       ${g.itens.slice().reverse().map(({l})=>`
-        <div class="ledger-row compact" data-id="${l.id}">
+        <div class="ledger-row compact" data-id="${l.id}" data-action="abrir-lancamento" style="cursor:pointer;">
           <span class="dot ${l.tipo}"></span>
-          <div class="desc-cell" data-action="ver-detalhe" data-id="${l.id}" style="cursor:pointer;">
+          <div class="desc-cell">
             <div>${escapeHTML(l.descricao)}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Ativo Patrimonial</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:10.5px;" title="Tem observação">📝</span>' : ''}${l.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${l.id}" style="cursor:pointer;font-size:10.5px;" title="Ver comprovante">📎</span>` : ''}</div>
             <div class="cat">${l.fornecedor ? escapeHTML(l.fornecedor) : escapeHTML(l.categoria)}</div>
           </div>
@@ -3996,9 +4198,10 @@ function renderDRE(periodo){
     label = 'Período personalizado';
   }
   const filtroCentro = l => dreCentroAtivo==='todos' || (l.centroCusto||'') === dreCentroAtivo;
+  const ehAporteInvestimento = l => l.categoria==='Investimentos' && l.origem==='investimento';
   const lista = state.lancamentos.filter(l=>{
     const ref = l.dataPagamento;
-    return ref && ref>=de && ref<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && filtroCentro(l);
+    return ref && ref>=de && ref<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehAporteInvestimento(l) && filtroCentro(l);
   });
   const porCategoria = (tipo)=>{
     const map = {};
@@ -4020,7 +4223,7 @@ function renderDRE(periodo){
   const ateAnterior = new Date(new Date(de).getTime() - 86400000).toISOString().slice(0,10);
   const listaAnterior = state.lancamentos.filter(l=>{
     const ref = l.dataPagamento;
-    return ref && ref>=deAnterior && ref<=ateAnterior && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && filtroCentro(l);
+    return ref && ref>=deAnterior && ref<=ateAnterior && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehAporteInvestimento(l) && filtroCentro(l);
   });
   const totalReceitasAnt = listaAnterior.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+l.valor,0);
   const totalDespesasAnt = listaAnterior.filter(l=>l.tipo==='saida').reduce((s,l)=>s+l.valor,0);
@@ -4694,7 +4897,7 @@ function renderRelatorioABCClientes(){
 function renderRelatorioABCDespesas(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
   const porCategoria = {};
-  state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{
+  state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento') && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{
     porCategoria[l.categoria] = (porCategoria[l.categoria]||0) + l.valor;
   });
   state.comprasCartao.filter(p=>{
@@ -4866,7 +5069,7 @@ function renderRelatorioBreakEven(){
   const ateMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
   const receitaMes = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=deMes && l.dataPagamento<=ateMes).reduce((s,l)=>s+l.valor,0);
   const despesasMes = {};
-  state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.dataPagamento>=deMes && l.dataPagamento<=ateMes).forEach(l=>{
+  state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento') && l.dataPagamento>=deMes && l.dataPagamento<=ateMes).forEach(l=>{
     despesasMes[l.categoria] = (despesasMes[l.categoria]||0) + l.valor;
   });
   const categorias = Object.keys(despesasMes).sort((a,b)=>a.localeCompare(b));
@@ -4922,7 +5125,7 @@ function renderRelatorioBreakEven(){
 function renderRelatorioValuation(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
   const receita12m = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
-  const despesas12m = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+  const despesas12m = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento') && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
   const ebitdaEstimado = receita12m - despesas12m;
   const multEbitda = state.valuationConfig?.multEbitda ?? 4;
   const multFaturamento = state.valuationConfig?.multFaturamento ?? 1;
@@ -5716,14 +5919,18 @@ function renderCategoriaPanel(tipo){
           return `
           <div class="categoria-item">
             <div class="categoria-head">
+              <span class="cat-dot" style="width:14px;height:14px;border-radius:50%;background:${c.cor||'#3B6FE0'};flex-shrink:0;"></span>
               <div class="categoria-head-nome">
-                <span class="nome" data-action="ver-lancamentos-categoria" data-tipo="${tipo}" data-cat="${escapeHTML(c.nome)}">${escapeHTML(c.nome)}</span>
-                <span class="categoria-total-linha">${info.qtd} lançamento(s) <span class="mono">${brl(info.total)}</span></span>
+                <span class="nome" data-action="ver-lancamentos-categoria" data-tipo="${tipo}" data-cat="${escapeHTML(c.nome)}" style="font-size:15px;font-weight:700;">${escapeHTML(c.nome)}</span>
               </div>
-              <div class="actions">
-                <button class="icon-btn" data-action="mover-lancamentos" data-tipo="${tipo}" data-cat="${escapeHTML(c.nome)}" title="Mover lançamentos para outra categoria">⇄</button>
-                <button class="icon-btn" data-action="editar-categoria" data-tipo="${tipo}" data-id="${c.id}" title="Editar">✎</button>
-                <button class="icon-btn" data-action="excluir-categoria" data-tipo="${tipo}" data-id="${c.id}" title="Excluir">✕</button>
+              <span class="categoria-total-linha">${info.qtd} lançamento(s) <span class="mono">${brl(info.total)}</span></span>
+              <div class="dropdown-wrap categoria-menu-wrap">
+                <button class="icon-btn" data-action="toggle-menu-categoria" data-menu-id="cat-${c.id}" title="Mais opções">⋮</button>
+                <div class="dropdown-menu" data-menu-categoria="cat-${c.id}">
+                  <button type="button" data-cat-menu="mover" data-tipo="${tipo}" data-cat="${escapeHTML(c.nome)}">⇄ Mover lançamentos</button>
+                  <button type="button" data-cat-menu="editar" data-tipo="${tipo}" data-id="${c.id}">✎ Editar</button>
+                  <button type="button" data-cat-menu="excluir" data-tipo="${tipo}" data-id="${c.id}" style="color:var(--danger);">✕ Excluir</button>
+                </div>
               </div>
             </div>
             <div class="subcategoria-list">
@@ -5731,14 +5938,18 @@ function renderCategoriaPanel(tipo){
                 const subInfo = totalSubcategoriaTodoHistorico(c.nome, sub.nome, tipo);
                 return `
                 <div class="subcategoria-row">
+                  <span class="cat-dot-sub" style="width:8px;height:8px;border-radius:50%;background:${c.cor||'#3B6FE0'};flex-shrink:0;"></span>
                   <div class="subcategoria-nome-wrap">
-                    <span class="sub-nome" data-action="ver-lancamentos-categoria" data-tipo="${tipo}" data-cat="${escapeHTML(c.nome+' / '+sub.nome)}">${escapeHTML(sub.nome)}</span>
-                    <span class="categoria-total-linha">${subInfo.qtd} lançamento(s) <span class="mono">${brl(subInfo.total)}</span></span>
+                    <span class="sub-nome" data-action="ver-lancamentos-categoria" data-tipo="${tipo}" data-cat="${escapeHTML(c.nome+' / '+sub.nome)}" style="font-weight:400;">${escapeHTML(sub.nome)}</span>
                   </div>
-                  <div class="actions">
-                    <button class="icon-btn" data-action="mover-lancamentos" data-tipo="${tipo}" data-cat="${escapeHTML(c.nome+' / '+sub.nome)}" title="Mover lançamentos para outra categoria">⇄</button>
-                    <button class="icon-btn" data-action="editar-subcategoria" data-tipo="${tipo}" data-cat="${c.id}" data-id="${sub.id}" title="Editar">✎</button>
-                    <button class="icon-btn" data-action="excluir-subcategoria" data-tipo="${tipo}" data-cat="${c.id}" data-id="${sub.id}" title="Excluir">✕</button>
+                  <span class="categoria-total-linha">${subInfo.qtd} lançamento(s) <span class="mono">${brl(subInfo.total)}</span></span>
+                  <div class="dropdown-wrap categoria-menu-wrap">
+                    <button class="icon-btn" data-action="toggle-menu-categoria" data-menu-id="sub-${sub.id}" title="Mais opções">⋮</button>
+                    <div class="dropdown-menu" data-menu-categoria="sub-${sub.id}">
+                      <button type="button" data-cat-menu="mover" data-tipo="${tipo}" data-cat="${escapeHTML(c.nome+' / '+sub.nome)}">⇄ Mover lançamentos</button>
+                      <button type="button" data-cat-menu="editar-sub" data-tipo="${tipo}" data-cat-id="${c.id}" data-id="${sub.id}">✎ Editar</button>
+                      <button type="button" data-cat-menu="excluir-sub" data-tipo="${tipo}" data-cat-id="${c.id}" data-id="${sub.id}" style="color:var(--danger);">✕ Excluir</button>
+                    </div>
                   </div>
                 </div>
               `;}).join('')}
@@ -7128,6 +7339,29 @@ function attachViewHandlers(){
       showToast('Orçamento atualizado');
     });
   });
+  document.querySelectorAll('.orcamento-alerta-input').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      if(!state.orcamentoAlertaPct) state.orcamentoAlertaPct = {};
+      const v = parseInt(inp.value);
+      state.orcamentoAlertaPct[inp.dataset.cat] = (isNaN(v) || v<=0) ? 80 : v;
+      persist(); render();
+      showToast('Limite de alerta atualizado');
+    });
+  });
+  document.querySelectorAll('[data-action="remover-orcamento"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const cat = btn.dataset.cat;
+      if(!confirm(`Remover "${cat}" do orçamento de despesas?`)) return;
+      delete state.orcamentoCategorias[cat];
+      if(state.orcamentoAlertaPct) delete state.orcamentoAlertaPct[cat];
+      persist(); render();
+      showToast('Categoria removida do orçamento');
+    });
+  });
+  document.getElementById('btnAdicionarOrcamento')?.addEventListener('click', ()=>openAdicionarOrcamentoModal());
+  document.querySelectorAll('[data-action="editar-orcamento"]').forEach(el=>{
+    el.addEventListener('click', ()=>openAdicionarOrcamentoModal(el.dataset.cat));
+  });
 
   // Simulação "E Se"
   document.getElementById('btnAddItemSimulacao')?.addEventListener('click', ()=>openItemSimulacaoModal());
@@ -7251,52 +7485,55 @@ function attachViewHandlers(){
           render();
         });
       });
-      document.querySelectorAll('[data-action="mover-lancamentos"]').forEach(btn=>{
-        btn.addEventListener('click', ()=>openMoverLancamentosModal(btn.dataset.tipo, btn.dataset.cat));
-      });
       document.querySelectorAll('[data-action="nova-categoria"]').forEach(btn=>{
         btn.addEventListener('click', ()=>openCategoriaModal(btn.dataset.tipo));
       });
-      document.querySelectorAll('[data-action="editar-categoria"]').forEach(btn=>{
-        btn.addEventListener('click', ()=>{
-          const cat = listaCategorias(btn.dataset.tipo).find(c=>c.id===btn.dataset.id);
-          openCategoriaModal(btn.dataset.tipo, cat);
+      document.querySelectorAll('[data-action="toggle-menu-categoria"]').forEach(btn=>{
+        btn.addEventListener('click', (e)=>{
+          e.stopPropagation();
+          const menu = document.querySelector(`[data-menu-categoria="${btn.dataset.menuId}"]`);
+          document.querySelectorAll('.dropdown-menu[data-menu-categoria]').forEach(m=>{ if(m!==menu) m.classList.remove('open'); });
+          menu?.classList.toggle('open');
+          if(menu) ajustarPosicaoDropdown(menu);
         });
       });
-      document.querySelectorAll('[data-action="excluir-categoria"]').forEach(btn=>{
+      document.querySelectorAll('[data-cat-menu]').forEach(btn=>{
         btn.addEventListener('click', ()=>{
-          const tipo = btn.dataset.tipo, id = btn.dataset.id;
-          const cat = listaCategorias(tipo).find(c=>c.id===id);
-          if(!cat) return;
-          const nomesAfetados = [cat.nome, ...(cat.subcategorias||[]).map(s=>`${cat.nome} / ${s.nome}`)];
-          if(nomesAfetados.some(n=>categoriaEmUso(n))){ showToast('Essa categoria está em uso em lançamentos — não é possível excluir'); return; }
-          if(!confirm(`Excluir a categoria "${cat.nome}"${(cat.subcategorias||[]).length?' e suas subcategorias':''}?`)) return;
-          state.categorias[tipo] = state.categorias[tipo].filter(c=>c.id!==id);
-          persist(); paintCategorias(); showToast('Categoria excluída');
+          document.querySelectorAll('.dropdown-menu[data-menu-categoria]').forEach(m=>m.classList.remove('open'));
+          const acao = btn.dataset.catMenu;
+          if(acao==='mover'){
+            openMoverLancamentosModal(btn.dataset.tipo, btn.dataset.cat);
+          } else if(acao==='editar'){
+            const cat = listaCategorias(btn.dataset.tipo).find(c=>c.id===btn.dataset.id);
+            openCategoriaModal(btn.dataset.tipo, cat);
+          } else if(acao==='excluir'){
+            const tipo = btn.dataset.tipo, id = btn.dataset.id;
+            const cat = listaCategorias(tipo).find(c=>c.id===id);
+            if(!cat) return;
+            const nomesAfetados = [cat.nome, ...(cat.subcategorias||[]).map(s=>`${cat.nome} / ${s.nome}`)];
+            if(nomesAfetados.some(n=>categoriaEmUso(n))){ showToast('Essa categoria está em uso em lançamentos — não é possível excluir'); return; }
+            if(!confirm(`Excluir a categoria "${cat.nome}"${(cat.subcategorias||[]).length?' e suas subcategorias':''}?`)) return;
+            state.categorias[tipo] = state.categorias[tipo].filter(c=>c.id!==id);
+            persist(); paintCategorias(); showToast('Categoria excluída');
+          } else if(acao==='editar-sub'){
+            const cat = listaCategorias(btn.dataset.tipo).find(c=>c.id===btn.dataset.catId);
+            const sub = cat?.subcategorias.find(s=>s.id===btn.dataset.id);
+            if(sub) openSubcategoriaModal(btn.dataset.tipo, btn.dataset.catId, sub);
+          } else if(acao==='excluir-sub'){
+            const tipo = btn.dataset.tipo, catId = btn.dataset.catId, id = btn.dataset.id;
+            const cat = listaCategorias(tipo).find(c=>c.id===catId);
+            const sub = cat?.subcategorias.find(s=>s.id===id);
+            if(!cat || !sub) return;
+            const full = `${cat.nome} / ${sub.nome}`;
+            if(categoriaEmUso(full)){ showToast('Essa subcategoria está em uso em lançamentos — não é possível excluir'); return; }
+            if(!confirm(`Excluir a subcategoria "${sub.nome}"?`)) return;
+            cat.subcategorias = cat.subcategorias.filter(s=>s.id!==id);
+            persist(); paintCategorias(); showToast('Subcategoria excluída');
+          }
         });
       });
       document.querySelectorAll('[data-action="nova-subcategoria"]').forEach(btn=>{
         btn.addEventListener('click', ()=>openSubcategoriaModal(btn.dataset.tipo, btn.dataset.cat));
-      });
-      document.querySelectorAll('[data-action="editar-subcategoria"]').forEach(btn=>{
-        btn.addEventListener('click', ()=>{
-          const cat = listaCategorias(btn.dataset.tipo).find(c=>c.id===btn.dataset.cat);
-          const sub = cat?.subcategorias.find(s=>s.id===btn.dataset.id);
-          if(sub) openSubcategoriaModal(btn.dataset.tipo, btn.dataset.cat, sub);
-        });
-      });
-      document.querySelectorAll('[data-action="excluir-subcategoria"]').forEach(btn=>{
-        btn.addEventListener('click', ()=>{
-          const tipo = btn.dataset.tipo, catId = btn.dataset.cat, id = btn.dataset.id;
-          const cat = listaCategorias(tipo).find(c=>c.id===catId);
-          const sub = cat?.subcategorias.find(s=>s.id===id);
-          if(!cat || !sub) return;
-          const full = `${cat.nome} / ${sub.nome}`;
-          if(categoriaEmUso(full)){ showToast('Essa subcategoria está em uso em lançamentos — não é possível excluir'); return; }
-          if(!confirm(`Excluir a subcategoria "${sub.nome}"?`)) return;
-          cat.subcategorias = cat.subcategorias.filter(s=>s.id!==id);
-          persist(); paintCategorias(); showToast('Subcategoria excluída');
-        });
       });
     };
     var paintCategorias = ()=>{
@@ -7737,6 +7974,7 @@ function attachViewHandlers(){
         }
       });
     });
+    atualizarSelecaoUI();
   });
   document.getElementById('btnBaixarExtratoPDF')?.addEventListener('click', ()=>{
     const dataDe = document.getElementById('extratoFiltroDe').value || null;
@@ -7776,6 +8014,9 @@ function attachViewHandlers(){
   });
   document.addEventListener('click', ()=>{
     document.querySelectorAll('.dropdown-menu[data-menu-cartao]').forEach(m=>m.classList.remove('open'));
+  });
+  document.addEventListener('click', ()=>{
+    document.querySelectorAll('.dropdown-menu[data-menu-categoria]').forEach(m=>m.classList.remove('open'));
   });
   document.querySelectorAll('[data-action="lancar-compra"]').forEach(btn=>{
     btn.addEventListener('click', ()=>openCompraCartaoModal(btn.dataset.id));
@@ -7959,12 +8200,13 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
   const isEdit = !!existing;
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
+    <div style="height:5px;margin:-4px -4px 14px;border-radius:10px 10px 0 0;background:${tipo==='saida'?'var(--danger)':'var(--success)'};"></div>
     <h3>${isEdit ? 'Editar lançamento' : (tipo==='saida' ? 'Nova conta a pagar' : 'Nova conta a receber')}</h3>
     <div class="field">
       <label>Descrição (opcional — se deixar em branco, usa o nome da categoria)</label>
       <input type="text" id="fDescricao" value="${existing ? escapeHTML(existing.descricao) : ''}" placeholder="${tipo==='saida' ? 'Ex: Compra de farinha' : 'Ex: Venda pedido #123'}">
     </div>
-    <div class="field-row">
+    <div class="field-row" id="fCategoriaValorRow">
       <div class="field">
         <label>Categoria</label>
         <select id="fCategoria">${opcoesCategoriaHTML(tipo, existing?.categoria)}</select>
@@ -7974,6 +8216,19 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
         <input type="text" inputmode="decimal" id="fValor" value="${existing ? existing.valor : ''}" placeholder="0,00">
       </div>
     </div>
+    ${tipo==='saida' && !isEdit ? `
+    <div class="field" id="fMulticategoriaWrap">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;">
+        <input type="checkbox" id="fMulticategoria" style="width:17px;height:17px;">
+        🏷️ Dividir esta despesa em várias categorias
+      </label>
+    </div>
+    <div id="fMulticategoriaGrupo" style="display:none;">
+      <div id="fMulticategoriaLinhas"></div>
+      <button type="button" class="btn ghost sm" id="btnAddCategoriaMulti" style="margin-top:6px;">+ Adicionar categoria</button>
+      <div class="note" id="fMulticategoriaNota" style="margin-top:8px;"></div>
+    </div>
+    ` : ''}
     ${tipo==='saida' && !isEdit ? `
     <div class="field">
       <label>Forma de pagamento</label>
@@ -8180,6 +8435,62 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
   } else {
     atualizarVisibilidadeEfetivacao();
   }
+  const fMulticategoria = document.getElementById('fMulticategoria');
+  if(fMulticategoria){
+    let linhasMulti = [];
+    const pintarLinhasMulti = ()=>{
+      document.getElementById('fMulticategoriaLinhas').innerHTML = linhasMulti.map((l,i)=>`
+        <div class="field-row multi-cat-row" data-idx="${i}" style="align-items:flex-end;">
+          <div class="field"><label>Categoria</label><select class="mc-categoria">${opcoesCategoriaHTML(tipo, l.categoria)}</select></div>
+          <div class="field" style="max-width:130px;"><label>Valor (R$)</label><input type="text" inputmode="decimal" class="mc-valor" value="${l.valor||''}" placeholder="0,00"></div>
+          <button type="button" class="icon-btn mc-remover" style="margin-bottom:14px;" ${linhasMulti.length<=2?'disabled title="Mínimo de 2 categorias"':''}>✕</button>
+        </div>
+      `).join('');
+      document.querySelectorAll('.mc-categoria, .mc-valor').forEach(el=>el.addEventListener('input', atualizarNotaMulti));
+      document.querySelectorAll('.mc-remover').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          lerLinhasMulti();
+          const idx = parseInt(btn.closest('.multi-cat-row').dataset.idx);
+          linhasMulti.splice(idx,1);
+          pintarLinhasMulti();
+          atualizarNotaMulti();
+        });
+      });
+    };
+    const lerLinhasMulti = ()=>{
+      linhasMulti = [...document.querySelectorAll('.multi-cat-row')].map(row=>({
+        categoria: row.querySelector('.mc-categoria').value,
+        valor: row.querySelector('.mc-valor').value
+      }));
+    };
+    const atualizarNotaMulti = ()=>{
+      lerLinhasMulti();
+      const soma = linhasMulti.reduce((s,l)=>s+(numBR(l.valor)||0),0);
+      const total = numBR(document.getElementById('fValor').value) || 0;
+      const nota = document.getElementById('fMulticategoriaNota');
+      const bate = Math.abs(soma-total) < 0.01 && total>0;
+      nota.style.color = total>0 && !bate ? 'var(--danger)' : 'var(--text-soft)';
+      nota.innerHTML = `Soma das categorias: <strong>${brl(soma)}</strong> de <strong>${brl(total)}</strong> (valor total)${!bate && total>0 ? ' — ajuste pra bater certinho' : ''}`;
+    };
+    document.getElementById('fValor').addEventListener('input', atualizarNotaMulti);
+    document.getElementById('btnAddCategoriaMulti').addEventListener('click', ()=>{
+      lerLinhasMulti();
+      linhasMulti.push({ categoria:'', valor:'' });
+      pintarLinhasMulti();
+      atualizarNotaMulti();
+    });
+    fMulticategoria.addEventListener('change', ()=>{
+      const ligado = fMulticategoria.checked;
+      document.getElementById('fMulticategoriaGrupo').style.display = ligado ? 'block' : 'none';
+      document.getElementById('fCategoria').closest('.field').style.display = ligado ? 'none' : 'block';
+      document.getElementById('fCategoria').disabled = ligado;
+      if(ligado && linhasMulti.length<2){
+        linhasMulti = [{categoria:'', valor:''}, {categoria:'', valor:''}];
+        pintarLinhasMulti();
+        atualizarNotaMulti();
+      }
+    });
+  }
   const fCentroCusto = document.getElementById('fCentroCusto');
   if(fCentroCusto) fCentroCusto.addEventListener('change', ()=>{
     if(fCentroCusto.value!=='__novo__') return;
@@ -8252,6 +8563,38 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       return;
     }
 
+    if(fMulticategoria?.checked){
+      const linhas = [...document.querySelectorAll('.multi-cat-row')].map(row=>({
+        categoria: row.querySelector('.mc-categoria').value,
+        valor: numBR(row.querySelector('.mc-valor').value) || 0
+      })).filter(l=>l.valor>0);
+      if(linhas.length<2){ showToast('Adicione pelo menos 2 categorias com valor'); return; }
+      const soma = Math.round(linhas.reduce((s,l)=>s+l.valor,0)*100)/100;
+      if(Math.abs(soma-valor)>=0.01){ showToast(`A soma das categorias (${brl(soma)}) precisa bater com o valor total (${brl(valor)})`); return; }
+      const status = document.getElementById('fStatus').value;
+      const efetivado = status==='pago' || status==='recebido';
+      const dataEfetivacao = efetivado ? (document.getElementById('fDataEfetivacao')?.value || todayISO()) : null;
+      const vencimentoInformado = document.getElementById('fVencimento').value;
+      const contaId = document.getElementById('fConta').value;
+      const fornecedorValor = fFornecedorSelect ? (fFornecedorSelect.value==='__outro__' ? document.getElementById('fFornecedor').value.trim() : fFornecedorSelect.value) : document.getElementById('fFornecedor').value.trim();
+      const grupoDivisaoId = uid();
+      linhas.forEach(l=>{
+        state.lancamentos.push({
+          id: uid(), tipo:'saida', categoria: l.categoria, valor: l.valor,
+          descricao, fornecedor: fornecedorValor,
+          centroCusto: (fCentroCusto && fCentroCusto.value!=='__novo__') ? fCentroCusto.value : '',
+          observacao: document.getElementById('fObservacao').value.trim(),
+          contaId, dataVencimento: vencimentoInformado || dataEfetivacao || todayISO(),
+          status, dataPagamento: efetivado ? dataEfetivacao : null,
+          origem:'manual', grupoDivisaoId, criadoEm: new Date().toISOString()
+        });
+      });
+      registrarLog('Despesa dividida lançada', `"${descricao}" — ${brl(valor)} em ${linhas.length} categorias`);
+      persist(); closeModal(); render();
+      showToast(`Despesa dividida em ${linhas.length} categorias lançada`);
+      return;
+    }
+
     const status = document.getElementById('fStatus').value;
     const efetivado = status==='pago' || status==='recebido';
     const dataEfetivacaoInput = document.getElementById('fDataEfetivacao');
@@ -8312,20 +8655,20 @@ function viewFornecedores(){
       <button class="btn" id="btnNovoFornecedor">+ Fornecedor</button>
     </div>
     <div class="panel">
-      <div class="ledger-row head" style="grid-template-columns:14px 1fr 160px 130px auto;">
-        <span></span><span>Nome</span><span>Contato</span><span>Total gasto</span><span></span>
+      <div class="ledger-row fornecedor-row head">
+        <span></span><span>Nome</span><span class="fornecedor-contato">Contato</span><span>Total gasto</span><span></span>
       </div>
       <div class="panel-body">
         ${lista.length ? lista.map(f=>{
           const total = totalGastoFornecedor(f.nome);
           return `
-          <div class="ledger-row" data-id="${f.id}" style="grid-template-columns:14px 1fr 160px 130px auto;">
+          <div class="ledger-row fornecedor-row" data-id="${f.id}">
             <span class="dot" style="background:var(--text-soft);"></span>
             <div class="desc-cell" data-action="editar-fornecedor" data-id="${f.id}" style="cursor:pointer;">
               <div>${escapeHTML(f.nome)}</div>
               <div class="cat">${escapeHTML(f.cnpjCpf||'sem CNPJ/CPF cadastrado')}</div>
             </div>
-            <span style="font-size:12.5px;color:var(--text-soft);">${escapeHTML(f.telefone||f.email||'—')}</span>
+            <span class="fornecedor-contato" style="font-size:12.5px;color:var(--text-soft);">${escapeHTML(f.telefone||f.email||'—')}</span>
             <span class="mono" style="font-weight:600;">${brl(total)}</span>
             <div class="row-actions">
               <button class="icon-btn" data-action="ver-fornecedor" data-id="${f.id}" title="Ver lançamentos">📋</button>
@@ -8805,10 +9148,10 @@ function viewLogAuditoria(){
     <div class="panel">
       <div class="panel-body">
         ${lista.length ? lista.map(l=>`
-          <div class="ledger-row" style="grid-template-columns:130px 160px 1fr;">
-            <span class="mono" style="font-size:11.5px;color:var(--text-soft);">${new Date(l.data).toLocaleString('pt-BR')}</span>
-            <span style="font-size:12px;font-weight:600;">${escapeHTML(l.acao)}</span>
-            <span style="font-size:12.5px;color:var(--text-soft);">${escapeHTML(l.detalhe||'')}</span>
+          <div class="ledger-row log-row">
+            <span class="mono log-row-data" style="font-size:11.5px;color:var(--text-soft);">${new Date(l.data).toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>
+            <span class="log-row-acao" style="font-size:12px;font-weight:600;">${escapeHTML(l.acao)}</span>
+            <span class="log-row-detalhe" style="font-size:12.5px;color:var(--text-soft);">${escapeHTML(l.detalhe||'')}</span>
           </div>
         `).join('') : `<div class="empty">Nenhuma ação registrada ainda.</div>`}
       </div>
@@ -10070,6 +10413,12 @@ function openCategoriaModal(tipo, existing){
       <label>Nome da categoria</label>
       <input type="text" id="catNome" value="${existing ? escapeHTML(existing.nome) : ''}" placeholder="Ex: Insumos">
     </div>
+    <div class="field">
+      <label>Cor</label>
+      <div id="catCorPicker" style="display:flex;gap:10px;flex-wrap:wrap;padding:4px 0;">
+        ${CATEGORIA_CORES.map((cor,i)=>`<span class="cat-cor-swatch ${(!isEdit && i===0) || (isEdit && existing.cor===cor) ? 'selected' : ''}" data-cor="${cor}" style="width:28px;height:28px;border-radius:50%;background:${cor};cursor:pointer;display:inline-block;border:3px solid transparent;"></span>`).join('')}
+      </div>
+    </div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       <button class="btn" id="btnSalvarCategoria">Salvar</button>
@@ -10077,12 +10426,26 @@ function openCategoriaModal(tipo, existing){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  let corSelecionada = isEdit ? (existing.cor || CATEGORIA_CORES[0]) : CATEGORIA_CORES[0];
+  const marcarSwatchAtivo = ()=>{
+    document.querySelectorAll('.cat-cor-swatch').forEach(sw=>{
+      sw.style.borderColor = sw.dataset.cor===corSelecionada ? 'var(--ink)' : 'transparent';
+    });
+  };
+  marcarSwatchAtivo();
+  document.getElementById('catCorPicker').addEventListener('click', (e)=>{
+    const sw = e.target.closest('.cat-cor-swatch');
+    if(!sw) return;
+    corSelecionada = sw.dataset.cor;
+    marcarSwatchAtivo();
+  });
   document.getElementById('btnSalvarCategoria').addEventListener('click', ()=>{
     const nome = document.getElementById('catNome').value.trim();
     if(!nome){ showToast('Informe o nome da categoria'); return; }
     if(isEdit){
       const oldNome = existing.nome;
       existing.nome = nome;
+      existing.cor = corSelecionada;
       if(oldNome !== nome){
         state.lancamentos.forEach(l=>{
           if(l.categoria===oldNome) l.categoria = nome;
@@ -10094,7 +10457,7 @@ function openCategoriaModal(tipo, existing){
         });
       }
     } else {
-      state.categorias[tipo].push({ id: uid(), nome, subcategorias: [] });
+      state.categorias[tipo].push({ id: uid(), nome, cor: corSelecionada, subcategorias: [] });
     }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Categoria atualizada' : 'Categoria criada');
