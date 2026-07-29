@@ -108,12 +108,13 @@
   .hero-saldo-card{
     background:linear-gradient(135deg, var(--blue-deep) 0%, var(--ink) 100%);
     border-radius:16px;padding:26px 26px 24px;color:#fff;margin-bottom:20px;
-    position:relative;overflow:hidden;
+    position:relative;overflow:hidden;transition:background 1.2s ease;
   }
   .hero-saldo-card::after{
     content:'';position:absolute;top:-40%;right:-10%;width:220px;height:220px;border-radius:50%;
     background:radial-gradient(circle, rgba(59,111,224,.35), transparent 70%);pointer-events:none;
   }
+  .hero-saldo-greeting{display:none;}
   .hero-saldo-top{display:flex;justify-content:space-between;align-items:flex-start;position:relative;}
   .hero-saldo-label{font-size:12px;font-weight:600;color:rgba(255,255,255,.65);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;}
   .hero-saldo-value{font-family:'IBM Plex Mono',monospace;font-size:36px;font-weight:600;line-height:1.1;color:#fff;}
@@ -126,6 +127,27 @@
     display:flex;align-items:center;justify-content:center;cursor:pointer;
   }
   .btn-eye:hover{background:rgba(255,255,255,.2);}
+
+  .dash-hero-row{display:block;}
+  .dash-side-panel{display:none;}
+  .clima-widget, .bolsa-widget{
+    border-radius:16px;padding:18px 18px;color:#fff;position:relative;overflow:hidden;
+    background:linear-gradient(135deg, var(--blue-deep) 0%, var(--ink) 100%);transition:background 1.2s ease;
+  }
+  .clima-widget{flex:1;display:flex;flex-direction:column;justify-content:center;min-height:118px;}
+  .clima-cidade{font-size:11px;font-weight:600;color:rgba(255,255,255,.65);text-transform:uppercase;letter-spacing:.05em;}
+  .clima-linha{display:flex;align-items:center;gap:10px;margin-top:6px;}
+  .clima-emoji{font-size:32px;line-height:1;}
+  .clima-temp{font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:600;}
+  .clima-desc{font-size:11.5px;color:rgba(255,255,255,.75);margin-top:2px;}
+  .bolsa-widget{padding:14px 16px;background:linear-gradient(135deg, #1B2430 0%, var(--ink) 100%);}
+  .bolsa-titulo{font-size:10.5px;font-weight:700;color:rgba(255,255,255,.55);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;}
+  .bolsa-linha{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;padding:3px 0;}
+  .bolsa-linha .tk{font-weight:600;color:#fff;}
+  .bolsa-linha .pc{font-family:'IBM Plex Mono',monospace;color:rgba(255,255,255,.85);}
+  .bolsa-linha .vr{font-family:'IBM Plex Mono',monospace;font-size:11px;}
+  .bolsa-linha .vr.pos{color:#6FDDA0;}
+  .bolsa-linha .vr.neg{color:#FF9385;}
 
   .dash-section-label{font-size:11.5px;font-weight:700;color:var(--text-soft);text-transform:uppercase;letter-spacing:.05em;margin:22px 0 10px;}
 
@@ -453,6 +475,13 @@
 
   /* Desktop/notebook: fonte maior nas linhas de lançamento (Extrato, Pagar, Receber, Fluxo). Celular não é afetado. */
   @media (min-width: 901px){
+    /* Dashboard no notebook: sem o título "Dashboard", saudação dentro do card, e painel de clima/bolsa ao lado */
+    .dash-titulo{display:none;}
+    .dash-topbar{margin-bottom:10px;}
+    .hero-saldo-greeting{display:block;font-size:13.5px;font-weight:600;color:rgba(255,255,255,.85);margin-bottom:4px;position:relative;}
+    .dash-hero-row{display:flex;gap:16px;align-items:stretch;}
+    .dash-hero-row .hero-saldo-card{flex:1 1 62%;margin-bottom:0;}
+    .dash-side-panel{display:flex;flex-direction:column;gap:12px;flex:1 1 34%;max-width:320px;}
     /* Contas Bancárias: handle de arrastar visível e botão "+ Adicionar" repetido escondido (fica só o "+ Novo" do topo e o "Ver extrato") */
     .drag-handle{display:inline-block;}
     .conta-card-footer .dropdown-wrap{display:none;}
@@ -785,6 +814,7 @@ function aplicarMigracoes(s){
   if(!s.canaisVenda) s.canaisVenda = ['E-commerce','Loja Física','Marketplace','B2B','Representante'];
   if(!s.categoriasFixas) s.categoriasFixas = [];
   if(!s.valuationConfig) s.valuationConfig = { multEbitda:4, multFaturamento:1 };
+  if(!s.dashboardConfig) s.dashboardConfig = { cidade:'Pomerode', ativos:['PETR4','VALE3','ITUB4'], brapiToken:'' };
   if(!s.provisoes) s.provisoes = [];
   if(!s.aprovacaoConfig) s.aprovacaoConfig = { ativo:false, limite:0 };
   if(!s.faturasPendentes) s.faturasPendentes = [];
@@ -1777,6 +1807,130 @@ function resumoCartoesHTML(){
   `;
 }
 
+// Dashboard (desktop) — saudação + cores por fase do dia, widget de clima (Open-Meteo, sem
+// chave) e cotações da bolsa (brapi.dev — funciona sem token só pra PETR4/VALE3/ITUB4/MGLU3;
+// outros ativos exigem token configurável em Configurações).
+function calcularFaseDia(){
+  const agora = new Date();
+  const h = agora.getHours() + agora.getMinutes()/60;
+  let saudacao;
+  if(h>=5 && h<12) saudacao = 'Bom dia';
+  else if(h>=12 && h<18) saudacao = 'Boa tarde';
+  else saudacao = 'Boa noite';
+
+  let fase, corInicio, corFim;
+  if(h>=5 && h<7.5){ fase='amanhecer'; corInicio='#8B5A8C'; corFim='#E8935C'; }
+  else if(h>=7.5 && h<11.5){ fase='manha'; corInicio='#3B7FD9'; corFim='#6BB0EA'; }
+  else if(h>=11.5 && h<16.5){ fase='tarde'; corInicio='#2B6CE0'; corFim='#3B8CE0'; }
+  else if(h>=16.5 && h<18.5){ fase='entardecer'; corInicio='#B85C3C'; corFim='#4A3268'; }
+  else { fase='noite'; corInicio='#0B1A3D'; corFim='#050810'; }
+  return { saudacao, fase, corInicio, corFim };
+}
+
+function categorizarClima(code){
+  if(code===0) return { cat:'limpo', label:'Céu limpo', emoji:'☀️' };
+  if([1,2].includes(code)) return { cat:'poucas_nuvens', label:'Poucas nuvens', emoji:'🌤️' };
+  if(code===3) return { cat:'nublado', label:'Nublado', emoji:'☁️' };
+  if([45,48].includes(code)) return { cat:'neblina', label:'Neblina', emoji:'🌫️' };
+  if([51,53,55,56,57,61,63,65,66,67,80,81,82].includes(code)) return { cat:'chuva', label:'Chuva', emoji:'🌧️' };
+  if([71,73,75,77,85,86].includes(code)) return { cat:'neve', label:'Neve', emoji:'❄️' };
+  if([95,96,99].includes(code)) return { cat:'tempestade', label:'Tempestade', emoji:'⛈️' };
+  return { cat:'limpo', label:'—', emoji:'🌡️' };
+}
+
+function aplicarCorHeroCard(climaInfo){
+  const { corInicio, corFim } = calcularFaseDia();
+  const tints = {
+    limpo:'rgba(255,210,140,.16)', poucas_nuvens:'rgba(205,212,225,.14)', nublado:'rgba(150,155,165,.32)',
+    neblina:'rgba(180,180,180,.32)', chuva:'rgba(110,135,160,.4)', neve:'rgba(215,230,245,.32)', tempestade:'rgba(70,65,90,.44)'
+  };
+  let overlay = '';
+  if(climaInfo){
+    overlay = `radial-gradient(circle at 88% 0%, ${tints[climaInfo.cat]||'rgba(150,150,150,.2)'}, transparent 65%), `;
+    if(typeof climaInfo.temp==='number' && climaInfo.temp<15){
+      overlay += `linear-gradient(200deg, rgba(190,215,240,.16), transparent 55%), `;
+    }
+  }
+  const bg = `${overlay}linear-gradient(135deg, ${corInicio} 0%, ${corFim} 100%)`;
+  const card = document.getElementById('heroSaldoCard');
+  const widget = document.getElementById('climaWidget');
+  if(card) card.style.background = bg;
+  if(widget) widget.style.background = bg;
+}
+
+function aplicarSaudacaoDashboard(){
+  const { saudacao, fase } = calcularFaseDia();
+  const emojiFase = { amanhecer:'🌅', manha:'☀️', tarde:'🌤️', entardecer:'🌇', noite:'🌙' };
+  const el = document.getElementById('heroSaldoGreeting');
+  if(el) el.textContent = `${saudacao}! ${emojiFase[fase]}`;
+}
+
+async function buscarClimaDashboard(cidade){
+  const geo = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cidade)}&count=1&language=pt&format=json`).then(r=>r.json());
+  if(!geo.results || !geo.results.length) throw new Error('Cidade não encontrada');
+  const { latitude, longitude, name } = geo.results[0];
+  const clima = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code,wind_speed_10m&timezone=auto`).then(r=>r.json());
+  return { nome:name, temp:clima.current.temperature_2m, code:clima.current.weather_code, vento:clima.current.wind_speed_10m };
+}
+
+async function carregarClimaDashboard(){
+  const widget = document.getElementById('climaWidget');
+  if(!widget) return;
+  try{
+    const cidade = state.dashboardConfig?.cidade || 'Pomerode';
+    const dados = await buscarClimaDashboard(cidade);
+    const info = categorizarClima(dados.code);
+    widget.innerHTML = `
+      <div class="clima-cidade">${escapeHTML(dados.nome)}</div>
+      <div class="clima-linha">
+        <span class="clima-emoji">${info.emoji}</span>
+        <div><div class="clima-temp">${Math.round(dados.temp)}°C</div><div class="clima-desc">${info.label} · vento ${Math.round(dados.vento)} km/h</div></div>
+      </div>
+    `;
+    aplicarCorHeroCard({ cat: info.cat, temp: dados.temp });
+  }catch(e){
+    console.error('Erro ao buscar clima do Dashboard:', e);
+    widget.innerHTML = `<div class="clima-cidade">Previsão indisponível</div><div class="clima-desc" style="margin-top:4px;">Não consegui buscar o clima agora — confira a cidade em Configurações.</div>`;
+    aplicarCorHeroCard(null);
+  }
+}
+
+async function buscarAtivosDashboard(){
+  const cfg = state.dashboardConfig || {};
+  const ativos = (cfg.ativos && cfg.ativos.length) ? cfg.ativos : ['PETR4','VALE3','ITUB4'];
+  const q = cfg.brapiToken ? `?token=${encodeURIComponent(cfg.brapiToken)}` : '';
+  const resp = await fetch(`https://brapi.dev/api/quote/${ativos.map(a=>a.trim()).join(',')}${q}`);
+  if(!resp.ok) throw new Error('brapi HTTP '+resp.status);
+  const data = await resp.json();
+  return data.results || [];
+}
+
+async function carregarBolsaDashboard(){
+  const widget = document.getElementById('bolsaWidget');
+  if(!widget) return;
+  try{
+    const resultados = await buscarAtivosDashboard();
+    if(!resultados.length) throw new Error('sem resultados');
+    widget.innerHTML = `<div class="bolsa-titulo">📈 Bolsa</div>` + resultados.map(a=>{
+      const variacao = a.regularMarketChangePercent || 0;
+      const pos = variacao>=0;
+      const preco = (a.regularMarketPrice||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+      return `<div class="bolsa-linha"><span class="tk">${escapeHTML(a.symbol||'')}</span><span class="pc">R$ ${preco}</span><span class="vr ${pos?'pos':'neg'}">${pos?'▲':'▼'} ${Math.abs(variacao).toFixed(2)}%</span></div>`;
+    }).join('');
+  }catch(e){
+    console.error('Erro ao buscar cotações do Dashboard:', e);
+    widget.innerHTML = `<div class="bolsa-titulo">📈 Bolsa</div><div class="bolsa-linha"><span style="color:rgba(255,255,255,.6);font-weight:400;font-size:11.5px;">Cotação indisponível — confira os ativos/token em Configurações</span></div>`;
+  }
+}
+
+function iniciarWidgetsDashboard(){
+  aplicarSaudacaoDashboard();
+  aplicarCorHeroCard(null);
+  if(window.innerWidth <= 900) return; // widgets de clima/bolsa são só do notebook
+  carregarClimaDashboard();
+  carregarBolsaDashboard();
+}
+
 function viewDashboard(){
   const t = totaisPorMesRef(mesGlobalRef);
   const pend = pendentesResumo();
@@ -1796,21 +1950,28 @@ function viewDashboard(){
 
     ${mesNavHTML()}
 
-    <div class="hero-saldo-card">
-      <div class="hero-saldo-top">
-        <div>
-          <div class="hero-saldo-label">💰 ${ehMesAtual ? 'Saldo em caixa' : 'Saldo no fim do mês'}</div>
-          <div class="hero-saldo-value ${t.saldoAtual>=0?'':'neg'}">${vm(brl(t.saldoAtual))}</div>
+    <div class="dash-hero-row">
+      <div class="hero-saldo-card" id="heroSaldoCard">
+        <div class="hero-saldo-greeting" id="heroSaldoGreeting"></div>
+        <div class="hero-saldo-top">
+          <div>
+            <div class="hero-saldo-label">💰 ${ehMesAtual ? 'Saldo em caixa' : 'Saldo no fim do mês'}</div>
+            <div class="hero-saldo-value ${t.saldoAtual>=0?'':'neg'}">${vm(brl(t.saldoAtual))}</div>
+          </div>
+          <button class="btn-eye" id="btnToggleSaldos" title="${saldosOcultos?'Mostrar valores':'Ocultar valores'}">${saldosOcultos?'🙈':'👁️'}</button>
         </div>
-        <button class="btn-eye" id="btnToggleSaldos" title="${saldosOcultos?'Mostrar valores':'Ocultar valores'}">${saldosOcultos?'🙈':'👁️'}</button>
+        <div class="hero-saldo-trio">
+          <div><span class="trio-label">Inicial</span><span class="trio-value">${vm(brl(t.saldoInicial))}</span></div>
+          <div><span class="trio-label">Previsto</span><span class="trio-value">${vm(brl(t.saldoPrevisto))}</span></div>
+        </div>
+        <div class="hero-saldo-sub">
+          <span>📈 Entradas no mês <strong>${vm(brl(t.entradasMes))}</strong></span>
+          <span>📉 Saídas no mês <strong>${vm(brl(t.saidasMes))}</strong></span>
+        </div>
       </div>
-      <div class="hero-saldo-trio">
-        <div><span class="trio-label">Inicial</span><span class="trio-value">${vm(brl(t.saldoInicial))}</span></div>
-        <div><span class="trio-label">Previsto</span><span class="trio-value">${vm(brl(t.saldoPrevisto))}</span></div>
-      </div>
-      <div class="hero-saldo-sub">
-        <span>📈 Entradas no mês <strong>${vm(brl(t.entradasMes))}</strong></span>
-        <span>📉 Saídas no mês <strong>${vm(brl(t.saidasMes))}</strong></span>
+      <div class="dash-side-panel" id="dashSidePanel">
+        <div class="clima-widget" id="climaWidget"><div class="clima-cidade">Carregando previsão…</div></div>
+        <div class="bolsa-widget" id="bolsaWidget"><div class="bolsa-titulo">📈 Bolsa</div><div class="bolsa-linha"><span class="tk">Carregando…</span></div></div>
       </div>
     </div>
 
@@ -6244,6 +6405,7 @@ function viewConfiguracoes(){
     { id:'aprovacao', icone:'✅', nome:'Aprovação de Despesas', desc:'Exigir aprovação para despesas acima de um valor limite' },
     { id:'firebase', icone:'🔥', nome:'Firebase', desc:'Projeto, usuário conectado, registros salvos e limites do plano' },
     { id:'conciliacao', icone:'🔄', nome:'Conciliação Bancária', desc:'Compare o extrato do banco (OFX) com os lançamentos já registrados' },
+    { id:'dashboard_widget', icone:'🌤️', nome:'Widget do Dashboard', desc:'Cidade da previsão do tempo e ativos da bolsa mostrados no card do notebook' },
   ];
   return `
     <div class="topbar">
@@ -6265,7 +6427,7 @@ function viewConfiguracoes(){
 
 const CONFIG_NOMES = {
   armazenamento:'Armazenamento no Firestore', codigo:'Código do Sistema',
-  aprovacao:'Aprovação de Despesas', firebase:'Firebase'
+  aprovacao:'Aprovação de Despesas', firebase:'Firebase', dashboard_widget:'Widget do Dashboard'
 };
 
 function viewConfiguracaoDetalhe(){
@@ -6400,6 +6562,31 @@ function renderConfigFirebase(){
   `;
 }
 
+function renderConfigDashboardWidget(){
+  const cfg = state.dashboardConfig || { cidade:'Pomerode', ativos:['PETR4','VALE3','ITUB4'], brapiToken:'' };
+  return `
+    <div class="panel-head"><h2>🌤️ Widget do Dashboard</h2></div>
+    <div class="panel-body" style="padding:16px;">
+      <div class="note" style="margin-top:0;">Esses ajustes valem só pro card do Dashboard no notebook (o celular não mostra esse widget).</div>
+      <div class="field" style="max-width:320px;">
+        <label>Cidade da previsão do tempo</label>
+        <input type="text" id="cfgDashCidade" value="${escapeHTML(cfg.cidade||'')}" placeholder="Ex: Pomerode">
+      </div>
+      <div class="field">
+        <label>Ativos da bolsa mostrados (tickers separados por vírgula)</label>
+        <input type="text" id="cfgDashAtivos" value="${escapeHTML((cfg.ativos||[]).join(', '))}" placeholder="Ex: PETR4, VALE3, MXRF11">
+        <div class="note" style="margin-top:6px;">Aceita ações e Fundos Imobiliários (FIIs) no mesmo campo — é só digitar o ticker normalmente (ex: <strong>MXRF11</strong>, <strong>HGLG11</strong>, <strong>KNRI11</strong>). A B3 trata os dois do mesmo jeito.</div>
+      </div>
+      <div class="field" style="max-width:320px;">
+        <label>Token da Brapi (opcional)</label>
+        <input type="text" id="cfgDashToken" value="${escapeHTML(cfg.brapiToken||'')}" placeholder="Cole aqui se tiver um token">
+      </div>
+      <div class="note">Sem token, só funcionam os tickers de teste PETR4, VALE3, ITUB4 e MGLU3 (o próprio brapi.dev libera esses de graça). FIIs e qualquer outra ação/ativo exigem um token — crie uma conta gratuita em <strong>brapi.dev</strong> e cole o token aqui.</div>
+      <button class="btn" id="btnSalvarDashConfig" style="margin-top:8px;">Salvar</button>
+    </div>
+  `;
+}
+
 async function preencherEstatisticasCodigo(){
   const set = (id,v)=>{ const el = document.getElementById(id); if(el) el.textContent = v; };
   try{
@@ -6519,6 +6706,14 @@ function attachViewHandlers(){
       };
       document.getElementById('cfgAprovAtivo')?.addEventListener('change', salvarAprovConfig);
       document.getElementById('cfgAprovLimite')?.addEventListener('change', salvarAprovConfig);
+      document.getElementById('btnSalvarDashConfig')?.addEventListener('click', ()=>{
+        const cidade = document.getElementById('cfgDashCidade').value.trim() || 'Pomerode';
+        const ativos = document.getElementById('cfgDashAtivos').value.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean);
+        const token = document.getElementById('cfgDashToken').value.trim();
+        state.dashboardConfig = { cidade, ativos: ativos.length?ativos:['PETR4','VALE3','ITUB4'], brapiToken: token };
+        persist();
+        showToast('Configuração do widget salva — atualiza ao voltar pro Dashboard');
+      });
       if(configAtivo==='codigo') preencherEstatisticasCodigo();
     };
     const paintConfig = ()=>{
@@ -6528,6 +6723,7 @@ function attachViewHandlers(){
         configAtivo==='codigo' ? renderConfigCodigo() :
         configAtivo==='aprovacao' ? renderConfigAprovacao() :
         configAtivo==='firebase' ? renderConfigFirebase() :
+        configAtivo==='dashboard_widget' ? renderConfigDashboardWidget() :
         renderConfigArmazenamento();
       bindConfigInner();
     };
@@ -6559,6 +6755,7 @@ function attachViewHandlers(){
     e.currentTarget.textContent = saldosOcultos ? '🙈' : '👁️';
     e.currentTarget.title = saldosOcultos ? 'Mostrar valores' : 'Ocultar valores';
   });
+  if(currentView==='dashboard') iniciarWidgetsDashboard();
 
   document.querySelectorAll('[data-action="ver-comprovante"]').forEach(el=>{
     el.addEventListener('click', (e)=>{
