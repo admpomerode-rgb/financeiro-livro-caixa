@@ -837,6 +837,7 @@ function aplicarMigracoes(s){
   if(!s.valuationConfig) s.valuationConfig = { multEbitda:4, multFaturamento:1 };
   if(!s.dashboardConfig) s.dashboardConfig = { cidade:'Pomerode', ativos:['PETR4','VALE3','ITUB4'], brapiToken:'' };
   if(!s.subcontasInvestimento) s.subcontasInvestimento = [];
+  if(!s.vkDivergencias) s.vkDivergencias = [];
   if(!s.orcamentoAlertaPct) s.orcamentoAlertaPct = {};
   ['saida','entrada'].forEach(tipo=>{
     (s.categorias?.[tipo]||[]).forEach((c,i)=>{ if(!c.cor) c.cor = CATEGORIA_CORES[i % CATEGORIA_CORES.length]; });
@@ -1354,25 +1355,14 @@ async function sincronizarPedidosVK(){
     const clientes = clientesSnap.docs.map(d=>({ id: d.id, ...d.data() }));
     const representantesVK = representantesSnap.docs.map(d=>({ id: d.id, ...d.data() }));
     const produtosVK = produtosSnap.docs.map(d=>({ id: d.id, ...d.data() }));
-    let novos = 0, jaImportados = 0, cancelados = 0, marcadosCancelados = 0;
+    let novos = 0, jaImportados = 0, cancelados = 0, marcadosCancelados = 0, atualizados = 0;
+    const divergentes = [];
 
     pedidos.forEach(p=>{
       const cliente = clientes.find(c=>c.id===p.clienteId);
       const descricaoPedido = `Pedido N° ${p.numero}`;
       const existenteAntigo = `Pedido N° ${p.numero}${cliente ? ' — '+cliente.nome : ''}`;
       const existente = state.lancamentos.find(l=>l.origem==='vk' && (l.vkPedidoId===p.id || l.descricao===descricaoPedido || l.descricao===existenteAntigo));
-
-      if(p.status === 'cancelado'){
-        cancelados++;
-        if(existente){
-          if(existente.status !== 'cancelado'){ existente.status = 'cancelado'; existente.dataPagamento = null; marcadosCancelados++; }
-          return;
-        }
-        // pedido já nasceu cancelado no VK — ainda assim entra aqui, só que já marcado
-      } else if(existente){
-        jaImportados++;
-        return;
-      }
 
       const itensTexto = (p.itens||[]).map(it=>{
         const prod = produtosVK.find(pr=>pr.nome===it.produto);
@@ -1393,6 +1383,34 @@ async function sincronizarPedidosVK(){
           }
         }
       }
+      const observacaoNova = `Cliente: ${cliente ? cliente.nome : '—'}\nItens: ${itensTexto || '—'}`;
+      const vencimentoNovo = p.dataEntrega || todayISO();
+
+      if(p.status === 'cancelado'){
+        cancelados++;
+        if(existente){
+          if(existente.status !== 'cancelado'){ existente.status = 'cancelado'; existente.dataPagamento = null; marcadosCancelados++; }
+          return;
+        }
+        // pedido já nasceu cancelado no VK — ainda assim entra aqui, só que já marcado
+      } else if(existente){
+        jaImportados++;
+        const mudou = existente.valor!==p.valorTotal || existente.fornecedor!==(cliente?cliente.nome:'') || existente.dataVencimento!==vencimentoNovo || existente.observacao!==observacaoNova || existente.vendedorId!==vendedorId;
+        if(mudou){
+          if(existente.status==='pendente'){
+            existente.valor = p.valorTotal;
+            existente.fornecedor = cliente ? cliente.nome : '';
+            existente.dataVencimento = vencimentoNovo;
+            existente.observacao = observacaoNova;
+            existente.vendedorId = vendedorId; existente.vendedorNome = vendedorNome;
+            atualizados++;
+          } else {
+            divergentes.push({ pedidoId: p.id, numero: p.numero, lancamentoId: existente.id, valorAntigo: existente.valor, valorNovo: p.valorTotal, status: existente.status });
+          }
+        }
+        return;
+      }
+
       state.lancamentos.push({
         id: uid(), tipo:'entrada', categoria: cfg.categoria || 'Vendas',
         descricao: descricaoPedido,
@@ -1410,15 +1428,20 @@ async function sincronizarPedidosVK(){
     });
 
     cfg.ultimaSincronizacao = new Date().toISOString();
+    state.vkDivergencias = divergentes;
     persist();
     render();
-    console.log(`Sincronização VK: ${pedidos.length} pedidos no total, ${novos} novos, ${jaImportados} já importados antes, ${cancelados} cancelados (${marcadosCancelados} marcados agora como cancelado).`);
+    console.log(`Sincronização VK: ${pedidos.length} pedidos no total, ${novos} novos, ${atualizados} atualizados, ${jaImportados} já importados antes, ${cancelados} cancelados (${marcadosCancelados} marcados agora como cancelado), ${divergentes.length} divergência(s) pra conferir.`);
     let msgFinal;
-    if(novos>0 || marcadosCancelados>0){
+    if(novos>0 || marcadosCancelados>0 || atualizados>0){
       const partes = [];
       if(novos>0) partes.push(`${novos} pedido(s) importado(s)`);
+      if(atualizados>0) partes.push(`${atualizados} corrigido(s)`);
       if(marcadosCancelados>0) partes.push(`${marcadosCancelados} marcado(s) como cancelado(s)`);
+      if(divergentes.length>0) partes.push(`${divergentes.length} precisam de conferência`);
       msgFinal = partes.join(' · ');
+    } else if(divergentes.length>0){
+      msgFinal = `${divergentes.length} pedido(s) já recebido(s) mudaram no VK — confira manualmente`;
     } else {
       msgFinal = `Nenhuma novidade (${pedidos.length} no total no VK, ${jaImportados} já importados, ${cancelados} cancelados)`;
     }
@@ -6383,6 +6406,21 @@ function viewVK(){
       </div>
     </div>
 
+    ${(state.vkDivergencias||[]).length ? `
+    <div class="panel" style="margin-bottom:16px;border-left:3px solid var(--warn);">
+      <div class="panel-head"><h2>⚠️ Pedidos que mudaram no VK e já foram recebidos (${state.vkDivergencias.length})</h2></div>
+      <div class="panel-body">
+        <div class="note" style="margin-top:0;">Esses pedidos já estão marcados como recebidos aqui, então não corrigi sozinho pra não bagunçar algo que você já conferiu. Dá uma olhada e ajusta manualmente se precisar.</div>
+        ${state.vkDivergencias.map(d=>`
+          <div class="ledger-row compact" data-action="abrir-lancamento-vk" data-id="${d.lancamentoId}" style="cursor:pointer;grid-template-columns:12px 1fr auto;">
+            <span class="dot pendente"></span>
+            <div class="desc-cell"><div>Pedido N° ${d.numero}</div><div class="cat">Valor mudou no VK: era ${brl(d.valorAntigo)}, agora é ${brl(d.valorNovo)}</div></div>
+            <button class="btn ghost sm" style="pointer-events:none;">Ver</button>
+          </div>
+        `).join('')}
+      </div>
+    </div>` : ''}
+
     <div class="panel">
       <div class="panel-head"><h2>Configurações</h2></div>
       <div class="panel-body" style="padding:20px;">
@@ -6409,9 +6447,9 @@ function viewVK(){
       <div class="note" style="margin:0;border-top-left-radius:0;border-top-right-radius:0;">
         Ao sincronizar, cada pedido do VK Industrial vira <strong>uma conta a receber</strong> aqui — descrição "Pedido N° [número]", valor total do pedido, vencimento na data de entrega, e uma observação com o nome do cliente e os itens comprados (clique no lançamento para ver).
         <br><br>
-        Pedidos cancelados no VK Industrial entram marcados como "Cancelado" (não somem). Pedidos já importados não são duplicados numa nova sincronização — mas se você editar o pedido no VK Industrial depois de importado, a alteração não atualiza automaticamente aqui (só cancelamento é detectado depois).
+        Pedidos cancelados no VK Industrial entram marcados como "Cancelado" (não somem). Se o pedido for editado no VK Industrial depois de importado (valor, cliente, itens, data de entrega ou vendedor), a sincronização detecta e corrige automaticamente aqui — <strong>desde que o pedido ainda esteja pendente</strong>. Se já tiver sido marcado como recebido, a correção não é feita sozinha (pra não mexer em algo que você já conferiu) — ele aparece no painel de pendências acima pra você decidir.
         <br><br>
-        A sincronização não é automática/contínua — clique em "Sincronizar pedidos agora" sempre que quiser buscar os pedidos novos. A senha fica salva só neste navegador.
+        A sincronização não é automática/contínua — clique em "Sincronizar pedidos agora" sempre que quiser buscar os pedidos novos e corrigir os que mudaram. A senha fica salva só neste navegador.
       </div>
     </details>
 
@@ -8243,6 +8281,12 @@ function attachViewHandlers(){
     }catch(e){ showToast('JSON do Firebase inválido — confira o formato'); }
   });
   const btnSincronizarVK = document.getElementById('btnSincronizarVK');
+  document.querySelectorAll('[data-action="abrir-lancamento-vk"]').forEach(row=>{
+    row.addEventListener('click', ()=>{
+      const l = state.lancamentos.find(x=>x.id===row.dataset.id);
+      if(l) openLancamentoModal(l.tipo, l);
+    });
+  });
   if(btnSincronizarVK) btnSincronizarVK.addEventListener('click', ()=>{
     const txt = document.getElementById('firebaseConfigInput').value.trim();
     try{
