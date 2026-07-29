@@ -768,6 +768,9 @@ function aplicarMigracoes(s){
   if(!s.notasPendentes) s.notasPendentes = [];
   if(!s.balancoManual) s.balancoManual = { estoques:0, realizavelLP:0, passivoNaoCirculante:0 };
   if(!s.centrosCusto) s.centrosCusto = [];
+  if(!s.canaisVenda) s.canaisVenda = ['E-commerce','Loja Física','Marketplace','B2B','Representante'];
+  if(!s.categoriasFixas) s.categoriasFixas = [];
+  if(!s.valuationConfig) s.valuationConfig = { multEbitda:4, multFaturamento:1 };
   if(!s.provisoes) s.provisoes = [];
   if(!s.aprovacaoConfig) s.aprovacaoConfig = { ativo:false, limite:0 };
   if(!s.faturasPendentes) s.faturasPendentes = [];
@@ -3465,6 +3468,15 @@ function viewRelatorios(){
     { id:'investimentos', icone:'💰', nome:'Relatório de Investimentos', desc:'Total aplicado no mês (renda fixa + variável), ativos mais investidos e custos das operações' },
     { id:'liquidez', icone:'💧', nome:'Índices de Liquidez', desc:'Liquidez imediata, seca, corrente e geral + capital de giro, endividamento e solvência' },
     { id:'cartoes', icone:'💳', nome:'Cartões de Crédito', desc:'Uso do limite por cartão, gastos por categoria, comprometido futuro e maiores compras' },
+    { id:'abc_clientes', icone:'👥', nome:'Curva ABC de Clientes', desc:'Classifica clientes em A/B/C pelo volume de receita gerada (últimos 12 meses)' },
+    { id:'abc_despesas', icone:'📉', nome:'Curva ABC de Despesas', desc:'Classifica categorias de despesa em A/B/C pelo volume gasto (últimos 12 meses)' },
+    { id:'abc_fornecedores', icone:'🏭', nome:'Auditoria de Fornecedores', desc:'Curva ABC de compras por fornecedor, com prazo médio de pagamento (PMP)' },
+    { id:'inadimplencia_cac', icone:'⚠️', nome:'Inadimplência e CAC', desc:'Taxa de inadimplência, perfil de clientes atrasados e custo de aquisição de clientes' },
+    { id:'canal_venda', icone:'🛒', nome:'Receita por Canal de Venda', desc:'Compara receita, participação e ticket médio entre canais de venda' },
+    { id:'comissoes', icone:'🤝', nome:'Desempenho Comercial e Comissões', desc:'Comissões por vendedor, metas e ticket médio (abre a tela de Comissões)' },
+    { id:'orcamento', icone:'🎯', nome:'Orçado vs. Realizado', desc:'Comparativo entre o planejado e o executado por categoria (abre Orçamento e Planejamento)' },
+    { id:'breakeven', icone:'⚖️', nome:'Ponto de Equilíbrio', desc:'Vendas mínimas pra cobrir os custos, em 3 cenários (otimista/realista/pessimista)' },
+    { id:'valuation', icone:'💎', nome:'Valuation Estimado', desc:'Estimativa educacional de valor da empresa por múltiplos de EBITDA e faturamento' },
     { id:'aging', icone:'⏳', nome:'Aging — Vencidos por Faixa', desc:'Contas a receber e a pagar por faixa de atraso, com ranking de inadimplentes' },
     { id:'dfc', icone:'🔄', nome:'DFC — Fluxo de Caixa', desc:'Demonstração do fluxo de caixa pelo método direto: operacional, investimento e financiamento' },
     { id:'mei', icone:'🧾', nome:'Declaração MEI', desc:'Números prontos pra DASN-SIMEI' },
@@ -3489,7 +3501,8 @@ function viewRelatorios(){
 
 const RELATORIOS_NOMES = {
   dre:'DRE', balanco:'Balanço Patrimonial', mei:'Declaração MEI', indicadores:'Indicadores Financeiros',
-  produto:'Rentabilidade por Produto', investimentos:'Relatório de Investimentos', liquidez:'Índices de Liquidez', aging:'Aging — Vencidos por Faixa', dfc:'DFC — Fluxo de Caixa', cartoes:'Cartões de Crédito', mensal:'Super Relatório Mensal'
+  produto:'Rentabilidade por Produto', investimentos:'Relatório de Investimentos', liquidez:'Índices de Liquidez', aging:'Aging — Vencidos por Faixa', dfc:'DFC — Fluxo de Caixa', cartoes:'Cartões de Crédito',
+  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal'
 };
 
 function viewRelatorioDetalhe(){
@@ -4424,6 +4437,329 @@ function renderRelatorioCartoes(){
         `).join('')}
       </div>
     </div>` : ''}
+  `;
+}
+
+function classificarABC(itens){
+  const total = itens.reduce((s,i)=>s+i.valor,0);
+  let acumulado = 0;
+  return itens.map(it=>{
+    acumulado += it.valor;
+    const pctAcum = total>0 ? acumulado/total*100 : 0;
+    const classe = pctAcum<=80 ? 'A' : pctAcum<=95 ? 'B' : 'C';
+    return { ...it, pct: total>0?it.valor/total*100:0, pctAcum, classe };
+  });
+}
+function ultimos12MesesAte(mesRef){
+  const [ano, mes] = mesRef.split('-').map(Number);
+  const fimMes = new Date(ano, mes, 0);
+  const ate = `${ano}-${String(mes).padStart(2,'0')}-${String(fimMes.getDate()).padStart(2,'0')}`;
+  const inicio = new Date(ano, mes-12, 1);
+  const de = `${inicio.getFullYear()}-${String(inicio.getMonth()+1).padStart(2,'0')}-01`;
+  return { de, ate };
+}
+function corClasseABC(classe){ return classe==='A' ? 'var(--success)' : classe==='B' ? 'var(--warn)' : 'var(--text-soft)'; }
+
+function renderTabelaABC(itens, rotuloColuna){
+  return `
+    <div class="ledger-row head" style="grid-template-columns:24px 1fr 90px 70px 70px;">
+      <span></span><span>${rotuloColuna}</span><span style="text-align:right;">Valor</span><span style="text-align:right;">%</span><span style="text-align:right;">Acum.</span>
+    </div>
+    ${itens.map(it=>`
+      <div class="ledger-row compact" style="grid-template-columns:24px 1fr 90px 70px 70px;align-items:center;">
+        <span style="font-weight:700;color:${corClasseABC(it.classe)};font-size:12px;">${it.classe}</span>
+        <span style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHTML(it.nome)}</span>
+        <span class="mono" style="text-align:right;font-size:12px;">${brl(it.valor)}</span>
+        <span class="mono" style="text-align:right;font-size:11.5px;color:var(--text-soft);">${it.pct.toFixed(1)}%</span>
+        <span class="mono" style="text-align:right;font-size:11.5px;color:var(--text-soft);">${it.pctAcum.toFixed(1)}%</span>
+      </div>
+    `).join('')}
+  `;
+}
+
+function renderRelatorioABCClientes(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const porCliente = {};
+  state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{
+    const nome = l.fornecedor || 'Sem identificação';
+    porCliente[nome] = (porCliente[nome]||0) + l.valor;
+  });
+  const lista = classificarABC(Object.entries(porCliente).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor));
+  const classeA = lista.filter(i=>i.classe==='A');
+  const totalGeral = lista.reduce((s,i)=>s+i.valor,0);
+
+  return `
+    <div class="report-controls"><span style="font-size:12.5px;color:var(--text-soft);">Curva ABC de Clientes — últimos 12 meses (${fmtDate(de)} a ${fmtDate(ate)})</span></div>
+    <div class="report-block">
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
+        <div class="card saldo"><div class="label">Receita total</div><div class="value mono">${brl(totalGeral)}</div></div>
+        <div class="card"><div class="label">Clientes classe A</div><div class="value mono" style="color:var(--success);">${classeA.length} <span style="font-size:11px;color:var(--text-soft);">de ${lista.length}</span></div></div>
+        <div class="card"><div class="label">% da receita na classe A</div><div class="value mono">${classeA.reduce((s,i)=>s+i.pct,0).toFixed(1)}%</div></div>
+      </div>
+      <div class="note">Classe A: clientes que somam até 80% da receita — são o núcleo do faturamento, merecem atenção prioritária de relacionamento. Classe B: até 95%. Classe C: os 5% finais, mais pulverizados.</div>
+    </div>
+    <div class="panel"><div class="panel-body">${lista.length ? renderTabelaABC(lista, 'Cliente') : `<div class="empty">Nenhuma receita recebida nesse período.</div>`}</div></div>
+  `;
+}
+
+function renderRelatorioABCDespesas(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const porCategoria = {};
+  state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{
+    porCategoria[l.categoria] = (porCategoria[l.categoria]||0) + l.valor;
+  });
+  state.comprasCartao.filter(p=>{
+    const [ano,mes] = p.competencia.split('-').map(Number);
+    const dataComp = `${ano}-${String(mes).padStart(2,'0')}-01`;
+    return dataComp>=de.slice(0,7)+'-01' && dataComp<=ate;
+  }).forEach(p=>{ porCategoria[p.categoria] = (porCategoria[p.categoria]||0) + p.valor; });
+  const lista = classificarABC(Object.entries(porCategoria).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor));
+  const classeA = lista.filter(i=>i.classe==='A');
+  const totalGeral = lista.reduce((s,i)=>s+i.valor,0);
+
+  return `
+    <div class="report-controls"><span style="font-size:12.5px;color:var(--text-soft);">Curva ABC de Custos e Despesas — últimos 12 meses (${fmtDate(de)} a ${fmtDate(ate)})</span></div>
+    <div class="report-block">
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
+        <div class="card saldo"><div class="label">Despesa total</div><div class="value mono">${brl(totalGeral)}</div></div>
+        <div class="card"><div class="label">Categorias classe A</div><div class="value mono" style="color:var(--danger);">${classeA.length} <span style="font-size:11px;color:var(--text-soft);">de ${lista.length}</span></div></div>
+        <div class="card"><div class="label">% da despesa na classe A</div><div class="value mono">${classeA.reduce((s,i)=>s+i.pct,0).toFixed(1)}%</div></div>
+      </div>
+      <div class="note">As categorias classe A concentram até 80% de tudo que sai do caixa — são as que mais valem negociar preço, buscar fornecedor alternativo ou cortar desperdício.</div>
+    </div>
+    <div class="panel"><div class="panel-body">${lista.length ? renderTabelaABC(lista, 'Categoria') : `<div class="empty">Nenhuma despesa paga nesse período.</div>`}</div></div>
+  `;
+}
+
+function renderRelatorioABCFornecedores(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const compras = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate);
+  const porFornecedor = {};
+  compras.forEach(l=>{
+    if(!porFornecedor[l.fornecedor]) porFornecedor[l.fornecedor] = { valor:0, qtd:0, somaPrazo:0, qtdComPrazo:0 };
+    const f = porFornecedor[l.fornecedor];
+    f.valor += l.valor; f.qtd++;
+    if(l.dataVencimento && l.dataPagamento){
+      const dias = Math.round((new Date(l.dataPagamento) - new Date(l.dataVencimento))/86400000);
+      f.somaPrazo += dias; f.qtdComPrazo++;
+    }
+  });
+  const lista = classificarABC(Object.entries(porFornecedor).map(([nome,f])=>({nome,valor:f.valor,qtd:f.qtd,pmp: f.qtdComPrazo? Math.round(f.somaPrazo/f.qtdComPrazo) : null})).sort((a,b)=>b.valor-a.valor));
+  const classeA = lista.filter(i=>i.classe==='A');
+  const totalGeral = lista.reduce((s,i)=>s+i.valor,0);
+
+  return `
+    <div class="report-controls"><span style="font-size:12.5px;color:var(--text-soft);">Auditoria de Fornecedores — últimos 12 meses (${fmtDate(de)} a ${fmtDate(ate)})</span></div>
+    <div class="report-block">
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
+        <div class="card saldo"><div class="label">Total comprado</div><div class="value mono">${brl(totalGeral)}</div></div>
+        <div class="card"><div class="label">Fornecedores classe A</div><div class="value mono">${classeA.length} <span style="font-size:11px;color:var(--text-soft);">de ${lista.length}</span></div></div>
+        <div class="card"><div class="label">Fornecedores no período</div><div class="value mono">${lista.length}</div></div>
+      </div>
+      <div class="note">PMP = Prazo Médio de Pagamento (dias entre o vencimento combinado e a data em que você realmente pagou); positivo significa que você pagou depois do combinado, negativo significa que pagou antes.</div>
+    </div>
+    <div class="panel">
+      <div class="panel-body">
+        <div class="ledger-row head" style="grid-template-columns:24px 1fr 90px 60px 70px;">
+          <span></span><span>Fornecedor</span><span style="text-align:right;">Valor</span><span style="text-align:right;">Compras</span><span style="text-align:right;">PMP</span>
+        </div>
+        ${lista.length ? lista.map(it=>`
+          <div class="ledger-row compact" style="grid-template-columns:24px 1fr 90px 60px 70px;align-items:center;">
+            <span style="font-weight:700;color:${corClasseABC(it.classe)};font-size:12px;">${it.classe}</span>
+            <span style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHTML(it.nome)}</span>
+            <span class="mono" style="text-align:right;font-size:12px;">${brl(it.valor)}</span>
+            <span class="mono" style="text-align:right;font-size:11.5px;color:var(--text-soft);">${it.qtd}</span>
+            <span class="mono" style="text-align:right;font-size:11.5px;color:${it.pmp>0?'var(--warn)':'var(--text-soft)'};">${it.pmp!==null?it.pmp+'d':'—'}</span>
+          </div>
+        `).join('') : `<div class="empty">Nenhuma compra com fornecedor identificado nesse período.</div>`}
+      </div>
+    </div>
+  `;
+}
+
+function renderRelatorioInadimplenciaCAC(){
+  const hoje = todayISO();
+  const vencidas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.dataVencimento && l.dataVencimento<hoje);
+  const totalVencido = vencidas.reduce((s,l)=>s+l.valor,0);
+  const totalCarteira = state.lancamentos.filter(l=>l.tipo==='entrada' && (l.status==='pendente'||l.status==='recebido') && l.origem!=='transferencia').reduce((s,l)=>s+l.valor,0);
+  const taxaInadimplencia = totalCarteira>0 ? totalVencido/totalCarteira*100 : 0;
+
+  const porCliente = {};
+  vencidas.forEach(l=>{
+    const nome = l.fornecedor || 'Sem identificação';
+    if(!porCliente[nome]) porCliente[nome] = { valor:0, qtd:0, maiorAtraso:0 };
+    const dias = Math.round((new Date(hoje)-new Date(l.dataVencimento))/86400000);
+    porCliente[nome].valor += l.valor; porCliente[nome].qtd++;
+    porCliente[nome].maiorAtraso = Math.max(porCliente[nome].maiorAtraso, dias);
+  });
+  const rankingInadimplentes = Object.entries(porCliente).sort((a,b)=>b[1].valor-a[1].valor).slice(0,10);
+
+  const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
+  const deMes = `${mesGlobalRef}-01`;
+  const ateMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
+  const gastoMarketing = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && /marketing|publicidade|an[úu]ncio/i.test(l.categoria||'') && l.dataPagamento>=deMes && l.dataPagamento<=ateMes).reduce((s,l)=>s+l.valor,0);
+
+  const primeiraCompraPorCliente = {};
+  state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor).forEach(l=>{
+    const atual = primeiraCompraPorCliente[l.fornecedor];
+    if(!atual || l.dataPagamento<atual) primeiraCompraPorCliente[l.fornecedor] = l.dataPagamento;
+  });
+  const clientesNovos = Object.entries(primeiraCompraPorCliente).filter(([,d])=>d>=deMes && d<=ateMes).length;
+  const cac = clientesNovos>0 ? gastoMarketing/clientesNovos : null;
+
+  return `
+    <div class="report-controls"><span style="font-size:12.5px;color:var(--text-soft);">Inadimplência (posição de hoje) e CAC (mês de ${competenciaLabel(mesGlobalRef)})</span></div>
+    <div class="report-block">
+      <div class="report-title">Inadimplência</div>
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
+        <div class="card"><div class="label">Total vencido</div><div class="value mono" style="color:${totalVencido>0?'var(--danger)':'var(--success)'};">${brl(totalVencido)}</div></div>
+        <div class="card"><div class="label">Taxa de inadimplência</div><div class="value mono" style="color:${taxaInadimplencia>=15?'var(--danger)':taxaInadimplencia>=5?'var(--warn)':'var(--success)'};">${taxaInadimplencia.toFixed(1)}%</div></div>
+        <div class="card"><div class="label">Clientes inadimplentes</div><div class="value mono">${rankingInadimplentes.length}</div></div>
+      </div>
+      <div class="note" style="margin-top:0;">Taxa de inadimplência = valor vencido ÷ carteira total a receber (pendente + já recebido). Referência: abaixo de 5% é saudável; acima de 15% merece ação de cobrança ativa.</div>
+      ${rankingInadimplentes.length ? `
+      <label style="font-size:12.5px;font-weight:600;display:block;margin:12px 0 6px;">Perfil dos clientes inadimplentes</label>
+      ${rankingInadimplentes.map(([nome,info],i)=>`
+        <div class="report-line sub"><span>${i+1}º &nbsp;${escapeHTML(nome)} <span style="font-size:11px;color:var(--text-soft);">· ${info.qtd} conta(s) · maior atraso ${info.maiorAtraso}d</span></span><span class="v" style="color:var(--danger);">${brl(info.valor)}</span></div>
+      `).join('')}` : `<div class="empty">Nenhuma conta vencida no momento.</div>`}
+    </div>
+    <div class="report-block" style="margin-top:16px;">
+      <div class="report-title">CAC — Custo de Aquisição de Clientes (estimado)</div>
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
+        <div class="card"><div class="label">Gasto em Marketing no mês</div><div class="value mono">${brl(gastoMarketing)}</div></div>
+        <div class="card"><div class="label">Clientes novos no mês</div><div class="value mono">${clientesNovos}</div></div>
+        <div class="card saldo"><div class="label">CAC estimado</div><div class="value mono">${cac!==null?brl(cac):'—'}</div></div>
+      </div>
+      <div class="note">Estimativa aproximada: soma das categorias com "marketing"/"publicidade"/"anúncio" no nome ÷ clientes cuja primeira compra recebida aconteceu neste mês. Só fica preciso se você categorizar as despesas de marketing separadamente. "Cliente novo" considera o primeiro recebimento já registrado no sistema.</div>
+    </div>
+  `;
+}
+
+function renderRelatorioCanalVenda(){
+  const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
+  const deMes = `${mesGlobalRef}-01`;
+  const ateMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
+  const vendas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.canalVenda && l.dataPagamento>=deMes && l.dataPagamento<=ateMes);
+  const semCanal = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && !l.canalVenda && l.origem!=='transferencia' && l.dataPagamento>=deMes && l.dataPagamento<=ateMes);
+
+  const porCanal = {};
+  vendas.forEach(l=>{
+    if(!porCanal[l.canalVenda]) porCanal[l.canalVenda] = { valor:0, qtd:0 };
+    porCanal[l.canalVenda].valor += l.valor; porCanal[l.canalVenda].qtd++;
+  });
+  const totalCanais = Object.values(porCanal).reduce((s,c)=>s+c.valor,0);
+  const lista = Object.entries(porCanal).map(([nome,c])=>({ nome, valor:c.valor, qtd:c.qtd, ticket: c.qtd>0?c.valor/c.qtd:0, pct: totalCanais>0?c.valor/totalCanais*100:0 })).sort((a,b)=>b.valor-a.valor);
+  const maior = lista.length ? lista[0].valor : 0;
+
+  return `
+    <div class="report-controls"><span style="font-size:12.5px;color:var(--text-soft);">Receita por Canal de Venda — ${competenciaLabel(mesGlobalRef)}</span></div>
+    <div class="report-block">
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
+        <div class="card saldo"><div class="label">Receita com canal identificado</div><div class="value mono">${brl(totalCanais)}</div></div>
+        <div class="card"><div class="label">Canais ativos no mês</div><div class="value mono">${lista.length}</div></div>
+        <div class="card"><div class="label">Vendas sem canal marcado</div><div class="value mono">${brl(semCanal.reduce((s,l)=>s+l.valor,0))}</div></div>
+      </div>
+      <div class="note">Este relatório mostra receita e ticket médio por canal — para ver a margem (lucro) por canal, seria preciso também marcar o canal nas despesas atribuíveis a cada um, o que o sistema ainda não faz automaticamente.</div>
+      ${lista.length ? lista.map(c=>`
+        <div style="padding:8px 0;border-bottom:1px solid var(--line);">
+          <div style="display:flex;justify-content:space-between;font-size:13px;"><span style="font-weight:600;">${escapeHTML(c.nome)}</span><span class="mono">${brl(c.valor)} <span style="font-size:11px;color:var(--text-soft);">(${c.pct.toFixed(1)}%)</span></span></div>
+          <div style="font-size:11px;color:var(--text-soft);margin-top:2px;">${c.qtd} venda(s) · ticket médio ${brl(c.ticket)}</div>
+          <div style="height:5px;border-radius:3px;background:var(--line);margin-top:5px;overflow:hidden;"><div style="height:100%;width:${maior>0?Math.round(c.valor/maior*100):0}%;background:var(--blue-accent);border-radius:3px;"></div></div>
+        </div>
+      `).join('') : `<div class="empty">Nenhuma venda com canal marcado neste mês. Marque o "Canal de venda" ao lançar uma receita pra alimentar este relatório.</div>`}
+    </div>
+  `;
+}
+
+function renderRelatorioBreakEven(){
+  const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
+  const deMes = `${mesGlobalRef}-01`;
+  const ateMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
+  const receitaMes = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=deMes && l.dataPagamento<=ateMes).reduce((s,l)=>s+l.valor,0);
+  const despesasMes = {};
+  state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.dataPagamento>=deMes && l.dataPagamento<=ateMes).forEach(l=>{
+    despesasMes[l.categoria] = (despesasMes[l.categoria]||0) + l.valor;
+  });
+  const categorias = Object.keys(despesasMes).sort((a,b)=>a.localeCompare(b));
+  const fixas = new Set(state.categoriasFixas||[]);
+  const custoFixo = categorias.filter(c=>fixas.has(c)).reduce((s,c)=>s+despesasMes[c],0);
+  const custoVariavel = categorias.filter(c=>!fixas.has(c)).reduce((s,c)=>s+despesasMes[c],0);
+  const margemContribPct = receitaMes>0 ? (receitaMes-custoVariavel)/receitaMes : null;
+
+  const cenario = (rotulo, margemPct, cor)=>{
+    const pe = margemPct>0 ? custoFixo/margemPct : null;
+    return `
+      <div class="card">
+        <div class="label">${rotulo}</div>
+        <div class="value mono" style="color:${cor};font-size:16px;">${pe!==null?brl(pe):'—'}</div>
+        <div style="font-size:10.5px;color:var(--text-soft);margin-top:2px;">margem de ${(margemPct*100).toFixed(1)}%</div>
+      </div>`;
+  };
+
+  return `
+    <div class="report-controls"><span style="font-size:12.5px;color:var(--text-soft);">Ponto de Equilíbrio — baseado no mês de ${competenciaLabel(mesGlobalRef)}</span></div>
+    <div class="report-block">
+      <div class="report-title">Classifique suas categorias de despesa</div>
+      <div class="note" style="margin-top:0;">Marque quais categorias são custo fixo (existem mesmo sem vender nada, tipo aluguel, salários). As não marcadas entram como custo variável (crescem junto com a venda, tipo insumos e frete).</div>
+      <div id="breakEvenCategoriasWrap" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:4px 12px;margin-top:8px;">
+        ${categorias.length ? categorias.map(c=>`
+          <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;padding:4px 0;cursor:pointer;">
+            <input type="checkbox" class="be-cat-fixa" data-cat="${escapeHTML(c)}" ${fixas.has(c)?'checked':''} style="width:16px;height:16px;">
+            ${escapeHTML(c)} <span class="mono" style="color:var(--text-soft);font-size:11px;">(${brl(despesasMes[c])})</span>
+          </label>
+        `).join('') : `<div class="empty">Nenhuma despesa paga neste mês pra classificar.</div>`}
+      </div>
+    </div>
+    <div class="report-block" style="margin-top:16px;">
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));">
+        <div class="card"><div class="label">Receita do mês</div><div class="value mono">${brl(receitaMes)}</div></div>
+        <div class="card"><div class="label">Custo fixo</div><div class="value mono">${brl(custoFixo)}</div></div>
+        <div class="card"><div class="label">Custo variável</div><div class="value mono">${brl(custoVariavel)}</div></div>
+        <div class="card"><div class="label">Margem de contribuição</div><div class="value mono">${margemContribPct!==null?(margemContribPct*100).toFixed(1)+'%':'—'}</div></div>
+      </div>
+      ${margemContribPct!==null && margemContribPct>0 ? `
+      <label style="font-size:12.5px;font-weight:600;display:block;margin:14px 0 8px;">Ponto de equilíbrio em 3 cenários (vendas mínimas pra cobrir todos os custos)</label>
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
+        ${cenario('Pessimista (margem -15%)', Math.max(0.01, margemContribPct-0.15), 'var(--danger)')}
+        ${cenario('Realista (margem atual)', margemContribPct, 'var(--ink)')}
+        ${cenario('Otimista (margem +15%)', margemContribPct+0.15, 'var(--success)')}
+      </div>
+      <div class="note">Ponto de equilíbrio = Custo Fixo ÷ Margem de Contribuição. Os cenários otimista/pessimista simulam uma variação de 15 pontos percentuais na margem (por exemplo, de um reajuste de preço ou de custo de insumo), mantendo o custo fixo constante.</div>
+      ` : `<div class="note">Sem receita ou margem de contribuição positiva neste mês, não é possível calcular o ponto de equilíbrio.</div>`}
+    </div>
+  `;
+}
+
+function renderRelatorioValuation(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const receita12m = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+  const despesas12m = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+  const ebitdaEstimado = receita12m - despesas12m;
+  const multEbitda = state.valuationConfig?.multEbitda ?? 4;
+  const multFaturamento = state.valuationConfig?.multFaturamento ?? 1;
+
+  return `
+    <div class="report-controls"><span style="font-size:12.5px;color:var(--text-soft);">Valuation Estimado — últimos 12 meses (${fmtDate(de)} a ${fmtDate(ate)})</span></div>
+    <div class="report-block">
+      <div class="note" style="margin-top:0;border-color:var(--warn);"><strong>Isto é uma estimativa educacional simplificada</strong> — não substitui uma avaliação profissional (que considera ativos, dívidas, mercado, contratos, etc). Use como referência de conversa, não como número final.</div>
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
+        <div class="card"><div class="label">Receita (12 meses)</div><div class="value mono">${brl(receita12m)}</div></div>
+        <div class="card"><div class="label">Despesas operacionais (12 meses)</div><div class="value mono">${brl(despesas12m)}</div></div>
+        <div class="card saldo"><div class="label">EBITDA estimado</div><div class="value mono" style="color:${ebitdaEstimado>=0?'var(--success)':'var(--danger)'};">${brl(ebitdaEstimado)}</div></div>
+      </div>
+      <div class="note" style="margin-top:0;">EBITDA estimado = Receita recebida − despesas pagas nos últimos 12 meses. Não desconta juros, impostos, depreciação e amortização separadamente (o sistema não isola esses itens hoje), então é uma aproximação.</div>
+
+      <label style="font-size:12.5px;font-weight:600;display:block;margin:14px 0 8px;">Ajuste os múltiplos (referências de mercado variam bastante por setor)</label>
+      <div class="field-row">
+        <div class="field"><label>Múltiplo de EBITDA (x)</label><input type="text" inputmode="decimal" id="valMultEbitda" value="${multEbitda}"></div>
+        <div class="field"><label>Múltiplo de Faturamento (x)</label><input type="text" inputmode="decimal" id="valMultFat" value="${multFaturamento}"></div>
+      </div>
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-top:6px;">
+        <div class="card"><div class="label">Valuation por EBITDA</div><div class="value mono">${ebitdaEstimado>0?brl(ebitdaEstimado*multEbitda):'— (EBITDA negativo)'}</div></div>
+        <div class="card"><div class="label">Valuation por Faturamento</div><div class="value mono">${brl(receita12m*multFaturamento)}</div></div>
+      </div>
+      <div class="note">Pequenas empresas costumam usar múltiplos de EBITDA entre 2x e 6x, e de faturamento entre 0,5x e 2x — variando muito por setor, crescimento e risco. Ajuste conforme referências do seu segmento.</div>
+    </div>
   `;
 }
 
@@ -6347,11 +6683,39 @@ function attachViewHandlers(){
         relatorioAtivo==='aging' ? renderAging() :
         relatorioAtivo==='dfc' ? renderDFC() :
         relatorioAtivo==='cartoes' ? renderRelatorioCartoes() :
+        relatorioAtivo==='abc_clientes' ? renderRelatorioABCClientes() :
+        relatorioAtivo==='abc_despesas' ? renderRelatorioABCDespesas() :
+        relatorioAtivo==='abc_fornecedores' ? renderRelatorioABCFornecedores() :
+        relatorioAtivo==='inadimplencia_cac' ? renderRelatorioInadimplenciaCAC() :
+        relatorioAtivo==='canal_venda' ? renderRelatorioCanalVenda() :
+        relatorioAtivo==='breakeven' ? renderRelatorioBreakEven() :
+        relatorioAtivo==='valuation' ? renderRelatorioValuation() :
         relatorioAtivo==='mensal' ? renderSuperRelatorioMensal(mensalMesRef) :
         renderIndicadores('mes');
       bindReportInner();
     };
     const bindReportInner = ()=>{
+      document.querySelectorAll('.be-cat-fixa').forEach(chk=>{
+        chk.addEventListener('change', ()=>{
+          const cat = chk.dataset.cat;
+          if(!state.categoriasFixas) state.categoriasFixas = [];
+          if(chk.checked){ if(!state.categoriasFixas.includes(cat)) state.categoriasFixas.push(cat); }
+          else { state.categoriasFixas = state.categoriasFixas.filter(c=>c!==cat); }
+          persist();
+          document.getElementById('reportPanel').innerHTML = renderRelatorioBreakEven();
+          bindReportInner();
+        });
+      });
+      ['valMultEbitda','valMultFat'].forEach(idc=>{
+        document.getElementById(idc)?.addEventListener('change', ()=>{
+          state.valuationConfig = state.valuationConfig || {};
+          state.valuationConfig.multEbitda = numBR(document.getElementById('valMultEbitda').value) || 0;
+          state.valuationConfig.multFaturamento = numBR(document.getElementById('valMultFat').value) || 0;
+          persist();
+          document.getElementById('reportPanel').innerHTML = renderRelatorioValuation();
+          bindReportInner();
+        });
+      });
       ['liqEstoques','liqRealizavelLP','liqPassivoLP'].forEach(idc=>{
         document.getElementById(idc)?.addEventListener('change', ()=>{
           state.balancoManual = state.balancoManual || {};
@@ -6435,13 +6799,20 @@ function attachViewHandlers(){
     });
     paint();
     document.getElementById('btnExportarRelatorioPDF')?.addEventListener('click', ()=>{
-      const titulos = { dre: 'DRE (Demonstrativo de Resultado)', balanco: 'Balanço Patrimonial', mei: `Declaração MEI — Ano ${meiAnoAtual}`, indicadores: 'Indicadores Financeiros', produto: 'Rentabilidade por Produto', mensal: `Super Relatório Mensal — ${mensalMesRef}`, investimentos: `Relatório de Investimentos — ${mesGlobalRef}`, liquidez: 'Índices de Liquidez e Endividamento', aging: 'Aging — Vencidos por Faixa', dfc: `DFC — Fluxo de Caixa — ${mesGlobalRef}`, cartoes: 'Relatório de Cartões de Crédito' };
+      const titulos = { dre: 'DRE (Demonstrativo de Resultado)', balanco: 'Balanço Patrimonial', mei: `Declaração MEI — Ano ${meiAnoAtual}`, indicadores: 'Indicadores Financeiros', produto: 'Rentabilidade por Produto', mensal: `Super Relatório Mensal — ${mensalMesRef}`, investimentos: `Relatório de Investimentos — ${mesGlobalRef}`, liquidez: 'Índices de Liquidez e Endividamento', aging: 'Aging — Vencidos por Faixa', dfc: `DFC — Fluxo de Caixa — ${mesGlobalRef}`, cartoes: 'Relatório de Cartões de Crédito', abc_clientes: 'Curva ABC de Clientes', abc_despesas: 'Curva ABC de Despesas', abc_fornecedores: 'Auditoria de Fornecedores', inadimplencia_cac: 'Inadimplência e CAC', canal_venda: `Receita por Canal de Venda — ${mesGlobalRef}`, breakeven: `Ponto de Equilíbrio — ${mesGlobalRef}`, valuation: 'Valuation Estimado' };
       exportarRelatorioPDF(titulos[relatorioAtivo]);
     });
   }
   document.querySelectorAll('[data-action="abrir-relatorio"]').forEach(card=>{
     card.addEventListener('click', ()=>{
-      relatorioAtivo = card.dataset.relatorio;
+      const id = card.dataset.relatorio;
+      if(id==='comissoes' || id==='orcamento'){
+        currentView = id;
+        document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view===id));
+        render();
+        return;
+      }
+      relatorioAtivo = id;
       currentView = 'relatorio-detalhe';
       render();
     });
@@ -7459,6 +7830,16 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
         <option value="__novo__">+ Criar novo centro…</option>
       </select>
     </div>
+    ${tipo==='entrada' ? `
+    <div class="field">
+      <label>Canal de venda (opcional — pra ver rentabilidade por canal nos relatórios)</label>
+      <select id="fCanalVenda">
+        <option value="">— nenhum —</option>
+        ${(state.canaisVenda||[]).map(c=>`<option value="${escapeHTML(c)}" ${existing?.canalVenda===c?'selected':''}>${escapeHTML(c)}</option>`).join('')}
+        <option value="__novo__">+ Criar novo canal…</option>
+      </select>
+    </div>
+    ` : ''}
     <div class="field">
       <label>Comprovante / nota fiscal (foto, opcional)</label>
       <input type="file" id="fComprovanteInput" accept="image/*" style="display:none;">
@@ -7589,6 +7970,21 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     fCentroCusto.insertBefore(opt, fCentroCusto.querySelector('option[value="__novo__"]'));
     fCentroCusto.value = nome;
   });
+  const fCanalVenda = document.getElementById('fCanalVenda');
+  if(fCanalVenda) fCanalVenda.addEventListener('change', ()=>{
+    if(fCanalVenda.value!=='__novo__') return;
+    const nome = (prompt('Nome do novo canal de venda (ex: E-commerce, Loja Física, Marketplace):')||'').trim();
+    if(!nome){ fCanalVenda.value=''; return; }
+    if(!state.canaisVenda.includes(nome)){
+      state.canaisVenda.push(nome);
+      state.canaisVenda.sort((a,b)=>a.localeCompare(b));
+      persist();
+    }
+    const opt2 = document.createElement('option');
+    opt2.value = nome; opt2.textContent = nome;
+    fCanalVenda.insertBefore(opt2, fCanalVenda.querySelector('option[value="__novo__"]'));
+    fCanalVenda.value = nome;
+  });
   document.getElementById('btnSalvarLancamento').addEventListener('click', ()=>{
     const categoria = document.getElementById('fCategoria').value;
     const descricao = document.getElementById('fDescricao').value.trim() || categoria;
@@ -7649,6 +8045,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       fornecedor: fornecedorValor,
       produtoTag: document.getElementById('fProduto').value.trim(),
       centroCusto: (fCentroCusto && fCentroCusto.value!=='__novo__') ? fCentroCusto.value : (existing?.centroCusto||''),
+      canalVenda: (fCanalVenda && fCanalVenda.value!=='__novo__') ? fCanalVenda.value : (existing?.canalVenda||''),
       comprovanteFoto: comprovanteAtual,
       observacao: document.getElementById('fObservacao').value.trim(),
       contaId: document.getElementById('fConta').value,
