@@ -57,6 +57,10 @@
   .sidebar .brand .sub{font-size:11px;color:#8A93A3;margin-top:2px;letter-spacing:0.04em;text-transform:uppercase;}
   .nav{padding:16px 12px;flex:1;}
   .sidebar.collapsed .nav{padding:16px 10px;}
+  .nav-group{margin-bottom:4px;}
+  .nav-group + .nav-group{margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.08);}
+  .nav-section-label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--group-accent, #8A93A3);padding:0 12px 8px;opacity:.9;}
+  .sidebar.collapsed .nav-section-label{display:none;}
   .nav-item{
     display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:8px;
     color:#B7BFCC;font-size:14px;font-weight:500;cursor:pointer;margin-bottom:2px;
@@ -64,17 +68,18 @@
   }
   .sidebar.collapsed .nav-item{justify-content:center;padding:10px 6px;}
   .nav-item:hover{background:rgba(255,255,255,0.06);color:var(--white);}
-  .nav-item.active{background:rgba(59,111,224,0.16);color:var(--white);border-left:2px solid var(--blue-accent);}
+  .nav-item.active{background:rgba(255,255,255,0.08);color:var(--white);border-left:2px solid var(--group-accent, var(--blue-accent));}
   .sidebar.collapsed .nav-item.active{border-left:2px solid transparent;}
   .nav-dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.5;flex-shrink:0;}
   .sidebar.collapsed .nav-dot{display:none;}
+  .nav-item.active .nav-dot{background:var(--group-accent, var(--blue-accent));opacity:1;}
   .nav-abbr{
     display:none;width:28px;height:22px;border-radius:6px;background:rgba(255,255,255,0.07);
     color:#B7BFCC;font-size:10px;font-weight:700;align-items:center;justify-content:center;
     letter-spacing:.02em;font-family:'Space Grotesk';flex-shrink:0;
   }
   .sidebar.collapsed .nav-abbr{display:flex;}
-  .nav-item.active .nav-abbr{background:var(--blue-accent);color:var(--white);}
+  .nav-item.active .nav-abbr{background:var(--group-accent, var(--blue-accent));color:var(--white);}
   .sidebar.collapsed .nav-label{display:none;}
   .sidebar-footer{padding:12px;border-top:1px solid rgba(255,255,255,0.08);}
   .sidebar-footer button{
@@ -549,27 +554,36 @@
       <div class="sub">Administração Financeira</div>
     </div>
     <nav class="nav" id="nav">
-      <div class="nav-item active" data-view="dashboard" title="Dashboard"><span class="nav-dot"></span><span class="nav-abbr">DB</span><span class="nav-label">Dashboard</span></div>
-      <div class="nav-item" data-view="pagar" title="Contas a Pagar"><span class="nav-dot"></span><span class="nav-abbr">CP</span><span class="nav-label">Contas a Pagar</span></div>
-      <div class="nav-item" data-view="receber" title="Contas a Receber"><span class="nav-dot"></span><span class="nav-abbr">CR</span><span class="nav-label">Contas a Receber</span></div>
-      <div class="nav-item" data-view="fluxo" title="Fluxo de Caixa"><span class="nav-dot"></span><span class="nav-abbr">FC</span><span class="nav-label">Fluxo de Caixa</span></div>
-      <div class="nav-item" data-view="contas" title="Contas Bancárias"><span class="nav-dot"></span><span class="nav-abbr">CB</span><span class="nav-label">Contas Bancárias</span></div>
-      <div class="nav-item" data-view="cartoes" title="Cartões de Crédito"><span class="nav-dot"></span><span class="nav-abbr">CC</span><span class="nav-label">Cartões de Crédito</span></div>
-      <div class="nav-item" data-view="relatorios" title="Relatórios"><span class="nav-dot"></span><span class="nav-abbr">RL</span><span class="nav-label">Relatórios</span></div>
-      <div class="nav-item" data-view="categorias" title="Categorias"><span class="nav-dot"></span><span class="nav-abbr">CT</span><span class="nav-label">Categorias</span></div>
-      <div class="nav-item" data-view="fornecedores" title="Fornecedores"><span class="nav-dot"></span><span class="nav-abbr">FN</span><span class="nav-label">Fornecedores</span></div>
-      <div class="nav-item" data-view="recorrencias" title="Lançamentos Recorrentes"><span class="nav-dot"></span><span class="nav-abbr">RC</span><span class="nav-label">Recorrentes</span></div>
-      <div class="nav-item" data-view="precificacao" title="Simulador de Precificação"><span class="nav-dot"></span><span class="nav-abbr">PR</span><span class="nav-label">Precificação</span></div>
-      <div class="nav-item" data-view="contratos" title="Central de Contratos"><span class="nav-dot"></span><span class="nav-abbr">CN</span><span class="nav-label">Contratos</span></div>
-      <div class="nav-item" data-view="metas" title="Metas de Reserva"><span class="nav-dot"></span><span class="nav-abbr">MT</span><span class="nav-label">Metas de Reserva</span></div>
-      <div class="nav-item" data-view="simulacao" title="Simulação &quot;E Se&quot;"><span class="nav-dot"></span><span class="nav-abbr">SE</span><span class="nav-label">Simulação "E Se"</span></div>
-      <div class="nav-item" data-view="orcamento" title="Orçamento e Planejamento"><span class="nav-dot"></span><span class="nav-abbr">OR</span><span class="nav-label">Orçamento e Planejamento</span></div>
-      <div class="nav-item" data-view="auditoria" title="Log de Auditoria"><span class="nav-dot"></span><span class="nav-abbr">LG</span><span class="nav-label">Log de Auditoria</span></div>
-      <div class="nav-item" data-view="comissoes" title="Comissões"><span class="nav-dot"></span><span class="nav-abbr">CM</span><span class="nav-label">Comissões</span></div>
-      <div class="nav-item" data-view="ativos" title="Ativos Patrimoniais"><span class="nav-dot"></span><span class="nav-abbr">AP</span><span class="nav-label">Ativos Patrimoniais</span></div>
-      <div class="nav-item" data-view="investimentos" title="Investimentos"><span class="nav-dot"></span><span class="nav-abbr">IV</span><span class="nav-label">Investimentos</span></div>
-      <div class="nav-item" data-view="integracoes" title="Central de Integrações"><span class="nav-dot"></span><span class="nav-abbr">IN</span><span class="nav-label">Central de Integrações</span></div>
-      <div class="nav-item" data-view="configuracoes" title="Configurações do Sistema"><span class="nav-dot"></span><span class="nav-abbr">CF</span><span class="nav-label">Configurações</span></div>
+      <div class="nav-group" style="--group-accent:var(--blue-accent);">
+        <div class="nav-section-label">Operacional</div>
+        <div class="nav-item active" data-view="dashboard" title="Dashboard"><span class="nav-dot"></span><span class="nav-abbr">DB</span><span class="nav-label">Dashboard</span></div>
+        <div class="nav-item" data-view="pagar" title="Contas a Pagar"><span class="nav-dot"></span><span class="nav-abbr">CP</span><span class="nav-label">Contas a Pagar</span></div>
+        <div class="nav-item" data-view="receber" title="Contas a Receber"><span class="nav-dot"></span><span class="nav-abbr">CR</span><span class="nav-label">Contas a Receber</span></div>
+        <div class="nav-item" data-view="fluxo" title="Fluxo de Caixa"><span class="nav-dot"></span><span class="nav-abbr">FC</span><span class="nav-label">Fluxo de Caixa</span></div>
+        <div class="nav-item" data-view="contas" title="Contas Bancárias"><span class="nav-dot"></span><span class="nav-abbr">CB</span><span class="nav-label">Contas Bancárias</span></div>
+        <div class="nav-item" data-view="cartoes" title="Cartões de Crédito"><span class="nav-dot"></span><span class="nav-abbr">CC</span><span class="nav-label">Cartões de Crédito</span></div>
+      </div>
+      <div class="nav-group" style="--group-accent:var(--success);">
+        <div class="nav-section-label">Análise</div>
+        <div class="nav-item" data-view="relatorios" title="Relatórios"><span class="nav-dot"></span><span class="nav-abbr">RL</span><span class="nav-label">Relatórios</span></div>
+        <div class="nav-item" data-view="comissoes" title="Comissões"><span class="nav-dot"></span><span class="nav-abbr">CM</span><span class="nav-label">Comissões</span></div>
+        <div class="nav-item" data-view="orcamento" title="Orçamento e Planejamento"><span class="nav-dot"></span><span class="nav-abbr">OR</span><span class="nav-label">Orçamento e Planejamento</span></div>
+        <div class="nav-item" data-view="simulacao" title="Simulação &quot;E Se&quot;"><span class="nav-dot"></span><span class="nav-abbr">SE</span><span class="nav-label">Simulação "E Se"</span></div>
+        <div class="nav-item" data-view="precificacao" title="Simulador de Precificação"><span class="nav-dot"></span><span class="nav-abbr">PR</span><span class="nav-label">Precificação</span></div>
+      </div>
+      <div class="nav-group" style="--group-accent:#7B5CD6;">
+        <div class="nav-section-label">Cadastros e Configurações</div>
+        <div class="nav-item" data-view="categorias" title="Categorias"><span class="nav-dot"></span><span class="nav-abbr">CT</span><span class="nav-label">Categorias</span></div>
+        <div class="nav-item" data-view="fornecedores" title="Fornecedores"><span class="nav-dot"></span><span class="nav-abbr">FN</span><span class="nav-label">Fornecedores</span></div>
+        <div class="nav-item" data-view="recorrencias" title="Lançamentos Recorrentes"><span class="nav-dot"></span><span class="nav-abbr">RC</span><span class="nav-label">Recorrentes</span></div>
+        <div class="nav-item" data-view="contratos" title="Central de Contratos"><span class="nav-dot"></span><span class="nav-abbr">CN</span><span class="nav-label">Contratos</span></div>
+        <div class="nav-item" data-view="metas" title="Metas de Reserva"><span class="nav-dot"></span><span class="nav-abbr">MT</span><span class="nav-label">Metas de Reserva</span></div>
+        <div class="nav-item" data-view="ativos" title="Ativos Patrimoniais"><span class="nav-dot"></span><span class="nav-abbr">AP</span><span class="nav-label">Ativos Patrimoniais</span></div>
+        <div class="nav-item" data-view="investimentos" title="Investimentos"><span class="nav-dot"></span><span class="nav-abbr">IV</span><span class="nav-label">Investimentos</span></div>
+        <div class="nav-item" data-view="integracoes" title="Central de Integrações"><span class="nav-dot"></span><span class="nav-abbr">IN</span><span class="nav-label">Central de Integrações</span></div>
+        <div class="nav-item" data-view="auditoria" title="Log de Auditoria"><span class="nav-dot"></span><span class="nav-abbr">LG</span><span class="nav-label">Log de Auditoria</span></div>
+        <div class="nav-item" data-view="configuracoes" title="Configurações do Sistema"><span class="nav-dot"></span><span class="nav-abbr">CF</span><span class="nav-label">Configurações</span></div>
+      </div>
     </nav>
     <div class="sidebar-footer">
       <button id="btnBackup"><span class="footer-icon">⇅</span><span class="footer-label">Backup / Restaurar</span></button>
