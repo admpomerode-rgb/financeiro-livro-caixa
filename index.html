@@ -836,6 +836,7 @@ function aplicarMigracoes(s){
   if(!s.categoriasFixas) s.categoriasFixas = [];
   if(!s.valuationConfig) s.valuationConfig = { multEbitda:4, multFaturamento:1 };
   if(!s.dashboardConfig) s.dashboardConfig = { cidade:'Pomerode', ativos:['PETR4','VALE3','ITUB4'], brapiToken:'' };
+  if(!s.subcontasInvestimento) s.subcontasInvestimento = [];
   if(!s.orcamentoAlertaPct) s.orcamentoAlertaPct = {};
   ['saida','entrada'].forEach(tipo=>{
     (s.categorias?.[tipo]||[]).forEach((c,i)=>{ if(!c.cor) c.cor = CATEGORIA_CORES[i % CATEGORIA_CORES.length]; });
@@ -3802,6 +3803,14 @@ function viewAtivosInvestimento(contaId){
   const conta = state.contasInvestimento.find(c=>c.id===contaId);
   if(!conta) return viewInvestimentos();
   const ativos = state.ativosInvestimento.filter(a=>a.contaId===contaId);
+  const subcontas = state.subcontasInvestimento.filter(s=>s.contaId===contaId);
+  const semSubconta = ativos.filter(a=>!a.subContaId);
+  const cabecalho = `
+      <div class="ledger-row ativo-row head">
+        <span></span><span>Ativo</span><span class="ativo-col-qtd">Qtd / Aplicado</span><span class="ativo-col-preco">Preço méd. / Taxa</span><span class="ativo-col-atual">Preço atual</span><span>Valor atual</span><span></span>
+      </div>`;
+  const blocoAtivos = (lista) => lista.length ? lista.map(rowAtivoHTML).join('') : `<div class="empty">Nenhum ativo aqui ainda.</div>`;
+  const totalSubconta = (s) => ativos.filter(a=>a.subContaId===s.id).reduce((sum,a)=>sum+valorAtivo(a),0);
   return `
     <div class="topbar">
       <div>
@@ -3809,16 +3818,32 @@ function viewAtivosInvestimento(contaId){
         <h1 style="margin-top:6px;">${escapeHTML(conta.nome)}</h1>
         <p>${escapeHTML(conta.instituicao || '')} · ${({renda_variavel:'Renda Variável',renda_fixa:'Renda Fixa',interno:'Na Empresa'})[conta.tipo]}</p>
       </div>
-      <button class="btn" id="btnNovoAtivo" data-conta="${contaId}">+ Adicionar ativo</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn ghost" id="btnNovaSubconta" data-conta="${contaId}">+ Subconta</button>
+        <button class="btn" id="btnNovoAtivo" data-conta="${contaId}">+ Adicionar ativo</button>
+      </div>
     </div>
+    ${subcontas.length ? subcontas.map(s=>`
+      <div class="panel" style="margin-bottom:16px;border-left:3px solid ${s.cor||'var(--blue-accent)'};">
+        <div class="panel-head">
+          <h2>${escapeHTML(s.nome)} <span style="font-weight:400;font-size:11.5px;color:var(--text-soft);">· ${brl(totalSubconta(s))}</span></h2>
+          <div class="row-actions">
+            <button class="icon-btn" data-action="renomear-subconta" data-id="${s.id}" title="Renomear">✎</button>
+            <button class="icon-btn" data-action="excluir-subconta" data-id="${s.id}" title="Excluir subconta">✕</button>
+          </div>
+        </div>
+        ${cabecalho}
+        <div class="panel-body">${blocoAtivos(ativos.filter(a=>a.subContaId===s.id))}</div>
+      </div>
+    `).join('') : ''}
     <div class="panel">
-      <div class="ledger-row ativo-row head">
-        <span></span><span>Ativo</span><span class="ativo-col-qtd">Qtd / Aplicado</span><span class="ativo-col-preco">Preço méd. / Taxa</span><span class="ativo-col-atual">Preço atual</span><span>Valor atual</span><span></span>
-      </div>
+      ${subcontas.length ? `<div class="panel-head"><h2>Sem subconta</h2></div>` : ''}
+      ${cabecalho}
       <div class="panel-body">
-        ${ativos.length ? ativos.map(rowAtivoHTML).join('') : `<div class="empty">Nenhum ativo cadastrado nesta conta ainda.</div>`}
+        ${ativos.length ? blocoAtivos(semSubconta) : `<div class="empty">Nenhum ativo cadastrado nesta conta ainda.</div>`}
       </div>
     </div>
+    <div class="note" style="margin-top:0;">Use subcontas pra agrupar aplicações do mesmo tipo dentro desta conta — ex: "LCI", "CDB", "Tesouro Direto" — assim novas aplicações no mesmo produto entram sempre juntas.</div>
   `;
 }
 
@@ -8117,6 +8142,36 @@ function attachViewHandlers(){
   });
   const btnNovoAtivo = document.getElementById('btnNovoAtivo');
   if(btnNovoAtivo) btnNovoAtivo.addEventListener('click', ()=>openAtivoModal(null, btnNovoAtivo.dataset.conta));
+  const btnNovaSubconta = document.getElementById('btnNovaSubconta');
+  if(btnNovaSubconta) btnNovaSubconta.addEventListener('click', ()=>{
+    const nome = (prompt('Nome da nova subconta (ex: LCI, CDB, Tesouro Direto):')||'').trim();
+    if(!nome) return;
+    state.subcontasInvestimento.push({ id: uid(), contaId: btnNovaSubconta.dataset.conta, nome, cor: CONTA_CORES[state.subcontasInvestimento.length % CONTA_CORES.length] });
+    registrarLog('Subconta de investimento criada', nome);
+    persist(); render();
+    showToast('Subconta criada');
+  });
+  document.querySelectorAll('[data-action="renomear-subconta"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const s = state.subcontasInvestimento.find(x=>x.id===btn.dataset.id);
+      if(!s) return;
+      const novoNome = (prompt('Novo nome da subconta:', s.nome)||'').trim();
+      if(!novoNome) return;
+      s.nome = novoNome;
+      persist(); render(); showToast('Subconta renomeada');
+    });
+  });
+  document.querySelectorAll('[data-action="excluir-subconta"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const s = state.subcontasInvestimento.find(x=>x.id===btn.dataset.id);
+      if(!s) return;
+      const qtdAtivos = state.ativosInvestimento.filter(a=>a.subContaId===s.id).length;
+      if(!confirm(`Excluir a subconta "${s.nome}"?${qtdAtivos?' Os '+qtdAtivos+' ativo(s) dela voltam pra "Sem subconta" (nada é apagado).':''}`)) return;
+      state.ativosInvestimento.forEach(a=>{ if(a.subContaId===s.id) a.subContaId = null; });
+      state.subcontasInvestimento = state.subcontasInvestimento.filter(x=>x.id!==s.id);
+      persist(); render(); showToast('Subconta excluída');
+    });
+  });
   document.querySelectorAll('[data-action="editar-ativo"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const a = state.ativosInvestimento.find(x=>x.id===btn.dataset.id);
@@ -10138,6 +10193,17 @@ function openInvestirModal(contaBancariaId){
         <button type="button" data-tipo="interno">Na Empresa</button>
       </div>
     </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Conta de investimento</label>
+        <select id="invContaSelect"></select>
+      </div>
+      <div class="field">
+        <label>Subconta (opcional)</label>
+        <select id="invSubcontaSelect"></select>
+      </div>
+    </div>
+    <div class="note" id="invSubcontaNota" style="margin-top:0;">A subconta agrupa aplicações do mesmo tipo dentro da conta — ex: crie "LCI" pra juntar todas as aplicações em LCI, separadas de outros produtos na mesma conta.</div>
 
     <div id="grupoInvRendaFixa" class="grupo-inv">
       <div class="field"><label>Descrição</label><input type="text" id="invDescricaoRF" placeholder="Ex: CDB Banco X 110% CDI"></div>
@@ -10197,34 +10263,68 @@ function openInvestirModal(contaBancariaId){
 
   let tipoInv = 'rendafixa';
   const grupos = { rendafixa:'grupoInvRendaFixa', rendavariavel:'grupoInvRendaVariavel', interno:'grupoInvInterno' };
+  const tipoContaMap = { rendafixa:'renda_fixa', rendavariavel:'renda_variavel', interno:'interno' };
+  const nomePadraoMap = { rendafixa:'Renda Fixa', rendavariavel:'Renda Variável', interno:'Investimentos na Empresa' };
   const syncGrupos = ()=>{
     document.querySelectorAll('.grupo-inv').forEach(g=>g.style.display='none');
     document.getElementById(grupos[tipoInv]).style.display='block';
   };
   syncGrupos();
+
+  const invContaSelect = document.getElementById('invContaSelect');
+  const invSubcontaSelect = document.getElementById('invSubcontaSelect');
+  const popularContas = ()=>{
+    const tipoContaAlvo = tipoContaMap[tipoInv];
+    const contasDoTipo = state.contasInvestimento.filter(c=>c.tipo===tipoContaAlvo);
+    invContaSelect.innerHTML = contasDoTipo.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('') + `<option value="__nova__">+ Criar nova conta…</option>`;
+    if(contasDoTipo.length) invContaSelect.value = contasDoTipo[0].id;
+    popularSubcontas();
+  };
+  const popularSubcontas = ()=>{
+    const contaId = invContaSelect.value;
+    const subs = state.subcontasInvestimento.filter(s=>s.contaId===contaId);
+    invSubcontaSelect.innerHTML = `<option value="">— nenhuma —</option>` + subs.map(s=>`<option value="${s.id}">${escapeHTML(s.nome)}</option>`).join('') + `<option value="__nova__">+ Criar nova subconta…</option>`;
+  };
+  invContaSelect.addEventListener('change', ()=>{
+    if(invContaSelect.value==='__nova__'){
+      const nome = (prompt('Nome da nova conta de investimento (ex: Banco Inter, XP, Rico):')||'').trim();
+      if(!nome){ popularContas(); return; }
+      const nova = { id: uid(), nome, instituicao:'', instituicaoDominio:'', tipo: tipoContaMap[tipoInv], cor: CONTA_CORES[state.contasInvestimento.length % CONTA_CORES.length] };
+      state.contasInvestimento.push(nova);
+      popularContas();
+      invContaSelect.value = nova.id;
+      popularSubcontas();
+      return;
+    }
+    popularSubcontas();
+  });
+  invSubcontaSelect.addEventListener('change', ()=>{
+    if(invSubcontaSelect.value==='__nova__'){
+      const nome = (prompt('Nome da nova subconta (ex: LCI, CDB, Tesouro Direto):')||'').trim();
+      if(!nome){ invSubcontaSelect.value=''; return; }
+      const nova = { id: uid(), contaId: invContaSelect.value, nome, cor: CONTA_CORES[state.subcontasInvestimento.length % CONTA_CORES.length] };
+      state.subcontasInvestimento.push(nova);
+      popularSubcontas();
+      invSubcontaSelect.value = nova.id;
+    }
+  });
+  popularContas();
+
   document.getElementById('invTipoToggle').addEventListener('click', (e)=>{
     const btn = e.target.closest('button[data-tipo]');
     if(!btn) return;
     tipoInv = btn.dataset.tipo;
     document.querySelectorAll('#invTipoToggle button').forEach(b=>b.classList.toggle('active', b.dataset.tipo===tipoInv));
     syncGrupos();
+    popularContas();
   });
 
   const corretoraSelect = document.getElementById('invCorretora');
   const corretoraOutro = document.getElementById('invCorretoraOutro');
   corretoraSelect.addEventListener('change', ()=>{ corretoraOutro.style.display = corretoraSelect.value==='Outro / não listado' ? 'block' : 'none'; });
 
-  function contaInvestimentoPara(tipoConta, nomePadrao){
-    let conta = state.contasInvestimento.find(c=>c.tipo===tipoConta);
-    if(!conta){
-      conta = { id: uid(), nome: nomePadrao, instituicao:'', instituicaoDominio:'', tipo: tipoConta, cor: CONTA_CORES[state.contasInvestimento.length % CONTA_CORES.length] };
-      state.contasInvestimento.push(conta);
-    }
-    return conta;
-  }
-
   document.getElementById('btnSalvarInvestimento').addEventListener('click', ()=>{
-    let valorTotal, nomeAtivo, ativoPayload, contaInvTipo, contaInvNomePadrao;
+    let valorTotal, nomeAtivo, ativoPayload;
 
     if(tipoInv==='rendafixa'){
       const descricao = document.getElementById('invDescricaoRF').value.trim();
@@ -10232,7 +10332,6 @@ function openInvestirModal(contaBancariaId){
       const data = document.getElementById('invDataRF').value || todayISO();
       if(!descricao || isNaN(valor) || valor<=0){ showToast('Preencha descrição e valor'); return; }
       valorTotal = valor; nomeAtivo = descricao;
-      contaInvTipo = 'renda_fixa'; contaInvNomePadrao = 'Renda Fixa';
       ativoPayload = { tipoAtivo:'rendafixa', nome: descricao, valorAplicado: valor, taxaAnual: 0, indexador: null, dataAplicacao: data, vencimento: null, valorAtualManual: valor };
     } else if(tipoInv==='rendavariavel'){
       const tipoAtivo = document.getElementById('invTipoAtivoRV').value;
@@ -10246,7 +10345,6 @@ function openInvestirModal(contaBancariaId){
       if(!ticker || isNaN(quantidade) || quantidade<=0 || isNaN(precoUnit) || precoUnit<=0){ showToast('Preencha ticker, quantidade e preço unitário'); return; }
       valorTotal = Math.round((quantidade*precoUnit + taxas)*100)/100;
       nomeAtivo = ticker;
-      contaInvTipo = 'renda_variavel'; contaInvNomePadrao = 'Renda Variável';
       ativoPayload = { tipoAtivo, ticker, nome: ticker, quantidade, precoMedio: Math.round((valorTotal/quantidade)*100)/100, precoAtual: null, dataUltimaCotacao: null, corretora };
     } else {
       const descricao = document.getElementById('invDescricaoInt').value.trim();
@@ -10254,13 +10352,19 @@ function openInvestirModal(contaBancariaId){
       const data = document.getElementById('invDataInt').value || todayISO();
       if(!descricao || isNaN(valor) || valor<=0){ showToast('Preencha descrição e valor'); return; }
       valorTotal = valor; nomeAtivo = descricao;
-      contaInvTipo = 'interno'; contaInvNomePadrao = 'Investimentos na Empresa';
       ativoPayload = { tipoAtivo:'interno', nome: descricao, valorAplicado: valor, dataAplicacao: data, valorAtualManual: valor };
     }
 
-    const contaInv = contaInvestimentoPara(contaInvTipo, contaInvNomePadrao);
+    let contaInvId = invContaSelect.value;
+    if(contaInvId==='__nova__' || !contaInvId){
+      const nova = { id: uid(), nome: nomePadraoMap[tipoInv], instituicao:'', instituicaoDominio:'', tipo: tipoContaMap[tipoInv], cor: CONTA_CORES[state.contasInvestimento.length % CONTA_CORES.length] };
+      state.contasInvestimento.push(nova);
+      contaInvId = nova.id;
+    }
+    const subContaId = (invSubcontaSelect.value && invSubcontaSelect.value!=='__nova__') ? invSubcontaSelect.value : null;
+
     const ativoId = uid();
-    state.ativosInvestimento.push({ id: ativoId, contaId: contaInv.id, ...ativoPayload });
+    state.ativosInvestimento.push({ id: ativoId, contaId: contaInvId, subContaId, ...ativoPayload });
 
     const dataMov = ativoPayload.dataAplicacao || document.getElementById('invDataOperacao')?.value || todayISO();
     state.lancamentos.push({
@@ -10289,6 +10393,14 @@ function openAtivoModal(existing, contaId){
         <option value="fii" ${existing?.tipoAtivo==='fii'?'selected':''}>Fundo Imobiliário (FII)</option>
         <option value="cripto" ${existing?.tipoAtivo==='cripto'?'selected':''}>Criptomoeda</option>
         <option value="rendafixa" ${existing?.tipoAtivo==='rendafixa'?'selected':''}>Renda Fixa (CDB/Tesouro/Poupança)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Subconta (opcional)</label>
+      <select id="aiSubconta">
+        <option value="">— nenhuma —</option>
+        ${state.subcontasInvestimento.filter(s=>s.contaId===(existing?existing.contaId:contaId)).map(s=>`<option value="${s.id}" ${existing?.subContaId===s.id?'selected':''}>${escapeHTML(s.nome)}</option>`).join('')}
+        <option value="__nova__">+ Criar nova subconta…</option>
       </select>
     </div>
 
@@ -10385,9 +10497,23 @@ function openAtivoModal(existing, contaId){
     syncRfModo();
   });
 
+  const aiSubconta = document.getElementById('aiSubconta');
+  aiSubconta.addEventListener('change', ()=>{
+    if(aiSubconta.value!=='__nova__') return;
+    const nome = (prompt('Nome da nova subconta (ex: LCI, CDB, Tesouro Direto):')||'').trim();
+    if(!nome){ aiSubconta.value=''; return; }
+    const nova = { id: uid(), contaId, nome, cor: CONTA_CORES[state.subcontasInvestimento.length % CONTA_CORES.length] };
+    state.subcontasInvestimento.push(nova);
+    const opt = document.createElement('option');
+    opt.value = nova.id; opt.textContent = nova.nome;
+    aiSubconta.insertBefore(opt, aiSubconta.querySelector('option[value="__nova__"]'));
+    aiSubconta.value = nova.id;
+  });
+
   document.getElementById('btnSalvarAtivo').addEventListener('click', ()=>{
     const tipoAtivo = tipoSelect.value;
-    let payload = { tipoAtivo, contaId };
+    const subContaId = (aiSubconta.value && aiSubconta.value!=='__nova__') ? aiSubconta.value : null;
+    let payload = { tipoAtivo, contaId, subContaId };
     if(tipoAtivo==='acao' || tipoAtivo==='fii'){
       const nome = document.getElementById('aiNomeAF').value.trim();
       const valor = numBR(document.getElementById('aiValorAF').value);
