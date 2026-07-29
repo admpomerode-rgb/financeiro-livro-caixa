@@ -238,6 +238,7 @@
   .ledger-row.compact .cat{font-size:10px;}
   .fornecedor-row{grid-template-columns:14px 1fr 160px 130px auto;}
   .log-row{grid-template-columns:130px 160px 1fr;}
+  .ativo-row{grid-template-columns:14px 1fr 120px 120px 110px 120px auto;}
   .desc-cell{min-width:0;overflow:hidden;}
   .desc-cell > div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .desc-cell .cat{color:var(--text-soft);font-size:10.5px;margin-top:1px;}
@@ -517,6 +518,8 @@
     .log-row-data{display:block;}
     .log-row-acao{display:block;margin-top:2px;}
     .log-row-detalhe{display:block;margin-top:2px;}
+    .ativo-row{grid-template-columns:10px 1fr 100px auto !important;gap:8px;padding:10px 12px;}
+    .ativo-row .ativo-col-qtd, .ativo-row .ativo-col-preco, .ativo-row .ativo-col-atual{display:none;}
     .extrato-dia-head{flex-wrap:wrap;gap:4px 10px;font-size:12.5px;}
     .extrato-dia-foot{flex-wrap:wrap;gap:4px 10px;}
 
@@ -1800,7 +1803,7 @@ function rankingCategoriasHTML(mesRef){
   const hoje = todayISO();
   const mesAtualRef = hoje.slice(0,7);
   const ateReal = mesRef === mesAtualRef ? hoje : (mesRef < mesAtualRef ? t.ateMes : t.de);
-  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=t.de && l.dataPagamento<=ateReal && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
+  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=t.de && l.dataPagamento<=ateReal && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento'));
 
   const rank = (tipo)=>{
     const map = {};
@@ -1842,7 +1845,19 @@ function rankingCategoriasHTML(mesRef){
 
 function economiaMensalHTML(mesRef){
   const t = totaisPorMesRef(mesRef);
-  const lucro = t.entradasMes - t.saidasMes;
+  const de = `${mesRef}-01`;
+  const hoje = todayISO();
+  const mesAtualRef = hoje.slice(0,7);
+  const ateReal = mesRef === mesAtualRef ? hoje : t.ateMes;
+  let saidasMesSemAporte = 0;
+  if(mesRef <= mesAtualRef){
+    state.lancamentos.forEach(l=>{
+      const ref = l.dataPagamento;
+      if(!ref || ref<de || ref>ateReal) return;
+      if(l.tipo==='saida' && l.status==='pago' && !(l.categoria==='Investimentos' && l.origem==='investimento')) saidasMesSemAporte += l.valor;
+    });
+  }
+  const lucro = t.entradasMes - saidasMesSemAporte;
   const pct = t.entradasMes>0 ? Math.max(0, Math.min(100, Math.round((lucro/t.entradasMes)*100))) : 0;
   const cor = lucro>=0 ? 'var(--success)' : 'var(--danger)';
   return `
@@ -1857,7 +1872,7 @@ function economiaMensalHTML(mesRef){
         </div>
         <div style="flex:1;min-width:160px;">
           <div class="economia-linha"><span>Receitas consideradas</span><span class="mono" style="color:var(--success);font-weight:600;">${vm(brl(t.entradasMes))}</span></div>
-          <div class="economia-linha"><span>Despesas consideradas</span><span class="mono" style="color:var(--danger);font-weight:600;">${vm(brl(t.saidasMes))}</span></div>
+          <div class="economia-linha"><span>Despesas consideradas</span><span class="mono" style="color:var(--danger);font-weight:600;">${vm(brl(saidasMesSemAporte))}</span></div>
         </div>
       </div>
       <div class="economia-total">
@@ -3280,7 +3295,9 @@ function viewExtrato(contaId){
         <h1 style="margin-top:6px;">Extrato — ${escapeHTML(conta.nome)}</h1>
         <p>${escapeHTML(conta.banco||'')} · Saldo atual: <strong class="mono">${brl(saldoConta(contaId))}</strong></p>
       </div>
-      ${menuAdicionarContaHTML(contaId)}
+      <div class="dash-acao" style="display:flex;gap:8px;align-items:center;">
+        ${menuAdicionarContaHTML(contaId)}
+      </div>
     </div>
     <div class="panel">
       <div class="filter-bar" style="align-items:flex-end;">
@@ -3794,8 +3811,8 @@ function viewAtivosInvestimento(contaId){
       <button class="btn" id="btnNovoAtivo" data-conta="${contaId}">+ Adicionar ativo</button>
     </div>
     <div class="panel">
-      <div class="ledger-row head" style="grid-template-columns:14px 1fr 120px 120px 110px 120px auto;">
-        <span></span><span>Ativo</span><span>Qtd / Aplicado</span><span>Preço méd. / Taxa</span><span>Preço atual</span><span>Valor atual</span><span></span>
+      <div class="ledger-row ativo-row head">
+        <span></span><span>Ativo</span><span class="ativo-col-qtd">Qtd / Aplicado</span><span class="ativo-col-preco">Preço méd. / Taxa</span><span class="ativo-col-atual">Preço atual</span><span>Valor atual</span><span></span>
       </div>
       <div class="panel-body">
         ${ativos.length ? ativos.map(rowAtivoHTML).join('') : `<div class="empty">Nenhum ativo cadastrado nesta conta ainda.</div>`}
@@ -3810,12 +3827,12 @@ function rowAtivoHTML(a){
   const isRF = a.tipoAtivo==='rendafixa';
   const isManual = a.tipoAtivo==='rendafixa' || a.tipoAtivo==='interno' || a.manual;
   return `
-    <div class="ledger-row" data-id="${a.id}" style="grid-template-columns:14px 1fr 120px 120px 110px 120px auto;">
+    <div class="ledger-row ativo-row" data-id="${a.id}">
       <span class="dot ${rend>=0?'entrada':'saida'}"></span>
       <div class="desc-cell"><div>${escapeHTML(a.nome || a.ticker || '')}</div><div class="cat">${rotuloTipoAtivo(a)}${a.ticker? ' · '+a.ticker.toUpperCase():''}${a.dataUltimaCotacao? ' · cotação '+fmtDate(a.dataUltimaCotacao.slice(0,10)) : ''}${isManual && a.valorAtualManual!=null ? ' · valor atualizado manualmente' : ''}</div></div>
-      <span class="mono" style="font-size:12.5px;">${isManual? brl(a.valorAplicado||0) : (a.quantidade||0)}</span>
-      <span class="mono" style="font-size:12.5px;">${isRF? ((a.taxaAnual||0)+'% a.a.') : (isManual? '—' : brl(a.precoMedio||0))}</span>
-      <span class="mono" style="font-size:12.5px;">${isManual? '—' : brl(a.precoAtual ?? a.precoMedio ?? 0)}</span>
+      <span class="mono ativo-col-qtd" style="font-size:12.5px;">${isManual? brl(a.valorAplicado||0) : (a.quantidade||0)}</span>
+      <span class="mono ativo-col-preco" style="font-size:12.5px;">${isRF? ((a.taxaAnual||0)+'% a.a.') : (isManual? '—' : brl(a.precoMedio||0))}</span>
+      <span class="mono ativo-col-atual" style="font-size:12.5px;">${isManual? '—' : brl(a.precoAtual ?? a.precoMedio ?? 0)}</span>
       <span class="mono" style="font-weight:600;">${brl(valor)}</span>
       <div class="row-actions">
         ${isManual ? `<button class="icon-btn" data-action="atualizar-valor-ativo" data-id="${a.id}" title="Atualizar valor">🔄</button>` : ''}
@@ -4289,8 +4306,8 @@ function renderSuperRelatorioMensal(mesRef){
   const ultimoDiaAnt = new Date(mesAnteriorDate.getFullYear(), mesAnteriorDate.getMonth()+1, 0).getDate();
   const ateAnt = `${mesAnteriorRef}-${String(ultimoDiaAnt).padStart(2,'0')}`;
 
-  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
-  const realizadosAnt = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=deAnt && l.dataPagamento<=ateAnt && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
+  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento'));
+  const realizadosAnt = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=deAnt && l.dataPagamento<=ateAnt && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento'));
 
   const totalReceitas = realizados.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+l.valor,0);
   const totalDespesas = realizados.filter(l=>l.tipo==='saida').reduce((s,l)=>s+l.valor,0);
@@ -4404,7 +4421,7 @@ function renderIndicadores(periodo){
     label = 'Período personalizado';
   }
 
-  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
+  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento'));
   const receitas = realizados.filter(l=>l.tipo==='entrada');
   const despesas = realizados.filter(l=>l.tipo==='saida');
   const totalReceitas = receitas.reduce((s,l)=>s+l.valor,0);
@@ -4487,7 +4504,7 @@ function renderRentabilidadeProduto(periodo){
     label = 'Período personalizado';
   }
 
-  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
+  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento'));
   const porProduto = {};
   realizados.forEach(l=>{
     const tag = l.produtoTag || 'Não classificado';
