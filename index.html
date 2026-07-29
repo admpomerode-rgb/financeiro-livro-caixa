@@ -3775,6 +3775,7 @@ function viewInvestimentos(){
         return `
         <div class="conta-card" style="--accent-c:${c.cor}">
           <div class="conta-actions">
+            <button class="icon-btn" data-action="transformar-conta-inv" data-id="${c.id}" title="Transformar em subconta de outra conta">🔀</button>
             <button class="icon-btn" data-action="editar-conta-inv" data-id="${c.id}" title="Editar">✎</button>
             <button class="icon-btn" data-action="excluir-conta-inv" data-id="${c.id}" title="Excluir">✕</button>
           </div>
@@ -8111,6 +8112,9 @@ function attachViewHandlers(){
   // Investimentos
   const btnNovaContaInv = document.getElementById('btnNovaContaInv');
   if(btnNovaContaInv) btnNovaContaInv.addEventListener('click', ()=>openContaInvestimentoModal());
+  document.querySelectorAll('[data-action="transformar-conta-inv"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openTransformarContaSubcontaModal(btn.dataset.id));
+  });
   document.querySelectorAll('[data-action="editar-conta-inv"]').forEach(btn=>{
     btn.addEventListener('click', ()=>openContaInvestimentoModal(state.contasInvestimento.find(c=>c.id===btn.dataset.id)));
   });
@@ -9563,6 +9567,60 @@ function openCompraCartaoModal(cartaoId){
     }
     persist(); closeModal(); render();
     showToast(parcelas>1 ? `Compra lançada em ${parcelas}x` : 'Compra lançada');
+  });
+}
+
+function openTransformarContaSubcontaModal(contaId){
+  const conta = state.contasInvestimento.find(c=>c.id===contaId);
+  if(!conta) return;
+  const outras = state.contasInvestimento.filter(c=>c.id!==contaId);
+  const qtdAtivos = state.ativosInvestimento.filter(a=>a.contaId===contaId).length;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Transformar "${escapeHTML(conta.nome)}" em subconta</h3>
+    <div class="note" style="margin-top:0;">${qtdAtivos} ativo(s) desta conta vão junto pra dentro da subconta nova — nada se perde, só reorganiza.</div>
+    <div class="field">
+      <label>Vai virar subconta de qual conta?</label>
+      <select id="tcsContaDestino">
+        ${outras.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}
+        <option value="__nova__">+ Criar nova conta…</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Nome da subconta</label>
+      <input type="text" id="tcsNomeSubconta" value="${escapeHTML(conta.nome)}">
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarTransformar">Transformar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnConfirmarTransformar').addEventListener('click', ()=>{
+    let contaDestinoId = document.getElementById('tcsContaDestino').value;
+    const nomeSubconta = document.getElementById('tcsNomeSubconta').value.trim() || conta.nome;
+    if(contaDestinoId==='__nova__'){
+      const nomeNovaConta = (prompt('Nome da nova conta (ex: Banco Inter, XP, Rico):')||'').trim();
+      if(!nomeNovaConta) return;
+      const novaConta = { id: uid(), nome: nomeNovaConta, instituicao: conta.instituicao||'', instituicaoDominio: conta.instituicaoDominio||'', tipo: conta.tipo, cor: CONTA_CORES[state.contasInvestimento.length % CONTA_CORES.length] };
+      state.contasInvestimento.push(novaConta);
+      contaDestinoId = novaConta.id;
+    }
+    const contaDestino = state.contasInvestimento.find(c=>c.id===contaDestinoId);
+    if(!contaDestino) return;
+    const novaSubconta = { id: uid(), contaId: contaDestinoId, nome: nomeSubconta, cor: conta.cor || CONTA_CORES[state.subcontasInvestimento.length % CONTA_CORES.length] };
+    state.subcontasInvestimento.push(novaSubconta);
+    let movidos = 0;
+    state.ativosInvestimento.forEach(a=>{
+      if(a.contaId===contaId){ a.contaId = contaDestinoId; a.subContaId = novaSubconta.id; movidos++; }
+    });
+    state.contasInvestimento = state.contasInvestimento.filter(c=>c.id!==contaId);
+    registrarLog('Conta de investimento transformada em subconta', `"${conta.nome}" virou subconta "${nomeSubconta}" dentro de "${contaDestino.nome}" — ${movidos} ativo(s) movido(s)`);
+    persist(); closeModal();
+    currentView = 'ativos-inv'; invContaId = contaDestinoId;
+    render();
+    showToast(`Pronto — "${nomeSubconta}" agora é uma subconta dentro de "${contaDestino.nome}"`);
   });
 }
 
