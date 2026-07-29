@@ -1625,6 +1625,7 @@ function pendentesResumo(){
   let aPagar=0, aReceber=0, atrasados=0;
   const hoje = todayISO();
   state.lancamentos.forEach(l=>{
+    if(l.origem==='transferencia' || l.origem==='investimento') return;
     if(l.status==='pendente'){
       if(l.tipo==='saida') aPagar += l.valor;
       if(l.tipo==='entrada') aReceber += l.valor;
@@ -1640,7 +1641,7 @@ function contasVencendoResumo(){
   const em7ISO = em7dias.toISOString().slice(0,10);
   const atrasadas = [], venceEmBreve = [];
   state.lancamentos.forEach(l=>{
-    if(l.status!=='pendente' || !l.dataVencimento || l.origem==='transferencia') return;
+    if(l.status!=='pendente' || !l.dataVencimento || l.origem==='transferencia' || l.origem==='investimento') return;
     if(l.dataVencimento < hoje) atrasadas.push(l);
     else if(l.dataVencimento <= em7ISO) venceEmBreve.push(l);
   });
@@ -2147,7 +2148,7 @@ function viewLancamentos(tipo){
   const deMes = `${mesGlobalRef}-01`;
   const ateMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
   let lista = state.lancamentos.filter(l=>{
-    if(l.tipo!==tipo || l.origem==='transferencia') return false;
+    if(l.tipo!==tipo || l.origem==='transferencia' || l.origem==='investimento') return false;
     const refMes = l.dataVencimento || l.dataPagamento;
     return refMes && refMes>=deMes && refMes<=ateMes;
   });
@@ -2224,7 +2225,7 @@ function viewFluxo(){
   const deMes = `${mesGlobalRef}-01`;
   const ateMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
 
-  const todosRealizados = state.lancamentos.filter(l=>(l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
+  const todosRealizados = state.lancamentos.filter(l=>(l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && l.origem!=='investimento');
   let saldo = 0;
   todosRealizados.filter(l=>(l.dataPagamento||'')<deMes).forEach(l=>{ saldo += l.tipo==='entrada' ? l.valor : -l.valor; });
   const saldoInicioMes = saldo;
@@ -2238,7 +2239,7 @@ function viewFluxo(){
   const hoje = todayISO();
   const em60dias = new Date(); em60dias.setDate(em60dias.getDate()+60);
   const em60ISO = em60dias.toISOString().slice(0,10);
-  let pendentes = state.lancamentos.filter(l=>l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento && l.dataVencimento<=em60ISO);
+  let pendentes = state.lancamentos.filter(l=>l.status==='pendente' && l.origem!=='transferencia' && l.origem!=='investimento' && l.dataVencimento && l.dataVencimento<=em60ISO);
   pendentes.sort((a,b)=>(a.dataVencimento||'').localeCompare(b.dataVencimento||''));
   let saldoProjetado = saldo;
   pendentes.forEach(l=>{ saldoProjetado += l.tipo==='entrada' ? l.valor : -l.valor; });
@@ -2246,7 +2247,7 @@ function viewFluxo(){
 
   return `
     <div class="topbar">
-      <div><h1>Fluxo de Caixa</h1><p>Lançamentos realizados, em ordem cronológica, com saldo acumulado (transferências entre contas próprias não entram aqui — veja o extrato da conta)</p></div>
+      <div><h1>Fluxo de Caixa</h1><p>Lançamentos realizados, em ordem cronológica, com saldo acumulado (transferências entre contas próprias e aplicações financeiras não entram aqui — veja o extrato da conta)</p></div>
     </div>
     ${mesNavHTML()}
     <div class="panel">
@@ -4645,7 +4646,7 @@ function renderAging(){
   const nomeDe = l => (l.fornecedor || (l.descricao||'').replace(/^Pedido\s*N[º°o]?\s*\d+\s*[—–-]\s*/i,'').trim() || 'Sem identificação');
 
   const blocoAging = (tipo)=>{
-    const pend = state.lancamentos.filter(l=>l.tipo===tipo && l.status==='pendente' && l.dataVencimento);
+    const pend = state.lancamentos.filter(l=>l.tipo===tipo && l.status==='pendente' && l.dataVencimento && l.origem!=='transferencia' && l.origem!=='investimento');
     const vencidas = pend.filter(l=>dias(l.dataVencimento)>0);
     const aVencer = pend.filter(l=>dias(l.dataVencimento)<=0);
     const faixasVenc = [
