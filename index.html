@@ -2822,12 +2822,14 @@ function renderExtratoConteudo(contaId){
   const conta = state.contas.find(c=>c.id===contaId);
   if(!conta) return '';
   let lista = state.lancamentos.filter(l=>l.contaId===contaId && (l.status==='pago'||l.status==='recebido'));
-  let pendentesConta = state.lancamentos.filter(l=>l.contaId===contaId && l.status==='pendente');
-  if(extratoBuscaTermo){
+  const buscando = !!extratoBuscaTermo;
+  let pendentesConta = state.lancamentos.filter(l=> l.status==='pendente' && (buscando || l.contaId===contaId));
+  if(buscando){
     const termo = extratoBuscaTermo.toLowerCase();
     const bate = l => l.descricao.toLowerCase().includes(termo) || (l.fornecedor||'').toLowerCase().includes(termo) || (l.observacao||'').toLowerCase().includes(termo);
     lista = lista.filter(bate);
     pendentesConta = pendentesConta.filter(bate);
+    pendentesConta.sort((a,b)=> (a.dataVencimento||'').localeCompare(b.dataVencimento||''));
   }
   lista.sort((a,b)=> (a.dataPagamento||'').localeCompare(b.dataPagamento||''));
 
@@ -2873,7 +2875,7 @@ function renderExtratoConteudo(contaId){
     ${grupos.length ? gruposHTML : `<div class="panel"><div class="empty">${extratoBuscaTermo ? 'Nenhuma movimentação encontrada para essa busca.' : 'Nenhuma movimentação realizada nesta conta ainda.'}</div></div>`}
     ${pendentesConta.length ? `
     <div class="panel">
-      <div class="panel-head"><h2>Previsto (ainda pendente) nesta conta</h2></div>
+      <div class="panel-head"><h2>${buscando ? 'Encontrado em Contas a Pagar/Receber (todas as contas)' : 'Previsto (ainda pendente) nesta conta'}</h2></div>
       <div class="panel-body">${pendentesConta.map(rowHTML).join('')}</div>
     </div>` : ''}
   `;
