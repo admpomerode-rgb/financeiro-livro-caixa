@@ -1274,9 +1274,36 @@ function custoAtivo(a){
   if(a.tipoAtivo==='rendafixa' || a.tipoAtivo==='interno' || a.manual) return a.valorAplicado||0;
   return (a.quantidade||0) * (a.precoMedio||0);
 }
-function valorContaInvestimento(contaId){ return state.ativosInvestimento.filter(a=>a.contaId===contaId).reduce((s,a)=>s+valorAtivo(a),0); }
-function custoContaInvestimento(contaId){ return state.ativosInvestimento.filter(a=>a.contaId===contaId).reduce((s,a)=>s+custoAtivo(a),0); }
-function totalInvestimentos(){ return state.ativosInvestimento.reduce((s,a)=>s+valorAtivo(a),0); }
+function totalSubconta(subcontaId){
+  const s = state.subcontasInvestimento.find(x=>x.id===subcontaId);
+  if(s && s.valorManual!=null) return s.valorManual;
+  return state.ativosInvestimento.filter(a=>a.subContaId===subcontaId).reduce((sum,a)=>sum+valorAtivo(a),0);
+}
+function custoSubconta(subcontaId){
+  const s = state.subcontasInvestimento.find(x=>x.id===subcontaId);
+  if(s && s.valorManual!=null) return s.custoAcumulado||0;
+  return state.ativosInvestimento.filter(a=>a.subContaId===subcontaId).reduce((sum,a)=>sum+custoAtivo(a),0);
+}
+function valorContaInvestimento(contaId){
+  const subsManual = state.subcontasInvestimento.filter(s=>s.contaId===contaId && s.valorManual!=null);
+  const idsSubManual = new Set(subsManual.map(s=>s.id));
+  const somaAtivos = state.ativosInvestimento.filter(a=>a.contaId===contaId && !idsSubManual.has(a.subContaId)).reduce((s,a)=>s+valorAtivo(a),0);
+  const somaSubManual = subsManual.reduce((s,sub)=>s+sub.valorManual,0);
+  return somaAtivos + somaSubManual;
+}
+function custoContaInvestimento(contaId){
+  const subsManual = state.subcontasInvestimento.filter(s=>s.contaId===contaId && s.valorManual!=null);
+  const idsSubManual = new Set(subsManual.map(s=>s.id));
+  const somaAtivos = state.ativosInvestimento.filter(a=>a.contaId===contaId && !idsSubManual.has(a.subContaId)).reduce((s,a)=>s+custoAtivo(a),0);
+  const somaSubManual = subsManual.reduce((s,sub)=>s+(sub.custoAcumulado||0),0);
+  return somaAtivos + somaSubManual;
+}
+function totalInvestimentos(){
+  const idsSubManual = new Set(state.subcontasInvestimento.filter(s=>s.valorManual!=null).map(s=>s.id));
+  const somaAtivos = state.ativosInvestimento.filter(a=>!idsSubManual.has(a.subContaId)).reduce((s,a)=>s+valorAtivo(a),0);
+  const somaSubManual = state.subcontasInvestimento.filter(s=>s.valorManual!=null).reduce((s,sub)=>s+sub.valorManual,0);
+  return somaAtivos + somaSubManual;
+}
 function rotuloTipoAtivo(a){
   return { acao:'Ação (B3)', fii:'FII', cripto:'Criptomoeda', rendafixa:'Renda Fixa', interno:'Investimento na Empresa' }[a.tipoAtivo] || a.tipoAtivo;
 }
@@ -3751,9 +3778,15 @@ function publicarFaturaCartao(fatura){
   return true;
 }
 
+function custoTotalInvestimentos(){
+  const idsSubManual = new Set(state.subcontasInvestimento.filter(s=>s.valorManual!=null).map(s=>s.id));
+  const somaAtivos = state.ativosInvestimento.filter(a=>!idsSubManual.has(a.subContaId)).reduce((s,a)=>s+custoAtivo(a),0);
+  const somaSubManual = state.subcontasInvestimento.filter(s=>s.valorManual!=null).reduce((s,sub)=>s+(sub.custoAcumulado||0),0);
+  return somaAtivos + somaSubManual;
+}
 function viewInvestimentos(){
   const total = totalInvestimentos();
-  const custo = state.ativosInvestimento.reduce((s,a)=>s+custoAtivo(a),0);
+  const custo = custoTotalInvestimentos();
   const rendimento = total - custo;
   return `
     <div class="topbar">
@@ -3834,7 +3867,6 @@ function viewAtivosInvestimento(contaId){
         <span></span><span>Ativo</span><span class="ativo-col-qtd">Qtd / Aplicado</span><span class="ativo-col-preco">Preço méd. / Taxa</span><span class="ativo-col-atual">Preço atual</span><span>Valor atual</span><span></span>
       </div>`;
   const blocoAtivos = (lista) => lista.length ? lista.map(rowAtivoHTML).join('') : `<div class="empty">Nenhum ativo aqui ainda.</div>`;
-  const totalSubconta = (s) => ativos.filter(a=>a.subContaId===s.id).reduce((sum,a)=>sum+valorAtivo(a),0);
   return `
     <div class="topbar">
       <div>
@@ -3850,14 +3882,16 @@ function viewAtivosInvestimento(contaId){
     ${subcontas.length ? subcontas.map(s=>`
       <div class="panel" style="margin-bottom:16px;border-left:3px solid ${s.cor||'var(--blue-accent)'};">
         <div class="panel-head">
-          <h2>${escapeHTML(s.nome)} <span style="font-weight:400;font-size:11.5px;color:var(--text-soft);">· ${brl(totalSubconta(s))}</span></h2>
+          <h2>${escapeHTML(s.nome)} <span style="font-weight:400;font-size:11.5px;color:var(--text-soft);">· ${brl(totalSubconta(s.id))}${s.valorManual!=null?' <span title="Valor atualizado manualmente">✋</span>':''}</span></h2>
           <div class="row-actions">
+            <button class="icon-btn" data-action="atualizar-valor-subconta" data-id="${s.id}" title="Atualizar valor da subconta">🔄</button>
             <button class="icon-btn" data-action="renomear-subconta" data-id="${s.id}" title="Renomear">✎</button>
             <button class="icon-btn" data-action="excluir-subconta" data-id="${s.id}" title="Excluir subconta">✕</button>
           </div>
         </div>
         ${cabecalho}
         <div class="panel-body">${blocoAtivos(ativos.filter(a=>a.subContaId===s.id))}</div>
+        ${s.valorManual!=null ? `<div class="note" style="margin:0;border-top-left-radius:0;border-top-right-radius:0;">Essa subconta está com valor atualizado manualmente (${brl(s.valorManual)}) — se tiver ativos individuais aqui embaixo, eles ficam só como referência, não entram na soma.</div>` : ''}
       </div>
     `).join('') : ''}
     <div class="panel">
@@ -8193,6 +8227,12 @@ function attachViewHandlers(){
     persist(); render();
     showToast('Subconta criada');
   });
+  document.querySelectorAll('[data-action="atualizar-valor-subconta"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const s = state.subcontasInvestimento.find(x=>x.id===btn.dataset.id);
+      if(s) openAtualizarValorSubcontaModal(s);
+    });
+  });
   document.querySelectorAll('[data-action="renomear-subconta"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const s = state.subcontasInvestimento.find(x=>x.id===btn.dataset.id);
@@ -10845,6 +10885,45 @@ function openComissaoManualModal(){
     state.comissoesManuais.push({ id: uid(), vendedorId, descricao, valorBase, data });
     persist(); closeModal(); render();
     showToast('Comissão manual adicionada — apareça na lista de pendentes do período');
+  });
+}
+
+function openAtualizarValorSubcontaModal(subconta){
+  const modal = document.getElementById('modalContent');
+  const valorAtual = totalSubconta(subconta.id);
+  modal.innerHTML = `
+    <h3>Atualizar valor — ${escapeHTML(subconta.nome)}</h3>
+    <p style="font-size:12.5px;color:var(--text-soft);margin-bottom:14px;">Valor atual registrado: <strong class="mono">${brl(valorAtual)}</strong></p>
+    <div class="field">
+      <label>Novo valor total (R$)</label>
+      <input type="text" inputmode="decimal" id="avsNovoValor" value="${valorAtual}">
+    </div>
+    <div class="note" style="margin-top:0;">A diferença entre o valor antigo e o novo fica registrada no histórico da subconta — assim toda aplicação/rendimento que você lançar aqui fica com data e valor guardados.</div>
+    ${(subconta.historico&&subconta.historico.length) ? `
+    <label style="font-size:12.5px;font-weight:600;display:block;margin:12px 0 6px;">Histórico de atualizações</label>
+    <div style="max-height:160px;overflow-y:auto;">
+      ${subconta.historico.slice(0,15).map(h=>`<div class="report-line sub"><span>${fmtDate(h.data)} · ${h.tipo==='aporte'?'Aporte':'Ajuste'}</span><span class="v" style="color:${h.valor>=0?'var(--success)':'var(--danger)'};">${h.valor>=0?'+':''}${brl(h.valor)}</span></div>`).join('')}
+    </div>` : ''}
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarValorSubconta">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarValorSubconta').addEventListener('click', ()=>{
+    const novoValor = numBR(document.getElementById('avsNovoValor').value);
+    if(isNaN(novoValor) || novoValor<0){ showToast('Informe um valor válido'); return; }
+    const delta = Math.round((novoValor - valorAtual)*100)/100;
+    if(!subconta.historico) subconta.historico = [];
+    if(delta!==0){
+      subconta.historico.unshift({ data: todayISO(), valor: delta, tipo: delta>=0?'aporte':'ajuste' });
+      if(delta>0) subconta.custoAcumulado = Math.round(((subconta.custoAcumulado||0)+delta)*100)/100;
+    }
+    subconta.valorManual = novoValor;
+    registrarLog('Valor da subconta de investimento atualizado', `"${subconta.nome}" — ${brl(valorAtual)} → ${brl(novoValor)}`);
+    persist(); closeModal(); render();
+    showToast('Valor da subconta atualizado');
   });
 }
 
