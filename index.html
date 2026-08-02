@@ -6024,7 +6024,7 @@ function renderCategoriaPanel(tipo){
               <div class="categoria-head-nome">
                 <span class="nome" data-action="ver-lancamentos-categoria" data-tipo="${tipo}" data-cat="${escapeHTML(c.nome)}" style="font-size:15px;font-weight:700;">${escapeHTML(c.nome)}</span>
               </div>
-              <span class="categoria-total-linha">${info.qtd} lançamento(s) <span class="mono">${brl(info.total)}</span></span>
+              <span class="categoria-total-linha"><span class="mono">${brl(info.total)}</span></span>
               <div class="dropdown-wrap categoria-menu-wrap">
                 <button class="icon-btn" data-action="toggle-menu-categoria" data-menu-id="cat-${c.id}" title="Mais opções">⋮</button>
                 <div class="dropdown-menu" data-menu-categoria="cat-${c.id}">
@@ -6043,7 +6043,7 @@ function renderCategoriaPanel(tipo){
                   <div class="subcategoria-nome-wrap">
                     <span class="sub-nome" data-action="ver-lancamentos-categoria" data-tipo="${tipo}" data-cat="${escapeHTML(c.nome+' / '+sub.nome)}" style="font-weight:400;">${escapeHTML(sub.nome)}</span>
                   </div>
-                  <span class="categoria-total-linha">${subInfo.qtd} lançamento(s) <span class="mono">${brl(subInfo.total)}</span></span>
+                  <span class="categoria-total-linha"><span class="mono">${brl(subInfo.total)}</span></span>
                   <div class="dropdown-wrap categoria-menu-wrap">
                     <button class="icon-btn" data-action="toggle-menu-categoria" data-menu-id="sub-${sub.id}" title="Mais opções">⋮</button>
                     <div class="dropdown-menu" data-menu-categoria="sub-${sub.id}">
