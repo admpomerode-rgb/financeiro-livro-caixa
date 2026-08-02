@@ -2410,7 +2410,12 @@ function calcularProjecaoSimulacao(mesesAFrente, itensHipoteticos){
 
     let hipReceita = 0, hipDespesa = 0;
     itensHipoteticos.forEach(it=>{
-      const aplica = it.recorrente ? (it.data<=ateMes) : (it.data>=deMes && it.data<=ateMes);
+      const dataItem = new Date(it.data+'T12:00:00');
+      const mesesDesde = (d.getFullYear()-dataItem.getFullYear())*12 + (d.getMonth()-dataItem.getMonth());
+      let aplica;
+      if(it.parcelas){ aplica = mesesDesde>=0 && mesesDesde<it.parcelas; }
+      else if(it.recorrente){ aplica = mesesDesde>=0; }
+      else { aplica = mesesDesde===0; }
       if(aplica){ if(it.tipo==='entrada') hipReceita += it.valor; else hipDespesa += it.valor; }
     });
     saldoSim += movBase + (hipReceita - hipDespesa);
@@ -2632,7 +2637,7 @@ function viewSimulacao(){
         ${itens.length ? itens.map(it=>`
           <div class="ledger-row" data-id="${it.id}" style="grid-template-columns:14px 1fr 110px auto;">
             <span class="dot ${it.tipo}"></span>
-            <div class="desc-cell"><div>${escapeHTML(it.descricao)}</div><div class="cat">${it.recorrente ? 'Todo mês a partir de '+fmtDate(it.data) : fmtDate(it.data)}</div></div>
+            <div class="desc-cell"><div>${escapeHTML(it.descricao)}</div><div class="cat">${it.parcelas ? `Parcelado em ${it.parcelas}x, a partir de `+fmtDate(it.data) : it.recorrente ? 'Todo mês a partir de '+fmtDate(it.data) : fmtDate(it.data)}</div></div>
             <span class="mono" style="font-weight:600;color:${it.tipo==='entrada'?'var(--success)':'var(--danger)'}">${it.tipo==='entrada'?'+':'-'} ${brl(it.valor)}</span>
             <button class="icon-btn" data-action="remover-item-simulacao" data-id="${it.id}" title="Remover">✕</button>
           </div>
@@ -2652,6 +2657,11 @@ function resultadoSimulacaoHTML(itens){
   if(!itens.length) return `<div class="empty">Adicione ao menos um item pra ver a comparação.</div>`;
   const meses = calcularProjecaoSimulacao(6, itens);
   return `
+    <canvas id="chartSimulacao" style="width:100%;height:190px;display:block;margin-bottom:16px;"></canvas>
+    <div class="chart-legenda" style="display:flex;gap:16px;font-size:11.5px;color:var(--text-soft);margin:-10px 0 14px;">
+      <span><span style="display:inline-block;width:10px;height:3px;background:#8A8F98;vertical-align:middle;margin-right:5px;"></span>Sem a decisão</span>
+      <span><span style="display:inline-block;width:10px;height:3px;background:#3B6FE0;vertical-align:middle;margin-right:5px;"></span>Com a decisão</span>
+    </div>
     <div class="ledger-row head" style="grid-template-columns:1fr 130px 130px 120px;">
       <span>Mês</span><span>Saldo sem a decisão</span><span>Saldo com a decisão</span><span>Diferença</span>
     </div>
@@ -2665,6 +2675,51 @@ function resultadoSimulacaoHTML(itens){
     `).join('')}
     ${meses.some(m=>m.saldoSim<0) ? `<div class="note" style="border-color:var(--danger);margin-top:10px;">⚠️ Com essa decisão, o saldo projetado fica negativo em algum mês — reveja antes de seguir.</div>` : ''}
   `;
+}
+
+function desenharGraficoSimulacao(canvasId, meses){
+  const canvas = document.getElementById(canvasId);
+  if(!canvas || !meses.length) return;
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = canvas.clientWidth || canvas.parentElement.clientWidth || 600;
+  const cssHeight = 190;
+  canvas.width = cssWidth * dpr;
+  canvas.height = cssHeight * dpr;
+  canvas.style.width = cssWidth+'px';
+  canvas.style.height = cssHeight+'px';
+  const ctx = canvas.getContext('2d');
+  if(!ctx) return;
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0,0,cssWidth,cssHeight);
+
+  const padLeft = 10, padRight = 10, padBottom = 22, padTop = 14;
+  const chartW = cssWidth - padLeft - padRight;
+  const chartH = cssHeight - padBottom - padTop;
+  const todosValores = meses.flatMap(m=>[m.saldoBase, m.saldoSim]);
+  let minVal = Math.min(0, ...todosValores);
+  let maxVal = Math.max(0, ...todosValores);
+  if(maxVal===minVal){ maxVal += 1; minVal -= 1; }
+  const y = v => padTop + chartH - ((v-minVal)/(maxVal-minVal))*chartH;
+  const x = i => padLeft + (meses.length>1 ? (chartW*i/(meses.length-1)) : chartW/2);
+
+  if(minVal<0 && maxVal>0){
+    ctx.strokeStyle = '#D8DCE3'; ctx.setLineDash([3,3]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(padLeft, y(0)); ctx.lineTo(padLeft+chartW, y(0)); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  const linha = (chave, cor) => {
+    ctx.strokeStyle = cor; ctx.lineWidth = 2.5; ctx.beginPath();
+    meses.forEach((m,i)=>{ const px=x(i), py=y(m[chave]); i===0?ctx.moveTo(px,py):ctx.lineTo(px,py); });
+    ctx.stroke();
+    ctx.fillStyle = cor;
+    meses.forEach((m,i)=>{ ctx.beginPath(); ctx.arc(x(i), y(m[chave]), 3, 0, Math.PI*2); ctx.fill(); });
+  };
+  linha('saldoBase', '#8A8F98');
+  linha('saldoSim', '#3B6FE0');
+
+  ctx.font = '10.5px Inter, sans-serif'; ctx.fillStyle = '#8A8F98'; ctx.textAlign = 'center';
+  meses.forEach((m,i)=>{ ctx.fillText(m.label, x(i), cssHeight-6); });
 }
 
 function openItemSimulacaoModal(){
@@ -2685,7 +2740,16 @@ function openItemSimulacaoModal(){
       <div class="field"><label>Data</label><input type="date" id="simData" value="${todayISO()}"></div>
     </div>
     <div class="field">
-      <label style="display:flex;align-items:center;gap:8px;font-weight:500;"><input type="checkbox" id="simRecorrente" style="width:auto;"> Repete todo mês a partir dessa data (ex: novo salário, nova assinatura)</label>
+      <label style="display:block;margin-bottom:6px;">Frequência</label>
+      <div class="toggle-row" id="simFreqToggle">
+        <button type="button" data-freq="unico" class="active">Único</button>
+        <button type="button" data-freq="parcelado">Parcelado</button>
+        <button type="button" data-freq="recorrente">Recorrente (sem fim)</button>
+      </div>
+    </div>
+    <div class="field" id="simParcelasWrap" style="display:none;">
+      <label>Número de parcelas</label>
+      <input type="number" id="simParcelas" min="2" value="12" placeholder="Ex: 24 pra um financiamento em 24x">
     </div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
@@ -2702,15 +2766,30 @@ function openItemSimulacaoModal(){
       tipoAtual = btn.dataset.tipo;
     });
   });
+  let freqAtual = 'unico';
+  document.getElementById('simFreqToggle').querySelectorAll('button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.getElementById('simFreqToggle').querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      freqAtual = btn.dataset.freq;
+      document.getElementById('simParcelasWrap').style.display = freqAtual==='parcelado' ? 'block' : 'none';
+    });
+  });
   document.getElementById('btnSalvarItemSimulacao').addEventListener('click', ()=>{
     const descricao = document.getElementById('simDescricao').value.trim();
     const valor = numBR(document.getElementById('simValor').value);
     if(!descricao || isNaN(valor) || valor<=0){ showToast('Preencha descrição e valor válido'); return; }
+    let parcelas = null;
+    if(freqAtual==='parcelado'){
+      parcelas = parseInt(document.getElementById('simParcelas').value, 10);
+      if(!parcelas || parcelas<2){ showToast('Informe um número de parcelas válido (mínimo 2)'); return; }
+    }
     if(!state.simulacaoAtual) state.simulacaoAtual = [];
     state.simulacaoAtual.push({
       id: uid(), descricao, tipo: tipoAtual, valor,
       data: document.getElementById('simData').value || todayISO(),
-      recorrente: document.getElementById('simRecorrente').checked
+      recorrente: freqAtual==='recorrente',
+      parcelas
     });
     persist(); closeModal(); render();
     showToast('Item adicionado à simulação');
@@ -7077,6 +7156,8 @@ function attachViewHandlers(){
   }
   const chartMeses = document.getElementById('chartMeses');
   if(chartMeses) desenharGraficoMeses('chartMeses');
+  const chartSimulacao = document.getElementById('chartSimulacao');
+  if(chartSimulacao) desenharGraficoSimulacao('chartSimulacao', calcularProjecaoSimulacao(6, state.simulacaoAtual||[]));
 
   document.getElementById('btnMesAnterior')?.addEventListener('click', ()=>{
     const [ano, mes] = mesGlobalRef.split('-').map(Number);
