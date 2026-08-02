@@ -2200,7 +2200,11 @@ function viewLancamentos(tipo){
   const ateMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
   let lista = state.lancamentos.filter(l=>{
     if(l.tipo!==tipo || l.origem==='transferencia' || l.origem==='investimento') return false;
-    const refMes = l.dataVencimento || l.dataPagamento;
+    if(l.status==='pendente'){
+      // Pendente "acompanha" os meses: aparece a partir do mês do vencimento em diante, até ser resolvido.
+      return l.dataVencimento && l.dataVencimento<=ateMes;
+    }
+    const refMes = l.dataPagamento || l.dataVencimento;
     return refMes && refMes>=deMes && refMes<=ateMes;
   });
   if(lancamentosBuscaPreenchida){
