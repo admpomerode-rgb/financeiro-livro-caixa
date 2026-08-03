@@ -630,7 +630,6 @@
         <div class="nav-item" data-view="ativos" title="Ativos Patrimoniais"><span class="nav-dot"></span><span class="nav-abbr">AP</span><span class="nav-label">Ativos Patrimoniais</span></div>
         <div class="nav-item" data-view="investimentos" title="Investimentos"><span class="nav-dot"></span><span class="nav-abbr">IV</span><span class="nav-label">Investimentos</span></div>
         <div class="nav-item" data-view="integracoes" title="Central de Integrações"><span class="nav-dot"></span><span class="nav-abbr">IN</span><span class="nav-label">Central de Integrações</span></div>
-        <div class="nav-item" data-view="auditoria" title="Log de Auditoria"><span class="nav-dot"></span><span class="nav-abbr">LG</span><span class="nav-label">Log de Auditoria</span></div>
         <div class="nav-item" data-view="configuracoes" title="Configurações do Sistema"><span class="nav-dot"></span><span class="nav-abbr">CF</span><span class="nav-label">Configurações</span></div>
       </div>
     </nav>
@@ -669,7 +668,6 @@
       <div class="more-item" data-view="metas"><span class="more-icon">🎯</span>Metas de Reserva</div>
       <div class="more-item" data-view="simulacao"><span class="more-icon">🔮</span>Simulação "E Se"</div>
       <div class="more-item" data-view="orcamento"><span class="more-icon">🗂️</span>Orçamento e Planejamento</div>
-      <div class="more-item" data-view="auditoria"><span class="more-icon">🕵️</span>Log de Auditoria</div>
       <div class="more-item" data-view="comissoes"><span class="more-icon">🤝</span>Comissões</div>
       <div class="more-item" data-view="ativos"><span class="more-icon">📦</span>Ativos Patrimoniais</div>
       <div class="more-item" data-view="investimentos"><span class="more-icon">📈</span>Investimentos</div>
@@ -1150,7 +1148,6 @@ function render(){
   else if(currentView==='metas') main.innerHTML = viewMetasReserva();
   else if(currentView==='simulacao') main.innerHTML = viewSimulacao();
   else if(currentView==='orcamento') main.innerHTML = viewOrcamentoPlanejamento();
-  else if(currentView==='auditoria') main.innerHTML = viewLogAuditoria();
   else if(currentView==='comissoes') main.innerHTML = viewComissoes();
   else if(currentView==='ativos') main.innerHTML = viewAtivosPatrimoniais();
   else if(currentView==='ativo-detalhe') main.innerHTML = viewAtivoPatrimonialDetalhe(ativoPatrimonialDetalheId);
@@ -6949,7 +6946,7 @@ function renderConfigAprovacao(){
         <label>Valor limite (R$) — acima disso, precisa aprovar</label>
         <input type="text" inputmode="decimal" id="cfgAprovLimite" value="${state.aprovacaoConfig?.limite||''}" placeholder="Ex: 500,00">
       </div>
-      <div class="note" style="margin-top:0;">Despesas novas acima do limite entram como "aguardando aprovação" e não podem ser marcadas como pagas até serem aprovadas (o botão de aprovar fica no modal de editar da despesa). Tudo registrado no Log de Auditoria.</div>
+      <div class="note" style="margin-top:0;">Despesas novas acima do limite entram como "aguardando aprovação" e não podem ser marcadas como pagas até serem aprovadas (o botão de aprovar fica no modal de editar da despesa).</div>
     </div>
   `;
 }
@@ -9383,27 +9380,6 @@ function openContratoModal(existing){
     persist(); closeModal(); render();
     showToast(isEdit?'Contrato atualizado':'Contrato cadastrado');
   });
-}
-
-function viewLogAuditoria(){
-  const lista = [...(state.logAuditoria||[])].sort((a,b)=>b.data.localeCompare(a.data)).slice(0,200);
-  return `
-    <div class="topbar">
-      <div><h1>Log de Auditoria</h1><p>Histórico de criações, edições e exclusões — só pra consulta, não dá pra apagar daqui</p></div>
-    </div>
-    <div class="panel">
-      <div class="panel-body">
-        ${lista.length ? lista.map(l=>`
-          <div class="ledger-row log-row">
-            <span class="mono log-row-data" style="font-size:11.5px;color:var(--text-soft);">${new Date(l.data).toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>
-            <span class="log-row-acao" style="font-size:12px;font-weight:600;">${escapeHTML(l.acao)}</span>
-            <span class="log-row-detalhe" style="font-size:12.5px;color:var(--text-soft);">${escapeHTML(l.detalhe||'')}</span>
-          </div>
-        `).join('') : `<div class="empty">Nenhuma ação registrada ainda.</div>`}
-      </div>
-    </div>
-    ${(state.logAuditoria||[]).length>200 ? `<div class="note">Mostrando os 200 registros mais recentes.</div>` : ''}
-  `;
 }
 
 function viewPrecificacao(){
