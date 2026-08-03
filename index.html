@@ -845,6 +845,7 @@ function aplicarMigracoes(s){
   if(!s.subcontasInvestimento) s.subcontasInvestimento = [];
   if(!s.vkDivergencias) s.vkDivergencias = [];
   if(!s.vkDivergenciasEstoque) s.vkDivergenciasEstoque = [];
+  if(!s.vkAprovacoes) s.vkAprovacoes = [];
   if(!s.orcamentoAlertaPct) s.orcamentoAlertaPct = {};
   ['saida','entrada'].forEach(tipo=>{
     (s.categorias?.[tipo]||[]).forEach((c,i)=>{ if(!c.cor) c.cor = CATEGORIA_CORES[i % CATEGORIA_CORES.length]; });
@@ -1162,6 +1163,7 @@ function render(){
   else if(currentView==='ativo-detalhe') main.innerHTML = viewAtivoPatrimonialDetalhe(ativoPatrimonialDetalheId);
   else if(currentView==='integracoes') main.innerHTML = viewIntegracoes();
   else if(currentView==='vk') main.innerHTML = viewVK();
+  else if(currentView==='vk-aprovacoes') main.innerHTML = viewVKAprovacoes();
   else if(currentView==='processos') main.innerHTML = viewProcessosConfig();
   else if(currentView==='configuracoes') main.innerHTML = viewConfiguracoes();
   else if(currentView==='configuracao-detalhe') main.innerHTML = viewConfiguracaoDetalhe();
@@ -1388,7 +1390,7 @@ async function sincronizarPedidosVK(){
     const clientes = clientesSnap.docs.map(d=>({ id: d.id, ...d.data() }));
     const representantesVK = representantesSnap.docs.map(d=>({ id: d.id, ...d.data() }));
     const produtosVK = produtosSnap.docs.map(d=>({ id: d.id, ...d.data() }));
-    let novos = 0, jaImportados = 0, cancelados = 0, marcadosCancelados = 0, atualizados = 0;
+    let novos = 0, jaImportados = 0, cancelados = 0, marcadosCancelados = 0, atualizados = 0, atualizadosAprovacao = 0;
     const divergentes = [];
 
     pedidos.forEach(p=>{
@@ -1396,6 +1398,7 @@ async function sincronizarPedidosVK(){
       const descricaoPedido = `Pedido N° ${p.numero}`;
       const existenteAntigo = `Pedido N° ${p.numero}${cliente ? ' — '+cliente.nome : ''}`;
       const existente = state.lancamentos.find(l=>l.origem==='vk' && (l.vkPedidoId===p.id || l.descricao===descricaoPedido || l.descricao===existenteAntigo));
+      const emAprovacao = state.vkAprovacoes.find(a=>a.tipo==='pedido' && a.vkPedidoId===p.id);
 
       const itensTexto = (p.itens||[]).map(it=>{
         const prod = produtosVK.find(pr=>pr.nome===it.produto);
@@ -1425,8 +1428,24 @@ async function sincronizarPedidosVK(){
           if(existente.status !== 'cancelado'){ existente.status = 'cancelado'; existente.dataPagamento = null; marcadosCancelados++; }
           return;
         }
-        // pedido já nasceu cancelado no VK — ainda assim entra aqui, só que já marcado
-      } else if(existente){
+        if(emAprovacao){
+          state.vkAprovacoes = state.vkAprovacoes.filter(a=>a.id!==emAprovacao.id);
+          return;
+        }
+        // pedido já nasceu cancelado no VK — não precisa de aprovação, entra direto já marcado
+        state.lancamentos.push({
+          id: uid(), tipo:'entrada', categoria: cfg.categoria || 'Vendas',
+          descricao: descricaoPedido, valor: p.valorTotal,
+          fornecedor: cliente ? cliente.nome : '', observacao: observacaoNova,
+          contaId: cfg.contaId, dataVencimento: vencimentoNovo,
+          status: 'cancelado', dataPagamento: null,
+          origem: 'vk', vkPedidoId: p.id, vendedorId, vendedorNome,
+          criadoEm: new Date().toISOString()
+        });
+        return;
+      }
+
+      if(existente){
         jaImportados++;
         const mudou = existente.valor!==p.valorTotal || existente.fornecedor!==(cliente?cliente.nome:'') || existente.dataVencimento!==vencimentoNovo || existente.observacao!==observacaoNova || existente.vendedorId!==vendedorId;
         if(mudou){
@@ -1444,16 +1463,28 @@ async function sincronizarPedidosVK(){
         return;
       }
 
-      state.lancamentos.push({
-        id: uid(), tipo:'entrada', categoria: cfg.categoria || 'Vendas',
+      if(emAprovacao){
+        jaImportados++;
+        const mudouAprov = emAprovacao.valor!==p.valorTotal || emAprovacao.contraparte!==(cliente?cliente.nome:'') || emAprovacao.dataVencimento!==vencimentoNovo || emAprovacao.observacao!==observacaoNova;
+        if(mudouAprov){
+          emAprovacao.valor = p.valorTotal;
+          emAprovacao.contraparte = cliente ? cliente.nome : '';
+          emAprovacao.dataVencimento = vencimentoNovo;
+          emAprovacao.observacao = observacaoNova;
+          emAprovacao.vendedorId = vendedorId; emAprovacao.vendedorNome = vendedorNome;
+          atualizadosAprovacao++;
+        }
+        return;
+      }
+
+      state.vkAprovacoes.push({
+        id: uid(), tipo:'pedido', vkPedidoId: p.id,
         descricao: descricaoPedido,
         valor: p.valorTotal,
-        fornecedor: cliente ? cliente.nome : '',
-        observacao: `Cliente: ${cliente ? cliente.nome : '—'}\nItens: ${itensTexto || '—'}`,
-        contaId: cfg.contaId,
-        dataVencimento: p.dataEntrega || todayISO(),
-        status: p.status==='cancelado' ? 'cancelado' : 'pendente', dataPagamento: null,
-        origem: 'vk', vkPedidoId: p.id,
+        contraparte: cliente ? cliente.nome : '',
+        observacao: observacaoNova,
+        dataVencimento: vencimentoNovo,
+        categoria: cfg.categoria || 'Vendas',
         vendedorId, vendedorNome,
         criadoEm: new Date().toISOString()
       });
@@ -1464,11 +1495,11 @@ async function sincronizarPedidosVK(){
     state.vkDivergencias = divergentes;
     persist();
     render();
-    console.log(`Sincronização VK: ${pedidos.length} pedidos no total, ${novos} novos, ${atualizados} atualizados, ${jaImportados} já importados antes, ${cancelados} cancelados (${marcadosCancelados} marcados agora como cancelado), ${divergentes.length} divergência(s) pra conferir.`);
+    console.log(`Sincronização VK: ${pedidos.length} pedidos no total, ${novos} novos aguardando aprovação, ${atualizados} atualizados, ${atualizadosAprovacao} atualizados na fila de aprovação, ${jaImportados} já importados antes, ${cancelados} cancelados (${marcadosCancelados} marcados agora como cancelado), ${divergentes.length} divergência(s) pra conferir.`);
     let msgFinal;
     if(novos>0 || marcadosCancelados>0 || atualizados>0){
       const partes = [];
-      if(novos>0) partes.push(`${novos} pedido(s) importado(s)`);
+      if(novos>0) partes.push(`${novos} pedido(s) aguardando aprovação`);
       if(atualizados>0) partes.push(`${atualizados} corrigido(s)`);
       if(marcadosCancelados>0) partes.push(`${marcadosCancelados} marcado(s) como cancelado(s)`);
       if(divergentes.length>0) partes.push(`${divergentes.length} precisam de conferência`);
@@ -1544,20 +1575,27 @@ async function sincronizarEntradasEstoqueVK(){
       return { descricao, valor, fornecedorNome, observacao };
     }
 
-    let novos = 0, atualizados = 0, jaImportados = 0, excluidosAutomaticamente = 0;
+    let novos = 0, atualizados = 0, jaImportados = 0, excluidosAutomaticamente = 0, atualizadosAprovacao = 0, excluidosAprovacao = 0;
     const divergentes = [];
     const idsAtuais = new Set(entradas.map(e=>e.id));
 
-    // Detecta entradas apagadas no VK que ainda existem aqui
+    // Detecta entradas apagadas no VK que ainda existem aqui (já aprovadas)
     state.lancamentos = state.lancamentos.filter(l=>{
       if(l.origem!=='vk-estoque' || idsAtuais.has(l.vkEntradaId)) return true;
       if(l.status==='pendente'){ excluidosAutomaticamente++; return false; }
       divergentes.push({ tipo:'excluida', entradaId: l.vkEntradaId, lancamentoId: l.id, descricao: l.descricao, status: l.status });
       return true;
     });
+    // Detecta entradas apagadas no VK que ainda estão aguardando aprovação
+    state.vkAprovacoes = state.vkAprovacoes.filter(a=>{
+      if(a.tipo!=='despesa' || idsAtuais.has(a.vkEntradaId)) return true;
+      excluidosAprovacao++;
+      return false;
+    });
 
     entradas.forEach(e=>{
       const existente = state.lancamentos.find(l=>l.origem==='vk-estoque' && l.vkEntradaId===e.id);
+      const emAprovacao = state.vkAprovacoes.find(a=>a.tipo==='despesa' && a.vkEntradaId===e.id);
       const montada = montarEntrada(e);
 
       if(existente){
@@ -1579,17 +1617,31 @@ async function sincronizarEntradasEstoqueVK(){
         return;
       }
 
-      state.lancamentos.push({
-        id: uid(), tipo:'saida', categoria: cfg.categoriaEstoque || 'Insumos',
+      if(emAprovacao){
+        jaImportados++;
+        const mudouAprov = emAprovacao.valor!==montada.valor || emAprovacao.contraparte!==montada.fornecedorNome || emAprovacao.dataVencimento!==(e.data||emAprovacao.dataVencimento) || emAprovacao.observacao!==montada.observacao || emAprovacao.semNF!==!!e.semNF;
+        if(mudouAprov){
+          emAprovacao.valor = montada.valor;
+          emAprovacao.contraparte = montada.fornecedorNome;
+          emAprovacao.observacao = montada.observacao;
+          emAprovacao.dataVencimento = e.data || emAprovacao.dataVencimento;
+          emAprovacao.semNF = !!e.semNF;
+          emAprovacao.descricao = montada.descricao;
+          atualizadosAprovacao++;
+        }
+        return;
+      }
+
+      state.vkAprovacoes.push({
+        id: uid(), tipo:'despesa', vkEntradaId: e.id,
         descricao: montada.descricao,
         valor: montada.valor,
-        fornecedor: montada.fornecedorNome,
+        contraparte: montada.fornecedorNome,
         observacao: montada.observacao,
-        contaId: cfg.contaIdEstoque,
         dataVencimento: e.data || todayISO(),
-        status: 'pendente', dataPagamento: null,
-        origem: 'vk-estoque', vkEntradaId: e.id,
+        categoria: cfg.categoriaEstoque || 'Insumos',
         semNF: !!e.semNF,
+        ehCartao: false, cartaoId: null,
         criadoEm: new Date().toISOString()
       });
       novos++;
@@ -1600,7 +1652,7 @@ async function sincronizarEntradasEstoqueVK(){
     persist();
     render();
     const partes = [];
-    if(novos>0) partes.push(`${novos} entrada(s) importada(s)`);
+    if(novos>0) partes.push(`${novos} entrada(s) aguardando aprovação`);
     if(atualizados>0) partes.push(`${atualizados} corrigida(s)`);
     if(excluidosAutomaticamente>0) partes.push(`${excluidosAutomaticamente} removida(s) (apagadas no VK)`);
     if(divergentes.length>0) partes.push(`${divergentes.length} precisam de conferência`);
@@ -6660,6 +6712,18 @@ function viewVK(){
       </div>
     </div>
 
+    ${(state.vkAprovacoes||[]).length ? `
+    <div class="panel vk-status-panel" style="cursor:pointer;" data-goto="vk-aprovacoes">
+      <div class="vk-status-row">
+        <div>
+          <div class="vk-status-label">Aguardando aprovação</div>
+          <div class="vk-status-value">${state.vkAprovacoes.length} item(ns)</div>
+          <div class="vk-status-sub">Confira categoria e se é despesa de cartão antes de virar lançamento</div>
+        </div>
+        <button class="btn lg" data-goto="vk-aprovacoes">📋 Revisar e aprovar</button>
+      </div>
+    </div>` : ''}
+
     ${(state.vkDivergencias||[]).length ? `
     <div class="panel" style="margin-bottom:16px;border-left:3px solid var(--warn);">
       <div class="panel-head"><h2>⚠️ Pedidos que mudaram no VK e já foram recebidos (${state.vkDivergencias.length})</h2></div>
@@ -6741,9 +6805,9 @@ function viewVK(){
     <details class="panel-details">
       <summary>Como funciona a sincronização de pedidos</summary>
       <div class="note" style="margin:0;border-top-left-radius:0;border-top-right-radius:0;">
-        Ao sincronizar, cada pedido do VK Industrial vira <strong>uma conta a receber</strong> aqui — descrição "Pedido N° [número]", valor total do pedido, vencimento na data de entrega, e uma observação com o nome do cliente e os itens comprados (clique no lançamento para ver).
+        Ao sincronizar, cada pedido novo do VK Industrial cai primeiro na <strong>fila de aprovação</strong> (tela "Revisar e aprovar") — lá dá pra conferir a categoria antes de virar lançamento de verdade. Só depois de aprovado é que vira <strong>uma conta a receber</strong> aqui — descrição "Pedido N° [número]", valor total do pedido, vencimento na data de entrega, e uma observação com o nome do cliente e os itens comprados (clique no lançamento para ver).
         <br><br>
-        Pedidos cancelados no VK Industrial entram marcados como "Cancelado" (não somem). Se o pedido for editado no VK Industrial depois de importado (valor, cliente, itens, data de entrega ou vendedor), a sincronização detecta e corrige automaticamente aqui — <strong>desde que o pedido ainda esteja pendente</strong>. Se já tiver sido marcado como recebido, a correção não é feita sozinha (pra não mexer em algo que você já conferiu) — ele aparece no painel de pendências acima pra você decidir.
+        Pedidos cancelados no VK Industrial entram marcados como "Cancelado" (não somem, não passam pela fila de aprovação). Se o pedido for editado no VK Industrial <strong>depois de aprovado</strong>, a sincronização detecta e corrige automaticamente aqui — <strong>desde que o pedido ainda esteja pendente</strong>. Se já tiver sido marcado como recebido, a correção não é feita sozinha (pra não mexer em algo que você já conferiu) — ele aparece no painel de pendências acima pra você decidir. Se o pedido ainda estiver na fila de aprovação quando for editado no VK, a fila é atualizada sozinha também.
         <br><br>
         A sincronização não é automática/contínua — clique em "Sincronizar pedidos" sempre que quiser buscar os pedidos novos e corrigir os que mudaram. A senha fica salva só neste navegador.
       </div>
@@ -6752,9 +6816,9 @@ function viewVK(){
     <details class="panel-details">
       <summary>Como funciona a sincronização de estoque</summary>
       <div class="note" style="margin:0;border-top-left-radius:0;border-top-right-radius:0;">
-        Ao sincronizar, cada entrada da coleção <span class="mono">entradas_estoque</span> vira <strong>uma conta a pagar</strong> aqui — valor somado dos itens (quantidade × valor unitário), fornecedor identificado pelo CNPJ (cria o fornecedor automaticamente se ainda não existir aqui), vencimento na data da entrada, e uma observação com os itens (clique no lançamento para ver). Entradas com <span class="mono">semNF: true</span> entram marcadas com a tag "⚠️ sem NF" na lista, pra lembrar de regularizar depois.
+        Ao sincronizar, cada entrada nova da coleção <span class="mono">entradas_estoque</span> cai primeiro na <strong>fila de aprovação</strong> (tela "Revisar e aprovar") — lá dá pra conferir a categoria e marcar se é uma despesa de cartão de crédito (nesse caso ela vira uma compra no cartão escolhido em vez de conta a pagar). Só depois de aprovada é que vira lançamento de verdade — valor somado dos itens (quantidade × valor unitário), fornecedor identificado pelo CNPJ (cria o fornecedor automaticamente se ainda não existir aqui), vencimento na data da entrada. Entradas com <span class="mono">semNF: true</span> entram marcadas com a tag "⚠️ sem NF", pra lembrar de regularizar depois.
         <br><br>
-        Se a entrada for editada no VK Industrial depois de importada (itens, fornecedor, data, nota fiscal), a sincronização corrige automaticamente aqui — <strong>desde que a despesa ainda esteja pendente</strong>. Se já tiver sido marcada como paga, a correção não é feita sozinha — ela aparece no painel de pendências acima pra você decidir. Se a entrada for excluída no VK Industrial, a despesa correspondente é removida automaticamente daqui (também só se ainda estiver pendente); se já estiver paga, some do estoque VK, mas fica aqui até você decidir manualmente, e aparece no mesmo painel de pendências.
+        Se a entrada for editada no VK Industrial <strong>depois de aprovada</strong>, a sincronização corrige automaticamente aqui — <strong>desde que a despesa ainda esteja pendente</strong>. Se já tiver sido marcada como paga, a correção não é feita sozinha — ela aparece no painel de pendências acima pra você decidir. Se a entrada ainda estiver na fila de aprovação quando for editada ou excluída no VK, a fila é atualizada/removida sozinha também, sem precisar de conferência.
         <br><br>
         A sincronização não é automática/contínua — clique em "Sincronizar estoque" sempre que quiser buscar as novidades.
       </div>
@@ -6812,6 +6876,111 @@ function viewVK(){
 }
 
 function escapeHTML(s){ const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
+
+function viewVKAprovacoes(){
+  const itens = state.vkAprovacoes||[];
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="vk">← Integração VK Industrial</span>
+        <h1 style="margin-top:6px;">Aprovações — VK Industrial</h1>
+        <p>Pedidos e entradas de estoque importados esperam aqui até você conferir a categoria (e marcar se é despesa de cartão) e aprovar</p>
+      </div>
+    </div>
+    ${!itens.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum item aguardando aprovação no momento.</div></div>` : itens.map(item=>{
+      const ehPedido = item.tipo==='pedido';
+      return `
+      <div class="panel" style="margin-bottom:14px;" data-aprov-card="${item.id}">
+        <div class="panel-body" style="padding:18px 20px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+            <div>
+              <div style="font-weight:600;font-size:14px;">${escapeHTML(item.descricao)}${item.semNF ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;">⚠️ sem NF</span>' : ''}</div>
+              <div style="font-size:12px;color:var(--text-soft);margin-top:2px;">${ehPedido?'Cliente':'Fornecedor'}: ${escapeHTML(item.contraparte||'—')} · Vencimento: ${fmtDate(item.dataVencimento)}</div>
+            </div>
+            <div class="mono" style="font-weight:700;font-size:16px;color:${ehPedido?'var(--success)':'var(--danger)'};">${ehPedido?'+':'-'} ${brl(item.valor)}</div>
+          </div>
+          ${item.observacao ? `<div class="note" style="margin:12px 0 0;white-space:pre-wrap;">${escapeHTML(item.observacao)}</div>` : ''}
+          <div class="field" style="margin-top:14px;max-width:340px;">
+            <label>Categoria</label>
+            <select id="aprovCategoria_${item.id}">${opcoesCategoriaHTML(ehPedido?'entrada':'saida', item.categoria)}</select>
+          </div>
+          ${!ehPedido ? `
+          <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;margin-top:12px;">
+            <input type="checkbox" class="aprov-cartao-toggle" data-id="${item.id}" style="width:17px;height:17px;" ${item.ehCartao?'checked':''}>
+            É despesa de cartão de crédito?
+          </label>
+          <div class="field" id="aprovCartaoWrap_${item.id}" style="margin-top:10px;max-width:340px;display:${item.ehCartao?'block':'none'};">
+            <label>Cartão</label>
+            <select id="aprovCartaoSelect_${item.id}">${state.cartoes.map(c=>`<option value="${c.id}" ${item.cartaoId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('') || '<option value="">Nenhum cartão cadastrado</option>'}</select>
+          </div>` : ''}
+          <div class="modal-actions" style="margin-top:16px;padding-top:0;border-top:none;">
+            <button class="btn ghost" data-action="descartar-vk-aprovacao" data-id="${item.id}">Descartar</button>
+            <button class="btn" data-action="aprovar-vk-aprovacao" data-id="${item.id}">✓ Aprovar e lançar</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('')}
+  `;
+}
+
+function aprovarItemVK(id){
+  const item = (state.vkAprovacoes||[]).find(a=>a.id===id);
+  if(!item) return;
+  const categoriaEl = document.getElementById('aprovCategoria_'+id);
+  const categoria = categoriaEl ? categoriaEl.value : item.categoria;
+  const cfg = state.vkConfig;
+
+  if(item.tipo==='pedido'){
+    if(!cfg.contaId){ showToast('Configure a conta bancária de destino dos pedidos nas configurações da integração'); return; }
+    state.lancamentos.push({
+      id: uid(), tipo:'entrada', categoria,
+      descricao: item.descricao, valor: item.valor, fornecedor: item.contraparte,
+      observacao: item.observacao, contaId: cfg.contaId, dataVencimento: item.dataVencimento,
+      status: 'pendente', dataPagamento: null,
+      origem: 'vk', vkPedidoId: item.vkPedidoId,
+      vendedorId: item.vendedorId, vendedorNome: item.vendedorNome,
+      criadoEm: new Date().toISOString()
+    });
+    registrarLog('Pedido VK aprovado', `"${item.descricao}" — ${brl(item.valor)}`);
+  } else {
+    const ehCartaoEl = document.getElementById('aprovCartaoToggle_'+id) || document.querySelector(`.aprov-cartao-toggle[data-id="${id}"]`);
+    const ehCartao = ehCartaoEl ? ehCartaoEl.checked : false;
+    if(ehCartao){
+      const cartaoId = document.getElementById('aprovCartaoSelect_'+id)?.value;
+      const cartao = state.cartoes.find(c=>c.id===cartaoId);
+      if(!cartao){ showToast('Escolha um cartão pra lançar essa despesa'); return; }
+      const dataCompra = item.dataVencimento || todayISO();
+      const competencia = competenciaFromDate(cartao, dataCompra);
+      state.comprasCartao.push({
+        id: uid(), cartaoId, grupoId: uid(),
+        descricao: item.descricao, categoria, valor: item.valor,
+        dataCompra, competencia, parcela: 1, totalParcelas: 1
+      });
+      registrarLog('Entrada de estoque VK aprovada como compra no cartão', `"${item.descricao}" — ${brl(item.valor)} — ${cartao.nome}`);
+    } else {
+      if(!cfg.contaIdEstoque){ showToast('Configure a conta bancária de destino do estoque nas configurações da integração'); return; }
+      state.lancamentos.push({
+        id: uid(), tipo:'saida', categoria,
+        descricao: item.descricao, valor: item.valor, fornecedor: item.contraparte,
+        observacao: item.observacao, contaId: cfg.contaIdEstoque, dataVencimento: item.dataVencimento,
+        status: 'pendente', dataPagamento: null,
+        origem: 'vk-estoque', vkEntradaId: item.vkEntradaId, semNF: !!item.semNF,
+        criadoEm: new Date().toISOString()
+      });
+      registrarLog('Entrada de estoque VK aprovada', `"${item.descricao}" — ${brl(item.valor)}`);
+    }
+  }
+  state.vkAprovacoes = state.vkAprovacoes.filter(a=>a.id!==id);
+  persist(); render();
+  showToast('Aprovado e lançado');
+}
+
+function descartarItemVK(id){
+  if(!confirm('Descartar esse item? Ele não vira lançamento nenhum. Se ainda existir no VK Industrial, pode voltar a aparecer numa próxima sincronização.')) return;
+  state.vkAprovacoes = (state.vkAprovacoes||[]).filter(a=>a.id!==id);
+  persist(); render();
+  showToast('Item descartado');
+}
 
 function ajustarPosicaoDropdown(menu){
   if(!menu || !menu.classList.contains('open')) return;
@@ -7165,6 +7334,7 @@ function renderConfigFirebase(){
     ['Ativos de investimento', (state.ativosInvestimento||[]).length],
     ['Notas pendentes', (state.notasPendentes||[]).length],
     ['Faturas aguardando revisão', (state.faturasPendentes||[]).length],
+    ['Aprovações VK aguardando revisão', (state.vkAprovacoes||[]).length],
     ['Fornecedores', (state.fornecedores||[]).length],
     ['Recorrências', (state.recorrencias||[]).length],
     ['Registros no log de auditoria', (state.logAuditoria||[]).length],
@@ -8632,6 +8802,18 @@ function attachViewHandlers(){
       persist(); render();
       showToast('Divergência ignorada');
     });
+  });
+  document.querySelectorAll('.aprov-cartao-toggle').forEach(chk=>{
+    chk.addEventListener('change', ()=>{
+      const wrap = document.getElementById('aprovCartaoWrap_'+chk.dataset.id);
+      if(wrap) wrap.style.display = chk.checked ? 'block' : 'none';
+    });
+  });
+  document.querySelectorAll('[data-action="aprovar-vk-aprovacao"]').forEach(btn=>{
+    btn.addEventListener('click', ()=> aprovarItemVK(btn.dataset.id));
+  });
+  document.querySelectorAll('[data-action="descartar-vk-aprovacao"]').forEach(btn=>{
+    btn.addEventListener('click', ()=> descartarItemVK(btn.dataset.id));
   });
   if(btnSincronizarVK) btnSincronizarVK.addEventListener('click', ()=>{
     const txt = document.getElementById('firebaseConfigInput').value.trim();
