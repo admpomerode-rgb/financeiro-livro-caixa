@@ -343,6 +343,7 @@
   .conta-card .banco{font-size:12px;color:var(--text-soft);margin-bottom:12px;}
   .conta-card .saldo{font-size:20px;}
   .conta-card .conta-actions{position:absolute;top:14px;right:14px;display:flex;gap:4px;align-items:center;}
+  .conta-card .card-menu-wrap{position:absolute;top:14px;right:14px;z-index:2;}
   .drag-handle{display:none;color:var(--text-soft);font-size:11px;letter-spacing:-2px;cursor:grab;padding:4px 2px;user-select:none;}
   .conta-card.dragging{opacity:.4;}
   .conta-card.drag-over{outline:2px dashed var(--blue-accent);outline-offset:2px;}
@@ -1285,32 +1286,35 @@ function custoAtivo(a){
 function totalSubconta(subcontaId){
   const s = state.subcontasInvestimento.find(x=>x.id===subcontaId);
   if(s && s.valorManual!=null) return s.valorManual;
-  return state.ativosInvestimento.filter(a=>a.subContaId===subcontaId).reduce((sum,a)=>sum+valorAtivo(a),0);
+  return state.ativosInvestimento.filter(a=>a.subContaId===subcontaId && !a.resgatado).reduce((sum,a)=>sum+valorAtivo(a),0);
 }
 function custoSubconta(subcontaId){
   const s = state.subcontasInvestimento.find(x=>x.id===subcontaId);
   if(s && s.valorManual!=null) return s.custoAcumulado||0;
-  return state.ativosInvestimento.filter(a=>a.subContaId===subcontaId).reduce((sum,a)=>sum+custoAtivo(a),0);
+  return state.ativosInvestimento.filter(a=>a.subContaId===subcontaId && !a.resgatado).reduce((sum,a)=>sum+custoAtivo(a),0);
 }
 function valorContaInvestimento(contaId){
   const subsManual = state.subcontasInvestimento.filter(s=>s.contaId===contaId && s.valorManual!=null);
   const idsSubManual = new Set(subsManual.map(s=>s.id));
-  const somaAtivos = state.ativosInvestimento.filter(a=>a.contaId===contaId && !idsSubManual.has(a.subContaId)).reduce((s,a)=>s+valorAtivo(a),0);
+  const somaAtivos = state.ativosInvestimento.filter(a=>a.contaId===contaId && !a.resgatado && !idsSubManual.has(a.subContaId)).reduce((s,a)=>s+valorAtivo(a),0);
   const somaSubManual = subsManual.reduce((s,sub)=>s+sub.valorManual,0);
   return somaAtivos + somaSubManual;
 }
 function custoContaInvestimento(contaId){
   const subsManual = state.subcontasInvestimento.filter(s=>s.contaId===contaId && s.valorManual!=null);
   const idsSubManual = new Set(subsManual.map(s=>s.id));
-  const somaAtivos = state.ativosInvestimento.filter(a=>a.contaId===contaId && !idsSubManual.has(a.subContaId)).reduce((s,a)=>s+custoAtivo(a),0);
+  const somaAtivos = state.ativosInvestimento.filter(a=>a.contaId===contaId && !a.resgatado && !idsSubManual.has(a.subContaId)).reduce((s,a)=>s+custoAtivo(a),0);
   const somaSubManual = subsManual.reduce((s,sub)=>s+(sub.custoAcumulado||0),0);
   return somaAtivos + somaSubManual;
 }
 function totalInvestimentos(){
   const idsSubManual = new Set(state.subcontasInvestimento.filter(s=>s.valorManual!=null).map(s=>s.id));
-  const somaAtivos = state.ativosInvestimento.filter(a=>!idsSubManual.has(a.subContaId)).reduce((s,a)=>s+valorAtivo(a),0);
+  const somaAtivos = state.ativosInvestimento.filter(a=>!a.resgatado && !idsSubManual.has(a.subContaId)).reduce((s,a)=>s+valorAtivo(a),0);
   const somaSubManual = state.subcontasInvestimento.filter(s=>s.valorManual!=null).reduce((s,sub)=>s+sub.valorManual,0);
   return somaAtivos + somaSubManual;
+}
+function ativosVencidosRF(){
+  return state.ativosInvestimento.filter(a=>a.tipoAtivo==='rendafixa' && !a.resgatado && a.vencimento && a.vencimento<=todayISO());
 }
 function rotuloTipoAtivo(a){
   return { acao:'Ação (B3)', fii:'FII', cripto:'Criptomoeda', rendafixa:'Renda Fixa', interno:'Investimento na Empresa' }[a.tipoAtivo] || a.tipoAtivo;
@@ -4064,10 +4068,29 @@ function viewInvestimentos(){
       </div>
     </div>
     <div class="cards cards-3">
-      <div class="card saldo"><div class="label">Total investido</div><div class="value mono">${brl(total)}</div></div>
-      <div class="card"><div class="label">Custo de aquisição</div><div class="value mono">${brl(custo)}</div></div>
-      <div class="card"><div class="label">Rendimento acumulado</div><div class="value mono ${rendimento>=0?'pos':'neg'}">${brl(rendimento)}</div></div>
+      <div class="card saldo"><div class="label">Total investido</div><div class="value mono">${brl(custo)}</div></div>
+      <div class="card"><div class="label">Diferença das atualizações</div><div class="value mono ${rendimento>=0?'pos':'neg'}">${brl(rendimento)}</div></div>
+      <div class="card"><div class="label">Saldo após atualização</div><div class="value mono">${brl(total)}</div></div>
     </div>
+    ${(()=>{ const vencidos = ativosVencidosRF(); return vencidos.length ? `
+    <div class="panel" style="margin-bottom:16px;border-left:3px solid var(--warn);">
+      <div class="panel-head"><h2>⏰ Renda fixa vencida aguardando resgate (${vencidos.length})</h2></div>
+      <div class="panel-body">
+        ${vencidos.map(a=>{
+          const conta = state.contasInvestimento.find(c=>c.id===a.contaId);
+          return `
+          <div class="ledger-row compact" data-action="resgatar-ativo-rf" data-id="${a.id}" style="cursor:pointer;grid-template-columns:12px 1fr auto auto;">
+            <span class="dot pendente"></span>
+            <div class="desc-cell">
+              <div>${escapeHTML(a.nome||'')}${conta?' — '+escapeHTML(conta.nome):''}</div>
+              <div class="cat">Venceu em ${fmtDate(a.vencimento)} · valor aplicado ${brl(a.valorAplicado||0)}</div>
+            </div>
+            <span class="mono" style="font-weight:600;">${brl(valorAtivo(a))}</span>
+            <button class="btn ghost sm" style="pointer-events:none;">Registrar resgate</button>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>` : ''; })()}
     ${(state.notasPendentes||[]).length ? `
     <div class="panel" style="margin-bottom:16px;border-left:3px solid var(--warn);">
       <div class="panel-head"><h2>📋 Notas aguardando aprovação (${state.notasPendentes.length})</h2></div>
@@ -4097,10 +4120,13 @@ function viewInvestimentos(){
         const rend = v-cu;
         return `
         <div class="conta-card" style="--accent-c:${c.cor}">
-          <div class="conta-actions">
-            <button class="icon-btn" data-action="transformar-conta-inv" data-id="${c.id}" title="Transformar em subconta de outra conta">🔀</button>
-            <button class="icon-btn" data-action="editar-conta-inv" data-id="${c.id}" title="Editar">✎</button>
-            <button class="icon-btn" data-action="excluir-conta-inv" data-id="${c.id}" title="Excluir">✕</button>
+          <div class="dropdown-wrap card-menu-wrap">
+            <button class="icon-btn" data-action="toggle-menu-conta-inv" data-id="${c.id}" title="Mais opções">⋮</button>
+            <div class="dropdown-menu" data-menu-conta-inv="${c.id}">
+              <button type="button" data-conta-inv-menu="transformar" data-id="${c.id}">🔀 Transformar em subconta de outra conta</button>
+              <button type="button" data-conta-inv-menu="editar" data-id="${c.id}">✎ Editar conta</button>
+              <button type="button" data-conta-inv-menu="excluir" data-id="${c.id}" style="color:var(--danger);">✕ Excluir conta</button>
+            </div>
           </div>
           <div class="card-top">
             ${bankLogoHTML({ cor:c.cor, banco:c.instituicao, bancoDominio:c.instituicaoDominio, nome:c.nome }, 34)}
@@ -4111,10 +4137,7 @@ function viewInvestimentos(){
           </div>
           <div class="saldo mono ${rend>=0?'pos':'neg'}">${brl(v)}</div>
           <div style="font-size:11.5px;color:var(--text-soft);margin-top:2px;">Rendimento: <span class="mono" style="color:${rend>=0?'var(--success)':'var(--danger)'}">${brl(rend)}</span></div>
-          <div style="display:flex;gap:8px;margin-top:12px;">
-            <button class="btn" data-action="add-ativo-direto" data-id="${c.id}" style="flex:1;">+ Ativo</button>
-            <button class="btn ghost sm" data-action="ver-ativos" data-id="${c.id}" style="flex:1;">Ver ativos</button>
-          </div>
+          <button class="btn ghost sm" data-action="ver-ativos" data-id="${c.id}" style="width:100%;margin-top:12px;">Ver ativos</button>
         </div>
       `;}).join('')}
       <div class="add-conta-card" id="btnNovaContaInv">+ Adicionar conta de investimento</div>
@@ -4126,7 +4149,8 @@ function viewInvestimentos(){
 function viewAtivosInvestimento(contaId){
   const conta = state.contasInvestimento.find(c=>c.id===contaId);
   if(!conta) return viewInvestimentos();
-  const ativos = state.ativosInvestimento.filter(a=>a.contaId===contaId);
+  const ativos = state.ativosInvestimento.filter(a=>a.contaId===contaId && !a.resgatado);
+  const resgatados = state.ativosInvestimento.filter(a=>a.contaId===contaId && a.resgatado).sort((a,b)=>(b.dataResgate||'').localeCompare(a.dataResgate||''));
   const subcontas = state.subcontasInvestimento.filter(s=>s.contaId===contaId);
   const semSubconta = ativos.filter(a=>!a.subContaId);
   const cabecalho = `
@@ -4168,6 +4192,19 @@ function viewAtivosInvestimento(contaId){
         ${ativos.length ? blocoAtivos(semSubconta) : `<div class="empty">Nenhum ativo cadastrado nesta conta ainda.</div>`}
       </div>
     </div>
+    ${resgatados.length ? `
+    <details class="panel-details">
+      <summary>Resgatados (${resgatados.length})</summary>
+      <div class="panel-body">
+        ${resgatados.map(a=>`
+          <div class="ledger-row compact" style="grid-template-columns:12px 1fr auto;">
+            <span class="dot entrada"></span>
+            <div class="desc-cell"><div>${escapeHTML(a.nome||'')}</div><div class="cat">Resgatado em ${fmtDate(a.dataResgate)} · aplicado ${brl(a.valorAplicado||0)}</div></div>
+            <span class="mono" style="font-weight:600;color:${(a.rendimentoResgate||0)>=0?'var(--success)':'var(--danger)'};">${brl(a.valorResgatado||0)}</span>
+          </div>
+        `).join('')}
+      </div>
+    </details>` : ''}
     <div class="note" style="margin-top:0;">Use subcontas pra agrupar aplicações do mesmo tipo dentro desta conta — ex: "LCI", "CDB", "Tesouro Direto" — assim novas aplicações no mesmo produto entram sempre juntas.</div>
   `;
 }
@@ -4177,15 +4214,17 @@ function rowAtivoHTML(a){
   const rend = valor - custoAtivo(a);
   const isRF = a.tipoAtivo==='rendafixa';
   const isManual = a.tipoAtivo==='rendafixa' || a.tipoAtivo==='interno' || a.manual;
+  const vencido = isRF && a.vencimento && a.vencimento<=todayISO();
   return `
     <div class="ledger-row ativo-row" data-id="${a.id}">
       <span class="dot ${rend>=0?'entrada':'saida'}"></span>
-      <div class="desc-cell"><div>${escapeHTML(a.nome || a.ticker || '')}</div><div class="cat">${rotuloTipoAtivo(a)}${a.ticker? ' · '+a.ticker.toUpperCase():''}${a.dataUltimaCotacao? ' · cotação '+fmtDate(a.dataUltimaCotacao.slice(0,10)) : ''}${isManual && a.valorAtualManual!=null ? ' · valor atualizado manualmente' : ''}</div></div>
+      <div class="desc-cell"><div>${escapeHTML(a.nome || a.ticker || '')}${vencido ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;">⏰ vencido — resgatar</span>' : ''}</div><div class="cat">${rotuloTipoAtivo(a)}${a.ticker? ' · '+a.ticker.toUpperCase():''}${isRF && a.vencimento ? ' · vence '+fmtDate(a.vencimento) : ''}${a.dataUltimaCotacao? ' · cotação '+fmtDate(a.dataUltimaCotacao.slice(0,10)) : ''}${isManual && a.valorAtualManual!=null ? ' · valor atualizado manualmente' : ''}</div></div>
       <span class="mono ativo-col-qtd" style="font-size:12.5px;">${isManual? brl(a.valorAplicado||0) : (a.quantidade||0)}</span>
       <span class="mono ativo-col-preco" style="font-size:12.5px;">${isRF? ((a.taxaAnual||0)+'% a.a.') : (isManual? '—' : brl(a.precoMedio||0))}</span>
       <span class="mono ativo-col-atual" style="font-size:12.5px;">${isManual? '—' : brl(a.precoAtual ?? a.precoMedio ?? 0)}</span>
       <span class="mono" style="font-weight:600;">${brl(valor)}</span>
       <div class="row-actions">
+        ${vencido ? `<button class="icon-btn" data-action="resgatar-ativo-rf" data-id="${a.id}" title="Registrar resgate">💰</button>` : ''}
         ${isManual ? `<button class="icon-btn" data-action="atualizar-valor-ativo" data-id="${a.id}" title="Atualizar valor">🔄</button>` : ''}
         <button class="icon-btn" data-action="editar-ativo" data-id="${a.id}" title="Editar">✎</button>
         <button class="icon-btn" data-action="excluir-ativo" data-id="${a.id}" title="Excluir">✕</button>
@@ -4540,9 +4579,9 @@ function renderRelatorioInvestimentos(){
       <div class="report-line"><span>Renda Fixa</span><span class="v">${brl(carteira.renda_fixa.v)}</span></div>
       <div class="report-line"><span>Renda Variável</span><span class="v">${brl(carteira.renda_variavel.v)}</span></div>
       ${carteira.interno.v>0?`<div class="report-line"><span>Investimentos na Empresa</span><span class="v">${brl(carteira.interno.v)}</span></div>`:''}
-      <div class="report-line total"><span>Total da carteira</span><span class="v">${brl(carteiraTotal)}</span></div>
-      <div class="report-line sub"><span>Custo total investido</span><span class="v">${brl(carteiraCusto)}</span></div>
-      <div class="report-line result"><span>Resultado da carteira</span><span class="v" style="color:${resultadoCarteira>=0?'var(--success)':'var(--danger)'};">${brl(resultadoCarteira)}</span></div>
+      <div class="report-line total"><span>Saldo após atualização</span><span class="v">${brl(carteiraTotal)}</span></div>
+      <div class="report-line sub"><span>Total investido</span><span class="v">${brl(carteiraCusto)}</span></div>
+      <div class="report-line result"><span>Diferença das atualizações</span><span class="v" style="color:${resultadoCarteira>=0?'var(--success)':'var(--danger)'};">${brl(resultadoCarteira)}</span></div>
     </div>
   `;
 }
@@ -8642,21 +8681,34 @@ function attachViewHandlers(){
   // Investimentos
   const btnNovaContaInv = document.getElementById('btnNovaContaInv');
   if(btnNovaContaInv) btnNovaContaInv.addEventListener('click', ()=>openContaInvestimentoModal());
-  document.querySelectorAll('[data-action="transformar-conta-inv"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>openTransformarContaSubcontaModal(btn.dataset.id));
-  });
-  document.querySelectorAll('[data-action="editar-conta-inv"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>openContaInvestimentoModal(state.contasInvestimento.find(c=>c.id===btn.dataset.id)));
-  });
-  document.querySelectorAll('[data-action="excluir-conta-inv"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      const id = btn.dataset.id;
-      const usada = state.ativosInvestimento.some(a=>a.contaId===id);
-      if(usada && !confirm('Essa conta tem ativos cadastrados. Excluí-la remove os ativos junto. Continuar?')) return;
-      state.contasInvestimento = state.contasInvestimento.filter(c=>c.id!==id);
-      state.ativosInvestimento = state.ativosInvestimento.filter(a=>a.contaId!==id);
-      persist(); render(); showToast('Conta de investimento excluída');
+  document.querySelectorAll('[data-action="toggle-menu-conta-inv"]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const menu = document.querySelector(`[data-menu-conta-inv="${btn.dataset.id}"]`);
+      document.querySelectorAll('.dropdown-menu[data-menu-conta-inv]').forEach(m=>{ if(m!==menu) m.classList.remove('open'); });
+      menu?.classList.toggle('open');
+      if(menu) ajustarPosicaoDropdown(menu);
     });
+  });
+  document.querySelectorAll('[data-conta-inv-menu]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('.dropdown-menu[data-menu-conta-inv]').forEach(m=>m.classList.remove('open'));
+      const id = btn.dataset.id;
+      if(btn.dataset.contaInvMenu==='transformar'){
+        openTransformarContaSubcontaModal(id);
+      } else if(btn.dataset.contaInvMenu==='editar'){
+        openContaInvestimentoModal(state.contasInvestimento.find(c=>c.id===id));
+      } else {
+        const usada = state.ativosInvestimento.some(a=>a.contaId===id);
+        if(usada && !confirm('Essa conta tem ativos cadastrados. Excluí-la remove os ativos junto. Continuar?')) return;
+        state.contasInvestimento = state.contasInvestimento.filter(c=>c.id!==id);
+        state.ativosInvestimento = state.ativosInvestimento.filter(a=>a.contaId!==id);
+        persist(); render(); showToast('Conta de investimento excluída');
+      }
+    });
+  });
+  document.addEventListener('click', ()=>{
+    document.querySelectorAll('.dropdown-menu[data-menu-conta-inv]').forEach(m=>m.classList.remove('open'));
   });
   document.querySelectorAll('[data-action="ver-ativos"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -8730,6 +8782,9 @@ function attachViewHandlers(){
       const a = state.ativosInvestimento.find(x=>x.id===btn.dataset.id);
       if(a) openAtualizarValorModal(a);
     });
+  });
+  document.querySelectorAll('[data-action="resgatar-ativo-rf"]').forEach(btn=>{
+    btn.addEventListener('click', ()=> openResgateModal(btn.dataset.id));
   });
   const btnAtualizarCotacoes = document.getElementById('btnAtualizarCotacoes');
   if(btnAtualizarCotacoes) btnAtualizarCotacoes.addEventListener('click', ()=>{
@@ -10267,6 +10322,7 @@ function openContaInvestimentoModal(existing){
 
 function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
   const notaEmRevisao = notaPendenteId ? (state.notasPendentes||[]).find(n=>n.id===notaPendenteId) : null;
+  const contaInvRVExistente = state.contasInvestimento.find(c=>c.tipo==='renda_variavel');
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
     <h3>${notaEmRevisao ? 'Revisar nota de corretagem' : 'Importar nota de corretagem'}</h3>
@@ -10308,6 +10364,30 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
 
       <div class="field"><label>Valor líquido da nota (R$) — o que efetivamente sai/entra da conta</label><input type="text" inputmode="decimal" id="notaLiquido"></div>
       <div class="note" id="notaTipoNota" style="margin-top:0;"></div>
+      <div class="field-row">
+        <div class="field">
+          <label>Subconta de destino (compras)</label>
+          <select id="notaSubcontaCompra">
+            <option value="">— nenhuma —</option>
+            ${contaInvRVExistente ? state.subcontasInvestimento.filter(s=>s.contaId===contaInvRVExistente.id).map(s=>`<option value="${s.id}">${escapeHTML(s.nome)}</option>`).join('') : ''}
+            <option value="__nova__">+ Criar nova subconta…</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Subconta de origem (vendas)</label>
+          <select id="notaSubcontaVenda">
+            <option value="">— nenhuma —</option>
+            ${contaInvRVExistente ? state.subcontasInvestimento.filter(s=>s.contaId===contaInvRVExistente.id).map(s=>`<option value="${s.id}">${escapeHTML(s.nome)}</option>`).join('') : ''}
+            <option value="__nova__">+ Criar nova subconta…</option>
+          </select>
+        </div>
+      </div>
+      <div class="note" style="margin-top:0;">Só preencha a subconta correspondente se a nota tiver esse tipo de operação (compra e/ou venda). Ajuda a manter os ativos organizados dentro da conta Renda Variável.</div>
+      <div class="field">
+        <label>Ganho ou perda de capital na venda (R$) — deixe 0 se não houve venda ou se não souber calcular</label>
+        <input type="text" inputmode="decimal" id="notaGanhoPerda" value="0">
+      </div>
+      <div class="note" style="margin-top:0;">Ganho de capital entra como receita financeira (categoria Rendimentos); perda de capital entra como despesa financeira (categoria Investimentos). Use valor negativo pra registrar perda.</div>
       <div class="field"><label>Conta bancária de origem/destino</label>
         <select id="notaContaBancaria">${state.contas.map(c=>`<option value="${c.id}" ${(notaEmRevisao?notaEmRevisao.contaBancariaId===c.id:contaPreSelecionadaId===c.id)?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
       </div>
@@ -10394,8 +10474,33 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     },
     liquido: numBR(document.getElementById('notaLiquido').value) || 0,
     contaBancariaId: document.getElementById('notaContaBancaria').value,
+    subContaCompraId: (document.getElementById('notaSubcontaCompra').value && document.getElementById('notaSubcontaCompra').value!=='__nova__') ? document.getElementById('notaSubcontaCompra').value : null,
+    subContaVendaId: (document.getElementById('notaSubcontaVenda').value && document.getElementById('notaSubcontaVenda').value!=='__nova__') ? document.getElementById('notaSubcontaVenda').value : null,
+    ganhoPerdaCapital: numBR(document.getElementById('notaGanhoPerda').value) || 0,
     arquivoNome: arquivoNomeAtual
   });
+
+  const criarSubcontaSeNecessario = (selectEl)=>{
+    if(selectEl.value!=='__nova__') return;
+    const nome = (prompt('Nome da nova subconta (ex: Ações Longo Prazo, Day Trade):')||'').trim();
+    if(!nome){ selectEl.value=''; return; }
+    let contaAlvo = state.contasInvestimento.find(c=>c.tipo==='renda_variavel');
+    if(!contaAlvo){
+      contaAlvo = { id: uid(), nome:'Renda Variável', instituicao:'', instituicaoDominio:'', tipo:'renda_variavel', cor: CONTA_CORES[state.contasInvestimento.length % CONTA_CORES.length] };
+      state.contasInvestimento.push(contaAlvo);
+    }
+    const nova = { id: uid(), contaId: contaAlvo.id, nome, cor: CONTA_CORES[state.subcontasInvestimento.length % CONTA_CORES.length] };
+    state.subcontasInvestimento.push(nova);
+    persist();
+    document.querySelectorAll('#notaSubcontaCompra, #notaSubcontaVenda').forEach(sel=>{
+      const opt = document.createElement('option');
+      opt.value = nova.id; opt.textContent = nova.nome;
+      sel.insertBefore(opt, sel.querySelector('option[value="__nova__"]'));
+    });
+    selectEl.value = nova.id;
+  };
+  document.getElementById('notaSubcontaCompra').addEventListener('change', function(){ criarSubcontaSeNecessario(this); });
+  document.getElementById('notaSubcontaVenda').addEventListener('change', function(){ criarSubcontaSeNecessario(this); });
 
   if(notaEmRevisao){
     document.getElementById('notaData').value = notaEmRevisao.dataPregao || todayISO();
@@ -10410,6 +10515,9 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     document.getElementById('notaTxIrrf').value = t.irrf || 0;
     document.getElementById('notaTxOutras').value = t.outras || 0;
     document.getElementById('notaLiquido').value = notaEmRevisao.liquido || 0;
+    if(notaEmRevisao.subContaCompraId) document.getElementById('notaSubcontaCompra').value = notaEmRevisao.subContaCompraId;
+    if(notaEmRevisao.subContaVendaId) document.getElementById('notaSubcontaVenda').value = notaEmRevisao.subContaVendaId;
+    document.getElementById('notaGanhoPerda').value = notaEmRevisao.ganhoPerdaCapital || 0;
     pintarOperacoes();
 
     document.getElementById('btnSalvarNota').addEventListener('click', ()=>{
@@ -10524,6 +10632,9 @@ function publicarNotaCorretagem(nota){
 
   const totalCompras = linhas.filter(l=>l.tipo==='C').reduce((s,l)=>s+l.quantidade*l.preco,0);
   const totalVendas = linhas.filter(l=>l.tipo==='V').reduce((s,l)=>s+l.quantidade*l.preco,0);
+  const subContaCompraId = nota.subContaCompraId || null;
+  const subContaVendaId = nota.subContaVendaId || null;
+  const ganhoPerdaCapital = nota.ganhoPerdaCapital || 0;
 
   let contaInv = state.contasInvestimento.find(c=>c.tipo==='renda_variavel');
   if(!contaInv){
@@ -10533,8 +10644,8 @@ function publicarNotaCorretagem(nota){
 
   linhas.forEach(l=>{
     const taxaProporcional = totalCompras>0 ? (l.quantidade*l.preco/totalCompras)*taxasTotal : 0;
-    let ativo = state.ativosInvestimento.find(a=>a.contaId===contaInv.id && a.ticker===l.ticker && !a.manual);
     if(l.tipo==='C'){
+      let ativo = state.ativosInvestimento.find(a=>a.contaId===contaInv.id && a.ticker===l.ticker && !a.manual && a.subContaId===subContaCompraId);
       if(ativo){
         const custoAntigo = (ativo.quantidade||0) * (ativo.precoMedio||0);
         const custoNovo = l.quantidade*l.preco + taxaProporcional;
@@ -10542,9 +10653,11 @@ function publicarNotaCorretagem(nota){
         ativo.precoMedio = Math.round(((custoAntigo+custoNovo)/ativo.quantidade)*100)/100;
       } else {
         const precoMedio = Math.round(((l.quantidade*l.preco + taxaProporcional)/l.quantidade)*100)/100;
-        state.ativosInvestimento.push({ id: uid(), tipoAtivo: l.tipoAtivo, contaId: contaInv.id, ticker: l.ticker, nome: l.ticker, quantidade: l.quantidade, precoMedio, precoAtual: null, dataUltimaCotacao: null, corretora });
+        state.ativosInvestimento.push({ id: uid(), tipoAtivo: l.tipoAtivo, contaId: contaInv.id, subContaId: subContaCompraId, ticker: l.ticker, nome: l.ticker, quantidade: l.quantidade, precoMedio, precoAtual: null, dataUltimaCotacao: null, corretora });
       }
     } else {
+      let ativo = state.ativosInvestimento.find(a=>a.contaId===contaInv.id && a.ticker===l.ticker && !a.manual && a.subContaId===subContaVendaId);
+      if(!ativo) ativo = state.ativosInvestimento.find(a=>a.contaId===contaInv.id && a.ticker===l.ticker && !a.manual);
       if(ativo){
         ativo.quantidade = Math.max(0, (ativo.quantidade||0) - l.quantidade);
       }
@@ -10570,6 +10683,25 @@ function publicarNotaCorretagem(nota){
       origem:'investimento', observacao: 'Operações: '+linhas.filter(l=>l.tipo==='V').map(l=>`${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', '),
       criadoEm: new Date().toISOString()
     });
+  }
+  if(Math.abs(ganhoPerdaCapital)>0.004){
+    if(ganhoPerdaCapital>0){
+      state.lancamentos.push({
+        id: uid(), tipo:'entrada', categoria:'Rendimentos',
+        descricao: `Ganho de capital${corretora ? ' — '+corretora : ''} (nota de corretagem)`,
+        valor: Math.round(ganhoPerdaCapital*100)/100, contaId: contaBancariaId, status: statusEntrada,
+        dataVencimento: dataDebito, dataPagamento,
+        criadoEm: new Date().toISOString()
+      });
+    } else {
+      state.lancamentos.push({
+        id: uid(), tipo:'saida', categoria:'Investimentos',
+        descricao: `Perda de capital${corretora ? ' — '+corretora : ''} (nota de corretagem)`,
+        valor: Math.round(Math.abs(ganhoPerdaCapital)*100)/100, contaId: contaBancariaId, status: statusSaida,
+        dataVencimento: dataDebito, dataPagamento,
+        criadoEm: new Date().toISOString()
+      });
+    }
   }
 
   // Custos da nota — lançados automaticamente nas categorias próprias (editáveis como qualquer outra)
@@ -11080,7 +11212,7 @@ function openAtivoModal(existing, contaId){
         </div>
         <div class="note" style="margin-top:0;">O valor atual nesse modo é estimado por juros compostos com a taxa informada — pode não bater exatamente com o extrato do banco.</div>
       </div>
-      <div class="field"><label>Vencimento (opcional)</label><input type="date" id="aiVencimento" value="${existing?.vencimento || ''}"></div>
+      <div class="field"><label>Vencimento</label><input type="date" id="aiVencimento" value="${existing?.vencimento || ''}"></div>
     </div>
 
     <div class="modal-actions">
@@ -11155,20 +11287,99 @@ function openAtivoModal(existing, contaId){
       const nome = document.getElementById('aiNomeRF').value.trim();
       const saldoInicial = numBR(document.getElementById('aiSaldoInicial').value);
       const dataAplicacao = document.getElementById('aiDataSaldoInicial').value || todayISO();
+      const vencimento = document.getElementById('aiVencimento').value;
       if(!nome || isNaN(saldoInicial)){ showToast('Preencha descrição e saldo inicial'); return; }
-      payload = { ...payload, nome, valorAplicado: saldoInicial, valorAtualManual: saldoInicial, taxaAnual: null, indexador: null, dataAplicacao, vencimento: document.getElementById('aiVencimento').value || null };
+      if(!vencimento){ showToast('Preencha a data de vencimento'); return; }
+      payload = { ...payload, nome, valorAplicado: saldoInicial, valorAtualManual: saldoInicial, taxaAnual: null, indexador: null, dataAplicacao, vencimento };
     } else {
       const nome = document.getElementById('aiNomeRF').value.trim();
       const valorAplicado = numBR(document.getElementById('aiValorAplicado').value);
       const taxaAnual = numBR(document.getElementById('aiTaxaAnual').value);
       const dataAplicacao = document.getElementById('aiDataAplicacao').value || todayISO();
+      const vencimento = document.getElementById('aiVencimento').value;
       if(!nome || isNaN(valorAplicado) || isNaN(taxaAnual)){ showToast('Preencha descrição, valor e taxa'); return; }
-      payload = { ...payload, nome, valorAplicado, taxaAnual, indexador: document.getElementById('aiIndexador').value, dataAplicacao, valorAtualManual: null, vencimento: document.getElementById('aiVencimento').value || null };
+      if(!vencimento){ showToast('Preencha a data de vencimento'); return; }
+      payload = { ...payload, nome, valorAplicado, taxaAnual, indexador: document.getElementById('aiIndexador').value, dataAplicacao, valorAtualManual: null, vencimento };
     }
     if(isEdit){ Object.keys(existing).forEach(k=>{ if(!(k in payload) && k!=='id') delete existing[k]; }); Object.assign(existing, payload); }
     else { state.ativosInvestimento.push({ id: uid(), ...payload }); }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Ativo atualizado' : 'Ativo adicionado');
+  });
+}
+
+function openResgateModal(ativoId){
+  const a = state.ativosInvestimento.find(x=>x.id===ativoId);
+  if(!a) return;
+  const custo = custoAtivo(a);
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Registrar resgate — ${escapeHTML(a.nome||'')}</h3>
+    <div class="note" style="margin-top:0;">Valor aplicado: <strong>${brl(custo)}</strong> · Venceu em ${fmtDate(a.vencimento)}</div>
+    <div class="field-row">
+      <div class="field"><label>Valor que retornou pra conta (R$)</label><input type="text" inputmode="decimal" id="rgValor" value="${brl(valorAtivo(a)).replace('R$ ','')}"></div>
+      <div class="field"><label>Data do resgate</label><input type="date" id="rgData" value="${todayISO()}"></div>
+    </div>
+    <div class="field">
+      <label>Conta bancária de destino</label>
+      <select id="rgConta">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select>
+    </div>
+    <div class="note" id="rgRendimentoPreview" style="margin-top:0;"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarResgate">Confirmar resgate e lançar na conta</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+
+  const rgValorEl = document.getElementById('rgValor');
+  const preview = document.getElementById('rgRendimentoPreview');
+  const atualizarPreview = ()=>{
+    const v = numBR(rgValorEl.value)||0;
+    const rend = v - custo;
+    preview.innerHTML = `Rendimento calculado: <strong style="color:${rend>=0?'var(--success)':'var(--danger)'}">${brl(rend)}</strong>${rend>=0?' (entra como Rendimentos)':' (entra como perda em Investimentos)'}`;
+  };
+  rgValorEl.addEventListener('input', atualizarPreview);
+  atualizarPreview();
+
+  document.getElementById('btnConfirmarResgate').addEventListener('click', ()=>{
+    const valorRetornado = numBR(rgValorEl.value);
+    const contaId = document.getElementById('rgConta').value;
+    const dataResgate = document.getElementById('rgData').value || todayISO();
+    if(isNaN(valorRetornado) || valorRetornado<0){ showToast('Preencha um valor válido'); return; }
+    if(!contaId){ showToast('Escolha a conta de destino'); return; }
+    const rendimento = valorRetornado - custo;
+
+    if(custo>0){
+      state.lancamentos.push({
+        id: uid(), tipo:'entrada', categoria:'Investimentos', descricao:`Retorno de resgate — ${a.nome}`,
+        valor: custo, contaId, dataVencimento: dataResgate, status:'recebido', dataPagamento: dataResgate,
+        origem:'investimento', criadoEm: new Date().toISOString()
+      });
+    }
+    if(Math.abs(rendimento)>0.004){
+      if(rendimento>0){
+        state.lancamentos.push({
+          id: uid(), tipo:'entrada', categoria:'Rendimentos', descricao:`Rendimento — ${a.nome}`,
+          valor: rendimento, contaId, dataVencimento: dataResgate, status:'recebido', dataPagamento: dataResgate,
+          criadoEm: new Date().toISOString()
+        });
+      } else {
+        state.lancamentos.push({
+          id: uid(), tipo:'saida', categoria:'Investimentos', descricao:`Perda no resgate — ${a.nome}`,
+          valor: Math.abs(rendimento), contaId, dataVencimento: dataResgate, status:'pago', dataPagamento: dataResgate,
+          criadoEm: new Date().toISOString()
+        });
+      }
+    }
+    a.resgatado = true;
+    a.dataResgate = dataResgate;
+    a.valorResgatado = valorRetornado;
+    a.rendimentoResgate = rendimento;
+    registrarLog('Resgate de renda fixa registrado', `"${a.nome}" — retornou ${brl(valorRetornado)} (rendimento ${brl(rendimento)})`);
+    persist(); closeModal(); render();
+    showToast('Resgate lançado na conta');
   });
 }
 
