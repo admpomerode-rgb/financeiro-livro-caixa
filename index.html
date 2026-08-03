@@ -205,6 +205,10 @@
   .vk-status-label{font-size:11.5px;color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.04em;}
   .vk-status-value{font-family:'Space Grotesk';font-weight:600;font-size:17px;color:var(--white);margin-top:3px;}
   .vk-status-sub{font-size:12.5px;color:rgba(255,255,255,.55);margin-top:4px;}
+  .vk-sync-row{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;flex-wrap:wrap;gap:14px;}
+  .vk-sync-row + .vk-sync-row{border-top:1px solid var(--line);}
+  .vk-sync-row .vk-status-label{color:var(--ink);font-size:13px;font-weight:600;text-transform:none;letter-spacing:normal;}
+  .vk-sync-row .vk-status-sub{color:var(--text-soft);}
   .panel-details{background:var(--white);border:1px solid var(--line);border-radius:12px;margin-bottom:16px;overflow:hidden;}
   .panel-details summary{padding:16px 20px;font-family:'Space Grotesk';font-weight:600;font-size:13.5px;cursor:pointer;list-style:none;}
   .panel-details summary::-webkit-details-marker{display:none;}
@@ -6625,29 +6629,34 @@ function viewVK(){
       <div>
         <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="integracoes">← Central de Integrações</span>
         <h1 style="margin-top:6px;">Integração VK Industrial</h1>
-        <p>Pedidos lançados no VK Industrial caem automaticamente aqui em Contas a Receber</p>
+        <p>Pedidos, ativos/OS e entradas de estoque do VK Industrial caem automaticamente aqui</p>
       </div>
     </div>
 
-    <div class="panel vk-status-panel">
-      <div class="vk-status-row">
-        <div>
-          <div class="vk-status-label">${cfg.ultimaSincronizacao ? 'Última sincronização' : 'Ainda não sincronizado'}</div>
-          <div class="vk-status-value">${cfg.ultimaSincronizacao ? new Date(cfg.ultimaSincronizacao).toLocaleString('pt-BR') : '—'}</div>
-          <div class="vk-status-sub">${totalImportados} pedido(s) importado(s) até agora</div>
+    <div class="panel">
+      <div class="panel-head"><h2>Sincronização</h2></div>
+      <div class="panel-body" style="padding:0;">
+        <div class="vk-sync-row">
+          <div>
+            <div class="vk-status-label">Pedidos (contas a receber)</div>
+            <div class="vk-status-sub">${cfg.ultimaSincronizacao ? 'Última: '+new Date(cfg.ultimaSincronizacao).toLocaleString('pt-BR') : 'Ainda não sincronizado'} · ${totalImportados} importado(s)</div>
+          </div>
+          <button class="btn" id="btnSincronizarVK">⟳ Sincronizar pedidos</button>
         </div>
-        <button class="btn lg" id="btnSincronizarVK">⟳ Sincronizar pedidos agora</button>
-      </div>
-    </div>
-
-    <div class="panel vk-status-panel">
-      <div class="vk-status-row">
-        <div>
-          <div class="vk-status-label">${cfg.ultimaSincronizacaoAtivos ? 'Última sincronização de ativos' : 'Ativos ainda não sincronizados'}</div>
-          <div class="vk-status-value">${cfg.ultimaSincronizacaoAtivos ? new Date(cfg.ultimaSincronizacaoAtivos).toLocaleString('pt-BR') : '—'}</div>
-          <div class="vk-status-sub">${state.ativosPatrimoniais.filter(a=>a.vkAtivoId).length} ativo(s) e ${state.ativosPatrimoniais.reduce((s,a)=>s+(a.manutencoes||[]).filter(m=>m.vkOsId).length,0)} ordem(ns) de serviço importados do VK Industrial</div>
+        <div class="vk-sync-row">
+          <div>
+            <div class="vk-status-label">Ativos e Ordens de Serviço</div>
+            <div class="vk-status-sub">${cfg.ultimaSincronizacaoAtivos ? 'Última: '+new Date(cfg.ultimaSincronizacaoAtivos).toLocaleString('pt-BR') : 'Ainda não sincronizado'} · ${state.ativosPatrimoniais.filter(a=>a.vkAtivoId).length} ativo(s), ${state.ativosPatrimoniais.reduce((s,a)=>s+(a.manutencoes||[]).filter(m=>m.vkOsId).length,0)} OS</div>
+          </div>
+          <button class="btn" id="btnSincronizarAtivosVK">⟳ Sincronizar ativos/OS</button>
         </div>
-        <button class="btn lg" id="btnSincronizarAtivosVK">⟳ Sincronizar Ativos e Ordens de Serviço</button>
+        <div class="vk-sync-row">
+          <div>
+            <div class="vk-status-label">Entradas de estoque (contas a pagar)</div>
+            <div class="vk-status-sub">${cfg.ultimaSincronizacaoEstoque ? 'Última: '+new Date(cfg.ultimaSincronizacaoEstoque).toLocaleString('pt-BR') : 'Ainda não sincronizado'} · ${state.lancamentos.filter(l=>l.origem==='vk-estoque').length} importada(s)</div>
+          </div>
+          <button class="btn" id="btnSincronizarEstoqueVK">⟳ Sincronizar estoque</button>
+        </div>
       </div>
     </div>
 
@@ -6660,22 +6669,14 @@ function viewVK(){
           <div class="ledger-row compact" data-action="abrir-lancamento-vk" data-id="${d.lancamentoId}" style="cursor:pointer;grid-template-columns:12px 1fr auto;">
             <span class="dot pendente"></span>
             <div class="desc-cell"><div>Pedido N° ${d.numero}</div><div class="cat">Valor mudou no VK: era ${brl(d.valorAntigo)}, agora é ${brl(d.valorNovo)}</div></div>
-            <button class="btn ghost sm" style="pointer-events:none;">Ver</button>
+            <div style="display:flex;gap:6px;">
+              <button class="btn ghost sm" style="pointer-events:none;">Ver</button>
+              <button class="btn ghost sm" data-action="ignorar-divergencia-vk" data-key="${d.pedidoId}" title="Já conferi, não precisa mudar nada">Ignorar</button>
+            </div>
           </div>
         `).join('')}
       </div>
     </div>` : ''}
-
-    <div class="panel vk-status-panel">
-      <div class="vk-status-row">
-        <div>
-          <div class="vk-status-label">${cfg.ultimaSincronizacaoEstoque ? 'Última sincronização de estoque' : 'Estoque ainda não sincronizado'}</div>
-          <div class="vk-status-value">${cfg.ultimaSincronizacaoEstoque ? new Date(cfg.ultimaSincronizacaoEstoque).toLocaleString('pt-BR') : '—'}</div>
-          <div class="vk-status-sub">${state.lancamentos.filter(l=>l.origem==='vk-estoque').length} entrada(s) de estoque importada(s) até agora</div>
-        </div>
-        <button class="btn lg" id="btnSincronizarEstoqueVK">⟳ Sincronizar entradas de estoque</button>
-      </div>
-    </div>
 
     ${(state.vkDivergenciasEstoque||[]).length ? `
     <div class="panel" style="margin-bottom:16px;border-left:3px solid var(--warn);">
@@ -6686,19 +6687,26 @@ function viewVK(){
           <div class="ledger-row compact" ${d.lancamentoId ? `data-action="abrir-lancamento-vk" data-id="${d.lancamentoId}" style="cursor:pointer;grid-template-columns:12px 1fr auto;"` : `style="grid-template-columns:12px 1fr auto;"`}>
             <span class="dot pendente"></span>
             <div class="desc-cell"><div>${escapeHTML(d.descricao||('Entrada '+d.entradaId))}</div><div class="cat">${d.tipo==='excluida' ? 'Essa entrada foi apagada no VK Industrial' : `Valor mudou no VK: era ${brl(d.valorAntigo)}, agora é ${brl(d.valorNovo)}`}</div></div>
-            <button class="btn ghost sm" style="pointer-events:none;">Ver</button>
+            <div style="display:flex;gap:6px;">
+              ${d.lancamentoId ? `<button class="btn ghost sm" style="pointer-events:none;">Ver</button>` : ''}
+              <button class="btn ghost sm" data-action="ignorar-divergencia-estoque-vk" data-key="${d.entradaId}" title="Já conferi, não precisa mudar nada">Ignorar</button>
+            </div>
           </div>
         `).join('')}
       </div>
     </div>` : ''}
 
-    <div class="panel">
-      <div class="panel-head"><h2>Configurações — Pedidos (contas a receber)</h2></div>
-      <div class="panel-body" style="padding:20px;">
+    <details class="panel-details">
+      <summary>⚙️ Configurações da integração</summary>
+      <div style="padding:16px 18px;">
+
+        <div style="font-weight:600;font-size:12.5px;margin-bottom:10px;">Acesso ao VK Industrial</div>
         <div class="field-row">
-          <div class="field"><label>E-mail de acesso ao VK Industrial</label><input type="email" id="vkEmail" value="${escapeHTML(cfg.email||'')}" placeholder="seu@email.com"></div>
+          <div class="field"><label>E-mail de acesso</label><input type="email" id="vkEmail" value="${escapeHTML(cfg.email||'')}" placeholder="seu@email.com"></div>
           <div class="field"><label>Senha</label><input type="password" id="vkSenha" value="${escapeHTML(cfg.senha||'')}" placeholder="senha"></div>
         </div>
+
+        <div style="font-weight:600;font-size:12.5px;margin:18px 0 10px;border-top:1px solid var(--line);padding-top:16px;">Pedidos (contas a receber)</div>
         <div class="field-row">
           <div class="field">
             <label>Conta bancária de destino</label>
@@ -6709,13 +6717,8 @@ function viewVK(){
             <select id="vkCategoria">${opcoesCategoriaHTML('entrada', cfg.categoria)}</select>
           </div>
         </div>
-        <button class="btn ghost" id="btnSalvarConfigVK">Salvar configuração</button>
-      </div>
-    </div>
 
-    <div class="panel">
-      <div class="panel-head"><h2>Configurações — Entradas de estoque (contas a pagar)</h2></div>
-      <div class="panel-body" style="padding:20px;">
+        <div style="font-weight:600;font-size:12.5px;margin:18px 0 10px;border-top:1px solid var(--line);padding-top:16px;">Entradas de estoque (contas a pagar)</div>
         <div class="field-row">
           <div class="field">
             <label>Conta bancária de destino</label>
@@ -6726,9 +6729,25 @@ function viewVK(){
             <select id="vkCategoriaEstoque">${opcoesCategoriaHTML('saida', cfg.categoriaEstoque)}</select>
           </div>
         </div>
-        <button class="btn ghost" id="btnSalvarConfigEstoqueVK">Salvar configuração</button>
+
+        <button class="btn ghost" id="btnSalvarConfigVK" style="margin-top:16px;">Salvar todas as configurações</button>
+
+        <div style="font-weight:600;font-size:12.5px;margin:20px 0 10px;border-top:1px solid var(--line);padding-top:16px;">Configuração avançada (Firebase do VK Industrial)</div>
+        <p style="font-size:12.5px;color:var(--text-soft);margin-bottom:10px;">Já preenchido com o projeto <span class="mono">vk-provisorio</span>. Só mexa aqui se souber o que está fazendo.</p>
+        <textarea id="firebaseConfigInput">${cfg.firebaseConfig ? JSON.stringify(cfg.firebaseConfig, null, 2) : ''}</textarea>
       </div>
-    </div>
+    </details>
+
+    <details class="panel-details">
+      <summary>Como funciona a sincronização de pedidos</summary>
+      <div class="note" style="margin:0;border-top-left-radius:0;border-top-right-radius:0;">
+        Ao sincronizar, cada pedido do VK Industrial vira <strong>uma conta a receber</strong> aqui — descrição "Pedido N° [número]", valor total do pedido, vencimento na data de entrega, e uma observação com o nome do cliente e os itens comprados (clique no lançamento para ver).
+        <br><br>
+        Pedidos cancelados no VK Industrial entram marcados como "Cancelado" (não somem). Se o pedido for editado no VK Industrial depois de importado (valor, cliente, itens, data de entrega ou vendedor), a sincronização detecta e corrige automaticamente aqui — <strong>desde que o pedido ainda esteja pendente</strong>. Se já tiver sido marcado como recebido, a correção não é feita sozinha (pra não mexer em algo que você já conferiu) — ele aparece no painel de pendências acima pra você decidir.
+        <br><br>
+        A sincronização não é automática/contínua — clique em "Sincronizar pedidos" sempre que quiser buscar os pedidos novos e corrigir os que mudaram. A senha fica salva só neste navegador.
+      </div>
+    </details>
 
     <details class="panel-details">
       <summary>Como funciona a sincronização de estoque</summary>
@@ -6737,44 +6756,12 @@ function viewVK(){
         <br><br>
         Se a entrada for editada no VK Industrial depois de importada (itens, fornecedor, data, nota fiscal), a sincronização corrige automaticamente aqui — <strong>desde que a despesa ainda esteja pendente</strong>. Se já tiver sido marcada como paga, a correção não é feita sozinha — ela aparece no painel de pendências acima pra você decidir. Se a entrada for excluída no VK Industrial, a despesa correspondente é removida automaticamente daqui (também só se ainda estiver pendente); se já estiver paga, some do estoque VK, mas fica aqui até você decidir manualmente, e aparece no mesmo painel de pendências.
         <br><br>
-        A sincronização não é automática/contínua — clique em "Sincronizar entradas de estoque" sempre que quiser buscar as novidades.
+        A sincronização não é automática/contínua — clique em "Sincronizar estoque" sempre que quiser buscar as novidades.
       </div>
     </details>
 
     <details class="panel-details">
-      <summary>Esquema esperado — Entradas de Estoque (para quem for construir essa tela no VK Industrial)</summary>
-      <div style="padding:16px 20px;font-size:12px;color:var(--text-soft);line-height:1.7;">
-        Essa sincronização lê três coleções do mesmo projeto Firebase do VK Industrial (<span class="mono">vk-provisorio</span>): <span class="mono">entradas_estoque</span>, <span class="mono">insumos</span> e <span class="mono">fornecedores</span>.
-        <br><br>
-        <strong style="color:var(--ink);">Coleção "entradas_estoque"</strong> — um documento por entrada/nota recebida:
-        <pre class="mono" style="background:var(--bone);padding:10px 12px;border-radius:8px;margin:8px 0;white-space:pre-wrap;font-size:11px;">{
-  fornecedorId: string, // id de um documento em "fornecedores"
-  data: "AAAA-MM-DD",
-  numeroNF: string,     // opcional
-  semNF: boolean,       // true se a entrada não tem nota fiscal
-  itens: [
-    { insumoId: string, quantidade: number, valorUnitario: number }
-  ]
-}</pre>
-        <strong style="color:var(--ink);">Coleção "fornecedores"</strong> — precisa ter pelo menos <span class="mono">nome</span> e <span class="mono">cnpj</span> (ou <span class="mono">cnpjCpf</span>) por documento, pra vincular com o cadastro de fornecedores já existente aqui no Livro Caixa.
-        <br><br>
-        <strong style="color:var(--ink);">Coleção "insumos"</strong> — precisa ter pelo menos <span class="mono">nome</span> por documento; só é usada pra montar a descrição dos itens na observação do lançamento.
-      </div>
-    </details>
-
-    <details class="panel-details">
-      <summary>Como funciona a sincronização</summary>
-      <div class="note" style="margin:0;border-top-left-radius:0;border-top-right-radius:0;">
-        Ao sincronizar, cada pedido do VK Industrial vira <strong>uma conta a receber</strong> aqui — descrição "Pedido N° [número]", valor total do pedido, vencimento na data de entrega, e uma observação com o nome do cliente e os itens comprados (clique no lançamento para ver).
-        <br><br>
-        Pedidos cancelados no VK Industrial entram marcados como "Cancelado" (não somem). Se o pedido for editado no VK Industrial depois de importado (valor, cliente, itens, data de entrega ou vendedor), a sincronização detecta e corrige automaticamente aqui — <strong>desde que o pedido ainda esteja pendente</strong>. Se já tiver sido marcado como recebido, a correção não é feita sozinha (pra não mexer em algo que você já conferiu) — ele aparece no painel de pendências acima pra você decidir.
-        <br><br>
-        A sincronização não é automática/contínua — clique em "Sincronizar pedidos agora" sempre que quiser buscar os pedidos novos e corrigir os que mudaram. A senha fica salva só neste navegador.
-      </div>
-    </details>
-
-    <details class="panel-details">
-      <summary>Esquema esperado — Ativos Patrimoniais e Ordens de Serviço (para quem for construir essas telas no VK Industrial)</summary>
+      <summary>Esquema esperado — Ativos Patrimoniais e Ordens de Serviço</summary>
       <div style="padding:16px 20px;font-size:12px;color:var(--text-soft);line-height:1.7;">
         Essa sincronização lê duas coleções do mesmo projeto Firebase do VK Industrial (<span class="mono">vk-provisorio</span>):
         <br><br>
@@ -6802,10 +6789,23 @@ function viewVK(){
     </details>
 
     <details class="panel-details">
-      <summary>Configuração avançada (Firebase do VK Industrial)</summary>
-      <div style="padding:16px 18px;">
-        <p style="font-size:12.5px;color:var(--text-soft);margin-bottom:10px;">Já preenchido com o projeto <span class="mono">vk-provisorio</span>. Só mexa aqui se souber o que está fazendo.</p>
-        <textarea id="firebaseConfigInput">${cfg.firebaseConfig ? JSON.stringify(cfg.firebaseConfig, null, 2) : ''}</textarea>
+      <summary>Esquema esperado — Entradas de Estoque</summary>
+      <div style="padding:16px 20px;font-size:12px;color:var(--text-soft);line-height:1.7;">
+        Essa sincronização lê três coleções do mesmo projeto Firebase do VK Industrial (<span class="mono">vk-provisorio</span>): <span class="mono">entradas_estoque</span>, <span class="mono">insumos</span> e <span class="mono">fornecedores</span>.
+        <br><br>
+        <strong style="color:var(--ink);">Coleção "entradas_estoque"</strong> — um documento por entrada/nota recebida:
+        <pre class="mono" style="background:var(--bone);padding:10px 12px;border-radius:8px;margin:8px 0;white-space:pre-wrap;font-size:11px;">{
+  fornecedorId: string, // id de um documento em "fornecedores"
+  data: "AAAA-MM-DD",
+  numeroNF: string,     // opcional
+  semNF: boolean,       // true se a entrada não tem nota fiscal
+  itens: [
+    { insumoId: string, quantidade: number, valorUnitario: number }
+  ]
+}</pre>
+        <strong style="color:var(--ink);">Coleção "fornecedores"</strong> — precisa ter pelo menos <span class="mono">nome</span> e <span class="mono">cnpj</span> (ou <span class="mono">cnpjCpf</span>) por documento, pra vincular com o cadastro de fornecedores já existente aqui no Livro Caixa.
+        <br><br>
+        <strong style="color:var(--ink);">Coleção "insumos"</strong> — precisa ter pelo menos <span class="mono">nome</span> por documento; só é usada pra montar a descrição dos itens na observação do lançamento.
       </div>
     </details>
   `;
@@ -8605,20 +8605,32 @@ function attachViewHandlers(){
       state.vkConfig.senha = document.getElementById('vkSenha').value;
       state.vkConfig.contaId = document.getElementById('vkConta').value;
       state.vkConfig.categoria = document.getElementById('vkCategoria').value;
+      state.vkConfig.contaIdEstoque = document.getElementById('vkContaEstoque').value;
+      state.vkConfig.categoriaEstoque = document.getElementById('vkCategoriaEstoque').value;
       persist(); showToast('Configuração salva'); render();
     }catch(e){ showToast('JSON do Firebase inválido — confira o formato'); }
-  });
-  const btnSalvarConfigEstoqueVK = document.getElementById('btnSalvarConfigEstoqueVK');
-  if(btnSalvarConfigEstoqueVK) btnSalvarConfigEstoqueVK.addEventListener('click', ()=>{
-    state.vkConfig.contaIdEstoque = document.getElementById('vkContaEstoque').value;
-    state.vkConfig.categoriaEstoque = document.getElementById('vkCategoriaEstoque').value;
-    persist(); showToast('Configuração salva'); render();
   });
   const btnSincronizarVK = document.getElementById('btnSincronizarVK');
   document.querySelectorAll('[data-action="abrir-lancamento-vk"]').forEach(row=>{
     row.addEventListener('click', ()=>{
       const l = state.lancamentos.find(x=>x.id===row.dataset.id);
       if(l) openLancamentoModal(l.tipo, l);
+    });
+  });
+  document.querySelectorAll('[data-action="ignorar-divergencia-vk"]').forEach(btn=>{
+    btn.addEventListener('click', (ev)=>{
+      ev.stopPropagation();
+      state.vkDivergencias = (state.vkDivergencias||[]).filter(d=>d.pedidoId!==btn.dataset.key);
+      persist(); render();
+      showToast('Divergência ignorada');
+    });
+  });
+  document.querySelectorAll('[data-action="ignorar-divergencia-estoque-vk"]').forEach(btn=>{
+    btn.addEventListener('click', (ev)=>{
+      ev.stopPropagation();
+      state.vkDivergenciasEstoque = (state.vkDivergenciasEstoque||[]).filter(d=>d.entradaId!==btn.dataset.key);
+      persist(); render();
+      showToast('Divergência ignorada');
     });
   });
   if(btnSincronizarVK) btnSincronizarVK.addEventListener('click', ()=>{
