@@ -10364,25 +10364,6 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
 
       <div class="field"><label>Valor líquido da nota (R$) — o que efetivamente sai/entra da conta</label><input type="text" inputmode="decimal" id="notaLiquido"></div>
       <div class="note" id="notaTipoNota" style="margin-top:0;"></div>
-      <div class="field-row">
-        <div class="field">
-          <label>Subconta de destino (compras)</label>
-          <select id="notaSubcontaCompra">
-            <option value="">— nenhuma —</option>
-            ${contaInvRVExistente ? state.subcontasInvestimento.filter(s=>s.contaId===contaInvRVExistente.id).map(s=>`<option value="${s.id}">${escapeHTML(s.nome)}</option>`).join('') : ''}
-            <option value="__nova__">+ Criar nova subconta…</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>Subconta de origem (vendas)</label>
-          <select id="notaSubcontaVenda">
-            <option value="">— nenhuma —</option>
-            ${contaInvRVExistente ? state.subcontasInvestimento.filter(s=>s.contaId===contaInvRVExistente.id).map(s=>`<option value="${s.id}">${escapeHTML(s.nome)}</option>`).join('') : ''}
-            <option value="__nova__">+ Criar nova subconta…</option>
-          </select>
-        </div>
-      </div>
-      <div class="note" style="margin-top:0;">Só preencha a subconta correspondente se a nota tiver esse tipo de operação (compra e/ou venda). Ajuda a manter os ativos organizados dentro da conta Renda Variável.</div>
       <div class="field">
         <label>Ganho ou perda de capital na venda (R$) — deixe 0 se não houve venda ou se não souber calcular</label>
         <input type="text" inputmode="decimal" id="notaGanhoPerda" value="0">
@@ -10406,8 +10387,13 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
   let operacoesAtuais = notaEmRevisao ? (notaEmRevisao.operacoes||[]).map(o=>({ ...o })) : [];
   let arquivoNomeAtual = notaEmRevisao ? (notaEmRevisao.arquivoNome||'') : '';
 
+  const opcoesSubcontaRV = ()=>{
+    const contaRV = state.contasInvestimento.find(c=>c.tipo==='renda_variavel');
+    const subs = contaRV ? state.subcontasInvestimento.filter(s=>s.contaId===contaRV.id) : [];
+    return subs.map(s=>`<option value="${s.id}">${escapeHTML(s.nome)}</option>`).join('');
+  };
   const linhaOperacaoHTML = (op, idx)=>`
-    <div class="field-row nota-op-row" data-idx="${idx}" style="align-items:flex-end;">
+    <div class="field-row nota-op-row" data-idx="${idx}" style="align-items:flex-end;flex-wrap:wrap;">
       <div class="field" style="max-width:70px;"><label>C/V</label>
         <select class="op-tipo">
           <option value="C" ${op.tipo==='C'?'selected':''}>C</option>
@@ -10423,6 +10409,13 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
       <div class="field"><label>Ticker</label><input type="text" class="op-ticker mono" style="text-transform:uppercase;" value="${escapeHTML(op.ticker||'')}"></div>
       <div class="field" style="max-width:90px;"><label>Qtd</label><input type="text" inputmode="decimal" class="op-qtd" value="${op.quantidade||''}"></div>
       <div class="field"><label>Preço unit.</label><input type="text" inputmode="decimal" class="op-preco" value="${op.preco||''}"></div>
+      <div class="field" style="min-width:150px;"><label>Subconta</label>
+        <select class="op-subconta">
+          <option value="">— nenhuma —</option>
+          ${opcoesSubcontaRV()}
+          <option value="__nova__">+ Criar nova…</option>
+        </select>
+      </div>
       <button type="button" class="icon-btn btn-remover-op" style="margin-bottom:14px;">✕</button>
     </div>
   `;
@@ -10431,8 +10424,28 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     tipoAtivo: row.querySelector('.op-tipoativo').value,
     ticker: row.querySelector('.op-ticker').value.trim().toUpperCase(),
     quantidade: row.querySelector('.op-qtd').value,
-    preco: row.querySelector('.op-preco').value
+    preco: row.querySelector('.op-preco').value,
+    subContaId: (row.querySelector('.op-subconta').value && row.querySelector('.op-subconta').value!=='__nova__') ? row.querySelector('.op-subconta').value : null
   }));
+  const criarSubcontaParaLinha = (selectEl)=>{
+    if(selectEl.value!=='__nova__') return;
+    const nome = (prompt('Nome da nova subconta (ex: MXRF11, SNEL11, Longo Prazo):')||'').trim();
+    if(!nome){ selectEl.value=''; return; }
+    let contaAlvo = state.contasInvestimento.find(c=>c.tipo==='renda_variavel');
+    if(!contaAlvo){
+      contaAlvo = { id: uid(), nome:'Renda Variável', instituicao:'', instituicaoDominio:'', tipo:'renda_variavel', cor: CONTA_CORES[state.contasInvestimento.length % CONTA_CORES.length] };
+      state.contasInvestimento.push(contaAlvo);
+    }
+    const nova = { id: uid(), contaId: contaAlvo.id, nome, cor: CONTA_CORES[state.subcontasInvestimento.length % CONTA_CORES.length] };
+    state.subcontasInvestimento.push(nova);
+    persist();
+    document.querySelectorAll('.op-subconta').forEach(sel=>{
+      const opt = document.createElement('option');
+      opt.value = nova.id; opt.textContent = nova.nome;
+      sel.insertBefore(opt, sel.querySelector('option[value="__nova__"]'));
+    });
+    selectEl.value = nova.id;
+  };
   const pintarOperacoes = ()=>{
     document.getElementById('notaOperacoesTable').innerHTML = operacoesAtuais.map((op,i)=>linhaOperacaoHTML(op,i)).join('') || `<div class="empty">Nenhuma operação identificada — adicione manualmente.</div>`;
     document.querySelectorAll('.btn-remover-op').forEach(btn=>{
@@ -10443,11 +10456,19 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
         pintarOperacoes();
       });
     });
+    document.querySelectorAll('.nota-op-row').forEach((row,i)=>{
+      const sel = row.querySelector('.op-subconta');
+      if(operacoesAtuais[i] && operacoesAtuais[i].subContaId) sel.value = operacoesAtuais[i].subContaId;
+      sel.addEventListener('change', function(){
+        operacoesAtuais = lerOperacoesDoDOM();
+        criarSubcontaParaLinha(this);
+      });
+    });
   };
 
   document.getElementById('btnAdicionarLinhaOp').addEventListener('click', ()=>{
     operacoesAtuais = lerOperacoesDoDOM();
-    operacoesAtuais.push({ tipo:'C', tipoAtivo:'acao', ticker:'', quantidade:'', preco:'' });
+    operacoesAtuais.push({ tipo:'C', tipoAtivo:'acao', ticker:'', quantidade:'', preco:'', subContaId:null });
     pintarOperacoes();
   });
 
@@ -10474,33 +10495,9 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     },
     liquido: numBR(document.getElementById('notaLiquido').value) || 0,
     contaBancariaId: document.getElementById('notaContaBancaria').value,
-    subContaCompraId: (document.getElementById('notaSubcontaCompra').value && document.getElementById('notaSubcontaCompra').value!=='__nova__') ? document.getElementById('notaSubcontaCompra').value : null,
-    subContaVendaId: (document.getElementById('notaSubcontaVenda').value && document.getElementById('notaSubcontaVenda').value!=='__nova__') ? document.getElementById('notaSubcontaVenda').value : null,
     ganhoPerdaCapital: numBR(document.getElementById('notaGanhoPerda').value) || 0,
     arquivoNome: arquivoNomeAtual
   });
-
-  const criarSubcontaSeNecessario = (selectEl)=>{
-    if(selectEl.value!=='__nova__') return;
-    const nome = (prompt('Nome da nova subconta (ex: Ações Longo Prazo, Day Trade):')||'').trim();
-    if(!nome){ selectEl.value=''; return; }
-    let contaAlvo = state.contasInvestimento.find(c=>c.tipo==='renda_variavel');
-    if(!contaAlvo){
-      contaAlvo = { id: uid(), nome:'Renda Variável', instituicao:'', instituicaoDominio:'', tipo:'renda_variavel', cor: CONTA_CORES[state.contasInvestimento.length % CONTA_CORES.length] };
-      state.contasInvestimento.push(contaAlvo);
-    }
-    const nova = { id: uid(), contaId: contaAlvo.id, nome, cor: CONTA_CORES[state.subcontasInvestimento.length % CONTA_CORES.length] };
-    state.subcontasInvestimento.push(nova);
-    persist();
-    document.querySelectorAll('#notaSubcontaCompra, #notaSubcontaVenda').forEach(sel=>{
-      const opt = document.createElement('option');
-      opt.value = nova.id; opt.textContent = nova.nome;
-      sel.insertBefore(opt, sel.querySelector('option[value="__nova__"]'));
-    });
-    selectEl.value = nova.id;
-  };
-  document.getElementById('notaSubcontaCompra').addEventListener('change', function(){ criarSubcontaSeNecessario(this); });
-  document.getElementById('notaSubcontaVenda').addEventListener('change', function(){ criarSubcontaSeNecessario(this); });
 
   if(notaEmRevisao){
     document.getElementById('notaData').value = notaEmRevisao.dataPregao || todayISO();
@@ -10515,8 +10512,6 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     document.getElementById('notaTxIrrf').value = t.irrf || 0;
     document.getElementById('notaTxOutras').value = t.outras || 0;
     document.getElementById('notaLiquido').value = notaEmRevisao.liquido || 0;
-    if(notaEmRevisao.subContaCompraId) document.getElementById('notaSubcontaCompra').value = notaEmRevisao.subContaCompraId;
-    if(notaEmRevisao.subContaVendaId) document.getElementById('notaSubcontaVenda').value = notaEmRevisao.subContaVendaId;
     document.getElementById('notaGanhoPerda').value = notaEmRevisao.ganhoPerdaCapital || 0;
     pintarOperacoes();
 
@@ -10606,7 +10601,8 @@ function publicarNotaCorretagem(nota){
     tipoAtivo: op.tipoAtivo==='fii' ? 'fii' : 'acao',
     ticker: String(op.ticker||'').trim().toUpperCase(),
     quantidade: typeof op.quantidade==='number' ? op.quantidade : numBR(op.quantidade),
-    preco: typeof op.preco==='number' ? op.preco : numBR(op.preco)
+    preco: typeof op.preco==='number' ? op.preco : numBR(op.preco),
+    subContaId: op.subContaId || null
   })).filter(op=>op.ticker && op.quantidade>0 && op.preco>0);
 
   if(!linhas.length){ showToast('Adicione ao menos uma operação válida antes de publicar'); return false; }
@@ -10632,8 +10628,6 @@ function publicarNotaCorretagem(nota){
 
   const totalCompras = linhas.filter(l=>l.tipo==='C').reduce((s,l)=>s+l.quantidade*l.preco,0);
   const totalVendas = linhas.filter(l=>l.tipo==='V').reduce((s,l)=>s+l.quantidade*l.preco,0);
-  const subContaCompraId = nota.subContaCompraId || null;
-  const subContaVendaId = nota.subContaVendaId || null;
   const ganhoPerdaCapital = nota.ganhoPerdaCapital || 0;
 
   let contaInv = state.contasInvestimento.find(c=>c.tipo==='renda_variavel');
@@ -10645,7 +10639,7 @@ function publicarNotaCorretagem(nota){
   linhas.forEach(l=>{
     const taxaProporcional = totalCompras>0 ? (l.quantidade*l.preco/totalCompras)*taxasTotal : 0;
     if(l.tipo==='C'){
-      let ativo = state.ativosInvestimento.find(a=>a.contaId===contaInv.id && a.ticker===l.ticker && !a.manual && a.subContaId===subContaCompraId);
+      let ativo = state.ativosInvestimento.find(a=>a.contaId===contaInv.id && a.ticker===l.ticker && !a.manual && a.subContaId===l.subContaId);
       if(ativo){
         const custoAntigo = (ativo.quantidade||0) * (ativo.precoMedio||0);
         const custoNovo = l.quantidade*l.preco + taxaProporcional;
@@ -10653,10 +10647,10 @@ function publicarNotaCorretagem(nota){
         ativo.precoMedio = Math.round(((custoAntigo+custoNovo)/ativo.quantidade)*100)/100;
       } else {
         const precoMedio = Math.round(((l.quantidade*l.preco + taxaProporcional)/l.quantidade)*100)/100;
-        state.ativosInvestimento.push({ id: uid(), tipoAtivo: l.tipoAtivo, contaId: contaInv.id, subContaId: subContaCompraId, ticker: l.ticker, nome: l.ticker, quantidade: l.quantidade, precoMedio, precoAtual: null, dataUltimaCotacao: null, corretora });
+        state.ativosInvestimento.push({ id: uid(), tipoAtivo: l.tipoAtivo, contaId: contaInv.id, subContaId: l.subContaId, ticker: l.ticker, nome: l.ticker, quantidade: l.quantidade, precoMedio, precoAtual: null, dataUltimaCotacao: null, corretora });
       }
     } else {
-      let ativo = state.ativosInvestimento.find(a=>a.contaId===contaInv.id && a.ticker===l.ticker && !a.manual && a.subContaId===subContaVendaId);
+      let ativo = state.ativosInvestimento.find(a=>a.contaId===contaInv.id && a.ticker===l.ticker && !a.manual && a.subContaId===l.subContaId);
       if(!ativo) ativo = state.ativosInvestimento.find(a=>a.contaId===contaInv.id && a.ticker===l.ticker && !a.manual);
       if(ativo){
         ativo.quantidade = Math.max(0, (ativo.quantidade||0) - l.quantidade);
