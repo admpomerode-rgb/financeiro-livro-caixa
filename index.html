@@ -674,6 +674,7 @@
       <div class="more-item" data-view="simulacao"><span class="more-icon">🔮</span>Simulação "E Se"</div>
       <div class="more-item" data-view="orcamento"><span class="more-icon">🗂️</span>Orçamento e Planejamento</div>
       <div class="more-item" data-view="comissoes"><span class="more-icon">🤝</span>Comissões</div>
+      <div class="more-item" data-view="funil"><span class="more-icon">🔻</span>Funil de Vendas</div>
       <div class="more-item" data-view="ativos"><span class="more-icon">📦</span>Ativos Patrimoniais</div>
       <div class="more-item" data-view="investimentos"><span class="more-icon">📈</span>Investimentos</div>
       <div class="more-item" data-view="integracoes"><span class="more-icon">🔌</span>Central de Integrações</div>
@@ -847,6 +848,9 @@ function aplicarMigracoes(s){
   if(!s.vkDivergencias) s.vkDivergencias = [];
   if(!s.vkDivergenciasEstoque) s.vkDivergenciasEstoque = [];
   if(!s.vkAprovacoes) s.vkAprovacoes = [];
+  if(!s.mesesFechados) s.mesesFechados = [];
+  if(!s.socios) s.socios = [];
+  if(!s.oportunidadesVenda) s.oportunidadesVenda = [];
   if(!s.orcamentoAlertaPct) s.orcamentoAlertaPct = {};
   ['saida','entrada'].forEach(tipo=>{
     (s.categorias?.[tipo]||[]).forEach((c,i)=>{ if(!c.cor) c.cor = CATEGORIA_CORES[i % CATEGORIA_CORES.length]; });
@@ -936,6 +940,8 @@ let pararCameraQRAtiva = null;
 let relatorioAtivo = 'dre';
 let configAtivo = 'armazenamento';
 let dreAnaliseAtiva = 'horizontal';
+let previsaoDiasAtivo = 30;
+let orcamentoAnualAno = new Date().getFullYear();
 let dreCentroAtivo = 'todos';
 let mesGlobalRef = todayISO().slice(0,7);
 let categoriaLancamentosAtual = null;
@@ -1160,6 +1166,7 @@ function render(){
   else if(currentView==='simulacao') main.innerHTML = viewSimulacao();
   else if(currentView==='orcamento') main.innerHTML = viewOrcamentoPlanejamento();
   else if(currentView==='comissoes') main.innerHTML = viewComissoes();
+  else if(currentView==='funil') main.innerHTML = viewFunilVendas();
   else if(currentView==='ativos') main.innerHTML = viewAtivosPatrimoniais();
   else if(currentView==='ativo-detalhe') main.innerHTML = viewAtivoPatrimonialDetalhe(ativoPatrimonialDetalheId);
   else if(currentView==='integracoes') main.innerHTML = viewIntegracoes();
@@ -1990,17 +1997,51 @@ function alertasInteligentesHTML(){
   `;
 }
 
+function streakMesesFechados(){
+  const fechados = new Set((state.mesesFechados||[]).map(m=>m.mes));
+  let streak = 0;
+  let d = new Date();
+  d.setDate(1); d.setMonth(d.getMonth()-1); // começa no mês anterior ao atual (mês atual normalmente ainda não fechou)
+  while(true){
+    const ref = d.toISOString().slice(0,7);
+    if(fechados.has(ref)){ streak++; d.setMonth(d.getMonth()-1); } else break;
+  }
+  return streak;
+}
+
 function mesNavHTML(){
   const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
   const nomeMes = new Date(anoM, mesM-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
   const ehMesAtual = mesGlobalRef === todayISO().slice(0,7);
+  const fechado = (state.mesesFechados||[]).find(m=>m.mes===mesGlobalRef);
+  const streak = streakMesesFechados();
   return `
     <div class="mes-nav">
       <button type="button" id="btnMesAnterior" title="Mês anterior">‹</button>
       <span class="mes-nav-label">${nomeMes}${ehMesAtual ? ' <span class="mes-nav-tag">atual</span>' : ''}</span>
       <button type="button" id="btnMesProximo" title="Próximo mês">›</button>
+      ${!ehMesAtual ? (fechado
+        ? `<span style="font-size:11.5px;color:var(--success);font-weight:600;margin-left:10px;" title="Fechado em ${new Date(fechado.fechadoEm).toLocaleDateString('pt-BR')}">✓ Mês fechado</span>`
+        : `<button type="button" id="btnFecharMes" style="font-size:11.5px;margin-left:10px;background:none;border:1px solid var(--line);border-radius:6px;padding:3px 8px;cursor:pointer;color:var(--text-soft);">Marcar mês como fechado</button>`
+      ) : ''}
+      ${streak>=2 ? `<span style="font-size:11.5px;color:var(--warn);font-weight:600;margin-left:10px;" title="Meses seguidos fechados/conferidos">🔥 ${streak} meses seguidos</span>` : ''}
     </div>
   `;
+}
+
+function projecaoSaldoBaixo(dias){
+  dias = dias || 30;
+  const hoje = todayISO();
+  const saldoAtual = totaisPorMesRef(hoje.slice(0,7)).saldoAtual;
+  const fim = new Date(); fim.setDate(fim.getDate()+dias);
+  const fimISO = fim.toISOString().slice(0,10);
+  const pendentes = state.lancamentos.filter(l=>l.status==='pendente' && l.dataVencimento && l.dataVencimento>hoje && l.dataVencimento<=fimISO).sort((a,b)=>a.dataVencimento.localeCompare(b.dataVencimento));
+  let saldoCorrente = saldoAtual, minSaldo = saldoAtual, dataMin = hoje;
+  pendentes.forEach(l=>{
+    saldoCorrente += (l.tipo==='entrada'?l.valor:-l.valor);
+    if(saldoCorrente < minSaldo){ minSaldo = saldoCorrente; dataMin = l.dataVencimento; }
+  });
+  return { saldoAtual, minSaldo, dataMin, ficaNegativo: minSaldo<0 };
 }
 
 function totaisPorMesRef(mesRef){
@@ -2272,6 +2313,8 @@ function viewDashboard(){
   const ehMesAtual = mesGlobalRef === todayISO().slice(0,7);
   const [anoMD, mesMD] = mesGlobalRef.split('-').map(Number);
   const nomeMes = new Date(anoMD, mesMD-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
+  const meiAlerta = pctLimiteMEIAno(new Date().getFullYear());
+  const saldoBaixo = projecaoSaldoBaixo(30);
 
   return `
     <div class="topbar dash-topbar">
@@ -2319,9 +2362,19 @@ function viewDashboard(){
         ${economiaMensalHTML(mesGlobalRef)}
       </div>
       <div class="dash-avisos-col">
-        ${(venc.atrasadas.length || venc.venceEmBreve.length || contratosVenc.vencidos.length || contratosVenc.vencendo.length) ? `
+        ${(venc.atrasadas.length || venc.venceEmBreve.length || contratosVenc.vencidos.length || contratosVenc.vencendo.length || meiAlerta.pct>=80 || saldoBaixo.ficaNegativo) ? `
         <div class="dash-section-label">Avisos</div>
         <div class="panel alerta-panel">
+          ${saldoBaixo.ficaNegativo ? `
+            <div class="alerta-linha atrasado">
+              <span>🔻 Saldo projetado fica <strong>negativo</strong> até ${fmtDate(saldoBaixo.dataMin)} se nada mudar</span>
+              <span class="mono">${vm(brl(saldoBaixo.minSaldo))}</span>
+            </div>` : ''}
+          ${meiAlerta.pct>=80 ? `
+            <div class="alerta-linha ${meiAlerta.pct>=100?'atrasado':''}">
+              <span>🧾 Faturamento do MEI em ${meiAlerta.pct}% do limite anual${meiAlerta.pct>=100?' — LIMITE ULTRAPASSADO':''}</span>
+              <span class="mono">${vm(brl(meiAlerta.totalGeral))} / ${brl(MEI_LIMITE_ANUAL)}</span>
+            </div>` : ''}
           ${venc.atrasadas.length ? `
             <div class="alerta-linha atrasado" data-goto-alerta="atrasadas">
               <span>⚠️ ${venc.atrasadas.length} conta(s) <strong>atrasada(s)</strong></span>
@@ -2370,7 +2423,7 @@ function rowHTML(l){
       <span class="dot ${l.tipo}"></span>
       <span class="mono" style="font-size:12px;color:var(--text-soft)">${fmtDate(l.dataPagamento || l.dataVencimento)}</span>
       <div class="desc-cell">
-        <div>${escapeHTML(l.descricao)}${l.recebimentoParcial ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Já recebeu parte, resta o valor mostrado">🔸 Parcial</span>' : ''}${l.origem==='forneira' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Forneira</span>' : ''}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Ativo Patrimonial</span>' : ''}${l.origem==='vk-estoque' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Estoque VK</span>' : ''}${l.semNF ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Entrada sem nota fiscal — regularizar depois">⚠️ sem NF</span>' : ''}${l.grupoDivisaoId ? ' <span style="color:#7B5CD6;font-size:11px;" title="Faz parte de uma despesa dividida em várias categorias">🏷️ Dividida</span>' : ''}${l.aprovacao==='pendente' ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Aguardando aprovação — não pode ser paga ainda">⏳ aprovação</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}${l.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${l.id}" style="cursor:pointer;font-size:11px;" title="Ver comprovante">📎</span>` : ''}</div>
+        <div>${escapeHTML(l.descricao)}${l.recebimentoParcial ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Já recebeu parte, resta o valor mostrado">🔸 Parcial</span>' : ''}${l.origem==='forneira' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Forneira</span>' : ''}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Ativo Patrimonial</span>' : ''}${l.origem==='vk-estoque' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Estoque VK</span>' : ''}${l.semNF ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Entrada sem nota fiscal — regularizar depois">⚠️ sem NF</span>' : ''}${(l.tipo==='entrada' && l.custoProdutoVendido>0) ? (()=>{ const m=l.valor-l.custoProdutoVendido; const p=l.valor>0?(m/l.valor*100):0; return ` <span style="color:${m>=0?'var(--success)':'var(--danger)'};font-size:11px;font-weight:600;" title="Margem de contribuição">${m>=0?'📈':'📉'} ${p.toFixed(0)}%</span>`; })() : ''}${l.grupoDivisaoId ? ' <span style="color:#7B5CD6;font-size:11px;" title="Faz parte de uma despesa dividida em várias categorias">🏷️ Dividida</span>' : ''}${l.aprovacao==='pendente' ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Aguardando aprovação — não pode ser paga ainda">⏳ aprovação</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}${l.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${l.id}" style="cursor:pointer;font-size:11px;" title="Ver comprovante">📎</span>` : ''}</div>
         <div class="cat">${l.fornecedor ? escapeHTML(l.fornecedor) : `<span class="conta-tag"><span class="conta-swatch" style="background:${corConta(l.contaId)}"></span>${escapeHTML(nomeConta(l.contaId))}</span> · ${escapeHTML(l.categoria)}`}</div>
       </div>
       <span class="col-cat mono" style="font-size:11.5px;color:var(--text-soft)">${fmtDate(l.dataVencimento)}</span>
@@ -4278,6 +4331,10 @@ function viewRelatorios(){
     { id:'aging', icone:'⏳', nome:'Aging — Vencidos por Faixa', desc:'Contas a receber e a pagar por faixa de atraso, com ranking de inadimplentes' },
     { id:'dfc', icone:'🔄', nome:'DFC — Fluxo de Caixa', desc:'Demonstração do fluxo de caixa pelo método direto: operacional, investimento e financiamento' },
     { id:'mei', icone:'🧾', nome:'Declaração MEI', desc:'Números prontos pra DASN-SIMEI' },
+    { id:'previsao', icone:'🔮', nome:'Previsão de Saldo Futuro', desc:'Projeção dia a dia do saldo em caixa pros próximos 30/60/90 dias, com base no que já está lançado' },
+    { id:'stress', icone:'🧪', nome:'Cenário de Stress (Stress Test)', desc:'E se as maiores contas a receber atrasarem — o caixa aguenta pagar o que já está previsto?' },
+    { id:'socios', icone:'🤝', nome:'Split entre Sócios', desc:'Divide o lucro/prejuízo do mês entre os sócios cadastrados, por percentual de participação' },
+    { id:'orcamento_anual', icone:'📆', nome:'Orçamento Anual', desc:'Orçado x realizado do ano inteiro, com acompanhamento por trimestre' },
   ];
   return `
     <div class="topbar">
@@ -4300,7 +4357,7 @@ function viewRelatorios(){
 const RELATORIOS_NOMES = {
   dre:'DRE', balanco:'Balanço Patrimonial', mei:'Declaração MEI', indicadores:'Indicadores Financeiros',
   produto:'Rentabilidade por Produto', investimentos:'Relatório de Investimentos', liquidez:'Índices de Liquidez', aging:'Aging — Vencidos por Faixa', dfc:'DFC — Fluxo de Caixa', cartoes:'Cartões de Crédito',
-  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal'
+  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual'
 };
 
 function viewRelatorioDetalhe(){
@@ -4323,6 +4380,15 @@ function viewRelatorioDetalhe(){
 }
 
 const MEI_LIMITE_ANUAL = 81000;
+
+function pctLimiteMEIAno(ano){
+  const de = `${ano}-01-01`, ate = `${ano}-12-31`;
+  const totalGeral = state.lancamentos.filter(l=>{
+    const ref = l.dataPagamento;
+    return ref && ref>=de && ref<=ate && l.tipo==='entrada' && l.status==='recebido' && !['transferencia','investimento','ativo_patrimonial'].includes(l.origem);
+  }).reduce((s,l)=>s+l.valor,0);
+  return { totalGeral, pct: Math.round((totalGeral/MEI_LIMITE_ANUAL)*100) };
+}
 
 function renderMEI(ano){
   const anosComDados = [...new Set(state.lancamentos.filter(l=>l.dataPagamento).map(l=>l.dataPagamento.slice(0,4)))].sort().reverse();
@@ -4636,16 +4702,29 @@ function renderDRE(periodo){
   const totalDespesasAnt = listaAnterior.filter(l=>l.tipo==='saida').reduce((s,l)=>s+l.valor,0);
   const resultadoAnt = totalReceitasAnt - totalDespesasAnt;
 
+  // Comparativo ano a ano (YoY) — mesmo período, um ano antes
+  const deAnoAnt = new Date(de); deAnoAnt.setFullYear(deAnoAnt.getFullYear()-1);
+  const ateAnoAnt = new Date(ate); ateAnoAnt.setFullYear(ateAnoAnt.getFullYear()-1);
+  const deAnoAntISO = deAnoAnt.toISOString().slice(0,10), ateAnoAntISO = ateAnoAnt.toISOString().slice(0,10);
+  const listaAnoAnt = state.lancamentos.filter(l=>{
+    const ref = l.dataPagamento;
+    return ref && ref>=deAnoAntISO && ref<=ateAnoAntISO && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehAporteInvestimento(l) && filtroCentro(l);
+  });
+  const totalReceitasAnoAnt = listaAnoAnt.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+l.valor,0);
+  const totalDespesasAnoAnt = listaAnoAnt.filter(l=>l.tipo==='saida').reduce((s,l)=>s+l.valor,0);
+  const resultadoAnoAnt = totalReceitasAnoAnt - totalDespesasAnoAnt;
+
   const mostraVertical = dreAnaliseAtiva==='vertical';
+  const mostraYoy = dreAnaliseAtiva==='yoy';
   const pctVerticalBase = (v)=> totalReceitas>0 ? ` <span style="color:var(--text-soft);font-size:11px;">(${(v/totalReceitas*100).toFixed(1)}%)</span>` : '';
   const pctVertical = (v)=> mostraVertical ? pctVerticalBase(v) : '';
-  const variacaoHTMLBase = (atual, anterior)=>{
-    if(anterior===0) return atual===0 ? '' : ` <span style="font-size:11px;color:var(--text-soft);">(sem período anterior pra comparar)</span>`;
+  const variacaoHTMLBase = (atual, anterior, rotulo)=>{
+    if(anterior===0) return atual===0 ? '' : ` <span style="font-size:11px;color:var(--text-soft);">(sem ${rotulo} pra comparar)</span>`;
     const pct = ((atual-anterior)/Math.abs(anterior))*100;
     const cor = pct>=0 ? 'var(--success)' : 'var(--danger)';
-    return ` <span style="font-size:11px;color:${cor};">(${pct>=0?'+':''}${pct.toFixed(1)}% vs período anterior)</span>`;
+    return ` <span style="font-size:11px;color:${cor};">(${pct>=0?'+':''}${pct.toFixed(1)}% vs ${rotulo})</span>`;
   };
-  const variacaoHTML = (atual, anterior)=> mostraVertical ? pctVerticalBase(atual) : variacaoHTMLBase(atual, anterior);
+  const variacaoHTML = (atual, anterior, atualYoy)=> mostraVertical ? pctVerticalBase(atual) : mostraYoy ? variacaoHTMLBase(atual, atualYoy, 'mesmo período ano passado') : variacaoHTMLBase(atual, anterior, 'período anterior');
 
   return `
     <div class="report-controls">
@@ -4655,8 +4734,9 @@ function renderDRE(periodo){
         <option value="custom" ${periodo==='custom'?'selected':''}>Personalizado</option>
       </select>
       <select id="dreAnalise">
-        <option value="horizontal" ${!mostraVertical?'selected':''}>Análise horizontal</option>
+        <option value="horizontal" ${!mostraVertical && !mostraYoy?'selected':''}>Análise horizontal</option>
         <option value="vertical" ${mostraVertical?'selected':''}>Análise vertical</option>
+        <option value="yoy" ${mostraYoy?'selected':''}>Comparativo Ano a Ano (YoY)</option>
       </select>
       ${(state.centrosCusto||[]).length ? `
       <select id="dreCentro">
@@ -4671,15 +4751,15 @@ function renderDRE(periodo){
     <div class="report-block">
       <div class="report-title">Receita Operacional</div>
       ${Object.keys(receitas).length ? Object.entries(receitas).map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">${brl(v)}${pctVertical(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma receita no período</span><span class="v">${brl(0)}</span></div>`}
-      <div class="report-line total"><span>(=) Total de Receitas</span><span class="v">${brl(totalReceitas)}${variacaoHTML(totalReceitas, totalReceitasAnt)}</span></div>
+      <div class="report-line total"><span>(=) Total de Receitas</span><span class="v">${brl(totalReceitas)}${variacaoHTML(totalReceitas, totalReceitasAnt, totalReceitasAnoAnt)}</span></div>
       <div class="report-line sub"><span>(-) Pedidos Cancelados${canceladosVK.length?' ('+canceladosVK.length+')':''}</span><span class="v">(${brl(totalCancelados)})</span></div>
       <div class="report-line total"><span>(=) Receita Líquida</span><span class="v">${brl(receitaLiquida)}</span></div>
 
       <div class="report-title">Despesas Operacionais</div>
       ${Object.keys(despesas).length ? Object.entries(despesas).map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">(${brl(v)})${pctVertical(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma despesa no período</span><span class="v">${brl(0)}</span></div>`}
-      <div class="report-line total"><span>(=) Total de Despesas</span><span class="v">(${brl(totalDespesas)})${variacaoHTML(totalDespesas, totalDespesasAnt)}</span></div>
+      <div class="report-line total"><span>(=) Total de Despesas</span><span class="v">(${brl(totalDespesas)})${variacaoHTML(totalDespesas, totalDespesasAnt, totalDespesasAnoAnt)}</span></div>
 
-      <div class="report-line result"><span>${resultado>=0?'Lucro':'Prejuízo'} do Período</span><span class="v" style="color:${resultado>=0?'var(--success)':'var(--danger)'}">${brl(resultado)}${variacaoHTML(resultado, resultadoAnt)}</span></div>
+      <div class="report-line result"><span>${resultado>=0?'Lucro':'Prejuízo'} do Período</span><span class="v" style="color:${resultado>=0?'var(--success)':'var(--danger)'}">${brl(resultado)}${variacaoHTML(resultado, resultadoAnt, resultadoAnoAnt)}</span></div>
     </div>
   `;
 }
@@ -4923,6 +5003,224 @@ function renderRentabilidadeProduto(periodo){
       `).join('')}
     </div>
     <div class="note" style="margin-top:0;">"Não classificado" reúne os lançamentos sem produto marcado. Pra detalhar melhor, edite o lançamento e preencha o campo "Produto/linha".</div>
+    `}
+  `;
+}
+
+function projecaoDiariaSaldo(dias){
+  const hoje = todayISO();
+  const saldoHoje = totaisPorMesRef(hoje.slice(0,7)).saldoAtual;
+  const fim = new Date(); fim.setDate(fim.getDate()+dias);
+  const fimISO = fim.toISOString().slice(0,10);
+  const pendentes = state.lancamentos.filter(l=>l.status==='pendente' && l.dataVencimento && l.dataVencimento>hoje && l.dataVencimento<=fimISO);
+  const porDia = {};
+  pendentes.forEach(l=>{ porDia[l.dataVencimento] = (porDia[l.dataVencimento]||0) + (l.tipo==='entrada'?l.valor:-l.valor); });
+  const pontos = [];
+  let saldo = saldoHoje;
+  const passo = dias<=30 ? 1 : dias<=60 ? 2 : 3;
+  const d = new Date();
+  for(let i=0; i<=dias; i++){
+    const dataRef = new Date(); dataRef.setDate(d.getDate()+i);
+    const ref = dataRef.toISOString().slice(0,10);
+    saldo += (porDia[ref]||0);
+    if(i % passo === 0 || i===dias){
+      pontos.push({ label: dataRef.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'}), data: ref, saldo });
+    }
+  }
+  return { pontos, saldoHoje };
+}
+
+function desenharGraficoPrevisao(canvasId, pontos){
+  const canvas = document.getElementById(canvasId);
+  if(!canvas || !pontos.length) return;
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = canvas.clientWidth || canvas.parentElement.clientWidth || 600;
+  const cssHeight = 190;
+  canvas.width = cssWidth * dpr; canvas.height = cssHeight * dpr;
+  canvas.style.width = cssWidth+'px'; canvas.style.height = cssHeight+'px';
+  const ctx = canvas.getContext('2d');
+  if(!ctx) return;
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0,0,cssWidth,cssHeight);
+  const padLeft=10, padRight=10, padBottom=22, padTop=14;
+  const chartW = cssWidth-padLeft-padRight, chartH = cssHeight-padBottom-padTop;
+  const valores = pontos.map(p=>p.saldo);
+  let minVal = Math.min(0, ...valores), maxVal = Math.max(0, ...valores);
+  if(maxVal===minVal){ maxVal+=1; minVal-=1; }
+  const y = v => padTop + chartH - ((v-minVal)/(maxVal-minVal))*chartH;
+  const x = i => padLeft + (pontos.length>1 ? (chartW*i/(pontos.length-1)) : chartW/2);
+  if(minVal<0 && maxVal>0){
+    ctx.strokeStyle = '#D8DCE3'; ctx.setLineDash([3,3]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(padLeft, y(0)); ctx.lineTo(padLeft+chartW, y(0)); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  ctx.strokeStyle = '#3B6FE0'; ctx.lineWidth = 2.5; ctx.beginPath();
+  pontos.forEach((p,i)=>{ const px=x(i), py=y(p.saldo); i===0?ctx.moveTo(px,py):ctx.lineTo(px,py); });
+  ctx.stroke();
+  pontos.forEach((p,i)=>{
+    ctx.fillStyle = p.saldo<0 ? '#C1443B' : '#3B6FE0';
+    ctx.beginPath(); ctx.arc(x(i), y(p.saldo), 2.5, 0, Math.PI*2); ctx.fill();
+  });
+  ctx.font = '10px Inter, sans-serif'; ctx.fillStyle = '#8A8F98'; ctx.textAlign = 'center';
+  const passoLabel = Math.max(1, Math.round(pontos.length/8));
+  pontos.forEach((p,i)=>{ if(i % passoLabel === 0 || i===pontos.length-1) ctx.fillText(p.label, x(i), cssHeight-6); });
+}
+
+function renderPrevisaoSaldoFuturo(){
+  const dias = previsaoDiasAtivo;
+  const proj = projecaoDiariaSaldo(dias);
+  const menorPonto = proj.pontos.reduce((min,p)=> p.saldo<min.saldo ? p : min, proj.pontos[0]);
+  const ultimoPonto = proj.pontos[proj.pontos.length-1];
+  const ficaNegativo = proj.pontos.some(p=>p.saldo<0);
+  return `
+    <div class="report-controls">
+      <select id="previsaoDias">
+        <option value="30" ${dias===30?'selected':''}>Próximos 30 dias</option>
+        <option value="60" ${dias===60?'selected':''}>Próximos 60 dias</option>
+        <option value="90" ${dias===90?'selected':''}>Próximos 90 dias</option>
+      </select>
+    </div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
+      <div class="card saldo"><div class="label">Saldo hoje</div><div class="value mono">${brl(proj.saldoHoje)}</div></div>
+      <div class="card"><div class="label">Ponto mais baixo projetado</div><div class="value mono" style="color:${menorPonto.saldo<0?'var(--danger)':'inherit'}">${brl(menorPonto.saldo)}</div></div>
+      <div class="card"><div class="label">Saldo projetado em ${dias} dias</div><div class="value mono ${ultimoPonto.saldo>=0?'pos':'neg'}">${brl(ultimoPonto.saldo)}</div></div>
+    </div>
+    ${ficaNegativo ? `<div class="note" style="border-color:var(--danger);">⚠️ Com o que já está lançado (contas a pagar/receber pendentes), o saldo projetado fica <strong>negativo</strong> em ${fmtDate(menorPonto.data)} — vale reorganizar prazos ou negociar recebimentos antecipados antes disso.</div>` : `<div class="note">O saldo projetado se mantém positivo no período, considerando só o que já está lançado como pendente — novos lançamentos que ainda vão entrar não estão aqui.</div>`}
+    <div class="panel">
+      <div class="panel-body" style="padding:18px;">
+        <canvas id="chartPrevisao" height="190"></canvas>
+      </div>
+    </div>
+    <div class="note" style="margin-top:0;">Projeção baseada no saldo atual real + contas a pagar/receber já cadastradas como pendentes com vencimento nesse período. Não inclui recorrências ainda não geradas nem lançamentos futuros que você ainda não cadastrou.</div>
+  `;
+}
+
+function renderStressTest(){
+  const hoje = todayISO();
+  const saldoHoje = totaisPorMesRef(hoje.slice(0,7)).saldoAtual;
+  const receber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.dataVencimento && l.dataVencimento<=todayISOMais(60)).sort((a,b)=>b.valor-a.valor);
+  const top3 = receber.slice(0,3);
+  const somaTop3 = top3.reduce((s,l)=>s+l.valor,0);
+  const pagar60 = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.dataVencimento && l.dataVencimento<=todayISOMais(60)).reduce((s,l)=>s+l.valor,0);
+  const saldoComAtraso = saldoHoje - pagar60;
+  const folgaSemTop3 = saldoHoje + (receber.reduce((s,l)=>s+l.valor,0) - somaTop3) - pagar60;
+  const aguenta = folgaSemTop3 >= 0;
+  return `
+    <div class="report-controls"><span style="font-size:12.5px;color:var(--text-soft);">Cenário: e se as maiores contas a receber atrasarem e todas as contas a pagar dos próximos 60 dias vencerem em dia?</span></div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
+      <div class="card saldo"><div class="label">Saldo hoje</div><div class="value mono">${brl(saldoHoje)}</div></div>
+      <div class="card"><div class="label">A pagar nos próx. 60 dias</div><div class="value mono neg">${brl(pagar60)}</div></div>
+      <div class="card"><div class="label">Saldo cobrindo tudo a pagar (sem contar receber)</div><div class="value mono ${saldoComAtraso>=0?'pos':'neg'}">${brl(saldoComAtraso)}</div></div>
+    </div>
+    <div class="report-block" style="margin-top:16px;">
+      <div class="report-title">Se as ${top3.length || 0} maiores contas a receber atrasarem</div>
+      ${top3.length ? top3.map(l=>`
+        <div class="report-line sub"><span>${escapeHTML(l.descricao)} <span style="font-size:11px;color:var(--text-soft);">· vence ${fmtDate(l.dataVencimento)}</span></span><span class="v">${brl(l.valor)}</span></div>
+      `).join('') : `<div class="empty">Não há contas a receber pendentes nos próximos 60 dias.</div>`}
+      ${top3.length ? `<div class="report-line total"><span>Soma dessas ${top3.length} contas</span><span class="v">${brl(somaTop3)}</span></div>` : ''}
+      <div class="report-line result"><span>Saldo projetado em 60 dias SEM elas (mas recebendo as demais)</span><span class="v" style="font-weight:700;color:${aguenta?'var(--success)':'var(--danger)'}">${brl(folgaSemTop3)}</span></div>
+    </div>
+    <div class="note" style="margin-top:0;border-color:${aguenta?'var(--line)':'var(--danger)'};">
+      ${aguenta
+        ? `✅ Mesmo se as ${top3.length} maiores contas a receber atrasarem 60 dias, o caixa aguenta pagar tudo que já está previsto no período, sem ficar negativo.`
+        : `⚠️ Se as ${top3.length} maiores contas a receber atrasarem, o caixa NÃO cobre tudo que está previsto pagar nos próximos 60 dias — faltariam ${brl(Math.abs(folgaSemTop3))}. Vale negociar prazo com fornecedores ou reforçar a cobrança dessas contas específicas.`}
+    </div>
+    <div class="note" style="margin-top:0;">Esse é um teste de sensibilidade simples — considera só o que já está lançado como pendente hoje, sem contar recorrências futuras ainda não geradas nem novas vendas.</div>
+  `;
+}
+
+function todayISOMais(dias){ const d = new Date(); d.setDate(d.getDate()+dias); return d.toISOString().slice(0,10); }
+
+function renderSplitSocios(){
+  if(!state.socios) state.socios = [];
+  const t = totaisPorMesRef(mesGlobalRef);
+  const lista = state.lancamentos.filter(l=>{
+    const ref = l.dataPagamento;
+    return ref && ref>=t.de && ref<=t.ateMes && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento');
+  });
+  const receitas = lista.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+l.valor,0);
+  const despesas = lista.filter(l=>l.tipo==='saida').reduce((s,l)=>s+l.valor,0);
+  const lucro = receitas - despesas;
+  const somaPct = state.socios.reduce((s,so)=>s+(so.pct||0),0);
+  return `
+    <div class="report-controls"><span style="font-size:12.5px;color:var(--text-soft);">Divisão do resultado de ${competenciaLabel(mesGlobalRef)} entre os sócios cadastrados</span></div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
+      <div class="card"><div class="label">Receita do mês</div><div class="value mono pos">${brl(receitas)}</div></div>
+      <div class="card"><div class="label">Despesa do mês</div><div class="value mono neg">${brl(despesas)}</div></div>
+      <div class="card saldo"><div class="label">${lucro>=0?'Lucro':'Prejuízo'} do mês</div><div class="value mono ${lucro>=0?'pos':'neg'}">${brl(lucro)}</div></div>
+    </div>
+    <div class="panel" style="margin-top:16px;">
+      <div class="panel-head"><h2>Sócios</h2><span style="font-size:12px;color:var(--blue-accent);cursor:pointer;" id="btnAddSocio">+ Adicionar sócio</span></div>
+      <div class="panel-body" style="padding:0;">
+        ${state.socios.length ? state.socios.map(so=>`
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
+            <span style="font-size:13px;">${escapeHTML(so.nome)}</span>
+            <span class="mono" style="font-size:12.5px;color:var(--text-soft);">${so.pct}%</span>
+            <span class="mono" style="font-weight:700;color:${lucro>=0?'var(--success)':'var(--danger)'};min-width:100px;text-align:right;">${brl(lucro*(so.pct||0)/100)}</span>
+            <button class="icon-btn" data-action="excluir-socio" data-id="${so.id}" title="Excluir" style="grid-column:4;">✕</button>
+          </div>
+        `).join('') : `<div class="empty">Nenhum sócio cadastrado ainda.</div>`}
+      </div>
+      ${state.socios.length ? `<div class="note" style="margin:0;border-radius:0;border-top:1px solid var(--line);">Soma das participações: <strong style="color:${Math.abs(somaPct-100)<0.5?'var(--success)':'var(--warn)'}">${somaPct}%</strong>${Math.abs(somaPct-100)>=0.5 ? ' — ajuste os percentuais pra somar 100%' : ''}</div>` : ''}
+    </div>
+    <div class="note" style="margin-top:0;">O valor de cada sócio é calculado sobre o resultado (lucro ou prejuízo) do mês selecionado no navegador de mês — isso é só um cálculo de referência, não gera lançamento nem transferência automática.</div>
+  `;
+}
+
+function renderOrcamentoAnual(){
+  const ano = orcamentoAnualAno;
+  const orc = state.orcamentoCategorias || {};
+  const orcadoMensalTotal = Object.values(orc).reduce((s,v)=>s+v,0);
+  const orcadoAnualTotal = orcadoMensalTotal*12;
+  const trimestres = [
+    { nome:'1º Trimestre', meses:[1,2,3] },
+    { nome:'2º Trimestre', meses:[4,5,6] },
+    { nome:'3º Trimestre', meses:[7,8,9] },
+    { nome:'4º Trimestre', meses:[10,11,12] }
+  ];
+  const hoje = new Date();
+  const linhas = trimestres.map(tri=>{
+    const de = `${ano}-${String(tri.meses[0]).padStart(2,'0')}-01`;
+    const ultimoMes = tri.meses[2];
+    const ultimoDia = new Date(ano, ultimoMes, 0).getDate();
+    const ate = `${ano}-${String(ultimoMes).padStart(2,'0')}-${String(ultimoDia).padStart(2,'0')}`;
+    const jaPassou = new Date(ate) < hoje;
+    const emAndamento = new Date(de) <= hoje && hoje <= new Date(ate);
+    const realizado = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento') && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+    const orcadoTri = orcadoMensalTotal*3;
+    return { ...tri, de, ate, realizado, orcadoTri, jaPassou, emAndamento };
+  });
+  const realizadoAnoTodo = linhas.reduce((s,l)=>s+l.realizado,0);
+  const anosDisponiveis = [...new Set(state.lancamentos.filter(l=>l.dataPagamento).map(l=>l.dataPagamento.slice(0,4)))].sort().reverse();
+  if(!anosDisponiveis.includes(String(new Date().getFullYear()))) anosDisponiveis.unshift(String(new Date().getFullYear()));
+
+  return `
+    <div class="report-controls">
+      <select id="orcAnualAno">${anosDisponiveis.map(a=>`<option value="${a}" ${String(ano)===a?'selected':''}>${a}</option>`).join('')}</select>
+    </div>
+    ${!orcadoMensalTotal ? `<div class="empty">Nenhuma categoria tem orçamento mensal definido ainda. Configure em "Orçado x Realizado" (tela de Orçamento e Planejamento) — o orçamento anual é calculado a partir dele (valor mensal × 12).</div>` : `
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
+      <div class="card"><div class="label">Orçado no ano</div><div class="value mono">${brl(orcadoAnualTotal)}</div></div>
+      <div class="card"><div class="label">Realizado até agora</div><div class="value mono ${realizadoAnoTodo<=orcadoAnualTotal?'pos':'neg'}">${brl(realizadoAnoTodo)}</div></div>
+      <div class="card saldo"><div class="label">Diferença</div><div class="value mono ${orcadoAnualTotal-realizadoAnoTodo>=0?'pos':'neg'}">${brl(orcadoAnualTotal-realizadoAnoTodo)}</div></div>
+    </div>
+    <div class="panel" style="margin-top:16px;">
+      <div class="panel-head"><h2>Acompanhamento trimestral</h2></div>
+      <div class="panel-body" style="padding:0;">
+        ${linhas.map(l=>{
+          const pct = l.orcadoTri>0 ? Math.round(l.realizado/l.orcadoTri*100) : 0;
+          const cor = pct>110 ? 'var(--danger)' : pct>90 ? 'var(--warn)' : 'var(--success)';
+          return `
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto auto auto;align-items:center;">
+            <span style="font-size:13px;">${l.nome}${l.emAndamento?' <span style="font-size:10.5px;color:var(--blue-accent);font-weight:600;">· em andamento</span>':''}${!l.jaPassou && !l.emAndamento?' <span style="font-size:10.5px;color:var(--text-soft);">· futuro</span>':''}</span>
+            <span class="mono" style="font-size:11.5px;color:var(--text-soft);">orçado ${brl(l.orcadoTri)}</span>
+            <span class="mono" style="font-size:12.5px;">${brl(l.realizado)}</span>
+            <span class="mono" style="font-weight:700;color:${cor};min-width:46px;text-align:right;">${pct}%</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+    <div class="note" style="margin-top:0;">O orçamento anual é calculado como o valor mensal orçado de cada categoria (definido em Orçamento e Planejamento) multiplicado por 12, dividido em 3 meses por trimestre. Trimestres futuros mostram 0% até chegar a hora.</div>
     `}
   `;
 }
@@ -5276,6 +5574,24 @@ function renderTabelaABC(itens, rotuloColuna){
   `;
 }
 
+function scoreCreditoCliente(nome){
+  const contas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.origem!=='transferencia' && l.fornecedor===nome && (l.status==='recebido' || (l.status==='pendente' && l.dataVencimento && l.dataVencimento<todayISO())));
+  if(!contas.length) return null;
+  let pontuais = 0, atrasadas = 0, somaDiasAtraso = 0;
+  contas.forEach(l=>{
+    if(l.status==='pendente'){ atrasadas++; somaDiasAtraso += Math.round((new Date(todayISO())-new Date(l.dataVencimento))/86400000); return; }
+    if(!l.dataVencimento || !l.dataPagamento || l.dataPagamento<=l.dataVencimento){ pontuais++; }
+    else { atrasadas++; somaDiasAtraso += Math.round((new Date(l.dataPagamento)-new Date(l.dataVencimento))/86400000); }
+  });
+  const total = contas.length;
+  const pctPontual = pontuais/total*100;
+  const atrasoMedio = atrasadas>0 ? Math.round(somaDiasAtraso/atrasadas) : 0;
+  const score = Math.max(0, Math.round(pctPontual - Math.min(40, atrasoMedio*0.8)));
+  const nivel = score>=85 ? 'Ótimo' : score>=65 ? 'Bom' : score>=40 ? 'Atenção' : 'Ruim';
+  const cor = score>=85 ? 'var(--success)' : score>=65 ? 'var(--success)' : score>=40 ? 'var(--warn)' : 'var(--danger)';
+  return { score, nivel, cor, total, pontuais, atrasadas, atrasoMedio };
+}
+
 function renderRelatorioABCClientes(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
   const porCliente = {};
@@ -5286,6 +5602,7 @@ function renderRelatorioABCClientes(){
   const lista = classificarABC(Object.entries(porCliente).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor));
   const classeA = lista.filter(i=>i.classe==='A');
   const totalGeral = lista.reduce((s,i)=>s+i.valor,0);
+  const comScore = lista.map(i=>({...i, score: scoreCreditoCliente(i.nome)})).filter(i=>i.score).sort((a,b)=>a.score.score-b.score.score);
 
   return `
     <div class="report-controls"><span style="font-size:12.5px;color:var(--text-soft);">Curva ABC de Clientes — últimos 12 meses (${fmtDate(de)} a ${fmtDate(ate)})</span></div>
@@ -5298,6 +5615,20 @@ function renderRelatorioABCClientes(){
       <div class="note">Classe A: clientes que somam até 80% da receita — são o núcleo do faturamento, merecem atenção prioritária de relacionamento. Classe B: até 95%. Classe C: os 5% finais, mais pulverizados.</div>
     </div>
     <div class="panel"><div class="panel-body">${lista.length ? renderTabelaABC(lista, 'Cliente') : `<div class="empty">Nenhuma receita recebida nesse período.</div>`}</div></div>
+    ${comScore.length ? `
+    <div class="dash-section-label" style="margin-top:20px;">Score de crédito interno (histórico completo, todos os clientes)</div>
+    <div class="panel">
+      <div class="panel-body" style="padding:0;">
+        ${comScore.map(c=>`
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
+            <span style="font-size:12.5px;">${escapeHTML(c.nome)}</span>
+            <span style="font-size:11px;color:var(--text-soft);">${c.score.pontuais}/${c.score.total} em dia${c.score.atrasadas?` · atraso méd. ${c.score.atrasoMedio}d`:''}</span>
+            <span class="mono" style="font-weight:700;color:${c.score.cor};min-width:70px;text-align:right;">${c.score.score} · ${c.score.nivel}</span>
+          </div>
+        `).join('')}
+      </div>
+      <div class="note" style="margin:0;border-radius:0;border-top:1px solid var(--line);">Score de 0 a 100 baseado no histórico de pontualidade de pagamento (contas já recebidas ou vencidas em aberto). Não considera valor, só comportamento de pagamento — use junto com a Curva ABC acima pra decidir prazo/limite de crédito.</div>
+    </div>` : ''}
   `;
 }
 
@@ -5605,17 +5936,21 @@ function renderBalanco(){
 /* --- Ativos Patrimoniais --- */
 function calcDepreciacao(a){
   const valorResidual = a.valorResidual || 0;
-  const valorDepreciavel = Math.max(0, a.valorAquisicao - valorResidual);
+  const reavaliacoes = a.reavaliacoes || [];
+  const ultimaReaval = reavaliacoes.length ? reavaliacoes[reavaliacoes.length-1] : null;
+  const baseValor = ultimaReaval ? ultimaReaval.valorLaudo : a.valorAquisicao;
+  const baseData = ultimaReaval ? ultimaReaval.data : a.dataAquisicao;
+  const valorDepreciavel = Math.max(0, baseValor - valorResidual);
   const vidaUtil = a.vidaUtilAnos || 1;
   const depreciacaoAnual = valorDepreciavel / vidaUtil;
   const dataRef = a.baixa ? a.baixa.data : todayISO();
-  const dias = Math.max(0, (new Date(dataRef) - new Date(a.dataAquisicao)) / 86400000);
+  const dias = Math.max(0, (new Date(dataRef) - new Date(baseData)) / 86400000);
   const anos = dias / 365;
   const depreciacaoAcumulada = Math.min(valorDepreciavel, depreciacaoAnual * anos);
-  const valorAtual = a.valorAquisicao - depreciacaoAcumulada;
+  const valorAtual = baseValor - depreciacaoAcumulada;
   const pctDepreciado = valorDepreciavel>0 ? Math.min(100, (depreciacaoAcumulada/valorDepreciavel)*100) : 100;
   const totalmenteDepreciado = depreciacaoAcumulada >= valorDepreciavel - 0.01;
-  return { valorAtual, depreciacaoAcumulada, depreciacaoAnual, pctDepreciado, totalmenteDepreciado, valorDepreciavel };
+  return { valorAtual, depreciacaoAcumulada, depreciacaoAnual, pctDepreciado, totalmenteDepreciado, valorDepreciavel, baseValor, baseData, reavaliado: !!ultimaReaval };
 }
 function totalAtivosPatrimoniais(){ return state.ativosPatrimoniais.filter(a=>!a.baixa).reduce((s,a)=>s+calcDepreciacao(a).valorAtual, 0); }
 
@@ -5865,6 +6200,21 @@ function viewAtivoPatrimonialDetalhe(id){
     </div>
 
     <div class="panel">
+      <div class="panel-head"><h2>Reavaliação de valor de mercado</h2><span style="font-size:12px;color:var(--blue-accent);cursor:pointer;" id="btnAdicionarReavaliacao">+ Registrar laudo</span></div>
+      <div class="panel-body" style="padding:0;">
+        ${(a.reavaliacoes||[]).length ? [...a.reavaliacoes].reverse().map(r=>`
+          <div class="ficha-historico-row">
+            <div>
+              <div>${brl(r.valorLaudo)}${r.observacao ? ' · '+escapeHTML(r.observacao) : ''}</div>
+              <div class="sub">${fmtDate(r.data)}</div>
+            </div>
+          </div>
+        `).join('') : `<div class="empty">Nenhuma reavaliação registrada — a depreciação usa o valor de aquisição como base.</div>`}
+      </div>
+      ${d.reavaliado ? `<div class="note" style="margin:0;border-radius:0;border-top:1px solid var(--line);">A depreciação atual está sendo calculada a partir do <strong>último laudo</strong> (${brl(d.baseValor)} em ${fmtDate(d.baseData)}), não mais do valor de aquisição original.</div>` : `<div class="note" style="margin:0;border-radius:0;border-top:1px solid var(--line);">Use isso se tiver um laudo de avaliação (ex: perícia, comparação de mercado) mostrando que o valor real do ativo é diferente do que a depreciação linear calcula.</div>`}
+    </div>
+
+    <div class="panel">
       <div class="panel-head"><h2>Manutenções</h2><span style="font-size:12px;color:var(--blue-accent);cursor:pointer;" id="btnAdicionarManutencao">+ Adicionar</span></div>
       <div class="panel-body" style="padding:0;">
         ${manutencoes.length ? manutencoes.slice().reverse().map(m=>`
@@ -5877,6 +6227,15 @@ function viewAtivoPatrimonialDetalhe(id){
           </div>
         `).join('') : `<div class="empty">Nenhuma manutenção registrada.</div>`}
       </div>
+      ${(()=>{
+        const doze = new Date(); doze.setDate(doze.getDate()-365);
+        const dozeISO = doze.toISOString().slice(0,10);
+        const custoManutUltimoAno = manutencoes.filter(m=>m.data>=dozeISO).reduce((s,m)=>s+(m.custo||0),0);
+        if(d.valorAtual>0 && custoManutUltimoAno > d.valorAtual*0.5){
+          return `<div class="note" style="margin:0;border-radius:0;border-top:1px solid var(--line);border-color:var(--warn);">⚖️ Nos últimos 12 meses, esse ativo já custou ${brl(custoManutUltimoAno)} em manutenção — ${Math.round(custoManutUltimoAno/d.valorAtual*100)}% do valor atual dele (${brl(d.valorAtual)}). Pode valer mais a pena comprar um novo do que continuar consertando.</div>`;
+        }
+        return '';
+      })()}
     </div>
 
     <div class="panel">
@@ -5937,6 +6296,36 @@ function comprimirImagem(file){
       img.src = reader.result;
     };
     reader.readAsDataURL(file);
+  });
+}
+
+function openReavaliacaoModal(ativo){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Registrar reavaliação — ${escapeHTML(ativo.nome)}</h3>
+    <div class="note" style="margin-top:0;">Valor atual calculado pela depreciação: <strong>${brl(calcDepreciacao(ativo).valorAtual)}</strong></div>
+    <div class="field-row">
+      <div class="field"><label>Valor do laudo (R$)</label><input type="text" inputmode="decimal" id="rvValor"></div>
+      <div class="field"><label>Data</label><input type="date" id="rvData" value="${todayISO()}"></div>
+    </div>
+    <div class="field"><label>Observação (opcional)</label><input type="text" id="rvObs" placeholder="Ex: laudo de perícia, comparação de mercado..."></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarReavaliacao">Salvar reavaliação</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarReavaliacao').addEventListener('click', ()=>{
+    const valorLaudo = numBR(document.getElementById('rvValor').value);
+    const data = document.getElementById('rvData').value || todayISO();
+    const observacao = document.getElementById('rvObs').value.trim();
+    if(isNaN(valorLaudo) || valorLaudo<0){ showToast('Preencha um valor válido'); return; }
+    if(!ativo.reavaliacoes) ativo.reavaliacoes = [];
+    ativo.reavaliacoes.push({ id: uid(), valorLaudo, data, observacao, criadoEm: new Date().toISOString() });
+    registrarLog('Reavaliação de ativo registrada', `"${ativo.nome}" — novo valor ${brl(valorLaudo)}`);
+    persist(); closeModal(); render();
+    showToast('Reavaliação registrada');
   });
 }
 
@@ -6373,6 +6762,100 @@ function renderCategoriaPanel(tipo){
 function corVendedor(vendedorId){
   const idx = state.vendedores.findIndex(v=>v.id===vendedorId);
   return CONTA_CORES[idx>=0 ? idx % CONTA_CORES.length : 0];
+}
+
+const FUNIL_ETAPAS = [
+  { id:'orcamento', nome:'Orçamento enviado', cor:'#8A8F98' },
+  { id:'pedido', nome:'Pedido confirmado', cor:'#3B6FE0' },
+  { id:'faturado', nome:'Faturado', cor:'#2E9E5B' }
+];
+
+function viewFunilVendas(){
+  const oport = state.oportunidadesVenda || [];
+  const perdidas = oport.filter(o=>o.etapa==='perdido');
+  const totalAberto = oport.filter(o=>o.etapa!=='faturado' && o.etapa!=='perdido').reduce((s,o)=>s+o.valor,0);
+  return `
+    <div class="topbar">
+      <div><h1>Funil de Vendas</h1><p>Acompanhe as oportunidades desde o orçamento até virar faturamento de verdade</p></div>
+      <button class="btn" id="btnNovaOportunidade">+ Nova oportunidade</button>
+    </div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:16px;">
+      <div class="card saldo"><div class="label">Em aberto no funil</div><div class="value mono">${brl(totalAberto)}</div></div>
+      <div class="card"><div class="label">Oportunidades ativas</div><div class="value mono">${oport.filter(o=>o.etapa!=='faturado' && o.etapa!=='perdido').length}</div></div>
+      <div class="card"><div class="label">Taxa de conversão (todas as encerradas)</div><div class="value mono">${(()=>{
+        const encerradas = oport.filter(o=>o.etapa==='faturado' || o.etapa==='perdido');
+        if(!encerradas.length) return '—';
+        return Math.round(oport.filter(o=>o.etapa==='faturado').length/encerradas.length*100)+'%';
+      })()}</div></div>
+    </div>
+    ${FUNIL_ETAPAS.map(et=>{
+      const itens = oport.filter(o=>o.etapa===et.id);
+      const totalEtapa = itens.reduce((s,o)=>s+o.valor,0);
+      return `
+      <div class="panel" style="margin-bottom:14px;border-left:3px solid ${et.cor};">
+        <div class="panel-head"><h2>${et.nome} <span style="font-weight:400;font-size:11.5px;color:var(--text-soft);">· ${itens.length} · ${brl(totalEtapa)}</span></h2></div>
+        <div class="panel-body" style="padding:0;">
+          ${itens.length ? itens.map(o=>`
+            <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
+              <div class="desc-cell"><div>${escapeHTML(o.cliente)}${o.descricao?' — '+escapeHTML(o.descricao):''}</div><div class="cat">${fmtDate(o.data)}</div></div>
+              <span class="mono" style="font-weight:600;">${brl(o.valor)}</span>
+              <div class="row-actions">
+                ${et.id!=='faturado' ? `<button class="icon-btn" data-action="avancar-oportunidade" data-id="${o.id}" title="Avançar etapa">➡️</button>` : ''}
+                ${et.id!=='faturado' ? `<button class="icon-btn" data-action="perder-oportunidade" data-id="${o.id}" title="Marcar como perdida">✕</button>` : ''}
+                ${et.id==='faturado' && !o.lancamentoId ? `<button class="icon-btn" data-action="converter-oportunidade" data-id="${o.id}" title="Lançar como conta a receber">💰</button>` : ''}
+                ${o.lancamentoId ? `<span style="font-size:10.5px;color:var(--success);">✓ lançado</span>` : ''}
+              </div>
+            </div>
+          `).join('') : `<div class="empty">Nada aqui ainda.</div>`}
+        </div>
+      </div>`;
+    }).join('')}
+    ${perdidas.length ? `
+    <details class="panel-details">
+      <summary>Perdidas (${perdidas.length})</summary>
+      <div class="panel-body">
+        ${perdidas.map(o=>`
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto;">
+            <div class="desc-cell"><div>${escapeHTML(o.cliente)}${o.descricao?' — '+escapeHTML(o.descricao):''}</div><div class="cat">${fmtDate(o.data)}</div></div>
+            <span class="mono" style="color:var(--text-soft);">${brl(o.valor)}</span>
+          </div>
+        `).join('')}
+      </div>
+    </details>` : ''}
+  `;
+}
+
+function openOportunidadeModal(){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Nova oportunidade</h3>
+    <div class="field"><label>Cliente</label><input type="text" id="opCliente" placeholder="Nome do cliente"></div>
+    <div class="field"><label>Descrição (opcional)</label><input type="text" id="opDescricao" placeholder="Ex: pedido de 50 caixas"></div>
+    <div class="field-row">
+      <div class="field"><label>Valor estimado (R$)</label><input type="text" inputmode="decimal" id="opValor"></div>
+      <div class="field"><label>Data</label><input type="date" id="opData" value="${todayISO()}"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarOportunidade">Adicionar ao funil</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarOportunidade').addEventListener('click', ()=>{
+    const cliente = document.getElementById('opCliente').value.trim();
+    const valor = numBR(document.getElementById('opValor').value);
+    if(!cliente){ showToast('Digite o cliente'); return; }
+    if(isNaN(valor) || valor<=0){ showToast('Digite um valor válido'); return; }
+    if(!state.oportunidadesVenda) state.oportunidadesVenda = [];
+    state.oportunidadesVenda.push({
+      id: uid(), cliente, descricao: document.getElementById('opDescricao').value.trim(),
+      valor, data: document.getElementById('opData').value || todayISO(),
+      etapa: 'orcamento', lancamentoId: null, criadoEm: new Date().toISOString()
+    });
+    persist(); closeModal(); render();
+    showToast('Oportunidade adicionada ao funil');
+  });
 }
 
 function viewComissoes(){
@@ -7583,6 +8066,13 @@ function attachViewHandlers(){
     mesGlobalRef = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     render();
   });
+  document.getElementById('btnFecharMes')?.addEventListener('click', ()=>{
+    if(!confirm(`Marcar ${mesGlobalRef} como fechado/conferido? Isso é só um lembrete visual, não trava nem impede novos lançamentos nesse mês.`)) return;
+    if(!state.mesesFechados) state.mesesFechados = [];
+    state.mesesFechados.push({ mes: mesGlobalRef, fechadoEm: new Date().toISOString() });
+    persist(); render();
+    showToast('Mês marcado como fechado');
+  });
 
   document.getElementById('btnToggleSaldos')?.addEventListener('click', (e)=>{
     saldosOcultos = !saldosOcultos;
@@ -7726,6 +8216,10 @@ function attachViewHandlers(){
         relatorioAtivo==='dre' ? renderDRE('mes') :
         relatorioAtivo==='balanco' ? renderBalanco() :
         relatorioAtivo==='mei' ? renderMEI(meiAnoAtual) :
+        relatorioAtivo==='previsao' ? renderPrevisaoSaldoFuturo() :
+        relatorioAtivo==='stress' ? renderStressTest() :
+        relatorioAtivo==='socios' ? renderSplitSocios() :
+        relatorioAtivo==='orcamento_anual' ? renderOrcamentoAnual() :
         relatorioAtivo==='produto' ? renderRentabilidadeProduto('mes') :
         relatorioAtivo==='investimentos' ? renderRelatorioInvestimentos() :
         relatorioAtivo==='liquidez' ? renderRelatorioLiquidez() :
@@ -7777,6 +8271,43 @@ function attachViewHandlers(){
         });
       });
       const drePeriodo = document.getElementById('drePeriodo');
+      const previsaoDiasSel = document.getElementById('previsaoDias');
+      if(previsaoDiasSel) previsaoDiasSel.addEventListener('change', ()=>{
+        previsaoDiasAtivo = parseInt(previsaoDiasSel.value);
+        document.getElementById('reportPanel').innerHTML = renderPrevisaoSaldoFuturo();
+        bindReportInner();
+      });
+      if(document.getElementById('chartPrevisao')){
+        desenharGraficoPrevisao('chartPrevisao', projecaoDiariaSaldo(previsaoDiasAtivo).pontos);
+      }
+      document.getElementById('btnAddSocio')?.addEventListener('click', ()=>{
+        const nome = (prompt('Nome do sócio:')||'').trim();
+        if(!nome) return;
+        const pctStr = prompt('Percentual de participação (%):','0');
+        const pct = numBR(pctStr);
+        if(isNaN(pct)){ showToast('Percentual inválido'); return; }
+        if(!state.socios) state.socios = [];
+        state.socios.push({ id: uid(), nome, pct });
+        persist();
+        document.getElementById('reportPanel').innerHTML = renderSplitSocios();
+        bindReportInner();
+      });
+      document.querySelectorAll('[data-action="excluir-socio"]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          state.socios = state.socios.filter(so=>so.id!==btn.dataset.id);
+          persist();
+          document.getElementById('reportPanel').innerHTML = renderSplitSocios();
+          bindReportInner();
+        });
+      });
+      const orcAnualAnoSel = document.getElementById('orcAnualAno');
+      if(orcAnualAnoSel) orcAnualAnoSel.addEventListener('change', ()=>{
+        orcamentoAnualAno = parseInt(orcAnualAnoSel.value);
+        document.getElementById('reportPanel').innerHTML = renderOrcamentoAnual();
+        const tituloEl = document.getElementById('reportTitulo');
+        if(tituloEl) tituloEl.textContent = `Orçamento Anual — ${orcamentoAnualAno}`;
+        bindReportInner();
+      });
       const dreAnaliseSel = document.getElementById('dreAnalise');
       if(dreAnaliseSel) dreAnaliseSel.addEventListener('change', ()=>{
         dreAnaliseAtiva = dreAnaliseSel.value;
@@ -7848,7 +8379,7 @@ function attachViewHandlers(){
     });
     paint();
     document.getElementById('btnExportarRelatorioPDF')?.addEventListener('click', ()=>{
-      const titulos = { dre: 'DRE (Demonstrativo de Resultado)', balanco: 'Balanço Patrimonial', mei: `Declaração MEI — Ano ${meiAnoAtual}`, indicadores: 'Indicadores Financeiros', produto: 'Rentabilidade por Produto', mensal: `Super Relatório Mensal — ${mensalMesRef}`, investimentos: `Relatório de Investimentos — ${mesGlobalRef}`, liquidez: 'Índices de Liquidez e Endividamento', aging: 'Aging — Vencidos por Faixa', dfc: `DFC — Fluxo de Caixa — ${mesGlobalRef}`, cartoes: 'Relatório de Cartões de Crédito', abc_clientes: 'Curva ABC de Clientes', abc_despesas: 'Curva ABC de Despesas', abc_fornecedores: 'Auditoria de Fornecedores', inadimplencia_cac: 'Inadimplência e CAC', canal_venda: `Receita por Canal de Venda — ${mesGlobalRef}`, breakeven: `Ponto de Equilíbrio — ${mesGlobalRef}`, valuation: 'Valuation Estimado' };
+      const titulos = { dre: 'DRE (Demonstrativo de Resultado)', balanco: 'Balanço Patrimonial', mei: `Declaração MEI — Ano ${meiAnoAtual}`, indicadores: 'Indicadores Financeiros', produto: 'Rentabilidade por Produto', mensal: `Super Relatório Mensal — ${mensalMesRef}`, investimentos: `Relatório de Investimentos — ${mesGlobalRef}`, liquidez: 'Índices de Liquidez e Endividamento', aging: 'Aging — Vencidos por Faixa', dfc: `DFC — Fluxo de Caixa — ${mesGlobalRef}`, cartoes: 'Relatório de Cartões de Crédito', abc_clientes: 'Curva ABC de Clientes', abc_despesas: 'Curva ABC de Despesas', abc_fornecedores: 'Auditoria de Fornecedores', inadimplencia_cac: 'Inadimplência e CAC', canal_venda: `Receita por Canal de Venda — ${mesGlobalRef}`, breakeven: `Ponto de Equilíbrio — ${mesGlobalRef}`, valuation: 'Valuation Estimado', previsao: 'Previsão de Saldo Futuro', stress: 'Cenário de Stress (Stress Test)', socios: 'Split entre Sócios', orcamento_anual: `Orçamento Anual — ${orcamentoAnualAno}` };
       exportarRelatorioPDF(titulos[relatorioAtivo]);
     });
   }
@@ -8057,6 +8588,39 @@ function attachViewHandlers(){
 
   // Fornecedores
   document.getElementById('btnNovoFornecedor')?.addEventListener('click', ()=>openFornecedorModal());
+  document.getElementById('btnNovaOportunidade')?.addEventListener('click', ()=>openOportunidadeModal());
+  document.querySelectorAll('[data-action="avancar-oportunidade"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const o = state.oportunidadesVenda.find(x=>x.id===btn.dataset.id);
+      if(!o) return;
+      const idx = FUNIL_ETAPAS.findIndex(e=>e.id===o.etapa);
+      if(idx < FUNIL_ETAPAS.length-1){ o.etapa = FUNIL_ETAPAS[idx+1].id; persist(); render(); showToast(`Movido pra "${FUNIL_ETAPAS[idx+1].nome}"`); }
+    });
+  });
+  document.querySelectorAll('[data-action="perder-oportunidade"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!confirm('Marcar essa oportunidade como perdida?')) return;
+      const o = state.oportunidadesVenda.find(x=>x.id===btn.dataset.id);
+      if(o){ o.etapa = 'perdido'; persist(); render(); showToast('Marcada como perdida'); }
+    });
+  });
+  document.querySelectorAll('[data-action="converter-oportunidade"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const o = state.oportunidadesVenda.find(x=>x.id===btn.dataset.id);
+      if(!o) return;
+      const novoId = uid();
+      state.lancamentos.push({
+        id: novoId, tipo:'entrada', categoria:'Vendas',
+        descricao: o.descricao || `Venda — ${o.cliente}`, valor: o.valor,
+        fornecedor: o.cliente, observacao: '', contaId: state.contas[0]?.id || '',
+        dataVencimento: todayISO(), status:'pendente', dataPagamento:null,
+        criadoEm: new Date().toISOString()
+      });
+      o.lancamentoId = novoId;
+      persist(); render();
+      showToast('Lançado como conta a receber — confira/edite os detalhes se precisar');
+    });
+  });
   document.querySelectorAll('[data-action="ver-fornecedor"]').forEach(el=>{
     el.addEventListener('click', ()=>{
       const f = (state.fornecedores||[]).find(x=>x.id===el.dataset.id);
@@ -8419,6 +8983,7 @@ function attachViewHandlers(){
       });
     });
     document.getElementById('btnAdicionarManutencao')?.addEventListener('click', ()=>openManutencaoModal(ativoDetalheAtual));
+    document.getElementById('btnAdicionarReavaliacao')?.addEventListener('click', ()=>openReavaliacaoModal(ativoDetalheAtual));
     document.querySelectorAll('[data-action="excluir-manutencao"]').forEach(btn=>{
       btn.addEventListener('click', ()=>{
         if(!confirm('Excluir este registro de manutenção?')) return;
@@ -8980,6 +9545,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
             <option value="__outro__" ${existing?.fornecedor && !(state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? 'selected' : ''}>Outro (digitar)</option>
           </select>
           <input type="text" id="fFornecedor" placeholder="Nome do fornecedor" style="margin-top:8px;${existing?.fornecedor && !(state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? '' : 'display:none;'}" value="${existing?.fornecedor && !(state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? escapeHTML(existing.fornecedor) : ''}">
+          <div class="note" id="fContratoAlerta" style="margin-top:8px;"></div>
         ` : `
           <input type="text" id="fFornecedor" value="${existing?.fornecedor ? escapeHTML(existing.fornecedor) : ''}">
         `}
@@ -9021,6 +9587,13 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       <label>Produto / linha (opcional — pra ver rentabilidade por produto nos relatórios)</label>
       <input type="text" id="fProduto" value="${existing?.produtoTag ? escapeHTML(existing.produtoTag) : ''}" placeholder="Ex: Biscoito Amanteigado, Bolacha Recheada...">
     </div>
+    ${tipo==='entrada' ? `
+    <div class="field">
+      <label>Custo dos produtos vendidos nesse lançamento (R$, opcional — pra calcular a margem de contribuição)</label>
+      <input type="text" inputmode="decimal" id="fCustoCPV" value="${existing?.custoProdutoVendido!=null ? existing.custoProdutoVendido : ''}" placeholder="Ex: valor de insumo/produção usado">
+    </div>
+    <div class="note" id="fMargemPreview" style="margin-top:0;"></div>
+    ` : ''}
     <div class="field">
       <label>Centro de custo (opcional — pra abrir o DRE por setor)</label>
       <select id="fCentroCusto">
@@ -9066,6 +9639,43 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  if(tipo==='entrada'){
+    const atualizarMargemPreview = ()=>{
+      const valor = numBR(document.getElementById('fValor').value) || 0;
+      const custo = numBR(document.getElementById('fCustoCPV').value);
+      const preview = document.getElementById('fMargemPreview');
+      if(!preview) return;
+      if(isNaN(custo) || custo<=0 || valor<=0){ preview.innerHTML = ''; return; }
+      const margem = valor - custo;
+      const pct = valor>0 ? (margem/valor*100) : 0;
+      preview.innerHTML = `Margem de contribuição: <strong style="color:${margem>=0?'var(--success)':'var(--danger)'}">${brl(margem)} (${pct.toFixed(0)}%)</strong>`;
+    };
+    document.getElementById('fValor').addEventListener('input', atualizarMargemPreview);
+    document.getElementById('fCustoCPV').addEventListener('input', atualizarMargemPreview);
+    atualizarMargemPreview();
+  }
+  if(tipo==='saida'){
+    const atualizarAlertaContrato = ()=>{
+      const notaEl = document.getElementById('fContratoAlerta');
+      if(!notaEl) return;
+      const selEl = document.getElementById('fFornecedorSelect');
+      const nomeForn = selEl ? selEl.value : '';
+      const fornecedor = (state.fornecedores||[]).find(f=>f.nome===nomeForn);
+      const valor = numBR(document.getElementById('fValor').value) || 0;
+      if(!fornecedor || !fornecedor.contratoPrecoFixo || valor<=0){ notaEl.innerHTML = ''; return; }
+      const diff = ((valor-fornecedor.contratoPrecoFixo)/fornecedor.contratoPrecoFixo)*100;
+      if(Math.abs(diff)>=15){
+        notaEl.innerHTML = `⚠️ Esse fornecedor tem contrato de ${brl(fornecedor.contratoPrecoFixo)} — esse lançamento está ${diff>0?'+':''}${diff.toFixed(0)}% ${diff>0?'acima':'abaixo'} do combinado.`;
+        notaEl.style.borderColor = 'var(--warn)';
+      } else {
+        notaEl.innerHTML = `📑 Dentro do combinado no contrato (${brl(fornecedor.contratoPrecoFixo)}).`;
+        notaEl.style.borderColor = 'var(--line)';
+      }
+    };
+    document.getElementById('fValor')?.addEventListener('input', atualizarAlertaContrato);
+    document.getElementById('fFornecedorSelect')?.addEventListener('change', atualizarAlertaContrato);
+    atualizarAlertaContrato();
+  }
   document.getElementById('btnExcluirDoEditar')?.addEventListener('click', ()=>{
     closeModal();
     excluirLancamento(existing.id);
@@ -9331,6 +9941,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       valor,
       fornecedor: fornecedorValor,
       produtoTag: document.getElementById('fProduto').value.trim(),
+      custoProdutoVendido: (tipo==='entrada' && document.getElementById('fCustoCPV')) ? (numBR(document.getElementById('fCustoCPV').value) || null) : (existing?.custoProdutoVendido ?? null),
       centroCusto: (fCentroCusto && fCentroCusto.value!=='__novo__') ? fCentroCusto.value : (existing?.centroCusto||''),
       canalVenda: (fCanalVenda && fCanalVenda.value!=='__novo__') ? fCanalVenda.value : (existing?.canalVenda||''),
       comprovanteFoto: comprovanteAtual,
@@ -9385,7 +9996,7 @@ function viewFornecedores(){
             <span class="dot" style="background:var(--text-soft);"></span>
             <div class="desc-cell" data-action="editar-fornecedor" data-id="${f.id}" style="cursor:pointer;">
               <div>${escapeHTML(f.nome)}</div>
-              <div class="cat">${escapeHTML(f.cnpjCpf||'sem CNPJ/CPF cadastrado')}</div>
+              <div class="cat">${escapeHTML(f.cnpjCpf||'sem CNPJ/CPF cadastrado')}${f.contratoPrecoFixo ? ` · 📑 contrato ${brl(f.contratoPrecoFixo)}${f.contratoVigenciaFim?' até '+fmtDate(f.contratoVigenciaFim):''}` : ''}</div>
             </div>
             <span class="fornecedor-contato" style="font-size:12.5px;color:var(--text-soft);">${escapeHTML(f.telefone||f.email||'—')}</span>
             <span class="mono" style="font-weight:600;">${brl(total)}</span>
@@ -9421,6 +10032,11 @@ function openFornecedorModal(existing){
     </div>
     <div class="field"><label>Endereço (opcional)</label><input type="text" id="fnEndereco" value="${existing?escapeHTML(existing.endereco||''):''}"></div>
     <div class="field"><label>Observação (opcional)</label><input type="text" id="fnObs" value="${existing?escapeHTML(existing.observacao||''):''}"></div>
+    <div class="field-row" style="margin-top:6px;padding-top:14px;border-top:1px solid var(--line);">
+      <div class="field"><label>Contrato — preço combinado (R$, opcional)</label><input type="text" inputmode="decimal" id="fnPrecoContrato" value="${existing?.contratoPrecoFixo!=null ? existing.contratoPrecoFixo : ''}" placeholder="Ex: valor combinado por entrega/insumo"></div>
+      <div class="field"><label>Vigência até (opcional)</label><input type="date" id="fnContratoVigencia" value="${existing?.contratoVigenciaFim||''}"></div>
+    </div>
+    <div class="note" style="margin-top:0;">Se preencher, o sistema avisa quando uma despesa lançada pra esse fornecedor destoar muito (±15%) do preço combinado.</div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       <button class="btn" id="btnSalvarFornecedor">Salvar</button>
@@ -9465,7 +10081,9 @@ function openFornecedorModal(existing){
       telefone: document.getElementById('fnTelefone').value.trim(),
       email: document.getElementById('fnEmail').value.trim(),
       endereco: document.getElementById('fnEndereco').value.trim(),
-      observacao: document.getElementById('fnObs').value.trim()
+      observacao: document.getElementById('fnObs').value.trim(),
+      contratoPrecoFixo: numBR(document.getElementById('fnPrecoContrato').value) || null,
+      contratoVigenciaFim: document.getElementById('fnContratoVigencia').value || null
     };
     if(isEdit){
       const nomeAntigo = existing.nome;
