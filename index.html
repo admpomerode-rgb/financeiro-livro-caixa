@@ -1314,9 +1314,14 @@ function custoContaInvestimento(contaId){
   const somaSubManual = subsManual.reduce((s,sub)=>s+(sub.custoAcumulado||0),0);
   return somaAtivos + somaSubManual;
 }
+function ativosOrfaosInvestimento(){
+  const idsContas = new Set(state.contasInvestimento.map(c=>c.id));
+  return state.ativosInvestimento.filter(a=>!a.resgatado && !idsContas.has(a.contaId));
+}
 function totalInvestimentos(){
+  const idsContas = new Set(state.contasInvestimento.map(c=>c.id));
   const idsSubManual = new Set(state.subcontasInvestimento.filter(s=>s.valorManual!=null).map(s=>s.id));
-  const somaAtivos = state.ativosInvestimento.filter(a=>!a.resgatado && !idsSubManual.has(a.subContaId)).reduce((s,a)=>s+valorAtivo(a),0);
+  const somaAtivos = state.ativosInvestimento.filter(a=>!a.resgatado && idsContas.has(a.contaId) && !idsSubManual.has(a.subContaId)).reduce((s,a)=>s+valorAtivo(a),0);
   const somaSubManual = state.subcontasInvestimento.filter(s=>s.valorManual!=null).reduce((s,sub)=>s+sub.valorManual,0);
   return somaAtivos + somaSubManual;
 }
@@ -4103,8 +4108,9 @@ function publicarFaturaCartao(fatura){
 }
 
 function custoTotalInvestimentos(){
+  const idsContas = new Set(state.contasInvestimento.map(c=>c.id));
   const idsSubManual = new Set(state.subcontasInvestimento.filter(s=>s.valorManual!=null).map(s=>s.id));
-  const somaAtivos = state.ativosInvestimento.filter(a=>!idsSubManual.has(a.subContaId)).reduce((s,a)=>s+custoAtivo(a),0);
+  const somaAtivos = state.ativosInvestimento.filter(a=>!a.resgatado && idsContas.has(a.contaId) && !idsSubManual.has(a.subContaId)).reduce((s,a)=>s+custoAtivo(a),0);
   const somaSubManual = state.subcontasInvestimento.filter(s=>s.valorManual!=null).reduce((s,sub)=>s+(sub.custoAcumulado||0),0);
   return somaAtivos + somaSubManual;
 }
@@ -4125,6 +4131,23 @@ function viewInvestimentos(){
       <div class="card"><div class="label">Diferença das atualizações</div><div class="value mono ${rendimento>=0?'pos':'neg'}">${brl(rendimento)}</div></div>
       <div class="card"><div class="label">Saldo após atualização</div><div class="value mono">${brl(total)}</div></div>
     </div>
+    ${(()=>{ const orfaos = ativosOrfaosInvestimento(); return orfaos.length ? `
+    <div class="panel" style="margin-bottom:16px;border-left:3px solid var(--danger);">
+      <div class="panel-head"><h2>🚨 Ativos órfãos encontrados (${orfaos.length})</h2></div>
+      <div class="panel-body">
+        <div class="note" style="margin-top:0;border-color:var(--danger);">Esses ativos pertenciam a uma conta de investimento que não existe mais (provavelmente excluída sem passar pelo aviso de segurança). Eles NÃO aparecem em nenhum card abaixo, mas até agora estavam entrando escondidos nos totais. A partir desta correção, eles pararam de contar nos totais — mas o valor continua existindo aqui embaixo até você decidir o que fazer.</div>
+        ${orfaos.map(a=>`
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
+            <div class="desc-cell"><div>${escapeHTML(a.nome||a.ticker||'Ativo sem nome')}</div><div class="cat">${rotuloTipoAtivo(a)} · conta antiga não existe mais</div></div>
+            <span class="mono" style="font-weight:600;">${brl(valorAtivo(a))}</span>
+            <div class="row-actions">
+              <button class="btn ghost sm" data-action="realocar-ativo-orfao" data-id="${a.id}">Mover pra uma conta</button>
+              <button class="icon-btn" data-action="excluir-ativo-orfao" data-id="${a.id}" title="Excluir de vez">✕</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>` : ''; })()}
     ${(()=>{ const vencidos = ativosVencidosRF(); return vencidos.length ? `
     <div class="panel" style="margin-bottom:16px;border-left:3px solid var(--warn);">
       <div class="panel-head"><h2>⏰ Renda fixa vencida aguardando resgate (${vencidos.length})</h2></div>
@@ -9350,6 +9373,31 @@ function attachViewHandlers(){
   });
   document.querySelectorAll('[data-action="resgatar-ativo-rf"]').forEach(btn=>{
     btn.addEventListener('click', ()=> openResgateModal(btn.dataset.id));
+  });
+  document.querySelectorAll('[data-action="realocar-ativo-orfao"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!state.contasInvestimento.length){ showToast('Crie uma conta de investimento primeiro'); return; }
+      const opcoes = state.contasInvestimento.map((c,i)=>`${i+1}. ${c.nome}`).join('\n');
+      const escolha = prompt(`Mover esse ativo pra qual conta?\n${opcoes}\n\nDigite o número:`);
+      const idx = parseInt(escolha)-1;
+      const contaEscolhida = state.contasInvestimento[idx];
+      if(!contaEscolhida) return;
+      const ativo = state.ativosInvestimento.find(a=>a.id===btn.dataset.id);
+      if(!ativo) return;
+      ativo.contaId = contaEscolhida.id;
+      ativo.subContaId = null;
+      registrarLog('Ativo órfão realocado', `"${ativo.nome||ativo.ticker}" movido pra "${contaEscolhida.nome}"`);
+      persist(); render();
+      showToast(`Movido pra "${contaEscolhida.nome}"`);
+    });
+  });
+  document.querySelectorAll('[data-action="excluir-ativo-orfao"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!confirm('Excluir esse ativo de vez? Essa ação não pode ser desfeita.')) return;
+      state.ativosInvestimento = state.ativosInvestimento.filter(a=>a.id!==btn.dataset.id);
+      persist(); render();
+      showToast('Ativo órfão excluído');
+    });
   });
   const btnAtualizarCotacoes = document.getElementById('btnAtualizarCotacoes');
   if(btnAtualizarCotacoes) btnAtualizarCotacoes.addEventListener('click', ()=>{
