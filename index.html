@@ -822,6 +822,7 @@ function aplicarMigracoes(s){
   if(s.vkConfig && s.vkConfig.categoriaEstoque===undefined) s.vkConfig.categoriaEstoque = 'Insumos';
   if(s.vkConfig && s.vkConfig.ultimaSincronizacaoEstoque===undefined) s.vkConfig.ultimaSincronizacaoEstoque = null;
   if(s.vkConfig && s.vkConfig.ultimaSincronizacaoEstoqueInsumos===undefined) s.vkConfig.ultimaSincronizacaoEstoqueInsumos = null;
+  if(s.vkConfig && s.vkConfig.ultimaSincronizacaoRecomendacoes===undefined) s.vkConfig.ultimaSincronizacaoRecomendacoes = null;
   if(!s.processosConfig){
     s.processosConfig = { firebaseConfig: null, email: '', senha: '', ultimaSincronizacao: null };
   }
@@ -853,6 +854,7 @@ function aplicarMigracoes(s){
   if(!s.socios) s.socios = [];
   if(!s.oportunidadesVenda) s.oportunidadesVenda = [];
   if(!s.estoqueInsumos) s.estoqueInsumos = [];
+  if(!s.previsoesGastoFuturo) s.previsoesGastoFuturo = [];
   if(!s.orcamentoAlertaPct) s.orcamentoAlertaPct = {};
   ['saida','entrada'].forEach(tipo=>{
     (s.categorias?.[tipo]||[]).forEach((c,i)=>{ if(!c.cor) c.cor = CATEGORIA_CORES[i % CATEGORIA_CORES.length]; });
@@ -1544,6 +1546,85 @@ async function sincronizarPedidosVK(){
   }
 }
 
+async function sincronizarRecomendacoesCompraVK(){
+  const cfg = state.vkConfig;
+  if(!cfg.firebaseConfig){ showToast('Cole a configuração do Firebase antes de sincronizar'); render(); return; }
+  if(!cfg.email || !cfg.senha){ showToast('Informe o e-mail e a senha de acesso ao VK Industrial'); render(); return; }
+  if(typeof firebase === 'undefined'){ showToast('Não foi possível carregar o Firebase — confira a internet'); render(); return; }
+
+  try{
+    if(!vkFirebaseApp){
+      vkFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'vk-industrial');
+    }
+    const auth = vkFirebaseApp.auth();
+    if(!auth.currentUser){
+      await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
+    }
+    const db = vkFirebaseApp.firestore();
+    const [recSnap, insumosSnap] = await Promise.all([
+      db.collection('recomendacoes_compra').get({ source: 'server' }),
+      db.collection('insumos').get({ source: 'server' }).catch(()=>({docs:[]}))
+    ]);
+    const recomendacoes = recSnap.docs.map(d=>({ id: d.id, ...d.data() }));
+    const insumosVK = insumosSnap.docs.map(d=>({ id: d.id, ...d.data() }));
+
+    if(!state.previsoesGastoFuturo) state.previsoesGastoFuturo = [];
+    const idsAtuais = new Set(recomendacoes.map(r=>r.id));
+
+    // Remove previsões vindas do VK que não existem mais na recomendação (e ainda não viraram despesa real)
+    let removidas = 0;
+    state.previsoesGastoFuturo = state.previsoesGastoFuturo.filter(p=>{
+      if(p.origem!=='vk' || idsAtuais.has(p.vkRecomendacaoId)) return true;
+      if(p.convertida) return true; // já virou despesa de verdade, mantém o histórico
+      removidas++;
+      return false;
+    });
+
+    let novas = 0, atualizadas = 0;
+    recomendacoes.forEach(r=>{
+      const insumo = insumosVK.find(i=>i.id===r.insumoId);
+      const nomeInsumo = r.insumoNome || insumo?.nome || 'Insumo';
+      const quantidade = Number(r.quantidadeRecomendada ?? r.quantidade ?? 0) || 0;
+      const precoRef = Number(r.precoEstimado ?? insumo?.precoMedio ?? insumo?.custoMedio ?? insumo?.preco ?? 0) || 0;
+      const valorEstimado = r.valorEstimado!=null ? Number(r.valorEstimado) : Math.round(quantidade*precoRef*100)/100;
+      const dataPrevista = r.dataSugerida || r.dataPrevista || todayISO();
+      const descricao = `Compra recomendada — ${nomeInsumo}${quantidade?` (${quantidade} ${r.unidade||insumo?.unidade||'un'})`:''}`;
+
+      const existente = state.previsoesGastoFuturo.find(p=>p.origem==='vk' && p.vkRecomendacaoId===r.id);
+      if(existente){
+        if(!existente.convertida){
+          existente.descricao = descricao; existente.valorEstimado = valorEstimado; existente.dataPrevista = dataPrevista;
+          atualizadas++;
+        }
+      } else {
+        state.previsoesGastoFuturo.push({
+          id: uid(), descricao, valorEstimado, dataPrevista,
+          convertida: false, origem: 'vk', vkRecomendacaoId: r.id,
+          criadoEm: new Date().toISOString()
+        });
+        novas++;
+      }
+    });
+
+    cfg.ultimaSincronizacaoRecomendacoes = new Date().toISOString();
+    persist();
+    render();
+    const partes = [];
+    if(novas>0) partes.push(`${novas} nova(s)`);
+    if(atualizadas>0) partes.push(`${atualizadas} atualizada(s)`);
+    if(removidas>0) partes.push(`${removidas} removida(s) (não recomendadas mais)`);
+    showToast(partes.length ? partes.join(' · ') : `Nenhuma novidade (${recomendacoes.length} recomendação(ões) no VK)`);
+  }catch(e){
+    console.error('Erro ao sincronizar recomendações de compra do VK Industrial:', e);
+    let msg = 'Falha ao sincronizar recomendações de compra';
+    if(e.code==='auth/wrong-password' || e.code==='auth/user-not-found' || e.code==='auth/invalid-credential') msg = 'E-mail ou senha incorretos';
+    else if(e.code==='permission-denied') msg = 'Sem permissão para ler os dados — confira o login';
+    else if(e.message) msg += ': ' + e.message;
+    showToast(msg);
+    render();
+  }
+}
+
 async function sincronizarEstoqueInsumosVK(){
   const cfg = state.vkConfig;
   if(!cfg.firebaseConfig){ showToast('Cole a configuração do Firebase antes de sincronizar'); render(); return; }
@@ -2097,11 +2178,13 @@ function projecaoSaldoBaixo(dias){
   const saldoAtual = totaisPorMesRef(hoje.slice(0,7)).saldoAtual;
   const fim = new Date(); fim.setDate(fim.getDate()+dias);
   const fimISO = fim.toISOString().slice(0,10);
-  const pendentes = state.lancamentos.filter(l=>l.status==='pendente' && l.dataVencimento && l.dataVencimento>hoje && l.dataVencimento<=fimISO).sort((a,b)=>a.dataVencimento.localeCompare(b.dataVencimento));
+  const pendentes = state.lancamentos.filter(l=>l.status==='pendente' && l.dataVencimento && l.dataVencimento>hoje && l.dataVencimento<=fimISO).map(l=>({ data: l.dataVencimento, valor: l.tipo==='entrada'?l.valor:-l.valor }));
+  const previsoes = (state.previsoesGastoFuturo||[]).filter(p=>!p.convertida && p.dataPrevista && p.dataPrevista>hoje && p.dataPrevista<=fimISO).map(p=>({ data: p.dataPrevista, valor: -p.valorEstimado }));
+  const eventos = [...pendentes, ...previsoes].sort((a,b)=>a.data.localeCompare(b.data));
   let saldoCorrente = saldoAtual, minSaldo = saldoAtual, dataMin = hoje;
-  pendentes.forEach(l=>{
-    saldoCorrente += (l.tipo==='entrada'?l.valor:-l.valor);
-    if(saldoCorrente < minSaldo){ minSaldo = saldoCorrente; dataMin = l.dataVencimento; }
+  eventos.forEach(ev=>{
+    saldoCorrente += ev.valor;
+    if(saldoCorrente < minSaldo){ minSaldo = saldoCorrente; dataMin = ev.data; }
   });
   return { saldoAtual, minSaldo, dataMin, ficaNegativo: minSaldo<0 };
 }
@@ -5123,8 +5206,10 @@ function projecaoDiariaSaldo(dias){
   const fim = new Date(); fim.setDate(fim.getDate()+dias);
   const fimISO = fim.toISOString().slice(0,10);
   const pendentes = state.lancamentos.filter(l=>l.status==='pendente' && l.dataVencimento && l.dataVencimento>hoje && l.dataVencimento<=fimISO);
+  const previsoes = (state.previsoesGastoFuturo||[]).filter(p=>!p.convertida && p.dataPrevista && p.dataPrevista>hoje && p.dataPrevista<=fimISO);
   const porDia = {};
   pendentes.forEach(l=>{ porDia[l.dataVencimento] = (porDia[l.dataVencimento]||0) + (l.tipo==='entrada'?l.valor:-l.valor); });
+  previsoes.forEach(p=>{ porDia[p.dataPrevista] = (porDia[p.dataPrevista]||0) - p.valorEstimado; });
   const pontos = [];
   let saldo = saldoHoje;
   const passo = dias<=30 ? 1 : dias<=60 ? 2 : 3;
@@ -5177,11 +5262,15 @@ function desenharGraficoPrevisao(canvasId, pontos){
 }
 
 function renderPrevisaoSaldoFuturo(){
+  const cfg = state.vkConfig;
   const dias = previsaoDiasAtivo;
   const proj = projecaoDiariaSaldo(dias);
   const menorPonto = proj.pontos.reduce((min,p)=> p.saldo<min.saldo ? p : min, proj.pontos[0]);
   const ultimoPonto = proj.pontos[proj.pontos.length-1];
   const ficaNegativo = proj.pontos.some(p=>p.saldo<0);
+  const hoje = todayISO();
+  const previsoesAtivas = (state.previsoesGastoFuturo||[]).filter(p=>!p.convertida).sort((a,b)=>(a.dataPrevista||'').localeCompare(b.dataPrevista||''));
+  const totalPrevisto = previsoesAtivas.reduce((s,p)=>s+p.valorEstimado,0);
   return `
     <div class="report-controls">
       <select id="previsaoDias">
@@ -5195,13 +5284,35 @@ function renderPrevisaoSaldoFuturo(){
       <div class="card"><div class="label">Ponto mais baixo projetado</div><div class="value mono" style="color:${menorPonto.saldo<0?'var(--danger)':'inherit'}">${brl(menorPonto.saldo)}</div></div>
       <div class="card"><div class="label">Saldo projetado em ${dias} dias</div><div class="value mono ${ultimoPonto.saldo>=0?'pos':'neg'}">${brl(ultimoPonto.saldo)}</div></div>
     </div>
-    ${ficaNegativo ? `<div class="note" style="border-color:var(--danger);">⚠️ Com o que já está lançado (contas a pagar/receber pendentes), o saldo projetado fica <strong>negativo</strong> em ${fmtDate(menorPonto.data)} — vale reorganizar prazos ou negociar recebimentos antecipados antes disso.</div>` : `<div class="note">O saldo projetado se mantém positivo no período, considerando só o que já está lançado como pendente — novos lançamentos que ainda vão entrar não estão aqui.</div>`}
+    ${ficaNegativo ? `<div class="note" style="border-color:var(--danger);">⚠️ Considerando o que já está lançado <strong>e</strong> as previsões de gasto abaixo, o saldo projetado fica <strong>negativo</strong> em ${fmtDate(menorPonto.data)} — vale reorganizar prazos ou negociar recebimentos antecipados antes disso.</div>` : `<div class="note">O saldo projetado se mantém positivo no período, considerando contas pendentes + as previsões de gasto abaixo.</div>`}
     <div class="panel">
       <div class="panel-body" style="padding:18px;">
         <canvas id="chartPrevisao" height="190"></canvas>
       </div>
     </div>
-    <div class="note" style="margin-top:0;">Projeção baseada no saldo atual real + contas a pagar/receber já cadastradas como pendentes com vencimento nesse período. Não inclui recorrências ainda não geradas nem lançamentos futuros que você ainda não cadastrou.</div>
+
+    <div class="panel" style="margin-top:16px;">
+      <div class="panel-head"><h2>Previsões de gasto futuro</h2>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span style="font-size:12px;color:var(--blue-accent);cursor:pointer;" id="btnNovaPrevisaoGasto">+ Adicionar à mão</span>
+          <button class="btn ghost sm" id="btnSincronizarRecomendacoesVK">⟳ Sincronizar recomendações do VK</button>
+        </div>
+      </div>
+      <div class="panel-body" style="padding:0;">
+        ${previsoesAtivas.length ? previsoesAtivas.map(p=>`
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
+            <div class="desc-cell"><div>${escapeHTML(p.descricao)}${p.origem==='vk' ? ' <span style="color:var(--blue-accent);font-size:10.5px;font-weight:600;border:1px solid var(--blue-accent);border-radius:4px;padding:1px 5px;">VK</span>' : ''}</div><div class="cat">previsto pra ${fmtDate(p.dataPrevista)}${p.dataPrevista<hoje?' <span style="color:var(--warn);">· data já passou</span>':''}</div></div>
+            <span class="mono" style="font-weight:600;">${brl(p.valorEstimado)}</span>
+            <div class="row-actions">
+              <button class="btn ghost sm" data-action="converter-previsao-gasto" data-id="${p.id}">Virou despesa de verdade</button>
+              <button class="icon-btn" data-action="excluir-previsao-gasto" data-id="${p.id}" title="Excluir">✕</button>
+            </div>
+          </div>
+        `).join('') : `<div class="empty">Nenhuma previsão ainda. Sincronize com o VK Industrial pra puxar as recomendações de compra automaticamente, ou adicione à mão.</div>`}
+      </div>
+      <div class="note" style="margin:0;border-radius:0;border-top:1px solid var(--line);">${cfg.ultimaSincronizacaoRecomendacoes ? `Última sincronização com o VK: ${new Date(cfg.ultimaSincronizacaoRecomendacoes).toLocaleString('pt-BR')}. ` : ''}${previsoesAtivas.length ? `Total previsto: <strong>${brl(totalPrevisto)}</strong> — ` : ''}Esses valores já entram no gráfico e nos cards acima, mas não aparecem em Contas a Pagar nem no DRE até "Virou despesa de verdade" ser clicado.</div>
+    </div>
+    <div class="note" style="margin-top:0;">Projeção baseada no saldo atual real + contas a pagar/receber já cadastradas como pendentes + as previsões de gasto acima. Não inclui recorrências ainda não geradas.</div>
   `;
 }
 
@@ -7355,6 +7466,16 @@ function viewVK(){
             <button class="btn" id="btnSincronizarEstoqueInsumosVK">⟳ Sincronizar</button>
           </div>
         </div>
+        <div class="vk-sync-row">
+          <div>
+            <div class="vk-status-label">Recomendações de compra (previsão de caixa)</div>
+            <div class="vk-status-sub">${cfg.ultimaSincronizacaoRecomendacoes ? 'Última: '+new Date(cfg.ultimaSincronizacaoRecomendacoes).toLocaleString('pt-BR') : 'Ainda não sincronizado'} · ${(state.previsoesGastoFuturo||[]).filter(p=>p.origem==='vk' && !p.convertida).length} previsão(ões) ativa(s) vinda(s) do VK</div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn ghost" data-action="ver-previsao-relatorio">Ver previsões</button>
+            <button class="btn" id="btnSincronizarRecomendacoesVKTopo">⟳ Sincronizar</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -7532,6 +7653,23 @@ function viewVK(){
   estoqueMinimo: number     // opcional — aceita também estoqueMin
 }</pre>
         O valor de cada insumo entra no Balanço como <span class="mono">quantidadeAtual × precoMedio</span>, somado na linha "Estoque de Insumos e Matérias-Primas". Essa tela é só um espelho — não cria lançamento nenhum, e a quantidade/custo continuam sendo geridos de verdade no VK Industrial.
+      </div>
+    </details>
+
+    <details class="panel-details">
+      <summary>Esquema esperado — Recomendações de Compra (previsão de caixa automática)</summary>
+      <div style="padding:16px 20px;font-size:12px;color:var(--text-soft);line-height:1.7;">
+        Essa sincronização lê uma nova coleção do projeto <span class="mono">vk-provisorio</span>: <span class="mono">recomendacoes_compra</span> — um documento por recomendação de compra de insumo, gerada conforme os pedidos vão entrando no VK Industrial (mesma lógica do relatório "Previsão de consumo/compra" que já existe lá):
+        <pre class="mono" style="background:var(--bone);padding:10px 12px;border-radius:8px;margin:8px 0;white-space:pre-wrap;font-size:11px;">{
+  insumoId: string,            // opcional — id de um documento em "insumos"
+  insumoNome: string,          // opcional — usado se não tiver insumoId
+  quantidadeRecomendada: number,
+  unidade: string,             // opcional
+  precoEstimado: number,       // opcional — R$ por unidade; se não vier, usa o precoMedio do insumo
+  valorEstimado: number,       // opcional — se vier pronto, usa direto em vez de calcular quantidade×preço
+  dataSugerida: "AAAA-MM-DD"   // data sugerida pra compra (aceita também dataPrevista)
+}</pre>
+        Cada recomendação vira automaticamente uma <strong>previsão de gasto futuro</strong> aqui no Livro Caixa (tela "Previsão de Saldo Futuro") — entra na projeção do saldo, mas não é uma despesa de verdade ainda. Se uma recomendação sumir do VK Industrial (o pedido que a gerou foi cancelado, por exemplo) e ainda não tiver virado despesa aqui, ela é removida automaticamente na próxima sincronização. Se já tiver sido confirmada como despesa de verdade (botão "Virou despesa de verdade"), ela fica registrada mesmo que a recomendação original suma.
       </div>
     </details>
   `;
@@ -8029,6 +8167,7 @@ function renderConfigFirebase(){
     ['Faturas aguardando revisão', (state.faturasPendentes||[]).length],
     ['Aprovações VK aguardando revisão', (state.vkAprovacoes||[]).length],
     ['Insumos no espelho de estoque', (state.estoqueInsumos||[]).length],
+    ['Previsões de gasto futuro', (state.previsoesGastoFuturo||[]).length],
     ['Fornecedores', (state.fornecedores||[]).length],
     ['Recorrências', (state.recorrencias||[]).length],
     ['Registros no log de auditoria', (state.logAuditoria||[]).length],
@@ -8452,6 +8591,46 @@ function attachViewHandlers(){
       if(document.getElementById('chartPrevisao')){
         desenharGraficoPrevisao('chartPrevisao', projecaoDiariaSaldo(previsaoDiasAtivo).pontos);
       }
+      document.getElementById('btnNovaPrevisaoGasto')?.addEventListener('click', ()=>openPrevisaoGastoModal());
+      const btnSincronizarRecomendacoesVK = document.getElementById('btnSincronizarRecomendacoesVK');
+      if(btnSincronizarRecomendacoesVK) btnSincronizarRecomendacoesVK.addEventListener('click', ()=>{
+        if(!state.vkConfig.firebaseConfig || !state.vkConfig.email || !state.vkConfig.senha){
+          showToast('Configure o acesso ao VK Industrial primeiro, na tela de Integrações → VK Industrial');
+          return;
+        }
+        btnSincronizarRecomendacoesVK.textContent = 'Sincronizando...';
+        btnSincronizarRecomendacoesVK.disabled = true;
+        sincronizarRecomendacoesCompraVK();
+      });
+      document.querySelectorAll('[data-action="converter-previsao-gasto"]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const p = (state.previsoesGastoFuturo||[]).find(x=>x.id===btn.dataset.id);
+          if(!p) return;
+          state.lancamentos.push({
+            id: uid(), tipo:'saida', categoria:'Insumos',
+            descricao: p.descricao, valor: p.valorEstimado,
+            fornecedor: '', observacao: 'Convertido de previsão de gasto futuro',
+            contaId: state.contas[0]?.id || '', dataVencimento: p.dataPrevista,
+            status: 'pendente', dataPagamento: null,
+            criadoEm: new Date().toISOString()
+          });
+          p.convertida = true;
+          persist();
+          document.getElementById('reportPanel').innerHTML = renderPrevisaoSaldoFuturo();
+          bindReportInner();
+          showToast('Virou conta a pagar de verdade — confira/edite os detalhes se precisar');
+        });
+      });
+      document.querySelectorAll('[data-action="excluir-previsao-gasto"]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          if(!confirm('Excluir essa previsão?')) return;
+          state.previsoesGastoFuturo = (state.previsoesGastoFuturo||[]).filter(p=>p.id!==btn.dataset.id);
+          persist();
+          document.getElementById('reportPanel').innerHTML = renderPrevisaoSaldoFuturo();
+          bindReportInner();
+          showToast('Previsão excluída');
+        });
+      });
       document.getElementById('btnAddSocio')?.addEventListener('click', ()=>{
         const nome = (prompt('Nome do sócio:')||'').trim();
         if(!nome) return;
@@ -9724,6 +9903,26 @@ function attachViewHandlers(){
     btnSincronizarEstoqueInsumosVK.textContent = 'Sincronizando...';
     btnSincronizarEstoqueInsumosVK.disabled = true;
     sincronizarEstoqueInsumosVK();
+  });
+  const btnSincronizarRecomendacoesVKTopo = document.getElementById('btnSincronizarRecomendacoesVKTopo');
+  if(btnSincronizarRecomendacoesVKTopo) btnSincronizarRecomendacoesVKTopo.addEventListener('click', ()=>{
+    const txt = document.getElementById('firebaseConfigInput').value.trim();
+    try{
+      state.vkConfig.firebaseConfig = txt ? JSON.parse(txt) : null;
+    }catch(e){ showToast('JSON do Firebase inválido — confira o formato'); return; }
+    state.vkConfig.email = document.getElementById('vkEmail').value.trim();
+    state.vkConfig.senha = document.getElementById('vkSenha').value;
+    persist();
+    btnSincronizarRecomendacoesVKTopo.textContent = 'Sincronizando...';
+    btnSincronizarRecomendacoesVKTopo.disabled = true;
+    sincronizarRecomendacoesCompraVK();
+  });
+  document.querySelectorAll('[data-action="ver-previsao-relatorio"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      relatorioAtivo = 'previsao';
+      currentView = 'relatorios';
+      render();
+    });
   });
 }
 
@@ -12165,6 +12364,43 @@ function openAtivoModal(existing, contaId){
     else { state.ativosInvestimento.push({ id: uid(), ...payload }); }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Ativo atualizado' : 'Ativo adicionado');
+  });
+}
+
+function openPrevisaoGastoModal(existing){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${existing ? 'Editar previsão de gasto' : 'Nova previsão de gasto futuro'}</h3>
+    <div class="note" style="margin-top:0;">Use pra anotar o que o VK Industrial recomendou comprar de insumos (ou qualquer outro gasto futuro esperado) — entra só na projeção de saldo, não vira despesa de verdade até você confirmar.</div>
+    <div class="field"><label>Descrição</label><input type="text" id="pgDescricao" value="${existing?escapeHTML(existing.descricao):''}" placeholder="Ex: Compra de farinha e açúcar recomendada"></div>
+    <div class="field-row">
+      <div class="field"><label>Valor estimado (R$)</label><input type="text" inputmode="decimal" id="pgValor" value="${existing?existing.valorEstimado:''}"></div>
+      <div class="field"><label>Data prevista</label><input type="date" id="pgData" value="${existing?existing.dataPrevista:todayISO()}"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarPrevisaoGasto">${existing?'Salvar':'Adicionar previsão'}</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarPrevisaoGasto').addEventListener('click', ()=>{
+    const descricao = document.getElementById('pgDescricao').value.trim();
+    const valorEstimado = numBR(document.getElementById('pgValor').value);
+    const dataPrevista = document.getElementById('pgData').value;
+    if(!descricao){ showToast('Digite uma descrição'); return; }
+    if(isNaN(valorEstimado) || valorEstimado<=0){ showToast('Digite um valor válido'); return; }
+    if(!dataPrevista){ showToast('Escolha a data prevista'); return; }
+    if(!state.previsoesGastoFuturo) state.previsoesGastoFuturo = [];
+    if(existing){
+      existing.descricao = descricao; existing.valorEstimado = valorEstimado; existing.dataPrevista = dataPrevista;
+    } else {
+      state.previsoesGastoFuturo.push({ id: uid(), descricao, valorEstimado, dataPrevista, convertida: false, criadoEm: new Date().toISOString() });
+    }
+    persist(); closeModal();
+    document.getElementById('reportPanel').innerHTML = renderPrevisaoSaldoFuturo();
+    bindReportInner();
+    showToast(existing ? 'Previsão atualizada' : 'Previsão adicionada');
   });
 }
 
