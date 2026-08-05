@@ -727,7 +727,7 @@
 </script>
 <script>
 /* ---------------- Estado & Persistência ---------------- */
-const CATEGORIAS_SAIDA = ['Insumos', 'Fornecedores', 'Salários', 'Aluguel', 'Utilidades (água/luz/internet)', 'Impostos', 'Manutenção', 'Marketing', 'Cartão de Crédito', 'Comissões', 'Investimentos', 'Ativos Patrimoniais', 'Outros'];
+const CATEGORIAS_SAIDA = ['Insumos', 'Fornecedores', 'Salários', 'Aluguel', 'Utilidades (água/luz/internet)', 'Impostos', 'Manutenção', 'Marketing', 'Cartão de Crédito', 'Comissões', 'Investimentos', 'Despesas Financeiras', 'Ativos Patrimoniais', 'Outros'];
 const CATEGORIAS_ATIVO_PATRIMONIAL = ['Equipamento','Máquina','Veículo','Imóvel','Móveis e Utensílios','Informática','Outro'];
 // Vida útil padrão conforme IN RFB nº 1.700/2017, Anexo III (regra geral por categoria)
 const VIDA_UTIL_RFB = {
@@ -821,6 +821,7 @@ function aplicarMigracoes(s){
   if(s.vkConfig && s.vkConfig.contaIdEstoque===undefined) s.vkConfig.contaIdEstoque = '';
   if(s.vkConfig && s.vkConfig.categoriaEstoque===undefined) s.vkConfig.categoriaEstoque = 'Insumos';
   if(s.vkConfig && s.vkConfig.ultimaSincronizacaoEstoque===undefined) s.vkConfig.ultimaSincronizacaoEstoque = null;
+  if(s.vkConfig && s.vkConfig.ultimaSincronizacaoEstoqueInsumos===undefined) s.vkConfig.ultimaSincronizacaoEstoqueInsumos = null;
   if(!s.processosConfig){
     s.processosConfig = { firebaseConfig: null, email: '', senha: '', ultimaSincronizacao: null };
   }
@@ -851,6 +852,7 @@ function aplicarMigracoes(s){
   if(!s.mesesFechados) s.mesesFechados = [];
   if(!s.socios) s.socios = [];
   if(!s.oportunidadesVenda) s.oportunidadesVenda = [];
+  if(!s.estoqueInsumos) s.estoqueInsumos = [];
   if(!s.orcamentoAlertaPct) s.orcamentoAlertaPct = {};
   ['saida','entrada'].forEach(tipo=>{
     (s.categorias?.[tipo]||[]).forEach((c,i)=>{ if(!c.cor) c.cor = CATEGORIA_CORES[i % CATEGORIA_CORES.length]; });
@@ -1172,6 +1174,7 @@ function render(){
   else if(currentView==='integracoes') main.innerHTML = viewIntegracoes();
   else if(currentView==='vk') main.innerHTML = viewVK();
   else if(currentView==='vk-aprovacoes') main.innerHTML = viewVKAprovacoes();
+  else if(currentView==='estoque-insumos') main.innerHTML = viewEstoqueInsumos();
   else if(currentView==='processos') main.innerHTML = viewProcessosConfig();
   else if(currentView==='configuracoes') main.innerHTML = viewConfiguracoes();
   else if(currentView==='configuracao-detalhe') main.innerHTML = viewConfiguracaoDetalhe();
@@ -1533,6 +1536,56 @@ async function sincronizarPedidosVK(){
   }catch(e){
     console.error('Erro ao sincronizar VK Industrial:', e);
     let msg = 'Falha ao sincronizar';
+    if(e.code==='auth/wrong-password' || e.code==='auth/user-not-found' || e.code==='auth/invalid-credential') msg = 'E-mail ou senha incorretos';
+    else if(e.code==='permission-denied') msg = 'Sem permissão para ler os dados — confira o login';
+    else if(e.message) msg += ': ' + e.message;
+    showToast(msg);
+    render();
+  }
+}
+
+async function sincronizarEstoqueInsumosVK(){
+  const cfg = state.vkConfig;
+  if(!cfg.firebaseConfig){ showToast('Cole a configuração do Firebase antes de sincronizar'); render(); return; }
+  if(!cfg.email || !cfg.senha){ showToast('Informe o e-mail e a senha de acesso ao VK Industrial'); render(); return; }
+  if(typeof firebase === 'undefined'){ showToast('Não foi possível carregar o Firebase — confira a internet'); render(); return; }
+
+  try{
+    if(!vkFirebaseApp){
+      vkFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'vk-industrial');
+    }
+    const auth = vkFirebaseApp.auth();
+    if(!auth.currentUser){
+      await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
+    }
+    const db = vkFirebaseApp.firestore();
+    const insumosSnap = await db.collection('insumos').get({ source: 'server' });
+    const insumosVK = insumosSnap.docs.map(d=>({ id: d.id, ...d.data() }));
+
+    const novoEstoque = insumosVK.map(i=>{
+      const quantidade = Number(i.quantidadeAtual ?? i.estoqueAtual ?? i.quantidade ?? i.estoque ?? 0) || 0;
+      const precoMedio = Number(i.precoMedio ?? i.custoMedio ?? i.preco ?? 0) || 0;
+      return {
+        insumoId: i.id,
+        nome: i.nome || 'Insumo sem nome',
+        unidade: i.unidade || 'un',
+        categoria: i.categoria || '',
+        quantidade,
+        precoMedio,
+        valorTotal: Math.round(quantidade*precoMedio*100)/100,
+        estoqueMinimo: Number(i.estoqueMinimo ?? i.estoqueMin ?? 0) || 0
+      };
+    });
+
+    state.estoqueInsumos = novoEstoque;
+    cfg.ultimaSincronizacaoEstoqueInsumos = new Date().toISOString();
+    persist();
+    render();
+    const totalValor = novoEstoque.reduce((s,i)=>s+i.valorTotal,0);
+    showToast(`${novoEstoque.length} insumo(s) sincronizado(s) — valor total em estoque: ${brl(totalValor)}`);
+  }catch(e){
+    console.error('Erro ao sincronizar estoque de insumos do VK Industrial:', e);
+    let msg = 'Falha ao sincronizar estoque de insumos';
     if(e.code==='auth/wrong-password' || e.code==='auth/user-not-found' || e.code==='auth/invalid-credential') msg = 'E-mail ou senha incorretos';
     else if(e.code==='permission-denied') msg = 'Sem permissão para ler os dados — confira o login';
     else if(e.message) msg += ': ' + e.message;
@@ -4794,14 +4847,27 @@ function renderDRE(periodo){
       : `Análise horizontal: variação de cada total comparada ao período anterior de mesma duração (${fmtDate(deAnterior)} a ${fmtDate(ateAnterior)}).`}</div>
     <div class="report-block">
       <div class="report-title">Receita Operacional</div>
-      ${Object.keys(receitas).length ? Object.entries(receitas).map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">${brl(v)}${pctVertical(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma receita no período</span><span class="v">${brl(0)}</span></div>`}
-      <div class="report-line total"><span>(=) Total de Receitas</span><span class="v">${brl(totalReceitas)}${variacaoHTML(totalReceitas, totalReceitasAnt, totalReceitasAnoAnt)}</span></div>
+      ${(()=>{ const op = Object.entries(receitas).filter(([k])=>k!=='Rendimentos'); return op.length ? op.map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">${brl(v)}${pctVertical(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma receita operacional no período</span><span class="v">${brl(0)}</span></div>`; })()}
+      ${(()=>{ const totalReceitaOp = totalReceitas - (receitas['Rendimentos']||0); return `<div class="report-line total"><span>(=) Total de Receita Operacional</span><span class="v">${brl(totalReceitaOp)}</span></div>`; })()}
       <div class="report-line sub"><span>(-) Pedidos Cancelados${canceladosVK.length?' ('+canceladosVK.length+')':''}</span><span class="v">(${brl(totalCancelados)})</span></div>
-      <div class="report-line total"><span>(=) Receita Líquida</span><span class="v">${brl(receitaLiquida)}</span></div>
 
       <div class="report-title">Despesas Operacionais</div>
-      ${Object.keys(despesas).length ? Object.entries(despesas).map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">(${brl(v)})${pctVertical(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma despesa no período</span><span class="v">${brl(0)}</span></div>`}
-      <div class="report-line total"><span>(=) Total de Despesas</span><span class="v">(${brl(totalDespesas)})${variacaoHTML(totalDespesas, totalDespesasAnt, totalDespesasAnoAnt)}</span></div>
+      ${(()=>{ const op = Object.entries(despesas).filter(([k])=>k!=='Despesas Financeiras'); return op.length ? op.map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">(${brl(v)})${pctVertical(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma despesa operacional no período</span><span class="v">${brl(0)}</span></div>`; })()}
+      ${(()=>{ const totalDespesaOp = totalDespesas - (despesas['Despesas Financeiras']||0); return `<div class="report-line total"><span>(=) Total de Despesas Operacionais</span><span class="v">(${brl(totalDespesaOp)})</span></div>`; })()}
+
+      ${(()=>{
+        const receitasFinanceiras = receitas['Rendimentos']||0;
+        const despesasFinanceiras = despesas['Despesas Financeiras']||0;
+        const resultadoOperacional = receitaLiquida - (receitas['Rendimentos']||0) - (totalDespesas - (despesas['Despesas Financeiras']||0));
+        const resultadoFinanceiro = receitasFinanceiras - despesasFinanceiras;
+        return `
+      <div class="report-line total"><span>(=) Resultado Operacional</span><span class="v">${brl(resultadoOperacional)}</span></div>
+
+      <div class="report-title">Resultado Financeiro</div>
+      <div class="report-line sub"><span>(+) Receitas Financeiras</span><span class="v">${brl(receitasFinanceiras)}</span></div>
+      <div class="report-line sub"><span>(-) Despesas Financeiras</span><span class="v">(${brl(despesasFinanceiras)})</span></div>
+      <div class="report-line total"><span>(=) Resultado Financeiro</span><span class="v" style="color:${resultadoFinanceiro>=0?'var(--success)':'var(--danger)'}">${brl(resultadoFinanceiro)}</span></div>`;
+      })()}
 
       <div class="report-line result"><span>${resultado>=0?'Lucro':'Prejuízo'} do Período</span><span class="v" style="color:${resultado>=0?'var(--success)':'var(--danger)'}">${brl(resultado)}${variacaoHTML(resultado, resultadoAnt, resultadoAnoAnt)}</span></div>
     </div>
@@ -5937,6 +6003,8 @@ function renderRelatorioValuation(){
   `;
 }
 
+function totalEstoqueInsumos(){ return (state.estoqueInsumos||[]).reduce((s,i)=>s+i.valorTotal,0); }
+
 function renderBalanco(){
   const dataRef = document.getElementById('balancoData')?.value || todayISO();
   const caixaBancos = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
@@ -5948,7 +6016,8 @@ function renderBalanco(){
   }, 0);
   const investimentos = totalInvestimentos();
   const ativoImobilizado = totalAtivosPatrimoniais();
-  const totalAtivo = caixaBancos + aReceber + investimentos + ativoImobilizado;
+  const estoqueInsumos = totalEstoqueInsumos();
+  const totalAtivo = caixaBancos + aReceber + investimentos + ativoImobilizado + estoqueInsumos;
   const totalPassivo = aPagar + cartoesNaoFaturados;
   const patrimonioLiquido = totalAtivo - totalPassivo;
 
@@ -5963,6 +6032,7 @@ function renderBalanco(){
       <div class="report-line sub"><span>Caixa e Bancos</span><span class="v">${brl(caixaBancos)}</span></div>
       <div class="report-line sub"><span>Contas a Receber</span><span class="v">${brl(aReceber)}</span></div>
       <div class="report-line sub"><span>Investimentos Financeiros</span><span class="v">${brl(investimentos)}</span></div>
+      <div class="report-line sub"><span>Estoque de Insumos e Matérias-Primas</span><span class="v">${brl(estoqueInsumos)}</span></div>
       <div class="report-line sub"><span>Ativo Imobilizado (Ativos Patrimoniais, já depreciado)</span><span class="v">${brl(ativoImobilizado)}</span></div>
       <div class="report-line total"><span>Total do Ativo</span><span class="v">${brl(totalAtivo)}</span></div>
 
@@ -7275,6 +7345,16 @@ function viewVK(){
           </div>
           <button class="btn" id="btnSincronizarEstoqueVK">⟳ Sincronizar estoque</button>
         </div>
+        <div class="vk-sync-row">
+          <div>
+            <div class="vk-status-label">Estoque de insumos (valor pro Balanço Patrimonial)</div>
+            <div class="vk-status-sub">${cfg.ultimaSincronizacaoEstoqueInsumos ? 'Última: '+new Date(cfg.ultimaSincronizacaoEstoqueInsumos).toLocaleString('pt-BR') : 'Ainda não sincronizado'} · ${(state.estoqueInsumos||[]).length} insumo(s) · valor total ${brl(totalEstoqueInsumos())}</div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn ghost" data-goto="estoque-insumos">Ver estoque</button>
+            <button class="btn" id="btnSincronizarEstoqueInsumosVK">⟳ Sincronizar</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -7435,7 +7515,23 @@ function viewVK(){
 }</pre>
         <strong style="color:var(--ink);">Coleção "fornecedores"</strong> — precisa ter pelo menos <span class="mono">nome</span> e <span class="mono">cnpj</span> (ou <span class="mono">cnpjCpf</span>) por documento, pra vincular com o cadastro de fornecedores já existente aqui no Livro Caixa.
         <br><br>
-        <strong style="color:var(--ink);">Coleção "insumos"</strong> — precisa ter pelo menos <span class="mono">nome</span> por documento; só é usada pra montar a descrição dos itens na observação do lançamento.
+        <strong style="color:var(--ink);">Coleção "insumos"</strong> — precisa ter pelo menos <span class="mono">nome</span> por documento; usada aqui só pra montar a descrição dos itens na observação do lançamento (o valor do estoque em si é lido separadamente, veja abaixo).
+      </div>
+    </details>
+
+    <details class="panel-details">
+      <summary>Esquema esperado — Estoque de Insumos (valor pro Balanço Patrimonial)</summary>
+      <div style="padding:16px 20px;font-size:12px;color:var(--text-soft);line-height:1.7;">
+        Essa sincronização lê a mesma coleção <span class="mono">insumos</span> do projeto <span class="mono">vk-provisorio</span>, mas dessa vez pegando a quantidade e o custo médio atuais de cada insumo (não as entradas — o saldo já calculado pelo VK Industrial):
+        <pre class="mono" style="background:var(--bone);padding:10px 12px;border-radius:8px;margin:8px 0;white-space:pre-wrap;font-size:11px;">{
+  nome: string,
+  unidade: string,          // ex: "kg", "un", "L"
+  categoria: string,        // opcional
+  quantidadeAtual: number,  // aceita também estoqueAtual/quantidade/estoque
+  precoMedio: number,       // aceita também custoMedio/preco
+  estoqueMinimo: number     // opcional — aceita também estoqueMin
+}</pre>
+        O valor de cada insumo entra no Balanço como <span class="mono">quantidadeAtual × precoMedio</span>, somado na linha "Estoque de Insumos e Matérias-Primas". Essa tela é só um espelho — não cria lançamento nenhum, e a quantidade/custo continuam sendo geridos de verdade no VK Industrial.
       </div>
     </details>
   `;
@@ -7486,6 +7582,37 @@ function viewVKAprovacoes(){
         </div>
       </div>`;
     }).join('')}
+  `;
+}
+
+function viewEstoqueInsumos(){
+  const lista = [...(state.estoqueInsumos||[])].sort((a,b)=>b.valorTotal-a.valorTotal);
+  const total = totalEstoqueInsumos();
+  const abaixoDoMinimo = lista.filter(i=>i.estoqueMinimo>0 && i.quantidade<i.estoqueMinimo);
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="vk">← Integração VK Industrial</span>
+        <h1 style="margin-top:6px;">Estoque de Insumos</h1>
+        <p>Espelho somente-leitura do estoque do VK Industrial, usado pra compor o valor no Balanço Patrimonial</p>
+      </div>
+    </div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:16px;">
+      <div class="card saldo"><div class="label">Valor total em estoque</div><div class="value mono">${brl(total)}</div></div>
+      <div class="card"><div class="label">Insumos cadastrados</div><div class="value mono">${lista.length}</div></div>
+      <div class="card"><div class="label">Abaixo do estoque mínimo</div><div class="value mono ${abaixoDoMinimo.length?'neg':''}">${abaixoDoMinimo.length}</div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-body" style="padding:0;">
+        ${lista.length ? lista.map(i=>`
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
+            <div class="desc-cell"><div>${escapeHTML(i.nome)}${i.estoqueMinimo>0 && i.quantidade<i.estoqueMinimo ? ' <span style="color:var(--danger);font-size:11px;font-weight:600;">⚠️ abaixo do mínimo</span>' : ''}</div><div class="cat">${escapeHTML(i.categoria||'sem categoria')} · ${i.quantidade} ${escapeHTML(i.unidade)} × ${brl(i.precoMedio)}</div></div>
+            <span class="mono" style="font-weight:600;">${brl(i.valorTotal)}</span>
+          </div>
+        `).join('') : `<div class="empty">Nenhum insumo sincronizado ainda. Volte pra tela da integração e clique em "Sincronizar" no bloco de estoque de insumos.</div>`}
+      </div>
+    </div>
+    <div class="note" style="margin-top:0;">Essa tela é só um espelho — a quantidade e o preço médio são geridos no VK Industrial (compras, produção e perdas dão baixa/entrada lá). Aqui só serve pra trazer o VALOR desse estoque como ativo no Balanço Patrimonial. Sincronize sempre que quiser atualizar os números.</div>
   `;
 }
 
@@ -7901,6 +8028,7 @@ function renderConfigFirebase(){
     ['Notas pendentes', (state.notasPendentes||[]).length],
     ['Faturas aguardando revisão', (state.faturasPendentes||[]).length],
     ['Aprovações VK aguardando revisão', (state.vkAprovacoes||[]).length],
+    ['Insumos no espelho de estoque', (state.estoqueInsumos||[]).length],
     ['Fornecedores', (state.fornecedores||[]).length],
     ['Recorrências', (state.recorrencias||[]).length],
     ['Registros no log de auditoria', (state.logAuditoria||[]).length],
@@ -8732,7 +8860,13 @@ function attachViewHandlers(){
             const cat = listaCategorias(tipo).find(c=>c.id===id);
             if(!cat) return;
             const nomesAfetados = [cat.nome, ...(cat.subcategorias||[]).map(s=>`${cat.nome} / ${s.nome}`)];
-            if(nomesAfetados.some(n=>categoriaEmUso(n))){ showToast('Essa categoria está em uso em lançamentos — não é possível excluir'); return; }
+            if(nomesAfetados.some(n=>categoriaEmUso(n))){
+              const qtdLancamentos = nomesAfetados.reduce((s,n)=>s+state.lancamentos.filter(l=>l.categoria===n).length, 0);
+              if(confirm(`"${cat.nome}" tem ${qtdLancamentos} lançamento(s) e por isso não pode ser excluída direto (isso evitaria perder a categoria desses lançamentos).\n\nQuer mover esses lançamentos pra outra categoria agora? Depois de mover, você pode excluir essa categoria normalmente.`)){
+                openMoverLancamentosModal(tipo, cat.nome);
+              }
+              return;
+            }
             if(!confirm(`Excluir a categoria "${cat.nome}"${(cat.subcategorias||[]).length?' e suas subcategorias':''}?`)) return;
             state.categorias[tipo] = state.categorias[tipo].filter(c=>c.id!==id);
             persist(); paintCategorias(); showToast('Categoria excluída');
@@ -8746,7 +8880,13 @@ function attachViewHandlers(){
             const sub = cat?.subcategorias.find(s=>s.id===id);
             if(!cat || !sub) return;
             const full = `${cat.nome} / ${sub.nome}`;
-            if(categoriaEmUso(full)){ showToast('Essa subcategoria está em uso em lançamentos — não é possível excluir'); return; }
+            if(categoriaEmUso(full)){
+              const qtdLancamentos = state.lancamentos.filter(l=>l.categoria===full).length;
+              if(confirm(`"${sub.nome}" tem ${qtdLancamentos} lançamento(s) e por isso não pode ser excluída direto.\n\nQuer mover esses lançamentos pra outra categoria/subcategoria agora? Depois de mover, você pode excluir normalmente.`)){
+                openMoverLancamentosModal(tipo, full);
+              }
+              return;
+            }
             if(!confirm(`Excluir a subcategoria "${sub.nome}"?`)) return;
             cat.subcategorias = cat.subcategorias.filter(s=>s.id!==id);
             persist(); paintCategorias(); showToast('Subcategoria excluída');
@@ -9571,6 +9711,19 @@ function attachViewHandlers(){
     btnSincronizarEstoqueVK.textContent = 'Sincronizando...';
     btnSincronizarEstoqueVK.disabled = true;
     sincronizarEntradasEstoqueVK();
+  });
+  const btnSincronizarEstoqueInsumosVK = document.getElementById('btnSincronizarEstoqueInsumosVK');
+  if(btnSincronizarEstoqueInsumosVK) btnSincronizarEstoqueInsumosVK.addEventListener('click', ()=>{
+    const txt = document.getElementById('firebaseConfigInput').value.trim();
+    try{
+      state.vkConfig.firebaseConfig = txt ? JSON.parse(txt) : null;
+    }catch(e){ showToast('JSON do Firebase inválido — confira o formato'); return; }
+    state.vkConfig.email = document.getElementById('vkEmail').value.trim();
+    state.vkConfig.senha = document.getElementById('vkSenha').value;
+    persist();
+    btnSincronizarEstoqueInsumosVK.textContent = 'Sincronizando...';
+    btnSincronizarEstoqueInsumosVK.disabled = true;
+    sincronizarEstoqueInsumosVK();
   });
 }
 
@@ -11402,7 +11555,7 @@ function publicarNotaCorretagem(nota){
       });
     } else {
       state.lancamentos.push({
-        id: uid(), tipo:'saida', categoria:'Investimentos',
+        id: uid(), tipo:'saida', categoria:'Despesas Financeiras',
         descricao: `Perda de capital${corretora ? ' — '+corretora : ''} (nota de corretagem)`,
         valor: Math.round(Math.abs(ganhoPerdaCapital)*100)/100, contaId: contaBancariaId, status: statusSaida,
         dataVencimento: dataDebito, dataPagamento,
@@ -12074,7 +12227,7 @@ function openResgateModal(ativoId){
         });
       } else {
         state.lancamentos.push({
-          id: uid(), tipo:'saida', categoria:'Investimentos', descricao:`Perda no resgate — ${a.nome}`,
+          id: uid(), tipo:'saida', categoria:'Despesas Financeiras', descricao:`Perda no resgate — ${a.nome}`,
           valor: Math.abs(rendimento), contaId, dataVencimento: dataResgate, status:'pago', dataPagamento: dataResgate,
           criadoEm: new Date().toISOString()
         });
