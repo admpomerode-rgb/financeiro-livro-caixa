@@ -855,6 +855,7 @@ function aplicarMigracoes(s){
   if(!s.oportunidadesVenda) s.oportunidadesVenda = [];
   if(!s.estoqueInsumos) s.estoqueInsumos = [];
   if(!s.previsoesGastoFuturo) s.previsoesGastoFuturo = [];
+  if(!s.recebimentosDinheiroRep) s.recebimentosDinheiroRep = [];
   if(!s.orcamentoAlertaPct) s.orcamentoAlertaPct = {};
   ['saida','entrada'].forEach(tipo=>{
     (s.categorias?.[tipo]||[]).forEach((c,i)=>{ if(!c.cor) c.cor = CATEGORIA_CORES[i % CATEGORIA_CORES.length]; });
@@ -1177,6 +1178,7 @@ function render(){
   else if(currentView==='vk') main.innerHTML = viewVK();
   else if(currentView==='vk-aprovacoes') main.innerHTML = viewVKAprovacoes();
   else if(currentView==='estoque-insumos') main.innerHTML = viewEstoqueInsumos();
+  else if(currentView==='a-receber-representante') main.innerHTML = viewAReceberRepresentante();
   else if(currentView==='processos') main.innerHTML = viewProcessosConfig();
   else if(currentView==='configuracoes') main.innerHTML = viewConfiguracoes();
   else if(currentView==='configuracao-detalhe') main.innerHTML = viewConfiguracaoDetalhe();
@@ -1516,17 +1518,51 @@ async function sincronizarPedidosVK(){
       novos++;
     });
 
+    // Recebimentos em dinheiro marcados pelo representante no VK Industrial
+    if(!state.recebimentosDinheiroRep) state.recebimentosDinheiroRep = [];
+    const idsPedidosComFlag = new Set(pedidos.filter(p=>p.pagamentoDinheiro===true).map(p=>p.id));
+    let recNovos = 0, recRemovidos = 0;
+    state.recebimentosDinheiroRep = state.recebimentosDinheiroRep.filter(r=>{
+      if(idsPedidosComFlag.has(r.vkPedidoId)) return true;
+      if(r.conferido) return true; // já foi conferido/acertado, mantém o histórico mesmo se a flag sumir lá
+      recRemovidos++;
+      return false;
+    });
+    pedidos.filter(p=>p.pagamentoDinheiro===true).forEach(p=>{
+      const jaExiste = state.recebimentosDinheiroRep.find(r=>r.vkPedidoId===p.id);
+      const cliente = clientes.find(c=>c.id===p.clienteId);
+      const rep = representantesVK.find(r=>r.id===p.representanteId);
+      if(jaExiste){
+        if(!jaExiste.conferido){
+          jaExiste.valor = p.valorTotal;
+          jaExiste.dataMarcado = p.pagamentoDinheiroData || jaExiste.dataMarcado;
+        }
+        return;
+      }
+      state.recebimentosDinheiroRep.push({
+        id: uid(), vkPedidoId: p.id, numero: p.numero,
+        representanteId: p.representanteId || null, representanteNome: rep ? rep.nome : 'Sem representante',
+        clienteNome: cliente ? cliente.nome : '—',
+        valor: p.valorTotal,
+        dataMarcado: p.pagamentoDinheiroData || new Date().toISOString(),
+        conferido: false, conferidoEm: null,
+        criadoEm: new Date().toISOString()
+      });
+      recNovos++;
+    });
+
     cfg.ultimaSincronizacao = new Date().toISOString();
     state.vkDivergencias = divergentes;
     persist();
     render();
     console.log(`Sincronização VK: ${pedidos.length} pedidos no total, ${novos} novos aguardando aprovação, ${atualizados} atualizados, ${atualizadosAprovacao} atualizados na fila de aprovação, ${jaImportados} já importados antes, ${cancelados} cancelados (${marcadosCancelados} marcados agora como cancelado), ${divergentes.length} divergência(s) pra conferir.`);
     let msgFinal;
-    if(novos>0 || marcadosCancelados>0 || atualizados>0){
+    if(novos>0 || marcadosCancelados>0 || atualizados>0 || recNovos>0){
       const partes = [];
       if(novos>0) partes.push(`${novos} pedido(s) aguardando aprovação`);
       if(atualizados>0) partes.push(`${atualizados} corrigido(s)`);
       if(marcadosCancelados>0) partes.push(`${marcadosCancelados} marcado(s) como cancelado(s)`);
+      if(recNovos>0) partes.push(`${recNovos} recebimento(s) em dinheiro novo(s)`);
       if(divergentes.length>0) partes.push(`${divergentes.length} precisam de conferência`);
       msgFinal = partes.join(' · ');
     } else if(divergentes.length>0){
@@ -7476,6 +7512,13 @@ function viewVK(){
             <button class="btn" id="btnSincronizarRecomendacoesVKTopo">⟳ Sincronizar</button>
           </div>
         </div>
+        <div class="vk-sync-row">
+          <div>
+            <div class="vk-status-label">A receber do representante (dinheiro em mãos)</div>
+            <div class="vk-status-sub">Vem junto da sincronização de pedidos, acima · ${(state.recebimentosDinheiroRep||[]).filter(r=>!r.conferido).length} pedido(s) pendente(s) · total ${brl((state.recebimentosDinheiroRep||[]).filter(r=>!r.conferido).reduce((s,r)=>s+r.valor,0))}</div>
+          </div>
+          <button class="btn ghost" data-goto="a-receber-representante">Ver tela</button>
+        </div>
       </div>
     </div>
 
@@ -7672,6 +7715,19 @@ function viewVK(){
         Cada recomendação vira automaticamente uma <strong>previsão de gasto futuro</strong> aqui no Livro Caixa (tela "Previsão de Saldo Futuro") — entra na projeção do saldo, mas não é uma despesa de verdade ainda. Se uma recomendação sumir do VK Industrial (o pedido que a gerou foi cancelado, por exemplo) e ainda não tiver virado despesa aqui, ela é removida automaticamente na próxima sincronização. Se já tiver sido confirmada como despesa de verdade (botão "Virou despesa de verdade"), ela fica registrada mesmo que a recomendação original suma.
       </div>
     </details>
+
+    <details class="panel-details">
+      <summary>Esquema esperado — Recebimento em Dinheiro pelo Representante (ainda precisa ser feito do lado do VK Industrial)</summary>
+      <div style="padding:16px 20px;font-size:12px;color:var(--text-soft);line-height:1.7;">
+        Essa é a única peça que ainda falta construir <strong>do lado do VK Industrial</strong> — não dá pra fazer por aqui, é outro sistema. A ideia: quando o representante marcar que recebeu um pedido em dinheiro, o VK Industrial precisa gravar dois campos a mais no próprio documento do pedido (mesma coleção <span class="mono">pedidos</span> que já é lida na sincronização de pedidos aqui em cima — não precisa de coleção nova):
+        <pre class="mono" style="background:var(--bone);padding:10px 12px;border-radius:8px;margin:8px 0;white-space:pre-wrap;font-size:11px;">{
+  // campos que já existem no pedido continuam iguais (numero, clienteId, representanteId, valorTotal...)
+  pagamentoDinheiro: boolean,       // true quando o representante marcar "recebido em dinheiro"
+  pagamentoDinheiroData: string     // data/hora ISO de quando marcou (ex: new Date().toISOString())
+}</pre>
+        Assim que esses dois campos existirem, a próxima sincronização de pedidos aqui no Livro Caixa já detecta sozinha e alimenta a tela "A Receber do Representante" — com o pedido, o cliente, o valor, e a data/hora exata que foi marcado. Não precisa de nenhuma sincronização extra além da que já existe.
+      </div>
+    </details>
   `;
 }
 
@@ -7720,6 +7776,64 @@ function viewVKAprovacoes(){
         </div>
       </div>`;
     }).join('')}
+  `;
+}
+
+function viewAReceberRepresentante(){
+  const pendentes = (state.recebimentosDinheiroRep||[]).filter(r=>!r.conferido);
+  const conferidos = [...(state.recebimentosDinheiroRep||[])].filter(r=>r.conferido).sort((a,b)=>(b.conferidoEm||'').localeCompare(a.conferidoEm||''));
+  const porRep = {};
+  pendentes.forEach(r=>{
+    const chave = r.representanteNome || 'Sem representante';
+    if(!porRep[chave]) porRep[chave] = [];
+    porRep[chave].push(r);
+  });
+  const totalGeral = pendentes.reduce((s,r)=>s+r.valor,0);
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="vk">← Integração VK Industrial</span>
+        <h1 style="margin-top:6px;">A Receber do Representante</h1>
+        <p>Pedidos que o representante marcou como recebidos em dinheiro no VK Industrial — dinheiro que ele ainda precisa trazer/repassar</p>
+      </div>
+    </div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:16px;">
+      <div class="card saldo"><div class="label">Total a receber dos representantes</div><div class="value mono">${brl(totalGeral)}</div></div>
+      <div class="card"><div class="label">Representantes com pendência</div><div class="value mono">${Object.keys(porRep).length}</div></div>
+      <div class="card"><div class="label">Pedidos pendentes</div><div class="value mono">${pendentes.length}</div></div>
+    </div>
+    ${Object.keys(porRep).length ? Object.entries(porRep).map(([nomeRep, pedidosRep])=>{
+      const totalRep = pedidosRep.reduce((s,r)=>s+r.valor,0);
+      return `
+      <div class="panel" style="margin-bottom:16px;">
+        <div class="panel-head">
+          <h2>${escapeHTML(nomeRep)} <span style="font-weight:400;font-size:11.5px;color:var(--text-soft);">· precisa trazer ${brl(totalRep)}</span></h2>
+          <button class="btn ghost sm" data-action="conferir-tudo-rep" data-rep="${escapeHTML(nomeRep)}">✓ Já recebi tudo desse representante</button>
+        </div>
+        <div class="panel-body" style="padding:0;">
+          ${pedidosRep.sort((a,b)=>(b.dataMarcado||'').localeCompare(a.dataMarcado||'')).map(r=>`
+            <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
+              <div class="desc-cell"><div>Pedido N° ${escapeHTML(String(r.numero||'—'))} — ${escapeHTML(r.clienteNome)}</div><div class="cat">Marcado em ${new Date(r.dataMarcado).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'})}</div></div>
+              <span class="mono" style="font-weight:600;">${brl(r.valor)}</span>
+              <button class="icon-btn" data-action="conferir-recebimento-rep" data-id="${r.id}" title="Já recebi esse valor">✓</button>
+            </div>
+          `).join('')}
+        </div>
+      </div>`;
+    }).join('') : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum recebimento em dinheiro pendente no momento.</div></div>`}
+    ${conferidos.length ? `
+    <details class="panel-details">
+      <summary>Já conferidos (${conferidos.length})</summary>
+      <div class="panel-body">
+        ${conferidos.slice(0,50).map(r=>`
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto;">
+            <div class="desc-cell"><div>${escapeHTML(r.representanteNome)} — Pedido N° ${escapeHTML(String(r.numero||'—'))}</div><div class="cat">Conferido em ${r.conferidoEm ? new Date(r.conferidoEm).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—'}</div></div>
+            <span class="mono" style="color:var(--text-soft);">${brl(r.valor)}</span>
+          </div>
+        `).join('')}
+      </div>
+    </details>` : ''}
+    <div class="note" style="margin-top:0;">Esses dados vêm do VK Industrial junto com a sincronização de pedidos — sincronize pedidos pra atualizar essa tela. Marcar como conferido aqui é só um controle interno (pra saber quem já acertou e quem ainda não); não gera lançamento nenhum sozinho.</div>
   `;
 }
 
@@ -9922,6 +10036,29 @@ function attachViewHandlers(){
       relatorioAtivo = 'previsao';
       currentView = 'relatorios';
       render();
+    });
+  });
+  document.querySelectorAll('[data-action="conferir-recebimento-rep"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const r = (state.recebimentosDinheiroRep||[]).find(x=>x.id===btn.dataset.id);
+      if(!r) return;
+      if(!confirm(`Confirmar que você já recebeu ${brl(r.valor)} de ${r.representanteNome} (Pedido N° ${r.numero})?`)) return;
+      r.conferido = true;
+      r.conferidoEm = new Date().toISOString();
+      persist(); render();
+      showToast('Recebimento conferido');
+    });
+  });
+  document.querySelectorAll('[data-action="conferir-tudo-rep"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const nomeRep = btn.dataset.rep;
+      const pendentesRep = (state.recebimentosDinheiroRep||[]).filter(r=>!r.conferido && r.representanteNome===nomeRep);
+      const total = pendentesRep.reduce((s,r)=>s+r.valor,0);
+      if(!confirm(`Confirmar que você já recebeu tudo de ${nomeRep}: ${brl(total)} (${pendentesRep.length} pedido(s))?`)) return;
+      const agora = new Date().toISOString();
+      pendentesRep.forEach(r=>{ r.conferido = true; r.conferidoEm = agora; });
+      persist(); render();
+      showToast(`${pendentesRep.length} recebimento(s) conferido(s)`);
     });
   });
 }
