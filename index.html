@@ -241,6 +241,7 @@
   .ledger-row.compact{grid-template-columns:12px 1fr 100px auto;gap:10px;padding:5px 16px;font-size:11.5px;}
   .ledger-row.compact .cat{font-size:10px;}
   .fornecedor-row{grid-template-columns:14px 1fr 160px 130px auto;}
+  .ativo-patrimonial-row{grid-template-columns:14px 1fr 120px 120px 120px auto;}
   .log-row{grid-template-columns:130px 160px 1fr;}
   .ativo-row{grid-template-columns:14px 1fr 120px 120px 110px 120px auto;}
   .desc-cell{min-width:0;overflow:hidden;}
@@ -519,6 +520,8 @@
     .ledger-row .col-cat, .ledger-row .col-status{display:none;}
     .fornecedor-row{grid-template-columns:10px 1fr 85px auto !important;gap:8px;padding:10px 12px;}
     .fornecedor-row .fornecedor-contato{display:none;}
+    .ativo-patrimonial-row{grid-template-columns:10px 1fr 90px auto !important;gap:8px;padding:10px 12px;}
+    .ativo-patrimonial-row .ativo-patrimonial-col{display:none;}
     .log-row{display:block !important;padding:10px 12px;}
     .log-row-data{display:block;}
     .log-row-acao{display:block;margin-top:2px;}
@@ -675,6 +678,7 @@
       <div class="more-item" data-view="orcamento"><span class="more-icon">🗂️</span>Orçamento e Planejamento</div>
       <div class="more-item" data-view="comissoes"><span class="more-icon">🤝</span>Comissões</div>
       <div class="more-item" data-view="funil"><span class="more-icon">🔻</span>Funil de Vendas</div>
+      <div class="more-item" data-view="a-receber-representante"><span class="more-icon">💵</span>A Receber do Representante</div>
       <div class="more-item" data-view="ativos"><span class="more-icon">📦</span>Ativos Patrimoniais</div>
       <div class="more-item" data-view="investimentos"><span class="more-icon">📈</span>Investimentos</div>
       <div class="more-item" data-view="integracoes"><span class="more-icon">🔌</span>Central de Integrações</div>
@@ -1474,14 +1478,18 @@ async function sincronizarPedidosVK(){
 
       if(existente){
         jaImportados++;
-        const mudou = existente.valor!==p.valorTotal || existente.fornecedor!==(cliente?cliente.nome:'') || existente.dataVencimento!==vencimentoNovo || existente.observacao!==observacaoNova || existente.vendedorId!==vendedorId;
+        // Nome/vendedor do pedido sempre é corrigido, mesmo já recebido — não é dado financeiro sensível,
+        // é só a atribuição de quem vendeu (importante pra Comissões não ficar desatualizado)
+        if(existente.vendedorId!==vendedorId || existente.vendedorNome!==vendedorNome){
+          existente.vendedorId = vendedorId; existente.vendedorNome = vendedorNome;
+        }
+        const mudou = existente.valor!==p.valorTotal || existente.fornecedor!==(cliente?cliente.nome:'') || existente.dataVencimento!==vencimentoNovo || existente.observacao!==observacaoNova;
         if(mudou){
           if(existente.status==='pendente'){
             existente.valor = p.valorTotal;
             existente.fornecedor = cliente ? cliente.nome : '';
             existente.dataVencimento = vencimentoNovo;
             existente.observacao = observacaoNova;
-            existente.vendedorId = vendedorId; existente.vendedorNome = vendedorNome;
             atualizados++;
           } else {
             divergentes.push({ pedidoId: p.id, numero: p.numero, lancamentoId: existente.id, valorAntigo: existente.valor, valorNovo: p.valorTotal, status: existente.status });
@@ -1492,13 +1500,15 @@ async function sincronizarPedidosVK(){
 
       if(emAprovacao){
         jaImportados++;
+        if(emAprovacao.vendedorId!==vendedorId || emAprovacao.vendedorNome!==vendedorNome){
+          emAprovacao.vendedorId = vendedorId; emAprovacao.vendedorNome = vendedorNome;
+        }
         const mudouAprov = emAprovacao.valor!==p.valorTotal || emAprovacao.contraparte!==(cliente?cliente.nome:'') || emAprovacao.dataVencimento!==vencimentoNovo || emAprovacao.observacao!==observacaoNova;
         if(mudouAprov){
           emAprovacao.valor = p.valorTotal;
           emAprovacao.contraparte = cliente ? cliente.nome : '';
           emAprovacao.dataVencimento = vencimentoNovo;
           emAprovacao.observacao = observacaoNova;
-          emAprovacao.vendedorId = vendedorId; emAprovacao.vendedorNome = vendedorNome;
           atualizadosAprovacao++;
         }
         return;
@@ -6233,8 +6243,8 @@ function viewAtivosPatrimoniais(){
       <div class="panel-head"><h2>Bens cadastrados</h2></div>
       <div class="panel-body">
         ${state.ativosPatrimoniais.length ? `
-        <div class="ledger-row head" style="grid-template-columns:14px 1fr 120px 120px 120px auto;">
-          <span></span><span>Ativo</span><span>Aquisição</span><span>Depreciado</span><span>Valor atual</span><span></span>
+        <div class="ledger-row head ativo-patrimonial-row">
+          <span></span><span>Ativo</span><span class="ativo-patrimonial-col">Aquisição</span><span class="ativo-patrimonial-col">Depreciado</span><span>Valor atual</span><span></span>
         </div>
         ${state.ativosPatrimoniais.map(rowAtivoPatrimonialHTML).join('')}` : `<div class="empty">Nenhum ativo cadastrado ainda. Clique em "+ Ativo" para começar.</div>`}
       </div>
@@ -6246,16 +6256,17 @@ function rowAtivoPatrimonialHTML(a){
   const d = calcDepreciacao(a);
   const baixado = !!a.baixa;
   return `
-    <div class="ledger-row" data-id="${a.id}" style="grid-template-columns:14px 1fr 120px 120px 120px auto;${baixado?'opacity:.6;':''}">
+    <div class="ledger-row ativo-patrimonial-row" data-id="${a.id}" style="${baixado?'opacity:.6;':''}">
       <span class="dot ${baixado ? 'saida' : (d.totalmenteDepreciado?'saida':'entrada')}"></span>
       <div class="desc-cell" data-action="ver-ativo-patrimonial" data-id="${a.id}" style="cursor:pointer;">
         <div>${escapeHTML(a.nome)}${a.numeroPatrimonio ? ` <span class="mono" style="font-size:11px;color:var(--text-soft);">#${escapeHTML(a.numeroPatrimonio)}</span>` : ''}${baixado ? ' <span style="color:var(--danger);font-size:11px;font-weight:600;">· BAIXADO</span>' : ''}</div>
         <div class="cat">${escapeHTML(a.categoria)} · adquirido em ${fmtDate(a.dataAquisicao)}${!baixado && d.totalmenteDepreciado?' · totalmente depreciado':''}</div>
       </div>
-      <span class="mono" style="font-size:12.5px;">${brl(a.valorAquisicao)}</span>
-      <span class="mono" style="font-size:12.5px;color:var(--danger);">-${brl(d.depreciacaoAcumulada)}</span>
+      <span class="mono ativo-patrimonial-col" style="font-size:12.5px;">${brl(a.valorAquisicao)}</span>
+      <span class="mono ativo-patrimonial-col" style="font-size:12.5px;color:var(--danger);">-${brl(d.depreciacaoAcumulada)}</span>
       <span class="mono" style="font-weight:600;">${brl(d.valorAtual)}</span>
       <div class="row-actions">
+        <button class="icon-btn" data-action="editar-ativo-patrimonial" data-id="${a.id}" title="Editar">✎</button>
         <button class="icon-btn" data-action="excluir-ativo-patrimonial" data-id="${a.id}" title="Excluir">✕</button>
       </div>
     </div>
@@ -7517,7 +7528,7 @@ function viewVK(){
             <div class="vk-status-label">A receber do representante (dinheiro em mãos)</div>
             <div class="vk-status-sub">Vem junto da sincronização de pedidos, acima · ${(state.recebimentosDinheiroRep||[]).filter(r=>!r.conferido).length} pedido(s) pendente(s) · total ${brl((state.recebimentosDinheiroRep||[]).filter(r=>!r.conferido).reduce((s,r)=>s+r.valor,0))}</div>
           </div>
-          <button class="btn ghost" data-goto="a-receber-representante">Ver tela</button>
+          <span style="font-size:11.5px;color:var(--text-soft);">📍 Tela em "Mais → A Receber do Representante"</span>
         </div>
       </div>
     </div>
