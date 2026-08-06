@@ -1183,6 +1183,7 @@ function render(){
   else if(currentView==='vk-aprovacoes') main.innerHTML = viewVKAprovacoes();
   else if(currentView==='estoque-insumos') main.innerHTML = viewEstoqueInsumos();
   else if(currentView==='a-receber-representante') main.innerHTML = viewAReceberRepresentante();
+  else if(currentView==='avisos-pendentes-vk') main.innerHTML = viewAvisosPendentesVK();
   else if(currentView==='processos') main.innerHTML = viewProcessosConfig();
   else if(currentView==='configuracoes') main.innerHTML = viewConfiguracoes();
   else if(currentView==='configuracao-detalhe') main.innerHTML = viewConfiguracaoDetalhe();
@@ -7530,6 +7531,13 @@ function viewVK(){
           </div>
           <span style="font-size:11.5px;color:var(--text-soft);">📍 Tela em "Mais → A Receber do Representante"</span>
         </div>
+        <div class="vk-sync-row">
+          <div>
+            <div class="vk-status-label">Avisos pendentes ao VK Industrial</div>
+            <div class="vk-status-sub">Pedidos pagos aqui antes do aviso automático de Pix existir, que talvez o VK Industrial ainda não saiba · ${state.lancamentos.filter(l=>l.origem==='vk' && l.vkPedidoId && l.status==='recebido' && l.formaRecebimento!=='pix' && !l.revisadoAvisoVK).length} pra revisar</div>
+          </div>
+          <button class="btn ghost" data-goto="avisos-pendentes-vk">Revisar</button>
+        </div>
       </div>
     </div>
 
@@ -7791,6 +7799,38 @@ function viewVKAprovacoes(){
 }
 
 let arRepFiltro = '';
+
+function viewAvisosPendentesVK(){
+  const candidatos = state.lancamentos.filter(l=>l.origem==='vk' && l.vkPedidoId && l.status==='recebido' && l.formaRecebimento!=='pix' && !l.revisadoAvisoVK).sort((a,b)=>(b.dataPagamento||'').localeCompare(a.dataPagamento||''));
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="vk">← Integração VK Industrial</span>
+        <h1 style="margin-top:6px;">Avisos Pendentes ao VK Industrial</h1>
+        <p>Pedidos que já foram marcados como recebidos aqui ANTES do aviso automático de Pix existir — o representante pode não saber que já foram pagos</p>
+      </div>
+    </div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:16px;">
+      <div class="card saldo"><div class="label">Pedidos pra revisar</div><div class="value mono">${candidatos.length}</div></div>
+      <div class="card"><div class="label">Valor total</div><div class="value mono">${brl(candidatos.reduce((s,l)=>s+l.valor,0))}</div></div>
+    </div>
+    ${candidatos.length ? `
+    <div class="panel">
+      <div class="panel-body" style="padding:0;">
+        ${candidatos.map(l=>`
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto auto auto;align-items:center;">
+            <div class="desc-cell"><div>${escapeHTML(l.descricao)}</div><div class="cat">${escapeHTML(l.fornecedor||'')} · recebido em ${fmtDate(l.dataPagamento)}${l.formaRecebimento?' · forma registrada: '+escapeHTML(l.formaRecebimento):' · sem forma registrada (pedido antigo)'}</div></div>
+            <span class="mono" style="font-weight:600;">${brl(l.valor)}</span>
+            <button class="btn ghost sm" data-action="ignorar-aviso-vk" data-id="${l.id}">Não foi Pix</button>
+            <button class="btn sm" data-action="avisar-vk-retroativo" data-id="${l.id}">💰 Foi Pix — avisar VK</button>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+    ` : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum pedido pendente de revisão — tudo em dia.</div></div>`}
+    <div class="note" style="margin-top:0;">Essa lista mostra pedidos do VK Industrial já recebidos aqui sem uma forma de recebimento "Pix" confirmada. Se algum foi pago via Pix mas o VK Industrial não ficou sabendo (porque isso foi marcado antes do aviso automático existir, ou porque falhou por falta de internet na hora), use "Foi Pix — avisar VK" pra corrigir agora. Se não foi Pix (foi dinheiro, boleto, etc), use "Não foi Pix" só pra tirar da lista.</div>
+  `;
+}
 
 function viewAReceberRepresentante(){
   const todosPendentes = (state.recebimentosDinheiroRep||[]).filter(r=>!r.conferido);
@@ -10131,6 +10171,25 @@ function attachViewHandlers(){
   document.getElementById('arRepFiltroSelect')?.addEventListener('change', function(){
     arRepFiltro = this.value;
     render();
+  });
+  document.querySelectorAll('[data-action="avisar-vk-retroativo"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const l = state.lancamentos.find(x=>x.id===btn.dataset.id);
+      if(!l) return;
+      if(!confirm(`Confirmar que "${l.descricao}" (${brl(l.valor)}) foi pago via Pix, e avisar o VK Industrial agora?`)) return;
+      l.formaRecebimento = 'pix';
+      persist(); render();
+      avisarVKPedidoPagoPix(l.vkPedidoId);
+    });
+  });
+  document.querySelectorAll('[data-action="ignorar-aviso-vk"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const l = state.lancamentos.find(x=>x.id===btn.dataset.id);
+      if(!l) return;
+      l.revisadoAvisoVK = true;
+      persist(); render();
+      showToast('Tirado da lista de revisão');
+    });
   });
 }
 
