@@ -7790,8 +7790,12 @@ function viewVKAprovacoes(){
   `;
 }
 
+let arRepFiltro = '';
+
 function viewAReceberRepresentante(){
-  const pendentes = (state.recebimentosDinheiroRep||[]).filter(r=>!r.conferido);
+  const todosPendentes = (state.recebimentosDinheiroRep||[]).filter(r=>!r.conferido);
+  const nomesReps = [...new Set(todosPendentes.map(r=>r.representanteNome||'Sem representante'))].sort();
+  const pendentes = arRepFiltro ? todosPendentes.filter(r=>(r.representanteNome||'Sem representante')===arRepFiltro) : todosPendentes;
   const conferidos = [...(state.recebimentosDinheiroRep||[])].filter(r=>r.conferido).sort((a,b)=>(b.conferidoEm||'').localeCompare(a.conferidoEm||''));
   const porRep = {};
   pendentes.forEach(r=>{
@@ -7807,9 +7811,17 @@ function viewAReceberRepresentante(){
         <h1 style="margin-top:6px;">A Receber do Representante</h1>
         <p>Pedidos que o representante marcou como recebidos em dinheiro no VK Industrial — dinheiro que ele ainda precisa trazer/repassar</p>
       </div>
+      <button class="btn ghost" id="btnPdfARepresentante">📄 Gerar PDF</button>
+    </div>
+    <div class="field" style="max-width:280px;margin-bottom:14px;">
+      <label>Filtrar por representante</label>
+      <select id="arRepFiltroSelect">
+        <option value="">Todos os representantes</option>
+        ${nomesReps.map(n=>`<option value="${escapeHTML(n)}" ${arRepFiltro===n?'selected':''}>${escapeHTML(n)}</option>`).join('')}
+      </select>
     </div>
     <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:16px;">
-      <div class="card saldo"><div class="label">Total a receber dos representantes</div><div class="value mono">${brl(totalGeral)}</div></div>
+      <div class="card saldo"><div class="label">Total a receber${arRepFiltro?' de '+escapeHTML(arRepFiltro):''}</div><div class="value mono">${brl(totalGeral)}</div></div>
       <div class="card"><div class="label">Representantes com pendência</div><div class="value mono">${Object.keys(porRep).length}</div></div>
       <div class="card"><div class="label">Pedidos pendentes</div><div class="value mono">${pendentes.length}</div></div>
     </div>
@@ -7819,32 +7831,32 @@ function viewAReceberRepresentante(){
       <div class="panel" style="margin-bottom:16px;">
         <div class="panel-head">
           <h2>${escapeHTML(nomeRep)} <span style="font-weight:400;font-size:11.5px;color:var(--text-soft);">· precisa trazer ${brl(totalRep)}</span></h2>
-          <button class="btn ghost sm" data-action="conferir-tudo-rep" data-rep="${escapeHTML(nomeRep)}">✓ Já recebi tudo desse representante</button>
+          <button class="btn sm" data-action="liberar-tudo-rep" data-rep="${escapeHTML(nomeRep)}">💰 Liberar valores</button>
         </div>
         <div class="panel-body" style="padding:0;">
           ${pedidosRep.sort((a,b)=>(b.dataMarcado||'').localeCompare(a.dataMarcado||'')).map(r=>`
             <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
               <div class="desc-cell"><div>Pedido N° ${escapeHTML(String(r.numero||'—'))} — ${escapeHTML(r.clienteNome)}</div><div class="cat">Marcado em ${new Date(r.dataMarcado).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'})}</div></div>
               <span class="mono" style="font-weight:600;">${brl(r.valor)}</span>
-              <button class="icon-btn" data-action="conferir-recebimento-rep" data-id="${r.id}" title="Já recebi esse valor">✓</button>
+              <button class="btn ghost sm" data-action="liberar-um-rep" data-id="${r.id}">💰 Liberar</button>
             </div>
           `).join('')}
         </div>
       </div>`;
-    }).join('') : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum recebimento em dinheiro pendente no momento.</div></div>`}
+    }).join('') : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum recebimento em dinheiro pendente${arRepFiltro?' desse representante':''} no momento.</div></div>`}
     ${conferidos.length ? `
     <details class="panel-details">
-      <summary>Já conferidos (${conferidos.length})</summary>
+      <summary>Já liberados (${conferidos.length})</summary>
       <div class="panel-body">
         ${conferidos.slice(0,50).map(r=>`
           <div class="ledger-row compact" style="grid-template-columns:1fr auto;">
-            <div class="desc-cell"><div>${escapeHTML(r.representanteNome)} — Pedido N° ${escapeHTML(String(r.numero||'—'))}</div><div class="cat">Conferido em ${r.conferidoEm ? new Date(r.conferidoEm).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—'}</div></div>
+            <div class="desc-cell"><div>${escapeHTML(r.representanteNome)} — Pedido N° ${escapeHTML(String(r.numero||'—'))}</div><div class="cat">Liberado em ${r.conferidoEm ? new Date(r.conferidoEm).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—'}</div></div>
             <span class="mono" style="color:var(--text-soft);">${brl(r.valor)}</span>
           </div>
         `).join('')}
       </div>
     </details>` : ''}
-    <div class="note" style="margin-top:0;">Esses dados vêm do VK Industrial junto com a sincronização de pedidos — sincronize pedidos pra atualizar essa tela. Marcar como conferido aqui é só um controle interno (pra saber quem já acertou e quem ainda não); não gera lançamento nenhum sozinho.</div>
+    <div class="note" style="margin-top:0;">Esses dados vêm do VK Industrial junto com a sincronização de pedidos — sincronize pedidos pra atualizar essa tela. "Liberar valores" marca a conta a receber correspondente como recebida (na conta bancária escolhida) e libera o representante dessa pendência.</div>
   `;
 }
 
@@ -10099,28 +10111,26 @@ function attachViewHandlers(){
       render();
     });
   });
-  document.querySelectorAll('[data-action="conferir-recebimento-rep"]').forEach(btn=>{
+  document.querySelectorAll('[data-action="liberar-um-rep"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const r = (state.recebimentosDinheiroRep||[]).find(x=>x.id===btn.dataset.id);
       if(!r) return;
-      if(!confirm(`Confirmar que você já recebeu ${brl(r.valor)} de ${r.representanteNome} (Pedido N° ${r.numero})?`)) return;
-      r.conferido = true;
-      r.conferidoEm = new Date().toISOString();
-      persist(); render();
-      showToast('Recebimento conferido');
+      abrirLiberarValoresModal([r], `Pedido N° ${r.numero||'—'} — ${r.clienteNome}`);
     });
   });
-  document.querySelectorAll('[data-action="conferir-tudo-rep"]').forEach(btn=>{
+  document.querySelectorAll('[data-action="liberar-tudo-rep"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const nomeRep = btn.dataset.rep;
-      const pendentesRep = (state.recebimentosDinheiroRep||[]).filter(r=>!r.conferido && r.representanteNome===nomeRep);
-      const total = pendentesRep.reduce((s,r)=>s+r.valor,0);
-      if(!confirm(`Confirmar que você já recebeu tudo de ${nomeRep}: ${brl(total)} (${pendentesRep.length} pedido(s))?`)) return;
-      const agora = new Date().toISOString();
-      pendentesRep.forEach(r=>{ r.conferido = true; r.conferidoEm = agora; });
-      persist(); render();
-      showToast(`${pendentesRep.length} recebimento(s) conferido(s)`);
+      const pendentesRep = (state.recebimentosDinheiroRep||[]).filter(r=>!r.conferido && (r.representanteNome||'Sem representante')===nomeRep);
+      abrirLiberarValoresModal(pendentesRep, nomeRep);
     });
+  });
+  document.getElementById('btnPdfARepresentante')?.addEventListener('click', ()=>{
+    gerarAReceberRepresentantePDF(arRepFiltro);
+  });
+  document.getElementById('arRepFiltroSelect')?.addEventListener('change', function(){
+    arRepFiltro = this.value;
+    render();
   });
 }
 
@@ -12599,6 +12609,117 @@ function openPrevisaoGastoModal(existing){
     document.getElementById('reportPanel').innerHTML = renderPrevisaoSaldoFuturo();
     bindReportInner();
     showToast(existing ? 'Previsão atualizada' : 'Previsão adicionada');
+  });
+}
+
+function gerarAReceberRepresentantePDF(filtroRep){
+  if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
+  let pendentes = (state.recebimentosDinheiroRep||[]).filter(r=>!r.conferido);
+  if(filtroRep) pendentes = pendentes.filter(r=>(r.representanteNome||'Sem representante')===filtroRep);
+  if(!pendentes.length){ showToast('Nada pendente pra gerar PDF'); return; }
+  const porRep = {};
+  pendentes.forEach(r=>{
+    const chave = r.representanteNome || 'Sem representante';
+    if(!porRep[chave]) porRep[chave] = [];
+    porRep[chave].push(r);
+  });
+
+  const { jsPDF } = window.jspdf;
+  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+  const M = 18, W = 210 - M*2;
+  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], DANGER=[194,74,61];
+  let y = 22;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
+  docPdf.text('Livro Caixa Financeiro VK', M, y);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
+  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
+  y += 7;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 9;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
+  docPdf.text(`A Receber do Representante${filtroRep ? ' — '+filtroRep : ''}`, M, y);
+  y += 6;
+  const totalGeral = pendentes.reduce((s,r)=>s+r.valor,0);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
+  docPdf.text(`${pendentes.length} pedido(s) pendente(s) · total ${brl(totalGeral)}`, M, y);
+  y += 10;
+
+  Object.entries(porRep).forEach(([nomeRep, itens])=>{
+    if(y > 260){ docPdf.addPage(); y = 20; }
+    const totalRep = itens.reduce((s,r)=>s+r.valor,0);
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(11); docPdf.setTextColor(...INK);
+    docPdf.text(nomeRep, M, y);
+    docPdf.setTextColor(...DANGER);
+    docPdf.text(brl(totalRep), M+W, y, { align:'right' });
+    y += 6;
+    docPdf.setDrawColor(...LINEC); docPdf.line(M, y-3, M+W, y-3);
+    itens.sort((a,b)=>(b.dataMarcado||'').localeCompare(a.dataMarcado||'')).forEach(r=>{
+      if(y > 270){ docPdf.addPage(); y = 20; }
+      docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...INK);
+      const desc = `Pedido N° ${r.numero||'—'} — ${r.clienteNome}`;
+      const dataFmt = new Date(r.dataMarcado).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+      docPdf.text(`${desc.length>50?desc.slice(0,50)+'…':desc}  (${dataFmt})`, M+3, y);
+      docPdf.setTextColor(...SOFT);
+      docPdf.text(brl(r.valor), M+W, y, { align:'right' });
+      y += 5.5;
+    });
+    y += 5;
+  });
+
+  docPdf.save(`a-receber-representante${filtroRep ? '-'+filtroRep.toLowerCase().replace(/\s+/g,'-') : ''}.pdf`);
+  showToast('PDF baixado');
+}
+
+function abrirLiberarValoresModal(itens, tituloContexto){
+  if(!itens.length){ showToast('Nada pra liberar'); return; }
+  if(!state.contas.length){ showToast('Cadastre uma conta bancária primeiro'); return; }
+  const total = itens.reduce((s,r)=>s+r.valor,0);
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Liberar valores — ${escapeHTML(tituloContexto)}</h3>
+    <div class="note" style="margin-top:0;">${itens.length} pedido(s) · total <strong>${brl(total)}</strong>. Isso marca a conta a receber de cada pedido como recebida, na conta escolhida abaixo.</div>
+    <div style="max-height:180px;overflow:auto;margin:10px 0;">
+      ${itens.map(r=>`<div style="font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;"><span>Pedido N° ${escapeHTML(String(r.numero||'—'))} — ${escapeHTML(r.clienteNome)}</span><span class="mono">${brl(r.valor)}</span></div>`).join('')}
+    </div>
+    <div class="field">
+      <label>Conta bancária de destino</label>
+      <select id="lvConta">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select>
+    </div>
+    <div class="field"><label>Data do recebimento</label><input type="date" id="lvData" value="${todayISO()}"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarLiberar">Liberar e marcar como recebido</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnConfirmarLiberar').addEventListener('click', ()=>{
+    const contaId = document.getElementById('lvConta').value;
+    const data = document.getElementById('lvData').value || todayISO();
+    let liberados = 0, jaResolvidos = 0, naoEncontrados = 0;
+    itens.forEach(r=>{
+      const lanc = state.lancamentos.find(l=>l.origem==='vk' && l.vkPedidoId===r.vkPedidoId);
+      if(!lanc){ naoEncontrados++; return; }
+      if(lanc.status==='pendente'){
+        lanc.status = 'recebido';
+        lanc.contaId = contaId;
+        lanc.dataPagamento = data;
+        lanc.formaRecebimento = 'dinheiro';
+        liberados++;
+      } else {
+        jaResolvidos++;
+      }
+      r.conferido = true;
+      r.conferidoEm = new Date().toISOString();
+    });
+    persist(); closeModal(); render();
+    const partes = [];
+    if(liberados>0) partes.push(`${liberados} pedido(s) liberado(s) e marcado(s) como recebido`);
+    if(jaResolvidos>0) partes.push(`${jaResolvidos} já estava(m) resolvido(s)`);
+    if(naoEncontrados>0) partes.push(`${naoEncontrados} pedido(s) ainda aguardando aprovação no financeiro — libere a aprovação primeiro`);
+    showToast(partes.join(' · '));
   });
 }
 
