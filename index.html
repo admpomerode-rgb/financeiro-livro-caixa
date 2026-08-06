@@ -7989,6 +7989,36 @@ function menuAdicionarContaHTML(contaId, flex){
 }
 
 /* ---------------- Handlers de view ---------------- */
+async function avisarVKPedidoPagoPix(vkPedidoId){
+  const cfg = state.vkConfig;
+  if(!cfg.firebaseConfig || !cfg.email || !cfg.senha){
+    showToast('Pedido marcado como Pix aqui, mas não deu pra avisar o VK Industrial — configure o acesso na tela de Integração VK Industrial e avise manualmente o representante dessa vez');
+    return;
+  }
+  if(typeof firebase === 'undefined'){
+    showToast('Sem conexão pra avisar o VK Industrial agora — o representante pode não ver que esse pedido já foi pago');
+    return;
+  }
+  try{
+    if(!vkFirebaseApp){
+      vkFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'vk-industrial');
+    }
+    const auth = vkFirebaseApp.auth();
+    if(!auth.currentUser){
+      await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
+    }
+    const db = vkFirebaseApp.firestore();
+    await db.collection('pedidos').doc(vkPedidoId).update({
+      pagamentoPix: true,
+      pagamentoPixData: new Date().toISOString()
+    });
+    showToast('VK Industrial avisado — o representante já vê esse pedido como pago');
+  }catch(e){
+    console.error('Erro ao avisar o VK Industrial sobre pagamento via Pix:', e);
+    showToast('Pedido marcado como Pix aqui, mas falhou ao avisar o VK Industrial — tente sincronizar de novo depois, ou avise o representante manualmente dessa vez');
+  }
+}
+
 function abrirQuitarModal(id){
   const l = state.lancamentos.find(x=>x.id===id);
   if(!l) return;
@@ -8006,6 +8036,20 @@ function abrirQuitarModal(id){
       <div class="field"><label>Data</label><input type="date" id="qtData" value="${todayISO()}"></div>
       <div class="field"><label>Conta</label><select id="qtConta">${state.contas.map(c=>`<option value="${c.id}" ${l.contaId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select></div>
     </div>
+    ${l.tipo==='entrada' ? `
+    <div class="field">
+      <label>Como foi recebido?</label>
+      <select id="qtFormaRecebimento">
+        <option value="pix" ${l.formaRecebimento==='pix'?'selected':''}>Pix</option>
+        <option value="dinheiro" ${l.formaRecebimento==='dinheiro'?'selected':''}>Dinheiro</option>
+        <option value="transferencia" ${l.formaRecebimento==='transferencia'?'selected':''}>Transferência bancária</option>
+        <option value="boleto" ${l.formaRecebimento==='boleto'?'selected':''}>Boleto</option>
+        <option value="cartao" ${l.formaRecebimento==='cartao'?'selected':''}>Cartão</option>
+        <option value="outro" ${l.formaRecebimento==='outro'?'selected':''}>Outro</option>
+      </select>
+    </div>
+    ${l.origem==='vk' && l.vkPedidoId ? `<div class="note" style="margin-top:0;">Se marcar "Pix", o VK Industrial é avisado automaticamente — o pedido aparece como já pago pro representante, pra ele não cobrar em dinheiro de novo.</div>` : ''}
+    ` : ''}
     <div class="note" style="margin-top:0;">Se o valor informado for menor que o total em aberto, o restante continua pendente em Contas a ${l.tipo==='entrada'?'Receber':'Pagar'} até o próximo ${acaoLabel}.</div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
@@ -8018,28 +8062,34 @@ function abrirQuitarModal(id){
     const valorInformado = numBR(document.getElementById('qtValor').value);
     const data = document.getElementById('qtData').value || todayISO();
     const contaId = document.getElementById('qtConta').value;
+    const formaRecebimento = document.getElementById('qtFormaRecebimento')?.value || null;
     if(isNaN(valorInformado) || valorInformado<=0){ showToast('Informe um valor válido'); return; }
     const restante = Math.round((l.valor - valorInformado)*100)/100;
     if(restante <= 0.01){
       l.status = l.tipo==='entrada' ? 'recebido' : 'pago';
       l.dataPagamento = data;
       l.contaId = contaId;
+      if(formaRecebimento) l.formaRecebimento = formaRecebimento;
       persist(); closeModal(); render();
       showToast(l.tipo==='entrada' ? 'Recebimento confirmado' : 'Pagamento confirmado');
+      if(formaRecebimento==='pix' && l.origem==='vk' && l.vkPedidoId) avisarVKPedidoPagoPix(l.vkPedidoId);
     } else {
+      const novoId = uid();
       state.lancamentos.push({
-        id: uid(), tipo: l.tipo, categoria: l.categoria,
+        id: novoId, tipo: l.tipo, categoria: l.categoria,
         descricao: `${l.descricao} (parcela)`,
         valor: valorInformado, contaId, status: l.tipo==='entrada'?'recebido':'pago',
         dataVencimento: l.dataVencimento, dataPagamento: data,
         origem: 'parcial', pedidoOrigemId: l.id,
         fornecedor: l.fornecedor||'', produtoTag: l.produtoTag||'',
+        formaRecebimento: formaRecebimento || null,
         criadoEm: new Date().toISOString()
       });
       l.valor = restante;
       l.recebimentoParcial = true;
       persist(); closeModal(); render();
       showToast(`Parcela registrada — restam ${brl(restante)} pendente(s)`);
+      if(formaRecebimento==='pix' && l.origem==='vk' && l.vkPedidoId) avisarVKPedidoPagoPix(l.vkPedidoId);
     }
   });
 }
