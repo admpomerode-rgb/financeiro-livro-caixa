@@ -8250,6 +8250,7 @@ function dropdownNovoHTML(){
         <button type="button" data-novo="transferencia" ${state.contas.length<2?'disabled title="Crie pelo menos 2 contas para transferir"':''}><span class="dropdown-dot" style="background:var(--blue-accent);"></span> Transferência entre contas</button>
         <button type="button" data-novo="investimento"><span class="dropdown-dot" style="background:var(--warn);"></span> Aplicação financeira</button>
         <button type="button" data-novo="qrnota"><span class="dropdown-dot" style="background:#00A884;"></span> 🧾 Ler nota fiscal (QR Code)</button>
+        <button type="button" data-novo="notafiscalpdf"><span class="dropdown-dot" style="background:#3B6FE0;"></span> 📄 Importar nota fiscal (PDF/foto)</button>
       </div>
     </div>
   `;
@@ -8894,6 +8895,7 @@ function attachViewHandlers(){
         else if(novoTipo==='recorrente') openRecorrenciaModal();
         else if(novoTipo==='investimento') openEscolherContaInvestirModal();
         else if(novoTipo==='qrnota') openLerQRNotaModal();
+        else if(novoTipo==='notafiscalpdf') openImportarNotaFiscalModal();
         else openLancamentoModal(novoTipo);
       });
     });
@@ -12348,6 +12350,160 @@ function parseNFeQR(conteudo){
   const chaveMatch = conteudo.match(/(\d{44})/);
   const url = /^https?:\/\//i.test(conteudo) ? conteudo : null;
   return { chave: chaveMatch ? chaveMatch[1] : null, url };
+}
+
+// Importação de nota fiscal por PDF ou foto, com leitura automática via IA — igual ao
+// fluxo de "Importar nota (PDF)" da corretagem, mas pra despesas comuns. Diferente do QR
+// Code (que só traz a chave de acesso), aqui a IA lê o conteúdo visível da nota e tenta
+// extrair fornecedor, valor, data e itens — sempre revisável antes de lançar.
+async function extrairDadosNotaFiscalIA(file){
+  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+  const base64 = await new Promise((res, rej)=>{
+    const r = new FileReader();
+    r.onload = ()=>res(r.result.split(',')[1]);
+    r.onerror = ()=>rej(new Error('Não consegui ler o arquivo'));
+    r.readAsDataURL(file);
+  });
+  const conteudo = isPdf
+    ? { type:'document', source:{ type:'base64', media_type:'application/pdf', data: base64 } }
+    : { type:'image', source:{ type:'base64', media_type: file.type || 'image/jpeg', data: base64 } };
+
+  const prompt = `Essa é uma nota fiscal (NFe, NFCe, NFSe ou recibo de compra) em PDF ou foto. Extraia os dados em JSON estrito, SEM nenhum texto antes ou depois, exatamente neste formato:
+{
+  "fornecedorNome": string ou null,
+  "fornecedorCNPJ": string só com dígitos ou null,
+  "valorTotal": number ou null,
+  "dataEmissao": string no formato AAAA-MM-DD ou null,
+  "numeroNF": string ou null,
+  "itens": [ { "descricao": string, "quantidade": number, "valorUnitario": number } ]
+}
+Se não conseguir ler algum campo com certeza, use null nesse campo (não invente valores). "itens" pode ser uma lista vazia se não der pra identificar os itens individualmente. Responda só com o JSON.`;
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1500,
+      messages: [{ role:'user', content: [ conteudo, { type:'text', text: prompt } ] }]
+    })
+  });
+  if(!response.ok) throw new Error('Falha ao consultar o leitor automático (HTTP '+response.status+')');
+  const data = await response.json();
+  const textoResp = (data.content||[]).map(c=>c.text||'').join('').trim();
+  const limpo = textoResp.replace(/^```json\s*|^```\s*|```\s*$/gi, '').trim();
+  let json;
+  try{ json = JSON.parse(limpo); }catch(e){ throw new Error('Não consegui interpretar a resposta do leitor automático — tente outra imagem/PDF ou preencha manualmente'); }
+  return json;
+}
+
+function openImportarNotaFiscalModal(){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Importar nota fiscal (PDF ou foto)</h3>
+    <div class="note" style="margin-top:0;">Envie o PDF da nota (DANFE) ou uma foto legível — a leitura automática tenta identificar fornecedor, valor, data e itens. Sempre revise antes de lançar.</div>
+    <div class="field"><label>Arquivo (PDF ou imagem)</label><input type="file" id="nfArquivoInput" accept="application/pdf,image/*"></div>
+    <div id="nfStatus" class="note" style="display:none;"></div>
+    <div id="nfRevisaoWrap" style="display:none;">
+      <div class="field-row">
+        <div class="field"><label>Fornecedor</label><input type="text" id="nfFornecedorNome"></div>
+        <div class="field"><label>CNPJ</label><input type="text" id="nfFornecedorCNPJ" class="mono"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Valor total (R$)</label><input type="text" inputmode="decimal" id="nfValor"></div>
+        <div class="field"><label>Data de emissão</label><input type="date" id="nfData"></div>
+      </div>
+      <div class="field"><label>Número da NF (opcional)</label><input type="text" id="nfNumero"></div>
+      <div class="field-row">
+        <div class="field"><label>Categoria</label><select id="nfCategoria">${opcoesCategoriaHTML('saida')}</select></div>
+        <div class="field"><label>Conta de pagamento</label><select id="nfConta">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+      </div>
+      <div id="nfItensPreview" style="font-size:12px;color:var(--text-soft);margin-top:6px;"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnLancarNotaFiscal" style="display:none;">Lançar despesa</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+
+  let itensExtraidos = [];
+
+  document.getElementById('nfArquivoInput').addEventListener('change', async ()=>{
+    const file = document.getElementById('nfArquivoInput').files[0];
+    if(!file) return;
+    const status = document.getElementById('nfStatus');
+    status.style.display = 'block';
+    status.style.borderColor = 'var(--line)';
+    status.textContent = 'Lendo a nota com o leitor automático... pode levar alguns segundos.';
+    document.getElementById('nfRevisaoWrap').style.display = 'none';
+    document.getElementById('btnLancarNotaFiscal').style.display = 'none';
+    try{
+      const dados = await extrairDadosNotaFiscalIA(file);
+      itensExtraidos = Array.isArray(dados.itens) ? dados.itens : [];
+
+      document.getElementById('nfFornecedorNome').value = dados.fornecedorNome || '';
+      document.getElementById('nfFornecedorCNPJ').value = dados.fornecedorCNPJ || '';
+      document.getElementById('nfValor').value = dados.valorTotal != null ? dados.valorTotal : '';
+      document.getElementById('nfData').value = dados.dataEmissao || todayISO();
+      document.getElementById('nfNumero').value = dados.numeroNF || '';
+      document.getElementById('nfItensPreview').innerHTML = itensExtraidos.length
+        ? 'Itens identificados: ' + itensExtraidos.map(it=>`${it.quantidade||''} ${escapeHTML(it.descricao||'')}`).join(', ')
+        : '';
+
+      const faltando = [];
+      if(!dados.fornecedorNome) faltando.push('fornecedor');
+      if(dados.valorTotal==null) faltando.push('valor');
+      if(!dados.dataEmissao) faltando.push('data');
+      status.style.display = faltando.length ? 'block' : 'none';
+      if(faltando.length){
+        status.style.borderColor = 'var(--warn)';
+        status.textContent = `Não consegui identificar: ${faltando.join(', ')}. Preencha manualmente antes de lançar.`;
+      }
+      document.getElementById('nfRevisaoWrap').style.display = 'block';
+      document.getElementById('btnLancarNotaFiscal').style.display = 'inline-flex';
+    }catch(e){
+      console.error('Erro ao ler nota fiscal com IA:', e);
+      status.style.borderColor = 'var(--danger)';
+      status.textContent = e.message || 'Não consegui ler essa nota automaticamente. Você pode preencher manualmente pelo lançamento comum.';
+      document.getElementById('nfRevisaoWrap').style.display = 'block';
+      document.getElementById('btnLancarNotaFiscal').style.display = 'inline-flex';
+      document.getElementById('nfData').value = todayISO();
+    }
+  });
+
+  document.getElementById('btnLancarNotaFiscal').addEventListener('click', ()=>{
+    const nomeForn = document.getElementById('nfFornecedorNome').value.trim();
+    const cnpj = document.getElementById('nfFornecedorCNPJ').value.trim();
+    const valor = numBR(document.getElementById('nfValor').value);
+    const data = document.getElementById('nfData').value || todayISO();
+    const numero = document.getElementById('nfNumero').value.trim();
+    const categoria = document.getElementById('nfCategoria').value;
+    const contaId = document.getElementById('nfConta').value;
+    if(isNaN(valor) || valor<=0){ showToast('Preencha um valor válido'); return; }
+
+    if(nomeForn){
+      const soDigitos = v => (v||'').toString().replace(/\D/g,'');
+      let fornecedorLocal = cnpj ? state.fornecedores.find(f=>soDigitos(f.cnpjCpf)===soDigitos(cnpj)) : null;
+      if(!fornecedorLocal) fornecedorLocal = state.fornecedores.find(f=>f.nome.toLowerCase()===nomeForn.toLowerCase());
+      if(!fornecedorLocal){
+        state.fornecedores.push({ id: uid(), nome: nomeForn, cnpjCpf: cnpj||'', telefone:'', email:'', endereco:'', observacao:'' });
+      }
+    }
+
+    const itensTexto = itensExtraidos.length ? 'Itens: ' + itensExtraidos.map(it=>`${it.quantidade||''} ${it.descricao||''} (${brl(it.valorUnitario||0)}/un)`).join(', ') : '';
+    state.lancamentos.push({
+      id: uid(), tipo:'saida', categoria,
+      descricao: numero ? `NF ${numero}${nomeForn?' — '+nomeForn:''}` : (nomeForn || 'Nota fiscal importada'),
+      valor, fornecedor: nomeForn, observacao: itensTexto,
+      contaId, dataVencimento: data, status:'pendente', dataPagamento: null,
+      criadoEm: new Date().toISOString()
+    });
+    registrarLog('Nota fiscal importada (PDF/foto)', `${nomeForn||'—'} — ${brl(valor)}`);
+    persist(); closeModal(); render();
+    showToast('Despesa lançada a partir da nota fiscal');
+  });
 }
 
 function openLerQRNotaModal(){
