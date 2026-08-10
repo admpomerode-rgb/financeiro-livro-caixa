@@ -1534,15 +1534,27 @@ async function sincronizarPedidosVK(){
     const clientes = clientesSnap.docs.map(d=>({ id: d.id, ...d.data() }));
     const representantesVK = representantesSnap.docs.map(d=>({ id: d.id, ...d.data() }));
     const produtosVK = produtosSnap.docs.map(d=>({ id: d.id, ...d.data() }));
-    let novos = 0, jaImportados = 0, cancelados = 0, marcadosCancelados = 0, atualizados = 0, atualizadosAprovacao = 0;
+    let novos = 0, jaImportados = 0, cancelados = 0, marcadosCancelados = 0, atualizados = 0, atualizadosAprovacao = 0, bonificacoes = 0;
     const divergentes = [];
 
     pedidos.forEach(p=>{
+      const ehBonificacao = p.bonificacao===true || p.isBonificacao===true || p.tipoPedido==='bonificacao' || p.tipo==='bonificacao';
       const cliente = clientes.find(c=>c.id===p.clienteId);
       const descricaoPedido = `Pedido N° ${p.numero}`;
       const existenteAntigo = `Pedido N° ${p.numero}${cliente ? ' — '+cliente.nome : ''}`;
       const existente = state.lancamentos.find(l=>l.origem==='vk' && (l.vkPedidoId===p.id || l.descricao===descricaoPedido || l.descricao===existenteAntigo));
       const emAprovacao = state.vkAprovacoes.find(a=>a.tipo==='pedido' && a.vkPedidoId===p.id);
+
+      if(ehBonificacao){
+        bonificacoes++;
+        if(emAprovacao){
+          // ainda não virou lançamento de verdade — tira da fila de aprovação, não é venda real
+          state.vkAprovacoes = state.vkAprovacoes.filter(a=>a.id!==emAprovacao.id);
+        }
+        // se já tiver virado lançamento antes de ser marcado como bonificação, não mexe (segurança financeira) —
+        // fica pra conferência manual, já que apagar um lançamento sozinho é arriscado.
+        return;
+      }
 
       const itensTexto = (p.itens||[]).map(it=>{
         const prod = produtosVK.find(pr=>pr.nome===it.produto);
@@ -1680,11 +1692,12 @@ async function sincronizarPedidosVK(){
     render();
     console.log(`Sincronização VK: ${pedidos.length} pedidos no total, ${novos} novos aguardando aprovação, ${atualizados} atualizados, ${atualizadosAprovacao} atualizados na fila de aprovação, ${jaImportados} já importados antes, ${cancelados} cancelados (${marcadosCancelados} marcados agora como cancelado), ${divergentes.length} divergência(s) pra conferir.`);
     let msgFinal;
-    if(novos>0 || marcadosCancelados>0 || atualizados>0 || recNovos>0){
+    if(novos>0 || marcadosCancelados>0 || atualizados>0 || recNovos>0 || bonificacoes>0){
       const partes = [];
       if(novos>0) partes.push(`${novos} pedido(s) aguardando aprovação`);
       if(atualizados>0) partes.push(`${atualizados} corrigido(s)`);
       if(marcadosCancelados>0) partes.push(`${marcadosCancelados} marcado(s) como cancelado(s)`);
+      if(bonificacoes>0) partes.push(`${bonificacoes} de bonificação (ignorado)`);
       if(recNovos>0) partes.push(`${recNovos} recebimento(s) em dinheiro novo(s)`);
       if(divergentes.length>0) partes.push(`${divergentes.length} precisam de conferência`);
       msgFinal = partes.join(' · ');
@@ -7832,7 +7845,7 @@ function viewVK(){
       <div class="note" style="margin:0;border-top-left-radius:0;border-top-right-radius:0;">
         Ao sincronizar, cada pedido novo do VK Industrial cai primeiro na <strong>fila de aprovação</strong> (tela "Revisar e aprovar") — lá dá pra conferir a categoria antes de virar lançamento de verdade. Só depois de aprovado é que vira <strong>uma conta a receber</strong> aqui — descrição "Pedido N° [número]", valor total do pedido, vencimento na data de entrega, e uma observação com o nome do cliente e os itens comprados (clique no lançamento para ver).
         <br><br>
-        Pedidos cancelados no VK Industrial entram marcados como "Cancelado" (não somem, não passam pela fila de aprovação). Se o pedido for editado no VK Industrial <strong>depois de aprovado</strong>, a sincronização detecta e corrige automaticamente aqui — <strong>desde que o pedido ainda esteja pendente</strong>. Se já tiver sido marcado como recebido, a correção não é feita sozinha (pra não mexer em algo que você já conferiu) — ele aparece no painel de pendências acima pra você decidir. Se o pedido ainda estiver na fila de aprovação quando for editado no VK, a fila é atualizada sozinha também.
+        Pedidos cancelados no VK Industrial entram marcados como "Cancelado" (não somem, não passam pela fila de aprovação). Pedidos marcados como <strong>bonificação</strong> no VK Industrial (campo <span class="mono">bonificacao: true</span> no documento do pedido) não são importados de jeito nenhum — nem viram lançamento, nem entram na fila de aprovação, já que não é uma venda de verdade. Se o pedido for editado no VK Industrial <strong>depois de aprovado</strong>, a sincronização detecta e corrige automaticamente aqui — <strong>desde que o pedido ainda esteja pendente</strong>. Se já tiver sido marcado como recebido, a correção não é feita sozinha (pra não mexer em algo que você já conferiu) — ele aparece no painel de pendências acima pra você decidir. Se o pedido ainda estiver na fila de aprovação quando for editado no VK, a fila é atualizada sozinha também.
         <br><br>
         A sincronização não é automática/contínua — clique em "Sincronizar pedidos" sempre que quiser buscar os pedidos novos e corrigir os que mudaram. A senha fica salva só neste navegador.
       </div>
