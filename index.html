@@ -1553,8 +1553,18 @@ async function sincronizarPedidosVK(){
           // ainda não virou lançamento de verdade — tira da fila de aprovação, não é venda real
           state.vkAprovacoes = state.vkAprovacoes.filter(a=>a.id!==emAprovacao.id);
         }
-        // se já tiver virado lançamento antes de ser marcado como bonificação, não mexe (segurança financeira) —
-        // fica pra conferência manual, já que apagar um lançamento sozinho é arriscado.
+
+        if(existente && existente.status!=='pendente'){
+          // Já tinha virado conta a receber E já foi recebido — não apaga sozinho (dinheiro já entrou de verdade),
+          // mas avisa no painel de pendências pra alguém decidir (estornar, corrigir no VK, etc).
+          divergentes.push({ pedidoId: p.id, numero: p.numero, lancamentoId: existente.id, valorAntigo: existente.valor, valorNovo: 0, status: existente.status, motivoBonificacao: true });
+          return;
+        }
+
+        if(existente && existente.status==='pendente'){
+          // Ainda não recebido — seguro converter pra bonificação: remove a conta a receber, vira venda bonificada.
+          state.lancamentos = state.lancamentos.filter(l=>l.id!==existente.id);
+        }
 
         // Registra como venda bonificada — não é conta a receber, mas fica visível no DRE
         // como "Vendas Bonificadas" com um desconto de 100% (efeito líquido zero no caixa).
@@ -5702,6 +5712,16 @@ function renderDescontosBonificacoes(){
   const totalDesconto = pedidosComDesconto.reduce((s,p)=>s+p.desconto,0);
   const totalBonificado = pedidosBonificados.reduce((s,b)=>s+b.valor,0);
 
+  // Indicadores em porcentagem
+  const todosPedidosVK = state.lancamentos.filter(l=>l.origem==='vk' && l.tipo==='entrada' && l.dataVencimento>=de && l.dataVencimento<=ate);
+  const totalPedidosVK = todosPedidosVK.length;
+  const totalBrutoGeral = todosPedidosVK.reduce((s,l)=>s+l.valor+(l.descontoConcedido||0),0);
+  const totalVendasNoPeriodo = totalPedidosVK + pedidosBonificados.length;
+  const pctPedidosComDesconto = totalPedidosVK>0 ? (pedidosComDesconto.length/totalPedidosVK*100) : 0;
+  const pctDescontoMedio = pedidosComDesconto.length ? (pedidosComDesconto.reduce((s,p)=>s+p.pct,0)/pedidosComDesconto.length) : 0;
+  const pctReceitaPerdidaDesconto = totalBrutoGeral>0 ? (totalDesconto/totalBrutoGeral*100) : 0;
+  const pctPedidosBonificados = totalVendasNoPeriodo>0 ? (pedidosBonificados.length/totalVendasNoPeriodo*100) : 0;
+
   return `
     <div class="report-controls">
       <select id="descontosBonifPeriodoSel">
@@ -5716,6 +5736,12 @@ function renderDescontosBonificacoes(){
       <div class="card"><div class="label">Total dado em desconto</div><div class="value mono neg">${brl(totalDesconto)}</div></div>
       <div class="card"><div class="label">Pedidos de bonificação</div><div class="value mono">${pedidosBonificados.length}</div></div>
       <div class="card"><div class="label">Valor total bonificado</div><div class="value mono neg">${brl(totalBonificado)}</div></div>
+    </div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin:0 0 14px;">
+      <div class="card"><div class="label">% dos pedidos com desconto</div><div class="value mono">${pctPedidosComDesconto.toFixed(1)}%</div></div>
+      <div class="card"><div class="label">Desconto médio (quando tem)</div><div class="value mono">${pctDescontoMedio.toFixed(1)}%</div></div>
+      <div class="card"><div class="label">% da receita bruta perdida em desconto</div><div class="value mono neg">${pctReceitaPerdidaDesconto.toFixed(1)}%</div></div>
+      <div class="card"><div class="label">% dos pedidos que foram bonificação</div><div class="value mono">${pctPedidosBonificados.toFixed(1)}%</div></div>
     </div>
 
     <div class="dash-section-label">Pedidos com desconto</div>
@@ -7879,7 +7905,7 @@ function viewVK(){
         ${state.vkDivergencias.map(d=>`
           <div class="ledger-row compact" data-action="abrir-lancamento-vk" data-id="${d.lancamentoId}" style="cursor:pointer;grid-template-columns:12px 1fr auto;">
             <span class="dot pendente"></span>
-            <div class="desc-cell"><div>Pedido N° ${d.numero}</div><div class="cat">Valor mudou no VK: era ${brl(d.valorAntigo)}, agora é ${brl(d.valorNovo)}</div></div>
+            <div class="desc-cell"><div>Pedido N° ${d.numero}</div><div class="cat">${d.motivoBonificacao ? `⚠️ Foi marcado como <strong>bonificação</strong> no VK, mas já tinha sido recebido aqui (${brl(d.valorAntigo)}) — decida se estorna ou corrige` : `Valor mudou no VK: era ${brl(d.valorAntigo)}, agora é ${brl(d.valorNovo)}`}</div></div>
             <div style="display:flex;gap:6px;">
               <button class="btn ghost sm" style="pointer-events:none;">Ver</button>
               <button class="btn ghost sm" data-action="ignorar-divergencia-vk" data-key="${d.pedidoId}" title="Já conferi, não precisa mudar nada">Ignorar</button>
@@ -7954,7 +7980,7 @@ function viewVK(){
       <div class="note" style="margin:0;border-top-left-radius:0;border-top-right-radius:0;">
         Ao sincronizar, cada pedido novo do VK Industrial cai primeiro na <strong>fila de aprovação</strong> (tela "Revisar e aprovar") — lá dá pra conferir a categoria antes de virar lançamento de verdade. Só depois de aprovado é que vira <strong>uma conta a receber</strong> aqui — descrição "Pedido N° [número]", valor total do pedido, vencimento na data de entrega, e uma observação com o nome do cliente e os itens comprados (clique no lançamento para ver).
         <br><br>
-        Pedidos cancelados no VK Industrial entram marcados como "Cancelado" (não somem, não passam pela fila de aprovação). Pedidos marcados como <strong>bonificação</strong> no VK Industrial (campo <span class="mono">bonificacao: true</span> no documento do pedido) nunca viram conta a receber nem passam pela fila de aprovação, já que não é dinheiro esperado — mas o valor entra no DRE como "Vendas Bonificadas" com um desconto de 100% ao lado ("Desconto por Bonificação"), efeito líquido zero no caixa, só pra dar visibilidade de quanto foi dado de bonificação no período. Se o pedido for editado no VK Industrial <strong>depois de aprovado</strong>, a sincronização detecta e corrige automaticamente aqui — <strong>desde que o pedido ainda esteja pendente</strong>. Se já tiver sido marcado como recebido, a correção não é feita sozinha (pra não mexer em algo que você já conferiu) — ele aparece no painel de pendências acima pra você decidir. Se o pedido ainda estiver na fila de aprovação quando for editado no VK, a fila é atualizada sozinha também.
+        Pedidos cancelados no VK Industrial entram marcados como "Cancelado" (não somem, não passam pela fila de aprovação). Pedidos marcados como <strong>bonificação</strong> no VK Industrial (campo <span class="mono">bonificacao: true</span> no documento do pedido) nunca viram conta a receber nem passam pela fila de aprovação, já que não é dinheiro esperado — mas o valor entra no DRE como "Vendas Bonificadas" com um desconto de 100% ao lado ("Desconto por Bonificação"), efeito líquido zero no caixa, só pra dar visibilidade de quanto foi dado de bonificação no período. Se um pedido que <strong>já virou conta a receber pendente</strong> for convertido em bonificação depois no VK (ex: decidiu bonificar um pedido já lançado), a sincronização remove a conta a receber sozinha e registra como venda bonificada, já que ainda não tinha entrado dinheiro. Se o pedido <strong>já tinha sido recebido</strong> quando foi convertido em bonificação, não mexo sozinho (dinheiro já entrou de verdade) — aparece no painel de pendências acima com aviso específico, pra você decidir se estorna ou corrige manualmente. Se o pedido for editado no VK Industrial <strong>depois de aprovado</strong> por outro motivo (valor, cliente, itens), a sincronização detecta e corrige automaticamente aqui — <strong>desde que o pedido ainda esteja pendente</strong>. Se ainda estiver na fila de aprovação quando for editado no VK, a fila é atualizada sozinha também.
         <br><br>
         A sincronização não é automática/contínua — clique em "Sincronizar pedidos" sempre que quiser buscar os pedidos novos e corrigir os que mudaram. A senha fica salva só neste navegador.
       </div>
@@ -10604,6 +10630,9 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
         <input type="text" inputmode="decimal" id="fValor" value="${existing ? existing.valor : ''}" placeholder="0,00">
       </div>
     </div>
+    ${existing?.descontoConcedido>0.004 ? `
+    <div class="note" style="margin-top:0;border-color:var(--warn);">🏷️ Esse pedido teve <strong>${brl(existing.descontoConcedido)}</strong> de desconto concedido no VK Industrial — valor bruto original: ${brl(existing.valor+existing.descontoConcedido)}. O valor acima já é o líquido (o que realmente entra). O desconto aparece separado no DRE.</div>
+    ` : ''}
     ${tipo==='saida' && !isEdit ? `
     <div class="field" id="fMulticategoriaWrap">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;">
