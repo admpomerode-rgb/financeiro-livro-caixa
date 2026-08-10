@@ -1063,6 +1063,7 @@ function viewCustosMargemProdutos(){
 
 let previsaoDiasAtivo = 30;
 let orcamentoAnualAno = new Date().getFullYear();
+let descontosBonifPeriodo = 'mes';
 let dreCentroAtivo = 'todos';
 let mesGlobalRef = todayISO().slice(0,7);
 let categoriaLancamentosAtual = null;
@@ -4792,6 +4793,7 @@ function viewRelatorios(){
     { id:'stress', icone:'🧪', nome:'Cenário de Stress (Stress Test)', desc:'E se as maiores contas a receber atrasarem — o caixa aguenta pagar o que já está previsto?' },
     { id:'socios', icone:'🤝', nome:'Split entre Sócios', desc:'Divide o lucro/prejuízo do mês entre os sócios cadastrados, por percentual de participação' },
     { id:'orcamento_anual', icone:'📆', nome:'Orçamento Anual', desc:'Orçado x realizado do ano inteiro, com acompanhamento por trimestre' },
+    { id:'descontos_bonificacoes', icone:'🏷️', nome:'Descontos e Bonificações', desc:'Pedidos com desconto aplicado e pedidos de bonificação, vindos do VK Industrial' },
   ];
   return `
     <div class="topbar">
@@ -4814,7 +4816,7 @@ function viewRelatorios(){
 const RELATORIOS_NOMES = {
   dre:'DRE', balanco:'Balanço Patrimonial', mei:'Declaração MEI', indicadores:'Indicadores Financeiros',
   produto:'Rentabilidade por Produto', investimentos:'Relatório de Investimentos', liquidez:'Índices de Liquidez', aging:'Aging — Vencidos por Faixa', dfc:'DFC — Fluxo de Caixa', cartoes:'Cartões de Crédito',
-  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual'
+  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações'
 };
 
 function viewRelatorioDetalhe(){
@@ -5670,6 +5672,77 @@ function renderSplitSocios(){
       ${state.socios.length ? `<div class="note" style="margin:0;border-radius:0;border-top:1px solid var(--line);">Soma das participações: <strong style="color:${Math.abs(somaPct-100)<0.5?'var(--success)':'var(--warn)'}">${somaPct}%</strong>${Math.abs(somaPct-100)>=0.5 ? ' — ajuste os percentuais pra somar 100%' : ''}</div>` : ''}
     </div>
     <div class="note" style="margin-top:0;">O valor de cada sócio é calculado sobre o resultado (lucro ou prejuízo) do mês selecionado no navegador de mês — isso é só um cálculo de referência, não gera lançamento nem transferência automática.</div>
+  `;
+}
+
+function renderDescontosBonificacoes(){
+  let de, ate, label;
+  const hoje = new Date();
+  if(descontosBonifPeriodo==='ano'){
+    de = new Date(hoje.getFullYear(), 0, 1).toISOString().slice(0,10);
+    ate = todayISO();
+    label = 'Ano atual (' + hoje.getFullYear() + ')';
+  } else {
+    const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
+    de = `${mesGlobalRef}-01`;
+    const ultimoDiaMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
+    ate = mesGlobalRef === todayISO().slice(0,7) ? todayISO() : ultimoDiaMes;
+    label = new Date(anoM, mesM-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
+  }
+
+  const pedidosComDesconto = state.lancamentos.filter(l=>l.origem==='vk' && (l.descontoConcedido||0)>0.004 && l.dataVencimento>=de && l.dataVencimento<=ate)
+    .map(l=>{
+      const bruto = l.valor + l.descontoConcedido;
+      const pct = bruto>0 ? (l.descontoConcedido/bruto*100) : 0;
+      return { descricao: l.descricao, cliente: l.fornecedor||'—', data: l.dataVencimento, bruto, desconto: l.descontoConcedido, liquido: l.valor, pct };
+    }).sort((a,b)=>b.desconto-a.desconto);
+
+  const pedidosBonificados = (state.vendasBonificadas||[]).filter(b=>b.data>=de && b.data<=ate).sort((a,b)=>b.valor-a.valor);
+
+  const totalDesconto = pedidosComDesconto.reduce((s,p)=>s+p.desconto,0);
+  const totalBonificado = pedidosBonificados.reduce((s,b)=>s+b.valor,0);
+
+  return `
+    <div class="report-controls">
+      <select id="descontosBonifPeriodoSel">
+        <option value="mes" ${descontosBonifPeriodo==='mes'?'selected':''}>Mês selecionado (${mesGlobalRef})</option>
+        <option value="ano" ${descontosBonifPeriodo==='ano'?'selected':''}>Ano atual</option>
+      </select>
+      <button class="btn ghost sm" id="btnPdfDescontosBonif">📄 Gerar PDF</button>
+    </div>
+    <div class="note" style="margin-top:0;">${label}: ${fmtDate(de)} até ${fmtDate(ate)} · dados vindos da sincronização de pedidos do VK Industrial</div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin:14px 0;">
+      <div class="card"><div class="label">Pedidos com desconto</div><div class="value mono">${pedidosComDesconto.length}</div></div>
+      <div class="card"><div class="label">Total dado em desconto</div><div class="value mono neg">${brl(totalDesconto)}</div></div>
+      <div class="card"><div class="label">Pedidos de bonificação</div><div class="value mono">${pedidosBonificados.length}</div></div>
+      <div class="card"><div class="label">Valor total bonificado</div><div class="value mono neg">${brl(totalBonificado)}</div></div>
+    </div>
+
+    <div class="dash-section-label">Pedidos com desconto</div>
+    <div class="panel">
+      <div class="panel-body" style="padding:0;">
+        ${pedidosComDesconto.length ? pedidosComDesconto.map(p=>`
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
+            <div class="desc-cell"><div>${escapeHTML(p.descricao)} — ${escapeHTML(p.cliente)}</div><div class="cat">${fmtDate(p.data)} · bruto ${brl(p.bruto)} → líquido ${brl(p.liquido)}</div></div>
+            <span class="mono" style="font-weight:600;color:var(--danger);">-${brl(p.desconto)}</span>
+            <span class="mono" style="font-size:11.5px;color:var(--text-soft);min-width:44px;text-align:right;">${p.pct.toFixed(0)}%</span>
+          </div>
+        `).join('') : `<div class="empty">Nenhum pedido com desconto nesse período.</div>`}
+      </div>
+    </div>
+
+    <div class="dash-section-label">Pedidos de bonificação</div>
+    <div class="panel">
+      <div class="panel-body" style="padding:0;">
+        ${pedidosBonificados.length ? pedidosBonificados.map(b=>`
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto;align-items:center;">
+            <div class="desc-cell"><div>Pedido N° ${escapeHTML(String(b.numero||'—'))} — ${escapeHTML(b.clienteNome||'—')}</div><div class="cat">${fmtDate(b.data)}</div></div>
+            <span class="mono" style="font-weight:600;color:var(--danger);">${brl(b.valor)}</span>
+          </div>
+        `).join('') : `<div class="empty">Nenhum pedido de bonificação nesse período.</div>`}
+      </div>
+    </div>
+    <div class="note" style="margin-top:0;">Pedidos com desconto continuam entrando normalmente em Contas a Receber pelo valor líquido. Pedidos de bonificação nunca viram conta a receber — aparecem aqui e no DRE só como informação de quanto foi dado de graça no período.</div>
   `;
 }
 
@@ -9031,6 +9104,7 @@ function attachViewHandlers(){
         relatorioAtivo==='stress' ? renderStressTest() :
         relatorioAtivo==='socios' ? renderSplitSocios() :
         relatorioAtivo==='orcamento_anual' ? renderOrcamentoAnual() :
+        relatorioAtivo==='descontos_bonificacoes' ? renderDescontosBonificacoes() :
         relatorioAtivo==='produto' ? renderRentabilidadeProduto('mes') :
         relatorioAtivo==='investimentos' ? renderRelatorioInvestimentos() :
         relatorioAtivo==='liquidez' ? renderRelatorioLiquidez() :
@@ -9159,6 +9233,35 @@ function attachViewHandlers(){
         if(tituloEl) tituloEl.textContent = `Orçamento Anual — ${orcamentoAnualAno}`;
         bindReportInner();
       });
+      const descontosBonifPeriodoSel = document.getElementById('descontosBonifPeriodoSel');
+      if(descontosBonifPeriodoSel) descontosBonifPeriodoSel.addEventListener('change', ()=>{
+        descontosBonifPeriodo = descontosBonifPeriodoSel.value;
+        document.getElementById('reportPanel').innerHTML = renderDescontosBonificacoes();
+        bindReportInner();
+      });
+      document.getElementById('btnPdfDescontosBonif')?.addEventListener('click', ()=>{
+        let de, ate, label;
+        const hoje = new Date();
+        if(descontosBonifPeriodo==='ano'){
+          de = new Date(hoje.getFullYear(), 0, 1).toISOString().slice(0,10);
+          ate = todayISO();
+          label = 'Ano atual (' + hoje.getFullYear() + ')';
+        } else {
+          const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
+          de = `${mesGlobalRef}-01`;
+          const ultimoDiaMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
+          ate = mesGlobalRef === todayISO().slice(0,7) ? todayISO() : ultimoDiaMes;
+          label = new Date(anoM, mesM-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' }) + ` (${fmtDate(de)} até ${fmtDate(ate)})`;
+        }
+        const pedidosComDesconto = state.lancamentos.filter(l=>l.origem==='vk' && (l.descontoConcedido||0)>0.004 && l.dataVencimento>=de && l.dataVencimento<=ate)
+          .map(l=>{
+            const bruto = l.valor + l.descontoConcedido;
+            const pct = bruto>0 ? (l.descontoConcedido/bruto*100) : 0;
+            return { descricao: l.descricao, cliente: l.fornecedor||'—', data: l.dataVencimento, bruto, desconto: l.descontoConcedido, liquido: l.valor, pct };
+          }).sort((a,b)=>b.desconto-a.desconto);
+        const pedidosBonificados = (state.vendasBonificadas||[]).filter(b=>b.data>=de && b.data<=ate).sort((a,b)=>b.valor-a.valor);
+        gerarDescontosBonificacoesPDF(pedidosComDesconto, pedidosBonificados, label);
+      });
       const dreAnaliseSel = document.getElementById('dreAnalise');
       if(dreAnaliseSel) dreAnaliseSel.addEventListener('change', ()=>{
         dreAnaliseAtiva = dreAnaliseSel.value;
@@ -9230,7 +9333,7 @@ function attachViewHandlers(){
     });
     paint();
     document.getElementById('btnExportarRelatorioPDF')?.addEventListener('click', ()=>{
-      const titulos = { dre: 'DRE (Demonstrativo de Resultado)', balanco: 'Balanço Patrimonial', mei: `Declaração MEI — Ano ${meiAnoAtual}`, indicadores: 'Indicadores Financeiros', produto: 'Rentabilidade por Produto', mensal: `Super Relatório Mensal — ${mensalMesRef}`, investimentos: `Relatório de Investimentos — ${mesGlobalRef}`, liquidez: 'Índices de Liquidez e Endividamento', aging: 'Aging — Vencidos por Faixa', dfc: `DFC — Fluxo de Caixa — ${mesGlobalRef}`, cartoes: 'Relatório de Cartões de Crédito', abc_clientes: 'Curva ABC de Clientes', abc_despesas: 'Curva ABC de Despesas', abc_fornecedores: 'Auditoria de Fornecedores', inadimplencia_cac: 'Inadimplência e CAC', canal_venda: `Receita por Canal de Venda — ${mesGlobalRef}`, breakeven: `Ponto de Equilíbrio — ${mesGlobalRef}`, valuation: 'Valuation Estimado', previsao: 'Previsão de Saldo Futuro', stress: 'Cenário de Stress (Stress Test)', socios: 'Split entre Sócios', orcamento_anual: `Orçamento Anual — ${orcamentoAnualAno}` };
+      const titulos = { dre: 'DRE (Demonstrativo de Resultado)', balanco: 'Balanço Patrimonial', mei: `Declaração MEI — Ano ${meiAnoAtual}`, indicadores: 'Indicadores Financeiros', produto: 'Rentabilidade por Produto', mensal: `Super Relatório Mensal — ${mensalMesRef}`, investimentos: `Relatório de Investimentos — ${mesGlobalRef}`, liquidez: 'Índices de Liquidez e Endividamento', aging: 'Aging — Vencidos por Faixa', dfc: `DFC — Fluxo de Caixa — ${mesGlobalRef}`, cartoes: 'Relatório de Cartões de Crédito', abc_clientes: 'Curva ABC de Clientes', abc_despesas: 'Curva ABC de Despesas', abc_fornecedores: 'Auditoria de Fornecedores', inadimplencia_cac: 'Inadimplência e CAC', canal_venda: `Receita por Canal de Venda — ${mesGlobalRef}`, breakeven: `Ponto de Equilíbrio — ${mesGlobalRef}`, valuation: 'Valuation Estimado', previsao: 'Previsão de Saldo Futuro', stress: 'Cenário de Stress (Stress Test)', socios: 'Split entre Sócios', orcamento_anual: `Orçamento Anual — ${orcamentoAnualAno}`, descontos_bonificacoes: 'Descontos e Bonificações' };
       exportarRelatorioPDF(titulos[relatorioAtivo]);
     });
   }
@@ -13120,6 +13223,74 @@ function openPrevisaoGastoModal(existing){
     bindReportInner();
     showToast(existing ? 'Previsão atualizada' : 'Previsão adicionada');
   });
+}
+
+function gerarDescontosBonificacoesPDF(pedidosComDesconto, pedidosBonificados, label){
+  if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
+  if(!pedidosComDesconto.length && !pedidosBonificados.length){ showToast('Nada pra gerar PDF nesse período'); return; }
+
+  const { jsPDF } = window.jspdf;
+  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+  const M = 18, W = 210 - M*2;
+  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], DANGER=[194,74,61];
+  let y = 22;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
+  docPdf.text('Livro Caixa Financeiro VK', M, y);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
+  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
+  y += 7;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 9;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
+  docPdf.text('Descontos e Bonificações', M, y);
+  y += 6;
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
+  docPdf.text(label, M, y);
+  y += 10;
+
+  const linhaItem = (titulo, sub, valor)=>{
+    if(y > 270){ docPdf.addPage(); y = 20; }
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...INK);
+    const tituloCorte = titulo.length>55 ? titulo.slice(0,55)+'…' : titulo;
+    docPdf.text(tituloCorte, M+3, y);
+    docPdf.setTextColor(...DANGER);
+    docPdf.text(valor, M+W, y, { align:'right' });
+    y += 4.3;
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(7.8); docPdf.setTextColor(...SOFT);
+    docPdf.text(sub, M+3, y);
+    y += 6;
+  };
+
+  if(pedidosComDesconto.length){
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(11); docPdf.setTextColor(...INK);
+    docPdf.text(`Pedidos com desconto (${pedidosComDesconto.length})`, M, y);
+    docPdf.setTextColor(...DANGER);
+    docPdf.text(brl(pedidosComDesconto.reduce((s,p)=>s+p.desconto,0)), M+W, y, { align:'right' });
+    y += 6;
+    docPdf.setDrawColor(...LINEC); docPdf.line(M, y-3, M+W, y-3);
+    pedidosComDesconto.forEach(p=>{
+      linhaItem(`${p.descricao} — ${p.cliente}`, `${fmtDate(p.data)} · bruto ${brl(p.bruto)} → líquido ${brl(p.liquido)} (${p.pct.toFixed(0)}%)`, '-'+brl(p.desconto));
+    });
+    y += 4;
+  }
+
+  if(pedidosBonificados.length){
+    if(y > 260){ docPdf.addPage(); y = 20; }
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(11); docPdf.setTextColor(...INK);
+    docPdf.text(`Pedidos de bonificação (${pedidosBonificados.length})`, M, y);
+    docPdf.setTextColor(...DANGER);
+    docPdf.text(brl(pedidosBonificados.reduce((s,b)=>s+b.valor,0)), M+W, y, { align:'right' });
+    y += 6;
+    docPdf.setDrawColor(...LINEC); docPdf.line(M, y-3, M+W, y-3);
+    pedidosBonificados.forEach(b=>{
+      linhaItem(`Pedido N° ${b.numero||'—'} — ${b.clienteNome||'—'}`, fmtDate(b.data), brl(b.valor));
+    });
+  }
+
+  docPdf.save('descontos-e-bonificacoes.pdf');
+  showToast('PDF baixado');
 }
 
 function gerarAReceberRepresentantePDF(filtroRep){
