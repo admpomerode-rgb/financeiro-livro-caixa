@@ -866,6 +866,7 @@ function aplicarMigracoes(s){
   if(!s.previsoesGastoFuturo) s.previsoesGastoFuturo = [];
   if(!s.recebimentosDinheiroRep) s.recebimentosDinheiroRep = [];
   if(!s.custosProdutosVK) s.custosProdutosVK = [];
+  if(!s.vendasBonificadas) s.vendasBonificadas = [];
   if(!s.orcamentoAlertaPct) s.orcamentoAlertaPct = {};
   ['saida','entrada'].forEach(tipo=>{
     (s.categorias?.[tipo]||[]).forEach((c,i)=>{ if(!c.cor) c.cor = CATEGORIA_CORES[i % CATEGORIA_CORES.length]; });
@@ -1553,7 +1554,30 @@ async function sincronizarPedidosVK(){
         }
         // se já tiver virado lançamento antes de ser marcado como bonificação, não mexe (segurança financeira) —
         // fica pra conferência manual, já que apagar um lançamento sozinho é arriscado.
+
+        // Registra como venda bonificada — não é conta a receber, mas fica visível no DRE
+        // como "Vendas Bonificadas" com um desconto de 100% (efeito líquido zero no caixa).
+        if(!state.vendasBonificadas) state.vendasBonificadas = [];
+        const dataBonif = p.dataEntrega || todayISO();
+        const existenteBonif = state.vendasBonificadas.find(b=>b.vkPedidoId===p.id);
+        if(existenteBonif){
+          existenteBonif.numero = p.numero;
+          existenteBonif.clienteNome = cliente ? cliente.nome : '';
+          existenteBonif.valor = p.valorTotal;
+          existenteBonif.data = dataBonif;
+        } else {
+          state.vendasBonificadas.push({
+            id: uid(), vkPedidoId: p.id, numero: p.numero,
+            clienteNome: cliente ? cliente.nome : '', valor: p.valorTotal, data: dataBonif,
+            criadoEm: new Date().toISOString()
+          });
+        }
         return;
+      }
+
+      // Se o pedido deixou de ser bonificação (foi corrigido no VK), tira do registro de vendas bonificadas
+      if(state.vendasBonificadas && state.vendasBonificadas.some(b=>b.vkPedidoId===p.id)){
+        state.vendasBonificadas = state.vendasBonificadas.filter(b=>b.vkPedidoId!==p.id);
       }
 
       const itensTexto = (p.itens||[]).map(it=>{
@@ -1577,6 +1601,7 @@ async function sincronizarPedidosVK(){
       }
       const observacaoNova = `Cliente: ${cliente ? cliente.nome : '—'}\nItens: ${itensTexto || '—'}`;
       const vencimentoNovo = p.dataEntrega || todayISO();
+      const descontoConcedido = Number(p.desconto ?? p.valorDesconto ?? p.descontoValor ?? 0) || 0;
 
       if(p.status === 'cancelado'){
         cancelados++;
@@ -1608,13 +1633,14 @@ async function sincronizarPedidosVK(){
         if(existente.vendedorId!==vendedorId || existente.vendedorNome!==vendedorNome){
           existente.vendedorId = vendedorId; existente.vendedorNome = vendedorNome;
         }
-        const mudou = existente.valor!==p.valorTotal || existente.fornecedor!==(cliente?cliente.nome:'') || existente.dataVencimento!==vencimentoNovo || existente.observacao!==observacaoNova;
+        const mudou = existente.valor!==p.valorTotal || existente.fornecedor!==(cliente?cliente.nome:'') || existente.dataVencimento!==vencimentoNovo || existente.observacao!==observacaoNova || (existente.descontoConcedido||0)!==descontoConcedido;
         if(mudou){
           if(existente.status==='pendente'){
             existente.valor = p.valorTotal;
             existente.fornecedor = cliente ? cliente.nome : '';
             existente.dataVencimento = vencimentoNovo;
             existente.observacao = observacaoNova;
+            existente.descontoConcedido = descontoConcedido;
             atualizados++;
           } else {
             divergentes.push({ pedidoId: p.id, numero: p.numero, lancamentoId: existente.id, valorAntigo: existente.valor, valorNovo: p.valorTotal, status: existente.status });
@@ -1628,12 +1654,13 @@ async function sincronizarPedidosVK(){
         if(emAprovacao.vendedorId!==vendedorId || emAprovacao.vendedorNome!==vendedorNome){
           emAprovacao.vendedorId = vendedorId; emAprovacao.vendedorNome = vendedorNome;
         }
-        const mudouAprov = emAprovacao.valor!==p.valorTotal || emAprovacao.contraparte!==(cliente?cliente.nome:'') || emAprovacao.dataVencimento!==vencimentoNovo || emAprovacao.observacao!==observacaoNova;
+        const mudouAprov = emAprovacao.valor!==p.valorTotal || emAprovacao.contraparte!==(cliente?cliente.nome:'') || emAprovacao.dataVencimento!==vencimentoNovo || emAprovacao.observacao!==observacaoNova || (emAprovacao.descontoConcedido||0)!==descontoConcedido;
         if(mudouAprov){
           emAprovacao.valor = p.valorTotal;
           emAprovacao.contraparte = cliente ? cliente.nome : '';
           emAprovacao.dataVencimento = vencimentoNovo;
           emAprovacao.observacao = observacaoNova;
+          emAprovacao.descontoConcedido = descontoConcedido;
           atualizadosAprovacao++;
         }
         return;
@@ -1648,6 +1675,7 @@ async function sincronizarPedidosVK(){
         dataVencimento: vencimentoNovo,
         categoria: cfg.categoria || 'Vendas',
         vendedorId, vendedorNome,
+        descontoConcedido,
         criadoEm: new Date().toISOString()
       });
       novos++;
@@ -5114,6 +5142,8 @@ function renderDRE(periodo){
   const despesas = porCategoria('saida');
   const totalReceitas = Object.values(receitas).reduce((a,b)=>a+b,0);
   const totalDespesas = Object.values(despesas).reduce((a,b)=>a+b,0);
+  const totalDescontos = lista.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+(l.descontoConcedido||0),0);
+  const totalBonificado = (state.vendasBonificadas||[]).filter(b=>b.data>=de && b.data<=ate).reduce((s,b)=>s+b.valor,0);
   const canceladosVK = state.lancamentos.filter(l=>l.origem==='vk' && l.status==='cancelado' && l.dataVencimento>=de && l.dataVencimento<=ate);
   const totalCancelados = canceladosVK.reduce((s,l)=>s+l.valor,0);
   const receitaLiquida = totalReceitas - totalCancelados;
@@ -5180,6 +5210,12 @@ function renderDRE(periodo){
     <div class="report-block">
       <div class="report-title">Receita Operacional</div>
       ${(()=>{ const op = Object.entries(receitas).filter(([k])=>k!=='Rendimentos'); return op.length ? op.map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">${brl(v)}${pctVertical(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma receita operacional no período</span><span class="v">${brl(0)}</span></div>`; })()}
+      ${totalDescontos>0.004 ? (()=>{ const totalReceitaOp = totalReceitas - (receitas['Rendimentos']||0); const bruta = totalReceitaOp + totalDescontos; return `
+      <div class="report-line sub"><span>Receita Bruta de Vendas</span><span class="v">${brl(bruta)}</span></div>
+      <div class="report-line sub"><span>(-) Descontos Concedidos</span><span class="v">(${brl(totalDescontos)})</span></div>`; })() : ''}
+      ${totalBonificado>0.004 ? `
+      <div class="report-line sub"><span>Vendas Bonificadas (informativo)</span><span class="v">${brl(totalBonificado)}</span></div>
+      <div class="report-line sub"><span>(-) Desconto por Bonificação</span><span class="v">(${brl(totalBonificado)})</span></div>` : ''}
       ${(()=>{ const totalReceitaOp = totalReceitas - (receitas['Rendimentos']||0); return `<div class="report-line total"><span>(=) Total de Receita Operacional</span><span class="v">${brl(totalReceitaOp)}</span></div>`; })()}
       <div class="report-line sub"><span>(-) Pedidos Cancelados${canceladosVK.length?' ('+canceladosVK.length+')':''}</span><span class="v">(${brl(totalCancelados)})</span></div>
 
@@ -7845,7 +7881,7 @@ function viewVK(){
       <div class="note" style="margin:0;border-top-left-radius:0;border-top-right-radius:0;">
         Ao sincronizar, cada pedido novo do VK Industrial cai primeiro na <strong>fila de aprovação</strong> (tela "Revisar e aprovar") — lá dá pra conferir a categoria antes de virar lançamento de verdade. Só depois de aprovado é que vira <strong>uma conta a receber</strong> aqui — descrição "Pedido N° [número]", valor total do pedido, vencimento na data de entrega, e uma observação com o nome do cliente e os itens comprados (clique no lançamento para ver).
         <br><br>
-        Pedidos cancelados no VK Industrial entram marcados como "Cancelado" (não somem, não passam pela fila de aprovação). Pedidos marcados como <strong>bonificação</strong> no VK Industrial (campo <span class="mono">bonificacao: true</span> no documento do pedido) não são importados de jeito nenhum — nem viram lançamento, nem entram na fila de aprovação, já que não é uma venda de verdade. Se o pedido for editado no VK Industrial <strong>depois de aprovado</strong>, a sincronização detecta e corrige automaticamente aqui — <strong>desde que o pedido ainda esteja pendente</strong>. Se já tiver sido marcado como recebido, a correção não é feita sozinha (pra não mexer em algo que você já conferiu) — ele aparece no painel de pendências acima pra você decidir. Se o pedido ainda estiver na fila de aprovação quando for editado no VK, a fila é atualizada sozinha também.
+        Pedidos cancelados no VK Industrial entram marcados como "Cancelado" (não somem, não passam pela fila de aprovação). Pedidos marcados como <strong>bonificação</strong> no VK Industrial (campo <span class="mono">bonificacao: true</span> no documento do pedido) nunca viram conta a receber nem passam pela fila de aprovação, já que não é dinheiro esperado — mas o valor entra no DRE como "Vendas Bonificadas" com um desconto de 100% ao lado ("Desconto por Bonificação"), efeito líquido zero no caixa, só pra dar visibilidade de quanto foi dado de bonificação no período. Se o pedido for editado no VK Industrial <strong>depois de aprovado</strong>, a sincronização detecta e corrige automaticamente aqui — <strong>desde que o pedido ainda esteja pendente</strong>. Se já tiver sido marcado como recebido, a correção não é feita sozinha (pra não mexer em algo que você já conferiu) — ele aparece no painel de pendências acima pra você decidir. Se o pedido ainda estiver na fila de aprovação quando for editado no VK, a fila é atualizada sozinha também.
         <br><br>
         A sincronização não é automática/contínua — clique em "Sincronizar pedidos" sempre que quiser buscar os pedidos novos e corrigir os que mudaram. A senha fica salva só neste navegador.
       </div>
@@ -8004,6 +8040,7 @@ function viewVKAprovacoes(){
             <div>
               <div style="font-weight:600;font-size:14px;">${escapeHTML(item.descricao)}${item.semNF ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;">⚠️ sem NF</span>' : ''}</div>
               <div style="font-size:12px;color:var(--text-soft);margin-top:2px;">${ehPedido?'Cliente':'Fornecedor'}: ${escapeHTML(item.contraparte||'—')} · Vencimento: ${fmtDate(item.dataVencimento)}</div>
+              ${item.descontoConcedido>0 ? `<div style="font-size:11.5px;color:var(--warn);margin-top:2px;">Valor bruto ${brl(item.valor+item.descontoConcedido)} − desconto ${brl(item.descontoConcedido)}</div>` : ''}
             </div>
             <div class="mono" style="font-weight:700;font-size:16px;color:${ehPedido?'var(--success)':'var(--danger)'};">${ehPedido?'+':'-'} ${brl(item.valor)}</div>
           </div>
@@ -8180,6 +8217,7 @@ function aprovarItemVK(id){
       status: 'pendente', dataPagamento: null,
       origem: 'vk', vkPedidoId: item.vkPedidoId,
       vendedorId: item.vendedorId, vendedorNome: item.vendedorNome,
+      descontoConcedido: item.descontoConcedido || 0,
       criadoEm: new Date().toISOString()
     });
     registrarLog('Pedido VK aprovado', `"${item.descricao}" — ${brl(item.valor)}`);
