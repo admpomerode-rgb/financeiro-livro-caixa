@@ -2312,8 +2312,8 @@ function pendentesResumo(){
   state.lancamentos.forEach(l=>{
     if(l.origem==='transferencia' || l.origem==='investimento') return;
     if(l.status==='pendente'){
-      if(l.tipo==='saida') aPagar += l.valor;
-      if(l.tipo==='entrada') aReceber += l.valor;
+      if(l.tipo==='saida') aPagar += valorEmAberto(l);
+      if(l.tipo==='entrada') aReceber += valorEmAberto(l);
       if(l.dataVencimento && l.dataVencimento < hoje) atrasados++;
     }
   });
@@ -2474,7 +2474,7 @@ function projecaoSaldoBaixo(dias){
   const saldoAtual = totaisPorMesRef(hoje.slice(0,7)).saldoAtual;
   const fim = new Date(); fim.setDate(fim.getDate()+dias);
   const fimISO = fim.toISOString().slice(0,10);
-  const pendentes = state.lancamentos.filter(l=>l.status==='pendente' && l.dataVencimento && l.dataVencimento>hoje && l.dataVencimento<=fimISO).map(l=>({ data: l.dataVencimento, valor: l.tipo==='entrada'?l.valor:-l.valor }));
+  const pendentes = state.lancamentos.filter(l=>l.status==='pendente' && l.dataVencimento && l.dataVencimento>hoje && l.dataVencimento<=fimISO).map(l=>({ data: l.dataVencimento, valor: l.tipo==='entrada'?valorEmAberto(l):-valorEmAberto(l) }));
   const previsoes = (state.previsoesGastoFuturo||[]).filter(p=>!p.convertida && p.dataPrevista && p.dataPrevista>hoje && p.dataPrevista<=fimISO).map(p=>({ data: p.dataPrevista, valor: -p.valorEstimado }));
   const eventos = [...pendentes, ...previsoes].sort((a,b)=>a.data.localeCompare(b.data));
   let saldoCorrente = saldoAtual, minSaldo = saldoAtual, dataMin = hoje;
@@ -2514,7 +2514,7 @@ function totaisPorMesRef(mesRef){
 
   const saldoAtual = saldoInicial + entradasMes - saidasMes;
   const pendentes = state.lancamentos.filter(l=>l.status==='pendente' && l.dataVencimento && l.dataVencimento>=de && l.dataVencimento<=ateMes);
-  const pendentesLiquido = pendentes.reduce((s,l)=> s + (l.tipo==='entrada'?l.valor:-l.valor), 0);
+  const pendentesLiquido = pendentes.reduce((s,l)=> s + (l.tipo==='entrada'?valorEmAberto(l):-valorEmAberto(l)), 0);
   const saldoPrevisto = saldoAtual + pendentesLiquido;
 
   return { saldoInicial, entradasMes, saidasMes, saldoAtual, saldoPrevisto, de, ateMes };
@@ -2856,6 +2856,11 @@ function viewDashboard(){
   `;
 }
 
+function valorEmAberto(l){
+  if(l.status!=='pendente') return l.valor;
+  return Math.round((l.valor - (l.valorRecebido||0))*100)/100;
+}
+
 function rowHTML(l){
   const statusClass = l.status==='pendente' && l.dataVencimento && l.dataVencimento<todayISO() ? 'atrasado' : l.status;
   const statusLabel = {pago:'Pago', recebido:'Recebido', cancelado:'Cancelado', pendente: statusClass==='atrasado' ? 'Atrasado' : 'Pendente'}[l.status];
@@ -2864,12 +2869,12 @@ function rowHTML(l){
       <span class="dot ${l.tipo}"></span>
       <span class="mono" style="font-size:12px;color:var(--text-soft)">${fmtDate(l.dataPagamento || l.dataVencimento)}</span>
       <div class="desc-cell">
-        <div>${escapeHTML(l.descricao)}${l.recebimentoParcial ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Já recebeu parte, resta o valor mostrado">🔸 Parcial</span>' : ''}${l.origem==='forneira' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Forneira</span>' : ''}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Ativo Patrimonial</span>' : ''}${l.origem==='vk-estoque' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Estoque VK</span>' : ''}${l.semNF ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Entrada sem nota fiscal — regularizar depois">⚠️ sem NF</span>' : ''}${(l.tipo==='entrada' && l.custoProdutoVendido>0) ? (()=>{ const m=l.valor-l.custoProdutoVendido; const p=l.valor>0?(m/l.valor*100):0; return ` <span style="color:${m>=0?'var(--success)':'var(--danger)'};font-size:11px;font-weight:600;" title="Margem de contribuição">${m>=0?'📈':'📉'} ${p.toFixed(0)}%</span>`; })() : ''}${l.grupoDivisaoId ? ' <span style="color:#7B5CD6;font-size:11px;" title="Faz parte de uma despesa dividida em várias categorias">🏷️ Dividida</span>' : ''}${l.aprovacao==='pendente' ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Aguardando aprovação — não pode ser paga ainda">⏳ aprovação</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}${l.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${l.id}" style="cursor:pointer;font-size:11px;" title="Ver comprovante">📎</span>` : ''}</div>
+        <div>${escapeHTML(l.descricao)}${(l.valorRecebido>0.004 && l.status==='pendente') ? ` <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Já recebeu/pagou parte — falta ${brl(l.valor-l.valorRecebido)}">🔸 Parcial</span>` : ''}${l.origem==='forneira' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Forneira</span>' : ''}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Ativo Patrimonial</span>' : ''}${l.origem==='vk-estoque' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Estoque VK</span>' : ''}${l.semNF ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Entrada sem nota fiscal — regularizar depois">⚠️ sem NF</span>' : ''}${(l.tipo==='entrada' && l.custoProdutoVendido>0) ? (()=>{ const m=l.valor-l.custoProdutoVendido; const p=l.valor>0?(m/l.valor*100):0; return ` <span style="color:${m>=0?'var(--success)':'var(--danger)'};font-size:11px;font-weight:600;" title="Margem de contribuição">${m>=0?'📈':'📉'} ${p.toFixed(0)}%</span>`; })() : ''}${l.grupoDivisaoId ? ' <span style="color:#7B5CD6;font-size:11px;" title="Faz parte de uma despesa dividida em várias categorias">🏷️ Dividida</span>' : ''}${l.aprovacao==='pendente' ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Aguardando aprovação — não pode ser paga ainda">⏳ aprovação</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}${l.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${l.id}" style="cursor:pointer;font-size:11px;" title="Ver comprovante">📎</span>` : ''}</div>
         <div class="cat">${l.fornecedor ? escapeHTML(l.fornecedor) : `<span class="conta-tag"><span class="conta-swatch" style="background:${corConta(l.contaId)}"></span>${escapeHTML(nomeConta(l.contaId))}</span> · ${escapeHTML(l.categoria)}`}</div>
       </div>
       <span class="col-cat mono" style="font-size:11.5px;color:var(--text-soft)">${fmtDate(l.dataVencimento)}</span>
       <span class="col-status status-chip ${statusClass}">${statusLabel}</span>
-      <span class="mono" style="font-weight:600;color:${l.tipo==='entrada'?'var(--success)':'var(--danger)'};text-align:right;">${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}</span>
+      <span class="mono" style="font-weight:600;color:${l.tipo==='entrada'?'var(--success)':'var(--danger)'};text-align:right;">${l.tipo==='entrada'?'+':'-'} ${brl(valorEmAberto(l))}</span>
     </div>
   `;
 }
@@ -3025,8 +3030,8 @@ function calcularProjecaoMultiMes(mesesAFrente, cenario){
     const d = new Date(hoje.getFullYear(), hoje.getMonth()+i, 1);
     const deMes = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0,10);
     const ateMes = new Date(d.getFullYear(), d.getMonth()+1, 0).toISOString().slice(0,10);
-    const pendentesReceita = state.lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pendente'&&l.dataVencimento>=deMes&&l.dataVencimento<=ateMes).reduce((s,l)=>s+l.valor,0);
-    const pendentesDespesa = state.lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente'&&l.dataVencimento>=deMes&&l.dataVencimento<=ateMes).reduce((s,l)=>s+l.valor,0);
+    const pendentesReceita = state.lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pendente'&&l.dataVencimento>=deMes&&l.dataVencimento<=ateMes).reduce((s,l)=>s+valorEmAberto(l),0);
+    const pendentesDespesa = state.lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente'&&l.dataVencimento>=deMes&&l.dataVencimento<=ateMes).reduce((s,l)=>s+valorEmAberto(l),0);
     let recorrenciaReceita = 0, recorrenciaDespesa = 0;
     if(i>0){
       recorrenciaReceita = (state.recorrencias||[]).filter(r=>r.ativo&&r.tipo==='entrada').reduce((s,r)=>s+r.valor,0);
@@ -3080,8 +3085,8 @@ function calcularProjecaoSimulacao(mesesAFrente, itensHipoteticos){
     const d = new Date(hoje.getFullYear(), hoje.getMonth()+i, 1);
     const deMes = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0,10);
     const ateMes = new Date(d.getFullYear(), d.getMonth()+1, 0).toISOString().slice(0,10);
-    const pendentesReceita = state.lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pendente'&&l.dataVencimento>=deMes&&l.dataVencimento<=ateMes).reduce((s,l)=>s+l.valor,0);
-    const pendentesDespesa = state.lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente'&&l.dataVencimento>=deMes&&l.dataVencimento<=ateMes).reduce((s,l)=>s+l.valor,0);
+    const pendentesReceita = state.lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pendente'&&l.dataVencimento>=deMes&&l.dataVencimento<=ateMes).reduce((s,l)=>s+valorEmAberto(l),0);
+    const pendentesDespesa = state.lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente'&&l.dataVencimento>=deMes&&l.dataVencimento<=ateMes).reduce((s,l)=>s+valorEmAberto(l),0);
     let recorrenciaReceita = 0, recorrenciaDespesa = 0;
     if(i>0){
       recorrenciaReceita = (state.recorrencias||[]).filter(r=>r.ativo&&r.tipo==='entrada').reduce((s,r)=>s+r.valor,0);
@@ -3109,7 +3114,7 @@ function calcularProjecaoSimulacao(mesesAFrente, itensHipoteticos){
 
 function previstoCategoriaNoPeriodo(categoria, tipo, de, ateReal, ateMes){
   const realizado = totalCategoriaTipoNoPeriodo(categoria, tipo, de, ateReal);
-  const pendente = state.lancamentos.filter(l=>l.categoria===categoria && l.tipo===tipo && l.status==='pendente' && l.dataVencimento>=de && l.dataVencimento<=ateMes).reduce((s,l)=>s+l.valor,0);
+  const pendente = state.lancamentos.filter(l=>l.categoria===categoria && l.tipo===tipo && l.status==='pendente' && l.dataVencimento>=de && l.dataVencimento<=ateMes).reduce((s,l)=>s+valorEmAberto(l),0);
   return realizado + pendente;
 }
 
@@ -3484,7 +3489,7 @@ function viewLancamentosCategoria(){
   let lista = state.lancamentos.filter(l=>l.tipo===tipo && l.origem!=='transferencia' && (l.categoria===categoria || l.categoria.startsWith(categoria+' / ')));
   lista.sort((a,b)=>(b.dataPagamento||b.dataVencimento||'').localeCompare(a.dataPagamento||a.dataVencimento||''));
   const totalRealizado = lista.filter(l=>l.status==='pago'||l.status==='recebido').reduce((s,l)=>s+l.valor,0);
-  const totalPendente = lista.filter(l=>l.status==='pendente').reduce((s,l)=>s+l.valor,0);
+  const totalPendente = lista.filter(l=>l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
 
   return `
     <div class="topbar">
@@ -5333,8 +5338,8 @@ function renderSuperRelatorioMensal(mesRef){
   const ticketMedio = receitasCount>0 ? totalReceitas/receitasCount : 0;
 
   const saldoCaixa = totaisRealizados().saldo;
-  const aReceberPendente = state.lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pendente').reduce((s,l)=>s+l.valor,0);
-  const aPagarPendente = state.lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente').reduce((s,l)=>s+l.valor,0);
+  const aReceberPendente = state.lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
+  const aPagarPendente = state.lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
   const liquidez = aPagarPendente>0 ? (saldoCaixa+aReceberPendente)/aPagarPendente : null;
 
   const orc = state.orcamentoCategorias||{};
@@ -5431,8 +5436,8 @@ function renderIndicadores(periodo){
   const ticketMedio = receitas.length>0 ? totalReceitas/receitas.length : 0;
 
   const saldoCaixa = totaisRealizados().saldo;
-  const aReceberPendente = state.lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pendente').reduce((s,l)=>s+l.valor,0);
-  const aPagarPendente = state.lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente').reduce((s,l)=>s+l.valor,0);
+  const aReceberPendente = state.lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
+  const aPagarPendente = state.lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
   const liquidez = aPagarPendente>0 ? (saldoCaixa+aReceberPendente)/aPagarPendente : null;
 
   const pontoEquilibrio = (state.recorrencias||[]).filter(r=>r.ativo && r.tipo==='saida').reduce((s,r)=>s+r.valor,0);
@@ -5544,7 +5549,7 @@ function projecaoDiariaSaldo(dias){
   const pendentes = state.lancamentos.filter(l=>l.status==='pendente' && l.dataVencimento && l.dataVencimento>hoje && l.dataVencimento<=fimISO);
   const previsoes = (state.previsoesGastoFuturo||[]).filter(p=>!p.convertida && p.dataPrevista && p.dataPrevista>hoje && p.dataPrevista<=fimISO);
   const porDia = {};
-  pendentes.forEach(l=>{ porDia[l.dataVencimento] = (porDia[l.dataVencimento]||0) + (l.tipo==='entrada'?l.valor:-l.valor); });
+  pendentes.forEach(l=>{ porDia[l.dataVencimento] = (porDia[l.dataVencimento]||0) + (l.tipo==='entrada'?valorEmAberto(l):-valorEmAberto(l)); });
   previsoes.forEach(p=>{ porDia[p.dataPrevista] = (porDia[p.dataPrevista]||0) - p.valorEstimado; });
   const pontos = [];
   let saldo = saldoHoje;
@@ -5872,8 +5877,8 @@ function renderOrcamentoAnual(){
 function renderRelatorioLiquidez(){
   const bm = state.balancoManual || { estoques:0, realizavelLP:0, passivoNaoCirculante:0 };
   const disponivel = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
-  const aReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente').reduce((s,l)=>s+l.valor,0);
-  const aPagar = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente').reduce((s,l)=>s+l.valor,0);
+  const aReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
+  const aPagar = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
   const cartoesAbertos = state.cartoes.reduce((s,c)=>{
     const comp = competenciaAtual(c);
     return s + (faturaStatus(c.id, comp)==='aberta' ? totalCompetencia(c.id, comp) : 0);
@@ -6542,8 +6547,8 @@ function totalEstoqueInsumos(){ return (state.estoqueInsumos||[]).reduce((s,i)=>
 function renderBalanco(){
   const dataRef = document.getElementById('balancoData')?.value || todayISO();
   const caixaBancos = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
-  const aReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente').reduce((s,l)=>s+l.valor,0);
-  const aPagar = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente').reduce((s,l)=>s+l.valor,0);
+  const aReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
+  const aPagar = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
   const cartoesNaoFaturados = state.cartoes.reduce((s,c)=>{
     const comp = competenciaAtual(c);
     return s + (faturaStatus(c.id, comp)==='aberta' ? totalCompetencia(c.id, comp) : 0);
@@ -8500,11 +8505,19 @@ function abrirQuitarModal(id){
     return;
   }
   const acaoLabel = l.tipo==='entrada' ? 'recebimento' : 'pagamento';
+  const valorRecebido = l.valorRecebido || 0;
+  const falta = Math.round((l.valor - valorRecebido)*100)/100;
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
     <h3>Confirmar ${acaoLabel} — ${escapeHTML(l.descricao)}</h3>
-    <div class="note" style="margin-top:0;">Valor em aberto: <strong class="mono">${brl(l.valor)}</strong>${l.recebimentoParcial ? ' <span style="color:var(--warn);font-weight:600;">· já teve parcela recebida antes</span>' : ''}</div>
-    <div class="field"><label>Valor ${l.tipo==='entrada'?'recebido':'pago'} agora (R$)</label><input type="text" inputmode="decimal" id="qtValor" value="${l.valor}"></div>
+    ${valorRecebido>0.004 ? `
+    <div class="note" style="margin-top:0;">
+      <div style="display:flex;justify-content:space-between;padding:2px 0;"><span>Valor total do pedido</span><span class="mono">${brl(l.valor)}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:2px 0;color:var(--success);"><span>Já ${l.tipo==='entrada'?'recebido':'pago'}</span><span class="mono">${brl(valorRecebido)}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:2px 0;font-weight:700;border-top:1px solid var(--line);margin-top:4px;"><span>Falta ${l.tipo==='entrada'?'receber':'pagar'}</span><span class="mono">${brl(falta)}</span></div>
+    </div>
+    ` : `<div class="note" style="margin-top:0;">Valor em aberto: <strong class="mono">${brl(falta)}</strong></div>`}
+    <div class="field"><label>Valor ${l.tipo==='entrada'?'recebido':'pago'} agora (R$)</label><input type="text" inputmode="decimal" id="qtValor" value="${falta}"></div>
     <div class="field-row">
       <div class="field"><label>Data</label><input type="date" id="qtData" value="${todayISO()}"></div>
       <div class="field"><label>Conta</label><select id="qtConta">${state.contas.map(c=>`<option value="${c.id}" ${l.contaId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select></div>
@@ -8523,7 +8536,7 @@ function abrirQuitarModal(id){
     </div>
     ${l.origem==='vk' && l.vkPedidoId ? `<div class="note" style="margin-top:0;">Se marcar "Pix", o VK Industrial é avisado automaticamente — o pedido aparece como já pago pro representante, pra ele não cobrar em dinheiro de novo.</div>` : ''}
     ` : ''}
-    <div class="note" style="margin-top:0;">Se o valor informado for menor que o total em aberto, o restante continua pendente em Contas a ${l.tipo==='entrada'?'Receber':'Pagar'} até o próximo ${acaoLabel}.</div>
+    <div class="note" style="margin-top:0;">Se o valor informado for menor que o total em aberto, o restante continua pendente nesse mesmo lançamento — não cria um novo.</div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       <button class="btn" id="btnConfirmarQuitar">Confirmar</button>
@@ -8537,8 +8550,12 @@ function abrirQuitarModal(id){
     const contaId = document.getElementById('qtConta').value;
     const formaRecebimento = document.getElementById('qtFormaRecebimento')?.value || null;
     if(isNaN(valorInformado) || valorInformado<=0){ showToast('Informe um valor válido'); return; }
-    const restante = Math.round((l.valor - valorInformado)*100)/100;
-    if(restante <= 0.01){
+    if(!l.historicoRecebimentos) l.historicoRecebimentos = [];
+    l.historicoRecebimentos.push({ valor: valorInformado, data, contaId, formaRecebimento: formaRecebimento||null });
+    const novoRecebido = Math.round(((l.valorRecebido||0) + valorInformado)*100)/100;
+    const novaFalta = Math.round((l.valor - novoRecebido)*100)/100;
+    l.valorRecebido = novoRecebido;
+    if(novaFalta <= 0.01){
       l.status = l.tipo==='entrada' ? 'recebido' : 'pago';
       l.dataPagamento = data;
       l.contaId = contaId;
@@ -8547,21 +8564,10 @@ function abrirQuitarModal(id){
       showToast(l.tipo==='entrada' ? 'Recebimento confirmado' : 'Pagamento confirmado');
       if(formaRecebimento==='pix' && l.origem==='vk' && l.vkPedidoId) avisarVKPedidoPagoPix(l.vkPedidoId);
     } else {
-      const novoId = uid();
-      state.lancamentos.push({
-        id: novoId, tipo: l.tipo, categoria: l.categoria,
-        descricao: `${l.descricao} (parcela)`,
-        valor: valorInformado, contaId, status: l.tipo==='entrada'?'recebido':'pago',
-        dataVencimento: l.dataVencimento, dataPagamento: data,
-        origem: 'parcial', pedidoOrigemId: l.id,
-        fornecedor: l.fornecedor||'', produtoTag: l.produtoTag||'',
-        formaRecebimento: formaRecebimento || null,
-        criadoEm: new Date().toISOString()
-      });
-      l.valor = restante;
-      l.recebimentoParcial = true;
+      l.contaId = contaId;
+      if(formaRecebimento) l.formaRecebimento = formaRecebimento;
       persist(); closeModal(); render();
-      showToast(`Parcela registrada — restam ${brl(restante)} pendente(s)`);
+      showToast(`Registrado — restam ${brl(novaFalta)} pendente(s) nesse mesmo lançamento`);
       if(formaRecebimento==='pix' && l.origem==='vk' && l.vkPedidoId) avisarVKPedidoPagoPix(l.vkPedidoId);
     }
   });
