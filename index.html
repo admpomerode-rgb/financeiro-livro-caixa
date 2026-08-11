@@ -2492,23 +2492,23 @@ function totaisPorMesRef(mesRef){
   const ateMes = `${mesRef}-${String(ultimoDia).padStart(2,'0')}`;
   const hoje = todayISO();
   const mesAtualRef = hoje.slice(0,7);
+  const eventos = movimentosRealizados();
 
   let saldoInicial = 0;
-  state.lancamentos.forEach(l=>{
-    const ref = l.dataPagamento;
-    if(!ref || ref>=de) return;
-    if(l.tipo==='entrada'&&l.status==='recebido') saldoInicial += l.valor;
-    if(l.tipo==='saida'&&l.status==='pago') saldoInicial -= l.valor;
+  eventos.forEach(ev=>{
+    if(!ev.data || ev.data>=de) return;
+    if(ev.tipo==='entrada') saldoInicial += ev.valor;
+    if(ev.tipo==='saida') saldoInicial -= ev.valor;
   });
 
   let entradasMes = 0, saidasMes = 0;
   if(mesRef <= mesAtualRef){
     const ateReal = mesRef === mesAtualRef ? hoje : ateMes;
-    state.lancamentos.forEach(l=>{
-      const ref = l.dataPagamento;
+    eventos.forEach(ev=>{
+      const ref = ev.data;
       if(!ref || ref<de || ref>ateReal) return;
-      if(l.tipo==='entrada'&&l.status==='recebido') entradasMes += l.valor;
-      if(l.tipo==='saida'&&l.status==='pago') saidasMes += l.valor;
+      if(ev.tipo==='entrada') entradasMes += ev.valor;
+      if(ev.tipo==='saida') saidasMes += ev.valor;
     });
   }
 
@@ -2859,6 +2859,37 @@ function viewDashboard(){
 function valorEmAberto(l){
   if(l.status!=='pendente') return l.valor;
   return Math.round((l.valor - (l.valorRecebido||0))*100)/100;
+}
+
+// Retorna cada movimentação de caixa REALIZADA (já paga/recebida) com sua data verdadeira.
+// Lançamento com pagamento em uma parcela só = 1 evento (o próprio lançamento).
+// Lançamento pago em partes (historicoRecebimentos) = 1 evento por parcela, cada um na sua data —
+// pra não "engolir" pagamentos antigos na data do último pagamento.
+function movimentosRealizados(){
+  const eventos = [];
+  state.lancamentos.forEach(l=>{
+    if(l.status!=='pago' && l.status!=='recebido') return;
+    if(l.historicoRecebimentos && l.historicoRecebimentos.length){
+      l.historicoRecebimentos.forEach(h=>{
+        eventos.push({
+          tipo: l.tipo, valor: h.valor, data: h.data, contaId: h.contaId || l.contaId,
+          categoria: l.categoria, descricao: l.descricao, origem: l.origem,
+          lancamentoId: l.id, fornecedor: l.fornecedor, produtoTag: l.produtoTag,
+          formaRecebimento: h.formaRecebimento, comprovanteFoto: l.comprovanteFoto,
+          observacao: l.observacao, centroCusto: l.centroCusto
+        });
+      });
+    } else {
+      eventos.push({
+        tipo: l.tipo, valor: l.valor, data: l.dataPagamento, contaId: l.contaId,
+        categoria: l.categoria, descricao: l.descricao, origem: l.origem,
+        lancamentoId: l.id, fornecedor: l.fornecedor, produtoTag: l.produtoTag,
+        formaRecebimento: l.formaRecebimento, comprovanteFoto: l.comprovanteFoto,
+        observacao: l.observacao, centroCusto: l.centroCusto
+      });
+    }
+  });
+  return eventos;
 }
 
 function rowHTML(l){
@@ -4068,29 +4099,30 @@ function renderExtratoConteudo(contaId){
   const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
   const deMes = `${mesGlobalRef}-01`;
   const ateMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
-  const saldoAntesDoMes = (conta.saldoInicial||0) + state.lancamentos.filter(l=>l.contaId===contaId && (l.status==='pago'||l.status==='recebido') && l.dataPagamento && l.dataPagamento<deMes).reduce((s,l)=>s+(l.tipo==='entrada'?l.valor:-l.valor),0);
+  const todosEventosConta = movimentosRealizados().filter(ev=>ev.contaId===contaId);
+  const saldoAntesDoMes = (conta.saldoInicial||0) + todosEventosConta.filter(ev=>ev.data && ev.data<deMes).reduce((s,ev)=>s+(ev.tipo==='entrada'?ev.valor:-ev.valor),0);
 
-  let lista = state.lancamentos.filter(l=>l.contaId===contaId && (l.status==='pago'||l.status==='recebido') && l.dataPagamento>=deMes && l.dataPagamento<=ateMes);
+  let lista = todosEventosConta.filter(ev=>ev.data>=deMes && ev.data<=ateMes);
   let pendentesConta = state.lancamentos.filter(l=>l.status==='pendente' && l.contaId===contaId && l.dataVencimento>=deMes && l.dataVencimento<=ateMes);
   if(buscando){
     lista = lista.filter(bate);
     pendentesConta = pendentesConta.filter(bate);
   }
   pendentesConta.sort((a,b)=> (a.dataVencimento||'').localeCompare(b.dataVencimento||''));
-  lista.sort((a,b)=> (a.dataPagamento||'').localeCompare(b.dataPagamento||''));
+  lista.sort((a,b)=> (a.data||'').localeCompare(b.data||''));
   const ehMobile = typeof window!=='undefined' && window.innerWidth <= 900;
 
   let saldo = saldoAntesDoMes;
   const grupos = [];
   let atual = null;
-  lista.forEach(l=>{
-    const dia = l.dataPagamento;
+  lista.forEach(ev=>{
+    const dia = ev.data;
     if(!atual || atual.dia!==dia){
       atual = { dia, saldoInicial: saldo, itens: [] };
       grupos.push(atual);
     }
-    saldo += l.tipo==='entrada' ? l.valor : -l.valor;
-    atual.itens.push({ l, saldoApos: saldo });
+    saldo += ev.tipo==='entrada' ? ev.valor : -ev.valor;
+    atual.itens.push({ ev, saldoApos: saldo });
     atual.saldoFinal = saldo;
   });
 
@@ -4100,15 +4132,15 @@ function renderExtratoConteudo(contaId){
         <span class="extrato-dia-data">${ehMobile ? fmtDateCurta(g.dia) : fmtDateExtenso(g.dia)}</span>
         <span>Saldo final do dia: <strong class="mono">${brl(g.saldoFinal)}</strong></span>
       </div>
-      ${g.itens.slice().reverse().map(({l})=>`
-        <div class="ledger-row compact" data-id="${l.id}" data-action="abrir-lancamento" style="cursor:pointer;">
-          <span class="dot ${l.tipo}"></span>
+      ${g.itens.slice().reverse().map(({ev})=>`
+        <div class="ledger-row compact" data-id="${ev.lancamentoId}" data-action="abrir-lancamento" style="cursor:pointer;">
+          <span class="dot ${ev.tipo}"></span>
           <div class="desc-cell">
-            <div>${escapeHTML(l.descricao)}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Ativo Patrimonial</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:10.5px;" title="Tem observação">📝</span>' : ''}${l.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${l.id}" style="cursor:pointer;font-size:10.5px;" title="Ver comprovante">📎</span>` : ''}</div>
-            <div class="cat">${l.fornecedor ? `<span style="text-transform:uppercase;">${escapeHTML(l.fornecedor)}</span>` : escapeHTML(l.categoria)}</div>
+            <div>${escapeHTML(ev.descricao)}${ev.formaRecebimento ? ` <span style="color:var(--text-soft);font-size:10.5px;">· parcela</span>` : ''}${ev.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Transferência</span>' : ''}${ev.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Investimento</span>' : ''}${ev.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Ativo Patrimonial</span>' : ''}${ev.observacao ? ' <span style="color:var(--text-soft);font-size:10.5px;" title="Tem observação">📝</span>' : ''}${ev.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${ev.lancamentoId}" style="cursor:pointer;font-size:10.5px;" title="Ver comprovante">📎</span>` : ''}</div>
+            <div class="cat">${ev.fornecedor ? `<span style="text-transform:uppercase;">${escapeHTML(ev.fornecedor)}</span>` : escapeHTML(ev.categoria)}</div>
           </div>
-          <span class="mono" style="font-weight:600;font-size:12.5px;color:${l.tipo==='entrada'?'var(--success)':'var(--danger)'}">${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}</span>
-          <div class="row-actions">${l.origem!=='transferencia' ? `<button class="icon-btn" data-action="editar" data-id="${l.id}" title="Editar">✎</button>` : ''}<button class="icon-btn" data-action="excluir" data-id="${l.id}" title="Excluir">✕</button></div>
+          <span class="mono" style="font-weight:600;font-size:12.5px;color:${ev.tipo==='entrada'?'var(--success)':'var(--danger)'}">${ev.tipo==='entrada'?'+':'-'} ${brl(ev.valor)}</span>
+          <div class="row-actions">${ev.origem!=='transferencia' ? `<button class="icon-btn" data-action="editar" data-id="${ev.lancamentoId}" title="Editar">✎</button>` : ''}<button class="icon-btn" data-action="excluir" data-id="${ev.lancamentoId}" title="Excluir">✕</button></div>
         </div>
       `).join('')}
       <div class="extrato-dia-foot">
@@ -5185,7 +5217,13 @@ function renderDRE(periodo){
   }
   const filtroCentro = l => dreCentroAtivo==='todos' || (l.centroCusto||'') === dreCentroAtivo;
   const ehAporteInvestimento = l => l.categoria==='Investimentos' && l.origem==='investimento';
-  const lista = state.lancamentos.filter(l=>{
+  // Pra receita/despesa por categoria: usa os eventos de caixa reais (cada parcela na sua data verdadeira).
+  const lista = movimentosRealizados().filter(ev=>{
+    return ev.data && ev.data>=de && ev.data<=ate && ev.origem!=='transferencia' && !ehAporteInvestimento(ev) && filtroCentro(ev);
+  });
+  // Descontos concedidos são um dado do PEDIDO (não de cada parcela) — escaneia os lançamentos originais,
+  // não os eventos, senão um pedido pago em partes contaria o desconto mais de uma vez.
+  const lancamentosPeriodo = state.lancamentos.filter(l=>{
     const ref = l.dataPagamento;
     return ref && ref>=de && ref<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehAporteInvestimento(l) && filtroCentro(l);
   });
@@ -5198,7 +5236,7 @@ function renderDRE(periodo){
   const despesas = porCategoria('saida');
   const totalReceitas = Object.values(receitas).reduce((a,b)=>a+b,0);
   const totalDespesas = Object.values(despesas).reduce((a,b)=>a+b,0);
-  const totalDescontos = lista.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+(l.descontoConcedido||0),0);
+  const totalDescontos = lancamentosPeriodo.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+(l.descontoConcedido||0),0);
   const totalBonificado = (state.vendasBonificadas||[]).filter(b=>b.data>=de && b.data<=ate).reduce((s,b)=>s+b.valor,0);
   const canceladosVK = state.lancamentos.filter(l=>l.origem==='vk' && l.status==='cancelado' && l.dataVencimento>=de && l.dataVencimento<=ate);
   const totalCancelados = canceladosVK.reduce((s,l)=>s+l.valor,0);
