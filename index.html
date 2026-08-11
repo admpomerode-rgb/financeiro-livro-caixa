@@ -4100,7 +4100,7 @@ function renderExtratoConteudo(contaId){
           <span class="dot ${l.tipo}"></span>
           <div class="desc-cell">
             <div>${escapeHTML(l.descricao)}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Ativo Patrimonial</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:10.5px;" title="Tem observação">📝</span>' : ''}${l.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${l.id}" style="cursor:pointer;font-size:10.5px;" title="Ver comprovante">📎</span>` : ''}</div>
-            <div class="cat">${l.fornecedor ? escapeHTML(l.fornecedor) : escapeHTML(l.categoria)}</div>
+            <div class="cat">${l.fornecedor ? `<span style="text-transform:uppercase;">${escapeHTML(l.fornecedor)}</span>` : escapeHTML(l.categoria)}</div>
           </div>
           <span class="mono" style="font-weight:600;font-size:12.5px;color:${l.tipo==='entrada'?'var(--success)':'var(--danger)'}">${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}</span>
           <div class="row-actions">${l.origem!=='transferencia' ? `<button class="icon-btn" data-action="editar" data-id="${l.id}" title="Editar">✎</button>` : ''}<button class="icon-btn" data-action="excluir" data-id="${l.id}" title="Excluir">✕</button></div>
@@ -10685,12 +10685,22 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
         <select id="fCategoria">${opcoesCategoriaHTML(tipo, existing?.categoria)}</select>
       </div>
       <div class="field">
-        <label>Valor (R$)</label>
-        <input type="text" inputmode="decimal" id="fValor" value="${existing ? existing.valor : ''}" placeholder="0,00">
+        <label>Valor (R$)${existing?.origem==='vk' ? ' 🔒' : ''}</label>
+        <input type="text" inputmode="decimal" id="fValor" value="${existing ? existing.valor : ''}" placeholder="0,00" ${existing?.origem==='vk' ? 'readonly style="background:var(--bone);color:var(--text-soft);cursor:not-allowed;"' : ''}>
       </div>
     </div>
+    ${existing?.origem==='vk' ? `
+    <div class="note" style="margin-top:0;">🔒 Esse pedido veio do VK Industrial — o valor não pode ser editado aqui, pra não ficar diferente do que está lá. Pra corrigir o valor, altere o pedido no VK Industrial; a próxima sincronização atualiza aqui sozinha (se o pedido ainda estiver pendente).</div>
+    ` : ''}
     ${existing?.descontoConcedido>0.004 ? `
     <div class="note" style="margin-top:0;border-color:var(--warn);">🏷️ Esse pedido teve <strong>${brl(existing.descontoConcedido)}</strong> de desconto concedido no VK Industrial — valor bruto original: ${brl(existing.valor+existing.descontoConcedido)}. O valor acima já é o líquido (o que realmente entra). O desconto aparece separado no DRE.</div>
+    ` : ''}
+    ${tipo==='entrada' && existing?.origem!=='vk' ? `
+    <div class="field">
+      <label>Desconto concedido (R$, opcional)</label>
+      <input type="text" inputmode="decimal" id="fDescontoConcedido" value="${existing?.descontoConcedido || ''}" placeholder="0,00">
+      <div class="note" style="margin-top:6px;">Se preencher, o valor acima continua sendo o líquido (o que realmente entra) — o desconto aparece separado no DRE, em "Receita Bruta de Vendas" e "(-) Descontos Concedidos".</div>
+    </div>
     ` : ''}
     ${tipo==='saida' && !isEdit ? `
     <div class="field" id="fMulticategoriaWrap">
@@ -11054,7 +11064,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
   document.getElementById('btnSalvarLancamento').addEventListener('click', ()=>{
     const categoria = document.getElementById('fCategoria').value;
     const descricao = document.getElementById('fDescricao').value.trim() || categoria;
-    const valor = numBR(document.getElementById('fValor').value);
+    const valor = existing?.origem==='vk' ? existing.valor : numBR(document.getElementById('fValor').value);
     if(!valor || isNaN(valor) || valor<=0){ showToast('Preencha um valor válido'); return; }
 
     if(formaPagtoAtual==='cartao'){
@@ -11144,6 +11154,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       produtoTag: document.getElementById('fProduto').value.trim(),
       custoProdutoVendido: (tipo==='entrada' && document.getElementById('fCustoCPV')) ? (numBR(document.getElementById('fCustoCPV').value) || null) : (existing?.custoProdutoVendido ?? null),
       proLabore: (tipo==='saida' && document.getElementById('fProLabore')) ? document.getElementById('fProLabore').checked : (existing?.proLabore || false),
+      descontoConcedido: (tipo==='entrada' && existing?.origem!=='vk' && document.getElementById('fDescontoConcedido')) ? (numBR(document.getElementById('fDescontoConcedido').value) || 0) : (existing?.descontoConcedido || 0),
       centroCusto: (fCentroCusto && fCentroCusto.value!=='__novo__') ? fCentroCusto.value : (existing?.centroCusto||''),
       canalVenda: (fCanalVenda && fCanalVenda.value!=='__novo__') ? fCanalVenda.value : (existing?.canalVenda||''),
       comprovanteFoto: comprovanteAtual,
@@ -11197,7 +11208,7 @@ function viewFornecedores(){
           <div class="ledger-row fornecedor-row" data-id="${f.id}">
             <span class="dot" style="background:var(--text-soft);"></span>
             <div class="desc-cell" data-action="editar-fornecedor" data-id="${f.id}" style="cursor:pointer;">
-              <div>${escapeHTML(f.nome)}</div>
+              <div style="text-transform:lowercase;">${escapeHTML(f.nome)}</div>
               <div class="cat">${escapeHTML(f.cnpjCpf||'sem CNPJ/CPF cadastrado')}${f.contratoPrecoFixo ? ` · 📑 contrato ${brl(f.contratoPrecoFixo)}${f.contratoVigenciaFim?' até '+fmtDate(f.contratoVigenciaFim):''}` : ''}</div>
             </div>
             <span class="fornecedor-contato" style="font-size:12.5px;color:var(--text-soft);">${escapeHTML(f.telefone||f.email||'—')}</span>
@@ -11801,12 +11812,20 @@ function openContaModal(existing){
   });
 }
 
-function openTransferenciaModal(contaOrigemId){
-  const origemId = contaOrigemId || state.contas[0].id;
-  const destinoPadrao = state.contas.find(c=>c.id!==origemId)?.id || state.contas[0].id;
+function openTransferenciaModal(contaOrigemId, existingLancamento){
+  const isEdit = !!existingLancamento;
+  let parOrigem, parDestino;
+  if(isEdit){
+    const par = state.lancamentos.filter(l=>l.origem==='transferencia' && l.transferenciaId===existingLancamento.transferenciaId);
+    parOrigem = par.find(l=>l.tipo==='saida');
+    parDestino = par.find(l=>l.tipo==='entrada');
+  }
+  const origemId = isEdit ? parOrigem.contaId : (contaOrigemId || state.contas[0].id);
+  const destinoPadrao = isEdit ? parDestino.contaId : (state.contas.find(c=>c.id!==origemId)?.id || state.contas[0].id);
+  const descricaoExtraExistente = isEdit ? (parOrigem.descricao.split(' — ').slice(1).join(' — ') || '') : '';
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
-    <h3>Transferência entre contas</h3>
+    <h3>${isEdit ? 'Editar transferência' : 'Transferência entre contas'}</h3>
     <div class="field-row">
       <div class="field">
         <label>De (origem)</label>
@@ -11820,20 +11839,20 @@ function openTransferenciaModal(contaOrigemId){
     <div class="field-row">
       <div class="field">
         <label>Valor (R$)</label>
-        <input type="text" inputmode="decimal" id="tValor" placeholder="0,00">
+        <input type="text" inputmode="decimal" id="tValor" placeholder="0,00" value="${isEdit ? parOrigem.valor : ''}">
       </div>
       <div class="field">
         <label>Data</label>
-        <input type="date" id="tData" value="${todayISO()}">
+        <input type="date" id="tData" value="${isEdit ? parOrigem.dataPagamento : todayISO()}">
       </div>
     </div>
     <div class="field">
       <label>Descrição (opcional)</label>
-      <input type="text" id="tDescricao" placeholder="Ex: Reforço de caixa da loja">
+      <input type="text" id="tDescricao" placeholder="Ex: Reforço de caixa da loja" value="${escapeHTML(descricaoExtraExistente)}">
     </div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
-      <button class="btn" id="btnSalvarTransferencia">Transferir</button>
+      <button class="btn" id="btnSalvarTransferencia">${isEdit ? 'Salvar' : 'Transferir'}</button>
     </div>
   `;
   document.getElementById('modalOverlay').classList.add('open');
@@ -11848,8 +11867,17 @@ function openTransferenciaModal(contaOrigemId){
     if(isNaN(valor) || valor<=0){ showToast('Informe um valor válido'); return; }
     if(!data){ showToast('Informe a data'); return; }
     const nomeOrigem = nomeConta(origemId), nomeDestino = nomeConta(destinoId);
-    const tid = uid();
     const base = descricaoExtra ? ' — ' + descricaoExtra : '';
+    if(isEdit){
+      parOrigem.contaId = origemId; parOrigem.valor = valor; parOrigem.dataVencimento = data; parOrigem.dataPagamento = data;
+      parOrigem.descricao = `Transferência para ${nomeDestino}${base}`;
+      parDestino.contaId = destinoId; parDestino.valor = valor; parDestino.dataVencimento = data; parDestino.dataPagamento = data;
+      parDestino.descricao = `Transferência de ${nomeOrigem}${base}`;
+      persist(); closeModal(); render();
+      showToast('Transferência atualizada');
+      return;
+    }
+    const tid = uid();
     state.lancamentos.push({
       id: uid(), tipo:'saida', categoria:'Transferência', descricao:`Transferência para ${nomeDestino}${base}`,
       valor, contaId: origemId, status:'pago', dataVencimento: data, dataPagamento: data,
@@ -13681,13 +13709,15 @@ function openDetalheLancamentoModal(l){
     ${l.observacao ? `<div class="note" style="margin-top:14px;white-space:pre-wrap;">${escapeHTML(l.observacao)}</div>` : ''}
     <div class="modal-actions">
       <button class="btn ghost" id="btnFecharDetalhe">Fechar</button>
-      ${l.origem!=='transferencia' ? `<button class="btn" id="btnEditarDoDetalhe">Editar</button>` : `<button class="btn ghost" id="btnExcluirDoDetalhe" style="color:var(--danger);border-color:#F3C6C2;">Excluir</button>`}
+      ${l.origem!=='transferencia' ? `<button class="btn" id="btnEditarDoDetalhe">Editar</button>` : `<button class="btn ghost" id="btnEditarTransferenciaDoDetalhe">Editar</button><button class="btn ghost" id="btnExcluirDoDetalhe" style="color:var(--danger);border-color:#F3C6C2;">Excluir</button>`}
     </div>
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnFecharDetalhe').addEventListener('click', closeModal);
   const btnEditar = document.getElementById('btnEditarDoDetalhe');
   if(btnEditar) btnEditar.addEventListener('click', ()=>{ closeModal(); openLancamentoModal(l.tipo, l); });
+  const btnEditarTransf = document.getElementById('btnEditarTransferenciaDoDetalhe');
+  if(btnEditarTransf) btnEditarTransf.addEventListener('click', ()=>{ closeModal(); openTransferenciaModal(null, l); });
   const btnExcluirDetalhe = document.getElementById('btnExcluirDoDetalhe');
   if(btnExcluirDetalhe) btnExcluirDetalhe.addEventListener('click', ()=>{ closeModal(); excluirLancamento(l.id); });
 }
