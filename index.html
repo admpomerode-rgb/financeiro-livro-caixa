@@ -951,6 +951,7 @@ function showToast(msg){
 let currentView = 'dashboard';
 let extratoContaId = null;
 let extratoBuscaTermo = '';
+let extratoModoBusca = 'conta';
 let conciliacaoContaId = null;
 let pararCameraQRAtiva = null;
 let relatorioAtivo = 'dre';
@@ -4040,20 +4041,41 @@ function fmtDateCurta(d){
 function renderExtratoConteudo(contaId){
   const conta = state.contas.find(c=>c.id===contaId);
   if(!conta) return '';
-  let lista = state.lancamentos.filter(l=>l.contaId===contaId && (l.status==='pago'||l.status==='recebido'));
   const buscando = !!extratoBuscaTermo;
-  let pendentesConta = state.lancamentos.filter(l=> l.status==='pendente' && (buscando || l.contaId===contaId));
+  const termo = extratoBuscaTermo.toLowerCase();
+  const bate = l => l.descricao.toLowerCase().includes(termo) || (l.fornecedor||'').toLowerCase().includes(termo) || (l.observacao||'').toLowerCase().includes(termo);
+
+  if(buscando && extratoModoBusca!=='conta'){
+    // Pesquisa cruzada em Contas a Receber/Pagar — todas as contas, todos os períodos,
+    // não respeita o mês selecionado (isso fica só nas telas específicas de Pagar/Receber).
+    const tipoAlvo = extratoModoBusca==='receber' ? 'entrada' : 'saida';
+    const resultados = state.lancamentos.filter(l=>l.tipo===tipoAlvo && l.origem!=='transferencia' && bate(l))
+      .sort((a,b)=>(b.dataVencimento||b.dataPagamento||'').localeCompare(a.dataVencimento||a.dataPagamento||''));
+    return `
+      <div class="panel">
+        <div class="panel-head"><h2>${resultados.length} resultado(s) em ${extratoModoBusca==='receber'?'Contas a Receber':'Contas a Pagar'}</h2></div>
+        <div class="panel-body">${resultados.length ? resultados.map(rowHTML).join('') : `<div class="empty">Nenhum resultado encontrado para essa busca.</div>`}</div>
+      </div>
+    `;
+  }
+
+  // Modo "nesta conta" — respeita o mês selecionado no navegador
+  const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
+  const deMes = `${mesGlobalRef}-01`;
+  const ateMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
+  const saldoAntesDoMes = (conta.saldoInicial||0) + state.lancamentos.filter(l=>l.contaId===contaId && (l.status==='pago'||l.status==='recebido') && l.dataPagamento && l.dataPagamento<deMes).reduce((s,l)=>s+(l.tipo==='entrada'?l.valor:-l.valor),0);
+
+  let lista = state.lancamentos.filter(l=>l.contaId===contaId && (l.status==='pago'||l.status==='recebido') && l.dataPagamento>=deMes && l.dataPagamento<=ateMes);
+  let pendentesConta = state.lancamentos.filter(l=>l.status==='pendente' && l.contaId===contaId && l.dataVencimento>=deMes && l.dataVencimento<=ateMes);
   if(buscando){
-    const termo = extratoBuscaTermo.toLowerCase();
-    const bate = l => l.descricao.toLowerCase().includes(termo) || (l.fornecedor||'').toLowerCase().includes(termo) || (l.observacao||'').toLowerCase().includes(termo);
     lista = lista.filter(bate);
     pendentesConta = pendentesConta.filter(bate);
-    pendentesConta.sort((a,b)=> (a.dataVencimento||'').localeCompare(b.dataVencimento||''));
   }
+  pendentesConta.sort((a,b)=> (a.dataVencimento||'').localeCompare(b.dataVencimento||''));
   lista.sort((a,b)=> (a.dataPagamento||'').localeCompare(b.dataPagamento||''));
   const ehMobile = typeof window!=='undefined' && window.innerWidth <= 900;
 
-  let saldo = conta.saldoInicial || 0;
+  let saldo = saldoAntesDoMes;
   const grupos = [];
   let atual = null;
   lista.forEach(l=>{
@@ -4092,10 +4114,10 @@ function renderExtratoConteudo(contaId){
   `).join('');
 
   return `
-    ${grupos.length ? gruposHTML : `<div class="panel"><div class="empty">${extratoBuscaTermo ? 'Nenhuma movimentação encontrada para essa busca.' : 'Nenhuma movimentação realizada nesta conta ainda.'}</div></div>`}
+    ${grupos.length ? gruposHTML : `<div class="panel"><div class="empty">${extratoBuscaTermo ? 'Nenhuma movimentação encontrada para essa busca neste mês.' : 'Nenhuma movimentação nesta conta neste mês.'}</div></div>`}
     ${pendentesConta.length ? `
     <div class="panel">
-      <div class="panel-head"><h2>${buscando ? 'Encontrado em Contas a Pagar/Receber (todas as contas)' : 'Previsto (ainda pendente) nesta conta'}</h2></div>
+      <div class="panel-head"><h2>Previsto (ainda pendente) neste mês</h2></div>
       <div class="panel-body">${pendentesConta.map(rowHTML).join('')}</div>
     </div>` : ''}
   `;
@@ -4115,6 +4137,7 @@ function viewExtrato(contaId){
         ${menuAdicionarContaHTML(contaId)}
       </div>
     </div>
+    ${mesNavHTML()}
     <div class="panel">
       <div class="filter-bar" style="align-items:flex-end;">
         <input type="text" id="extratoFiltroBusca" value="${escapeHTML(extratoBuscaTermo)}" placeholder="🔍 Buscar por descrição, cliente/fornecedor..." style="flex:1;min-width:180px;border:2px solid var(--blue-accent);border-radius:8px;padding:9px 12px;font-size:12.5px;background:var(--white);">
@@ -4122,6 +4145,12 @@ function viewExtrato(contaId){
         <div class="field" style="margin:0;max-width:120px;"><label style="font-size:10.5px;">Até</label><input type="date" id="extratoFiltroAte" style="padding:6px 8px;font-size:12px;"></div>
         <button class="btn ghost sm" id="btnBaixarExtratoPDF">📄 Baixar PDF</button>
       </div>
+      <div class="toggle-row" id="extratoModoBuscaRow" style="margin:10px 20px 16px;flex-wrap:wrap;width:auto;">
+        <button type="button" data-modo="conta" class="${extratoModoBusca==='conta'?'active':''}">Nesta conta</button>
+        <button type="button" data-modo="receber" class="${extratoModoBusca==='receber'?'active':''}">Contas a Receber</button>
+        <button type="button" data-modo="pagar" class="${extratoModoBusca==='pagar'?'active':''}">Contas a Pagar</button>
+      </div>
+      ${extratoModoBusca!=='conta' ? `<div class="note" style="margin:0 20px 16px;">Pesquisando em ${extratoModoBusca==='receber'?'Contas a Receber':'Contas a Pagar'} — todas as contas, todos os períodos (não respeita o mês selecionado acima).</div>` : ''}
     </div>
     <div id="extratoConteudo">${renderExtratoConteudo(contaId)}</div>
   `;
@@ -10069,6 +10098,7 @@ function attachViewHandlers(){
     btn.addEventListener('click', ()=>{
       extratoContaId = btn.dataset.id;
       extratoBuscaTermo = '';
+      extratoModoBusca = 'conta';
       currentView = 'extrato';
       render();
     });
@@ -10117,9 +10147,16 @@ function attachViewHandlers(){
   const btnVoltarContas = document.getElementById('btnVoltarContas');
   if(btnVoltarContas) btnVoltarContas.addEventListener('click', ()=>{
     extratoBuscaTermo = '';
+    extratoModoBusca = 'conta';
     currentView = 'contas';
     document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view==='contas'));
     render();
+  });
+  document.querySelectorAll('#extratoModoBuscaRow [data-modo]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      extratoModoBusca = btn.dataset.modo;
+      render();
+    });
   });
   document.getElementById('extratoFiltroBusca')?.addEventListener('input', (e)=>{
     extratoBuscaTermo = e.target.value;
