@@ -92,7 +92,7 @@
   .sidebar-footer button:hover{border-color:var(--blue-accent);color:var(--white);}
 
   .main{flex:1;padding:32px 40px;max-width:1200px;}
-  .topbar{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:28px;}
+  .topbar{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:16px;}
   .topbar h1{font-size:22px;}
   .topbar p{color:var(--text-soft);font-size:13.5px;margin-top:4px;}
 
@@ -151,8 +151,8 @@
 
   .dash-section-label{font-size:11.5px;font-weight:700;color:var(--text-soft);text-transform:uppercase;letter-spacing:.05em;margin:22px 0 10px;}
 
-  .mes-nav{display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:14px;}
-  .mes-nav button{background:var(--white);border:1px solid var(--line);width:32px;height:32px;border-radius:8px;font-size:16px;color:var(--ink);cursor:pointer;}
+  .mes-nav{display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:8px;}
+  .mes-nav button{background:var(--white);border:1px solid var(--line);width:28px;height:28px;border-radius:8px;font-size:15px;color:var(--ink);cursor:pointer;}
   .mes-nav button:hover{background:var(--bone);}
   .mes-nav-label{font-family:'Space Grotesk';font-weight:600;font-size:15px;text-transform:capitalize;min-width:150px;text-align:center;}
   .mes-nav-tag{font-size:10px;font-weight:600;color:var(--blue-accent);background:#E8EFFC;border-radius:5px;padding:2px 6px;margin-left:4px;text-transform:none;}
@@ -294,8 +294,8 @@
   .field-row{display:flex;gap:10px;}
   .field-row .field{flex:1;}
   .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px;}
-  .toggle-row{display:flex;gap:8px;background:var(--bone);border-radius:8px;padding:4px;margin-bottom:16px;width:fit-content;}
-  .toggle-row button{border:none;background:transparent;padding:7px 14px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;color:var(--text-soft);font-family:'Inter';}
+  .toggle-row{display:flex;gap:8px;background:var(--bone);border-radius:8px;padding:3px;margin-bottom:12px;width:fit-content;}
+  .toggle-row button{border:none;background:transparent;padding:6px 12px;border-radius:6px;font-size:12.5px;font-weight:500;cursor:pointer;color:var(--text-soft);font-family:'Inter';}
   .toggle-row button.active{background:var(--white);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,0.08);}
 
   .stub{padding:60px 30px;text-align:center;color:var(--text-soft);}
@@ -308,7 +308,7 @@
   }
   .toast.show{opacity:1;transform:translateX(-50%) translateY(-6px);}
 
-  .filter-bar{display:flex;gap:8px;padding:14px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center;}
+  .filter-bar{display:flex;gap:8px;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center;}
   .dropdown-wrap{position:relative;display:inline-block;}
   .dropdown-menu{position:absolute;top:calc(100% + 6px);right:0;background:var(--white);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(11,15,20,.14);min-width:210px;z-index:50;overflow:hidden;display:none;}
   .dropdown-menu.open{display:block;}
@@ -4145,12 +4145,12 @@ function viewExtrato(contaId){
         <div class="field" style="margin:0;max-width:120px;"><label style="font-size:10.5px;">Até</label><input type="date" id="extratoFiltroAte" style="padding:6px 8px;font-size:12px;"></div>
         <button class="btn ghost sm" id="btnBaixarExtratoPDF">📄 Baixar PDF</button>
       </div>
-      <div class="toggle-row" id="extratoModoBuscaRow" style="margin:10px 20px 16px;flex-wrap:wrap;width:auto;">
+      <div class="toggle-row" id="extratoModoBuscaRow" style="margin:8px 16px 8px;flex-wrap:wrap;width:auto;">
         <button type="button" data-modo="conta" class="${extratoModoBusca==='conta'?'active':''}">Nesta conta</button>
         <button type="button" data-modo="receber" class="${extratoModoBusca==='receber'?'active':''}">Contas a Receber</button>
         <button type="button" data-modo="pagar" class="${extratoModoBusca==='pagar'?'active':''}">Contas a Pagar</button>
       </div>
-      ${extratoModoBusca!=='conta' ? `<div class="note" style="margin:0 20px 16px;">Pesquisando em ${extratoModoBusca==='receber'?'Contas a Receber':'Contas a Pagar'} — todas as contas, todos os períodos (não respeita o mês selecionado acima).</div>` : ''}
+      ${extratoModoBusca!=='conta' ? `<div class="note" style="margin:0 16px 10px;padding:8px 12px;font-size:12px;">Pesquisando em ${extratoModoBusca==='receber'?'Contas a Receber':'Contas a Pagar'} — todas as contas, todos os períodos (não respeita o mês selecionado acima).</div>` : ''}
     </div>
     <div id="extratoConteudo">${renderExtratoConteudo(contaId)}</div>
   `;
