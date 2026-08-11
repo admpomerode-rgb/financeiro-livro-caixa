@@ -4140,7 +4140,10 @@ function viewExtrato(contaId){
     ${mesNavHTML()}
     <div class="panel">
       <div class="filter-bar" style="align-items:flex-end;">
-        <input type="text" id="extratoFiltroBusca" value="${escapeHTML(extratoBuscaTermo)}" placeholder="🔍 Buscar por descrição, cliente/fornecedor..." style="flex:1;min-width:180px;border:2px solid var(--blue-accent);border-radius:8px;padding:9px 12px;font-size:12.5px;background:var(--white);">
+        <div style="position:relative;flex:1;min-width:180px;">
+          <input type="text" id="extratoFiltroBusca" value="${escapeHTML(extratoBuscaTermo)}" placeholder="🔍 Buscar por descrição, cliente/fornecedor..." style="width:100%;border:2px solid var(--blue-accent);border-radius:8px;padding:9px 32px 9px 12px;font-size:12.5px;background:var(--white);box-sizing:border-box;">
+          <button type="button" id="btnLimparExtratoBusca" title="Limpar busca" style="display:${extratoBuscaTermo?'flex':'none'};position:absolute;right:6px;top:50%;transform:translateY(-50%);width:22px;height:22px;border:none;background:var(--bone);border-radius:50%;align-items:center;justify-content:center;cursor:pointer;color:var(--text-soft);font-size:13px;line-height:1;padding:0;">✕</button>
+        </div>
         <div class="field" style="margin:0;max-width:120px;"><label style="font-size:10.5px;">De</label><input type="date" id="extratoFiltroDe" style="padding:6px 8px;font-size:12px;"></div>
         <div class="field" style="margin:0;max-width:120px;"><label style="font-size:10.5px;">Até</label><input type="date" id="extratoFiltroAte" style="padding:6px 8px;font-size:12px;"></div>
         <button class="btn ghost sm" id="btnBaixarExtratoPDF">📄 Baixar PDF</button>
@@ -10158,8 +10161,7 @@ function attachViewHandlers(){
       render();
     });
   });
-  document.getElementById('extratoFiltroBusca')?.addEventListener('input', (e)=>{
-    extratoBuscaTermo = e.target.value;
+  const atualizarExtratoConteudo = ()=>{
     const wrap = document.getElementById('extratoConteudo');
     if(!wrap) return;
     wrap.innerHTML = renderExtratoConteudo(extratoContaId);
@@ -10189,6 +10191,19 @@ function attachViewHandlers(){
       });
     });
     atualizarSelecaoUI();
+  };
+  document.getElementById('extratoFiltroBusca')?.addEventListener('input', (e)=>{
+    extratoBuscaTermo = e.target.value;
+    const btnLimpar = document.getElementById('btnLimparExtratoBusca');
+    if(btnLimpar) btnLimpar.style.display = extratoBuscaTermo ? 'flex' : 'none';
+    atualizarExtratoConteudo();
+  });
+  document.getElementById('btnLimparExtratoBusca')?.addEventListener('click', ()=>{
+    extratoBuscaTermo = '';
+    const input = document.getElementById('extratoFiltroBusca');
+    if(input) input.value = '';
+    document.getElementById('btnLimparExtratoBusca').style.display = 'none';
+    atualizarExtratoConteudo();
   });
   document.getElementById('btnBaixarExtratoPDF')?.addEventListener('click', ()=>{
     const dataDe = document.getElementById('extratoFiltroDe').value || null;
