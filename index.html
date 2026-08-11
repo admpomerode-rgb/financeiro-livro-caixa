@@ -1544,7 +1544,14 @@ async function sincronizarPedidosVK(){
       const cliente = clientes.find(c=>c.id===p.clienteId);
       const descricaoPedido = `Pedido N° ${p.numero}`;
       const existenteAntigo = `Pedido N° ${p.numero}${cliente ? ' — '+cliente.nome : ''}`;
-      const existente = state.lancamentos.find(l=>l.origem==='vk' && (l.vkPedidoId===p.id || l.descricao===descricaoPedido || l.descricao===existenteAntigo));
+      // Prioriza o ID único do pedido (vkPedidoId) — é o único jeito confiável de saber que é o MESMO pedido.
+      // O match por texto da descrição só serve de fallback pra lançamentos bem antigos que nunca tiveram
+      // vkPedidoId gravado; usar texto como critério pra tudo intercambiava pedidos diferentes que
+      // calhavam de ter o mesmo número (reinício de numeração, numeração por representante, pedido sem
+      // número preenchido etc.) — e o pedido novo ficava de fora silenciosamente, achando que já existia.
+      const existente = state.lancamentos.find(l=>l.origem==='vk' && (
+        l.vkPedidoId ? l.vkPedidoId===p.id : (l.descricao===descricaoPedido || l.descricao===existenteAntigo)
+      ));
       const emAprovacao = state.vkAprovacoes.find(a=>a.tipo==='pedido' && a.vkPedidoId===p.id);
 
       if(ehBonificacao){
