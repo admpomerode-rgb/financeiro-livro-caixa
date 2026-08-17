@@ -1614,7 +1614,9 @@ async function sincronizarPedidosVK(){
             state.vendedores.push({ id: vendedorId, nome: rep.nome, comissaoPadrao: 0 });
           } else {
             const vExistente = state.vendedores.find(v=>v.id===vendedorId);
-            if(vExistente) vExistente.nome = rep.nome;
+            // Se o nome foi corrigido manualmente aqui no Livro Caixa, não deixa a sincronização
+            // sobrescrever de volta com o nome (possivelmente desatualizado/errado) do VK Industrial.
+            if(vExistente && !vExistente.nomeEditadoManualmente) vExistente.nome = rep.nome;
           }
         }
       }
@@ -4300,7 +4302,7 @@ function viewFatura(cartaoId, competencia){
             <div class="desc-cell"><div>${escapeHTML(p.descricao)}${p.totalParcelas>1?` <span style="color:var(--text-soft);font-size:11.5px;">(${p.parcela}/${p.totalParcelas})</span>`:''}</div></div>
             <span class="col-cat" style="font-size:12px;color:var(--text-soft);">${escapeHTML(p.categoria)}</span>
             <span class="mono" style="font-weight:600;color:var(--danger);">${brl(p.valor)}</span>
-            <span></span>
+            <span>${status==='aberta' ? `<button class="icon-btn" data-action="excluir-compra-cartao" data-id="${p.id}" title="Excluir essa despesa da fatura">✕</button>` : ''}</span>
           </div>
         `).join('') : `<div class="empty">Nenhuma compra lançada nesta fatura ainda.</div>`}
       </div>
@@ -4315,6 +4317,24 @@ function viewFatura(cartaoId, competencia){
         <button class="btn" id="btnFecharFatura">Fechar fatura e lançar como conta a pagar</button>
       </div>
     </div>` : ''}
+    ${status==='fechada' || status==='paga' ? (()=>{
+      const fechamento = state.faturasFechadas.find(f=>f.cartaoId===cartaoId && f.competencia===compAtual);
+      const lanc = fechamento ? state.lancamentos.find(l=>l.id===fechamento.lancamentoId) : null;
+      if(!lanc) return '';
+      const jaPago = lanc.valorRecebido || 0;
+      const falta = valorEmAberto(lanc);
+      return `
+      <div class="panel">
+        <div class="panel-body" style="padding:18px 20px;">
+          ${jaPago>0.004 ? `
+            <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;"><span>Valor total da fatura</span><span class="mono">${brl(lanc.valor)}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;color:var(--success);"><span>Já pago</span><span class="mono">${brl(jaPago)}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;font-weight:700;border-top:1px solid var(--line);margin:4px 0 10px;"><span>Falta pagar</span><span class="mono">${brl(falta)}</span></div>
+          ` : `<div class="note" style="margin-top:0;">Falta pagar: <strong class="mono">${brl(falta)}</strong></div>`}
+          ${lanc.status==='pendente' ? `<button class="btn" id="btnPagarFaturaAqui">Registrar pagamento (pode ser parcial)</button>` : `<div class="note" style="margin-top:0;border-color:var(--success);">✓ Fatura totalmente paga.</div>`}
+        </div>
+      </div>`;
+    })() : ''}
   `;
 }
 
@@ -7295,7 +7315,8 @@ function openMoverLancamentosModal(tipo, catNome){
   const lista = state.lancamentos
     .filter(l=>l.tipo===tipo && pertence(l))
     .sort((a,b)=>(b.dataVencimento||'').localeCompare(a.dataVencimento||''));
-  if(!lista.length){ showToast('Nenhum lançamento nessa categoria pra mover'); return; }
+  const comprasCartaoLista = tipo==='saida' ? state.comprasCartao.filter(p=>pertence(p)).sort((a,b)=>(b.dataCompra||'').localeCompare(a.dataCompra||'')) : [];
+  if(!lista.length && !comprasCartaoLista.length){ showToast('Nenhum lançamento nessa categoria pra mover'); return; }
 
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
@@ -7305,15 +7326,23 @@ function openMoverLancamentosModal(tipo, catNome){
       <select id="moverDestino">${opcoesCategoriaHTML(tipo)}</select>
     </div>
     <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;padding:8px 0;border-bottom:1px solid var(--line);cursor:pointer;">
-      <input type="checkbox" id="moverTodos" style="width:17px;height:17px;"> Selecionar todos (${lista.length})
+      <input type="checkbox" id="moverTodos" style="width:17px;height:17px;"> Selecionar todos (${lista.length + comprasCartaoLista.length})
     </label>
     <div id="moverLista" style="max-height:300px;overflow-y:auto;">
       ${lista.map(l=>`
         <label style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);cursor:pointer;font-size:12.5px;">
-          <input type="checkbox" class="mover-check" data-id="${l.id}" style="width:17px;height:17px;flex-shrink:0;">
+          <input type="checkbox" class="mover-check" data-id="${l.id}" data-tipo-registro="lancamento" style="width:17px;height:17px;flex-shrink:0;">
           <span style="color:var(--text-soft);flex-shrink:0;" class="mono">${fmtDate(l.dataVencimento)}</span>
           <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHTML(l.descricao||'—')}${l.categoria!==catNome?` <span style="font-size:10.5px;color:var(--text-soft);">· ${escapeHTML(l.categoria)}</span>`:''}</span>
           <span class="mono" style="flex-shrink:0;font-weight:600;">${brl(l.valor)}</span>
+        </label>
+      `).join('')}
+      ${comprasCartaoLista.map(p=>`
+        <label style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);cursor:pointer;font-size:12.5px;">
+          <input type="checkbox" class="mover-check" data-id="${p.id}" data-tipo-registro="cartao" style="width:17px;height:17px;flex-shrink:0;">
+          <span style="color:var(--text-soft);flex-shrink:0;" class="mono">${fmtDate(p.dataCompra)}</span>
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHTML(p.descricao||'—')} <span style="font-size:10.5px;color:var(--text-soft);">· compra no cartão</span></span>
+          <span class="mono" style="flex-shrink:0;font-weight:600;">${brl(p.valor)}</span>
         </label>
       `).join('')}
     </div>
@@ -7332,8 +7361,8 @@ function openMoverLancamentosModal(tipo, catNome){
     btnConfirmar.disabled = n===0;
     btnConfirmar.textContent = n>0 ? `Mover ${n} lançamento(s)` : 'Mover selecionados';
     const todos = document.getElementById('moverTodos');
-    todos.checked = n===lista.length;
-    todos.indeterminate = n>0 && n<lista.length;
+    todos.checked = n===(lista.length+comprasCartaoLista.length);
+    todos.indeterminate = n>0 && n<(lista.length+comprasCartaoLista.length);
   };
   document.getElementById('moverTodos').addEventListener('change', (e)=>{
     checks().forEach(c=>{ c.checked = e.target.checked; });
@@ -7343,15 +7372,19 @@ function openMoverLancamentosModal(tipo, catNome){
 
   btnConfirmar.addEventListener('click', ()=>{
     const destino = document.getElementById('moverDestino').value;
-    const ids = checks().filter(c=>c.checked).map(c=>c.dataset.id);
-    if(!ids.length){ showToast('Selecione ao menos um lançamento'); return; }
+    const idsLancamento = checks().filter(c=>c.checked && c.dataset.tipoRegistro==='lancamento').map(c=>c.dataset.id);
+    const idsCartao = checks().filter(c=>c.checked && c.dataset.tipoRegistro==='cartao').map(c=>c.dataset.id);
+    if(!idsLancamento.length && !idsCartao.length){ showToast('Selecione ao menos um lançamento'); return; }
     let movidos = 0;
     state.lancamentos.forEach(l=>{
-      if(ids.includes(l.id) && l.categoria!==destino){ l.categoria = destino; movidos++; }
+      if(idsLancamento.includes(l.id) && l.categoria!==destino){ l.categoria = destino; movidos++; }
     });
-    registrarLog('Lançamentos movidos de categoria', `${movidos} lançamento(s) de "${catNome}" para "${destino}"`);
+    state.comprasCartao.forEach(p=>{
+      if(idsCartao.includes(p.id) && p.categoria!==destino){ p.categoria = destino; movidos++; }
+    });
+    registrarLog('Lançamentos movidos de categoria', `${movidos} registro(s) de "${catNome}" para "${destino}"`);
     persist(); closeModal(); render();
-    showToast(movidos ? `${movidos} lançamento(s) movido(s) para "${destino}"` : 'Nada pra mover — os selecionados já estavam nessa categoria');
+    showToast(movidos ? `${movidos} registro(s) movido(s) para "${destino}"` : 'Nada pra mover — os selecionados já estavam nessa categoria');
   });
 }
 
@@ -7587,7 +7620,10 @@ function renderComissaoResultado(){
     return `<div class="panel"><div class="empty">Escolha um vendedor e um período acima, depois clique em "Ver pedidos".</div></div>`;
   }
   const vendedor = state.vendedores.find(v=>v.id===comissaoVendedorSelecionado);
-  if(!vendedor) return `<div class="panel"><div class="empty">Vendedor não encontrado.</div></div>`;
+  if(!vendedor){
+    comissaoVendedorSelecionado = '';
+    return `<div class="panel"><div class="empty">Esse vendedor não foi encontrado (pode ter sido excluído ou substituído por outro cadastro) — escolha um vendedor na lista acima de novo.</div></div>`;
+  }
   const dataDe = comissaoDataDeSelecionada || primeiroDiaMes();
   const dataAte = comissaoDataAteSelecionada || todayISO();
   const totalVendidoPeriodo = itensComissaoNoPeriodo(dataDe, dataAte).filter(it=>it.vendedorId===vendedor.id).reduce((s,it)=>s+it.valorBase,0);
@@ -9752,7 +9788,7 @@ function attachViewHandlers(){
             if(!cat) return;
             const nomesAfetados = [cat.nome, ...(cat.subcategorias||[]).map(s=>`${cat.nome} / ${s.nome}`)];
             if(nomesAfetados.some(n=>categoriaEmUso(n))){
-              const qtdLancamentos = nomesAfetados.reduce((s,n)=>s+state.lancamentos.filter(l=>l.categoria===n).length, 0);
+              const qtdLancamentos = nomesAfetados.reduce((s,n)=>s+state.lancamentos.filter(l=>l.categoria===n).length+state.comprasCartao.filter(p=>p.categoria===n).length, 0);
               if(confirm(`"${cat.nome}" tem ${qtdLancamentos} lançamento(s) e por isso não pode ser excluída direto (isso evitaria perder a categoria desses lançamentos).\n\nQuer mover esses lançamentos pra outra categoria agora? Depois de mover, você pode excluir essa categoria normalmente.`)){
                 openMoverLancamentosModal(tipo, cat.nome);
               }
@@ -10318,6 +10354,18 @@ function attachViewHandlers(){
   if(faturaCompetenciaSelect) faturaCompetenciaSelect.addEventListener('change', ()=>{
     faturaCompetenciaAtual = faturaCompetenciaSelect.value;
     render();
+  });
+  document.querySelectorAll('[data-action="excluir-compra-cartao"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!confirm('Excluir essa despesa da fatura?')) return;
+      state.comprasCartao = state.comprasCartao.filter(p=>p.id!==btn.dataset.id);
+      persist(); render();
+      showToast('Despesa removida da fatura');
+    });
+  });
+  document.getElementById('btnPagarFaturaAqui')?.addEventListener('click', ()=>{
+    const fechamento = state.faturasFechadas.find(f=>f.cartaoId===faturaCartaoId && f.competencia===faturaCompetenciaAtual);
+    if(fechamento) abrirQuitarModal(fechamento.lancamentoId);
   });
   const btnFecharFatura = document.getElementById('btnFecharFatura');
   if(btnFecharFatura) btnFecharFatura.addEventListener('click', ()=>{
@@ -13783,6 +13831,7 @@ function openVendedorModal(existing){
       <label>Meta de vendas mensal (R$, opcional)</label>
       <input type="text" inputmode="decimal" id="vMetaMensal" value="${existing && existing.metaMensal ? existing.metaMensal : ''}" placeholder="Ex: 30.000,00">
     </div>
+    ${isEdit ? `<div class="note" style="margin-top:0;">Se esse vendedor vier do VK Industrial, corrigir o nome aqui agora é definitivo — a sincronização de pedidos não vai mais sobrescrever de volta.</div>` : ''}
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       <button class="btn" id="btnSalvarVendedor">Salvar</button>
@@ -13796,7 +13845,10 @@ function openVendedorModal(existing){
     const metaMensalRaw = document.getElementById('vMetaMensal').value.trim();
     const metaMensal = metaMensalRaw ? numBR(metaMensalRaw) : null;
     if(!nome || isNaN(comissaoPadrao)){ showToast('Preencha nome e comissão padrão'); return; }
-    if(isEdit){ existing.nome = nome; existing.comissaoPadrao = comissaoPadrao; existing.metaMensal = metaMensal; }
+    if(isEdit){
+      if(nome !== existing.nome) existing.nomeEditadoManualmente = true;
+      existing.nome = nome; existing.comissaoPadrao = comissaoPadrao; existing.metaMensal = metaMensal;
+    }
     else { state.vendedores.push({ id: uid(), nome, comissaoPadrao, metaMensal }); }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Vendedor atualizado' : 'Vendedor criado');
