@@ -1373,12 +1373,16 @@ function dataVencimentoFatura(cartao, competencia){
   const dia = String(Math.min(cartao.diaVencimento, 28)).padStart(2,'0');
   return `${y}-${String(m).padStart(2,'0')}-${dia}`;
 }
+function idsLancamentosFatura(fech){
+  return fech.lancamentoIds || (fech.lancamentoId ? [fech.lancamentoId] : []);
+}
 function faturaStatus(cartaoId, competencia){
   const fech = state.faturasFechadas.find(f=>f.cartaoId===cartaoId && f.competencia===competencia);
   if(!fech) return 'aberta';
-  const lanc = state.lancamentos.find(l=>l.id===fech.lancamentoId);
-  if(!lanc) return 'aberta';
-  return lanc.status==='pendente' ? 'fechada' : 'paga';
+  const ids = idsLancamentosFatura(fech);
+  const lancs = ids.map(id=>state.lancamentos.find(l=>l.id===id)).filter(Boolean);
+  if(!lancs.length) return 'aberta';
+  return lancs.every(l=>l.status!=='pendente') ? 'paga' : 'fechada';
 }
 function totalCompetencia(cartaoId, competencia){
   return state.comprasCartao.filter(p=>p.cartaoId===cartaoId && p.competencia===competencia).reduce((s,p)=>s+p.valor,0);
@@ -4312,28 +4316,53 @@ function viewFatura(cartaoId, competencia){
     ${status==='aberta' && total>0 ? `
     <div class="panel">
       <div class="panel-body" style="padding:18px 20px;">
-        <div class="field" style="max-width:280px;">
-          <label>Conta para pagar esta fatura</label>
-          <select id="faturaContaPagamento">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select>
+        <div class="field-row">
+          <div class="field" style="max-width:280px;">
+            <label>Conta para pagar esta fatura</label>
+            <select id="faturaContaPagamento">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select>
+          </div>
+          <div class="field" style="max-width:160px;">
+            <label>Parcelar o saldo em</label>
+            <select id="faturaParcelasSaldo">${Array.from({length:12},(_,i)=>i+1).map(n=>`<option value="${n}">${n}x${n===1?' (à vista)':''}</option>`).join('')}</select>
+          </div>
         </div>
+        <div class="note" id="faturaParcelasSaldoNota" style="margin-top:0;display:none;"></div>
         <button class="btn" id="btnFecharFatura">Fechar fatura e lançar como conta a pagar</button>
       </div>
     </div>` : ''}
     ${status==='fechada' || status==='paga' ? (()=>{
       const fechamento = state.faturasFechadas.find(f=>f.cartaoId===cartaoId && f.competencia===compAtual);
-      const lanc = fechamento ? state.lancamentos.find(l=>l.id===fechamento.lancamentoId) : null;
-      if(!lanc) return '';
-      const jaPago = lanc.valorRecebido || 0;
-      const falta = valorEmAberto(lanc);
+      const ids = fechamento ? idsLancamentosFatura(fechamento) : [];
+      const lancs = ids.map(id=>state.lancamentos.find(l=>l.id===id)).filter(Boolean);
+      if(!lancs.length) return '';
+      if(lancs.length===1){
+        const lanc = lancs[0];
+        const jaPago = lanc.valorRecebido || 0;
+        const falta = valorEmAberto(lanc);
+        return `
+        <div class="panel">
+          <div class="panel-body" style="padding:18px 20px;">
+            ${jaPago>0.004 ? `
+              <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;"><span>Valor total da fatura</span><span class="mono">${brl(lanc.valor)}</span></div>
+              <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;color:var(--success);"><span>Já pago</span><span class="mono">${brl(jaPago)}</span></div>
+              <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;font-weight:700;border-top:1px solid var(--line);margin:4px 0 10px;"><span>Falta pagar</span><span class="mono">${brl(falta)}</span></div>
+            ` : `<div class="note" style="margin-top:0;">Falta pagar: <strong class="mono">${brl(falta)}</strong></div>`}
+            ${lanc.status==='pendente' ? `<button class="btn" data-action="pagar-parcela-fatura" data-id="${lanc.id}">Registrar pagamento (pode ser parcial)</button>` : `<div class="note" style="margin-top:0;border-color:var(--success);">✓ Fatura totalmente paga.</div>`}
+          </div>
+        </div>`;
+      }
+      // Fatura parcelada em várias contas a pagar mensais
       return `
       <div class="panel">
-        <div class="panel-body" style="padding:18px 20px;">
-          ${jaPago>0.004 ? `
-            <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;"><span>Valor total da fatura</span><span class="mono">${brl(lanc.valor)}</span></div>
-            <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;color:var(--success);"><span>Já pago</span><span class="mono">${brl(jaPago)}</span></div>
-            <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;font-weight:700;border-top:1px solid var(--line);margin:4px 0 10px;"><span>Falta pagar</span><span class="mono">${brl(falta)}</span></div>
-          ` : `<div class="note" style="margin-top:0;">Falta pagar: <strong class="mono">${brl(falta)}</strong></div>`}
-          ${lanc.status==='pendente' ? `<button class="btn" id="btnPagarFaturaAqui">Registrar pagamento (pode ser parcial)</button>` : `<div class="note" style="margin-top:0;border-color:var(--success);">✓ Fatura totalmente paga.</div>`}
+        <div class="panel-head"><h2>Saldo parcelado em ${lancs.length}x</h2></div>
+        <div class="panel-body">
+          ${lancs.map((l,i)=>`
+            <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
+              <div class="desc-cell"><div>Parcela ${i+1}/${lancs.length}</div><div class="cat">vence ${fmtDate(l.dataVencimento)}${l.status!=='pendente'?' · paga':''}</div></div>
+              <span class="mono" style="font-weight:600;">${brl(l.valor)}</span>
+              ${l.status==='pendente' ? `<button class="btn ghost sm" data-action="pagar-parcela-fatura" data-id="${l.id}">Pagar</button>` : `<span style="color:var(--success);font-size:12px;">✓ paga</span>`}
+            </div>
+          `).join('')}
         </div>
       </div>`;
     })() : ''}
@@ -8659,7 +8688,7 @@ function excluirLancamento(id){
     state.lancamentos = state.lancamentos.filter(x=>x.transferenciaId!==l.transferenciaId);
   } else {
     state.lancamentos = state.lancamentos.filter(x=>x.id!==id);
-    if(l.origem==='cartao') state.faturasFechadas = state.faturasFechadas.filter(f=>f.lancamentoId!==id);
+    if(l.origem==='cartao') state.faturasFechadas = state.faturasFechadas.filter(f=>!idsLancamentosFatura(f).includes(id));
   }
   persist(); render(); showToast('Lançamento excluído');
 }
@@ -8673,7 +8702,7 @@ function executarAcaoSelecaoLote(acao){
     const ids = new Set(lancs.map(l=>l.id));
     const transfIds = new Set(lancs.filter(l=>l.origem==='transferencia' && l.transferenciaId).map(l=>l.transferenciaId));
     state.lancamentos = state.lancamentos.filter(l=> !ids.has(l.id) && !(l.transferenciaId && transfIds.has(l.transferenciaId)));
-    lancs.forEach(l=>{ if(l.origem==='cartao') state.faturasFechadas = state.faturasFechadas.filter(f=>f.lancamentoId!==l.id); });
+    lancs.forEach(l=>{ if(l.origem==='cartao') state.faturasFechadas = state.faturasFechadas.filter(f=>!idsLancamentosFatura(f).includes(l.id)); });
     registrarLog('Lançamentos apagados em lote', `${lancs.length} lançamento(s) removido(s) de uma vez`);
     limparSelecaoLanc(); persist(); render();
     showToast(`${lancs.length} lançamento(s) apagado(s)`);
@@ -10380,27 +10409,56 @@ function attachViewHandlers(){
       showToast('Despesa removida da fatura');
     });
   });
-  document.getElementById('btnPagarFaturaAqui')?.addEventListener('click', ()=>{
-    const fechamento = state.faturasFechadas.find(f=>f.cartaoId===faturaCartaoId && f.competencia===faturaCompetenciaAtual);
-    if(fechamento) abrirQuitarModal(fechamento.lancamentoId);
+  document.querySelectorAll('[data-action="pagar-parcela-fatura"]').forEach(btn=>{
+    btn.addEventListener('click', ()=> abrirQuitarModal(btn.dataset.id));
   });
+  const faturaParcelasSaldoSel = document.getElementById('faturaParcelasSaldo');
+  if(faturaParcelasSaldoSel){
+    const atualizarNotaParcelas = ()=>{
+      const n = parseInt(faturaParcelasSaldoSel.value);
+      const nota = document.getElementById('faturaParcelasSaldoNota');
+      if(!nota) return;
+      if(n<=1){ nota.style.display = 'none'; return; }
+      const cartao = state.cartoes.find(c=>c.id===faturaCartaoId);
+      const total = totalCompetencia(cartao.id, faturaCompetenciaAtual);
+      const valorParcela = Math.round((total/n)*100)/100;
+      nota.style.display = 'block';
+      nota.textContent = `O saldo de ${brl(total)} vira ${n} contas a pagar de ${brl(valorParcela)}, uma por mês, começando no vencimento normal dessa fatura.`;
+    };
+    faturaParcelasSaldoSel.addEventListener('change', atualizarNotaParcelas);
+    atualizarNotaParcelas();
+  }
   const btnFecharFatura = document.getElementById('btnFecharFatura');
   if(btnFecharFatura) btnFecharFatura.addEventListener('click', ()=>{
     const cartao = state.cartoes.find(c=>c.id===faturaCartaoId);
     const comp = faturaCompetenciaAtual;
     const total = totalCompetencia(cartao.id, comp);
     const contaId = document.getElementById('faturaContaPagamento').value;
-    if(!confirm(`Fechar a fatura de ${competenciaLabel(comp)} (${brl(total)}) e lançar como conta a pagar?`)) return;
-    const lancId = uid();
-    state.lancamentos.push({
-      id: lancId, tipo:'saida', categoria:'Cartão de Crédito',
-      descricao:`Fatura ${cartao.nome} — ${competenciaLabel(comp)}`,
-      valor: total, contaId, status:'pendente',
-      dataVencimento: dataVencimentoFatura(cartao, comp), dataPagamento: null,
-      origem:'cartao', cartaoId: cartao.id, competencia: comp, criadoEm: new Date().toISOString()
-    });
-    state.faturasFechadas.push({ cartaoId: cartao.id, competencia: comp, lancamentoId: lancId });
-    persist(); render(); showToast('Fatura fechada e lançada em Contas a Pagar');
+    const parcelasSaldo = parseInt(document.getElementById('faturaParcelasSaldo')?.value || '1');
+    const msgConfirm = parcelasSaldo>1
+      ? `Fechar a fatura de ${competenciaLabel(comp)} (${brl(total)}) e lançar como conta a pagar, parcelada em ${parcelasSaldo}x?`
+      : `Fechar a fatura de ${competenciaLabel(comp)} (${brl(total)}) e lançar como conta a pagar?`;
+    if(!confirm(msgConfirm)) return;
+    const vencBase = dataVencimentoFatura(cartao, comp);
+    const valorParcela = Math.round((total/parcelasSaldo)*100)/100;
+    const lancamentoIds = [];
+    for(let i=1;i<=parcelasSaldo;i++){
+      const lancId = uid();
+      const [vy,vm,vd] = vencBase.split('-').map(Number);
+      const dtVenc = new Date(vy, vm-1+(i-1), vd);
+      state.lancamentos.push({
+        id: lancId, tipo:'saida', categoria:'Cartão de Crédito',
+        descricao: parcelasSaldo>1 ? `Fatura ${cartao.nome} — ${competenciaLabel(comp)} (${i}/${parcelasSaldo})` : `Fatura ${cartao.nome} — ${competenciaLabel(comp)}`,
+        valor: i===parcelasSaldo ? Math.round((total - valorParcela*(parcelasSaldo-1))*100)/100 : valorParcela,
+        contaId, status:'pendente',
+        dataVencimento: dtVenc.toISOString().slice(0,10), dataPagamento: null,
+        origem:'cartao', cartaoId: cartao.id, competencia: comp, criadoEm: new Date().toISOString()
+      });
+      lancamentoIds.push(lancId);
+    }
+    state.faturasFechadas.push({ cartaoId: cartao.id, competencia: comp, lancamentoIds, lancamentoId: lancamentoIds[0] });
+    persist(); render();
+    showToast(parcelasSaldo>1 ? `Fatura fechada e parcelada em ${parcelasSaldo}x em Contas a Pagar` : 'Fatura fechada e lançada em Contas a Pagar');
   });
 
   // Investimentos
@@ -12090,6 +12148,8 @@ function openEscolherCartaoModal(){
 
 function openCompraCartaoModal(cartaoId){
   const cartao = state.cartoes.find(c=>c.id===cartaoId);
+  const compAutoSugerida = competenciaFromDate(cartao, todayISO());
+  const opcoesComp = Array.from({length:6},(_,i)=>addMonthsComp(addMonthsComp(compAutoSugerida,-1), i));
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
     <h3>Lançar compra — ${escapeHTML(cartao.nome)}</h3>
@@ -12117,7 +12177,14 @@ function openCompraCartaoModal(cartaoId){
         <select id="pcParcelas">${Array.from({length:12},(_,i)=>i+1).map(n=>`<option value="${n}">${n}x</option>`).join('')}</select>
       </div>
     </div>
-    <div class="note" style="margin-top:0;">A compra entra na fatura com base na data e no dia de fechamento (${cartao.diaFechamento}) deste cartão. Parcelas seguintes caem nas faturas dos meses seguintes.</div>
+    <div class="field">
+      <label>Vai pra qual fatura?</label>
+      <select id="pcFatura">
+        <option value="">Calcular automaticamente (pela data + fechamento dia ${cartao.diaFechamento})</option>
+        ${opcoesComp.map(c=>`<option value="${c}" ${c===compAutoSugerida?'data-sugerida="1"':''}>${competenciaLabel(c)}${c===compAutoSugerida?' (sugerida pela data de hoje)':''}</option>`).join('')}
+      </select>
+    </div>
+    <div class="note" style="margin-top:0;" id="pcFaturaNota">Deixe em "Calcular automaticamente" pra seguir a regra normal (compra depois do dia ${cartao.diaFechamento} cai na fatura do mês seguinte). Só escolha uma fatura específica se precisar colocar essa despesa num mês diferente do que a data indicaria.</div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       <button class="btn" id="btnSalvarCompra">Lançar</button>
@@ -12131,10 +12198,11 @@ function openCompraCartaoModal(cartaoId){
     const data = document.getElementById('pcData').value;
     const categoria = document.getElementById('pcCategoria').value;
     const parcelas = parseInt(document.getElementById('pcParcelas').value);
+    const faturaEscolhida = document.getElementById('pcFatura').value;
     if(!descricao || isNaN(valorTotal) || valorTotal<=0 || !data){ showToast('Preencha descrição, valor e data'); return; }
     const grupoId = uid();
     const valorParcela = Math.round((valorTotal/parcelas)*100)/100;
-    let compAtual = competenciaFromDate(cartao, data);
+    let compAtual = faturaEscolhida || competenciaFromDate(cartao, data);
     for(let i=1;i<=parcelas;i++){
       state.comprasCartao.push({
         id: uid(), cartaoId, grupoId, descricao, categoria,
