@@ -835,6 +835,8 @@ function aplicarMigracoes(s){
   if(!s.processosConfig){
     s.processosConfig = { firebaseConfig: null, email: '', senha: '', ultimaSincronizacao: null };
   }
+  if(!s.orcamentosProcessos) s.orcamentosProcessos = [];
+  if(!s.orcamentosProcessosContador) s.orcamentosProcessosContador = 0;
   if(!s.contas) s.contas = [];
   // Migração: garante uma conta padrão e associa lançamentos antigos sem conta
   if(s.contas.length===0){
@@ -1299,6 +1301,7 @@ function render(){
   else if(currentView==='avisos-pendentes-vk') main.innerHTML = viewAvisosPendentesVK();
   else if(currentView==='custos-margem-produtos') main.innerHTML = viewCustosMargemProdutos();
   else if(currentView==='processos') main.innerHTML = viewProcessosConfig();
+  else if(currentView==='orcamentos-processos') main.innerHTML = viewOrcamentosProcessos();
   else if(currentView==='configuracoes') main.innerHTML = viewConfiguracoes();
   else if(currentView==='configuracao-detalhe') main.innerHTML = viewConfiguracaoDetalhe();
   attachViewHandlers();
@@ -7887,12 +7890,47 @@ async function sincronizarProcessos(){
       novasOcorrencias++;
     });
 
+    // Orçamentos pedidos dentro de um processo — viram fila de aprovação aqui.
+    const snapOrc = await db.collection('orcamentos').get({ source: 'server' }).catch(()=>({docs:[]}));
+    const orcamentosVK = snapOrc.docs.map(d=>({ id: d.id, ...d.data() }));
+    if(!state.orcamentosProcessos) state.orcamentosProcessos = [];
+    if(!state.orcamentosProcessosContador) state.orcamentosProcessosContador = 0;
+    let orcamentosNovos = 0, orcamentosAtualizados = 0;
+    const writesNumero = [];
+    orcamentosVK.forEach(o=>{
+      const existente = state.orcamentosProcessos.find(x=>x.processoOrcamentoId===o.id);
+      const itens = (o.itens||[]).map(it=>({ descricao: it.descricao||'', quantidade: Number(it.quantidade)||0, valorUnitario: Number(it.valorUnitario)||0 }));
+      const valorTotal = o.valorTotal!=null ? Number(o.valorTotal) : itens.reduce((s,it)=>s+it.quantidade*it.valorUnitario,0);
+      if(existente){
+        if(existente.status==='pendente'){
+          existente.itens = itens; existente.valorTotal = valorTotal;
+          existente.processoTitulo = o.processoTitulo || o.titulo || existente.processoTitulo;
+          orcamentosAtualizados++;
+        }
+        return;
+      }
+      state.orcamentosProcessosContador++;
+      const numero = state.orcamentosProcessosContador;
+      state.orcamentosProcessos.push({
+        id: uid(), processoOrcamentoId: o.id, processoId: o.processoId || null,
+        processoTitulo: o.processoTitulo || o.titulo || '', numero, itens, valorTotal,
+        status: 'pendente', criadoEm: new Date().toISOString(), decididoEm: null
+      });
+      writesNumero.push({ ref: db.collection('orcamentos').doc(o.id), numero });
+      orcamentosNovos++;
+    });
+    for(const w of writesNumero){
+      try{ await w.ref.update({ numero: w.numero, numeroGeradoLivroCaixa: true }); }catch(e){ console.error('Falha ao gravar número do orçamento:', e); }
+    }
+
     cfg.ultimaSincronizacao = new Date().toISOString();
     persist();
     render();
     const partes = [];
-    if(novasOcorrencias>0) partes.push(`${novasOcorrencias} ocorrência(s) nova(s) registrada(s)`);
+    if(novasOcorrencias>0) partes.push(`${novasOcorrencias} ocorrência(s) nova(s)`);
     if(semAtivoCorrespondente>0) partes.push(`${semAtivoCorrespondente} processo(s) sem ativo correspondente`);
+    if(orcamentosNovos>0) partes.push(`${orcamentosNovos} orçamento(s) novo(s) aguardando decisão`);
+    if(orcamentosAtualizados>0) partes.push(`${orcamentosAtualizados} orçamento(s) atualizado(s)`);
     showToast(partes.length ? partes.join(' · ') : 'Nada novo pra importar');
   }catch(e){
     console.error('Erro ao sincronizar com o Livro de Processos:', e);
@@ -7905,15 +7943,45 @@ async function sincronizarProcessos(){
   }
 }
 
+async function decidirOrcamentoProcesso(id, aprovado){
+  const orc = (state.orcamentosProcessos||[]).find(o=>o.id===id);
+  if(!orc) return;
+  orc.status = aprovado ? 'aprovado' : 'recusado';
+  orc.decididoEm = new Date().toISOString();
+  persist(); render();
+  showToast(aprovado ? `Orçamento N° ${orc.numero} aprovado` : `Orçamento N° ${orc.numero} recusado`);
+
+  const cfg = state.processosConfig;
+  if(!cfg.firebaseConfig || !cfg.email || !cfg.senha){
+    showToast('Decisão salva aqui, mas não deu pra avisar o Livro de Processos — configure o acesso na Central de Integrações');
+    return;
+  }
+  try{
+    if(!processosFirebaseApp) processosFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'livro-processos');
+    const auth = processosFirebaseApp.auth();
+    if(!auth.currentUser) await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
+    const db = processosFirebaseApp.firestore();
+    await db.collection('orcamentos').doc(orc.processoOrcamentoId).update({
+      status: aprovado ? 'aprovado' : 'recusado',
+      decididoEm: new Date().toISOString()
+    });
+    showToast('Livro de Processos avisado da decisão');
+  }catch(e){
+    console.error('Erro ao avisar decisão do orçamento:', e);
+    showToast('Decisão salva aqui, mas falhou ao avisar o Livro de Processos — sincronize de novo depois');
+  }
+}
+
 function viewProcessosConfig(){
   const cfg = state.processosConfig;
   const totalImportadas = state.ativosPatrimoniais.reduce((s,a)=>s+(a.ocorrencias||[]).filter(o=>o.origem==='processo').length,0);
+  const orcamentosPendentes = (state.orcamentosProcessos||[]).filter(o=>o.status==='pendente');
   return `
     <div class="topbar">
       <div>
         <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="integracoes">← Central de Integrações</span>
         <h1 style="margin-top:6px;">Integração — Livro de Processos</h1>
-        <p>Decisões finais de processos vinculados a um ativo caem automaticamente como ocorrência na ficha dele</p>
+        <p>Decisões finais de processos vinculados a um ativo caem automaticamente como ocorrência na ficha dele; orçamentos pedidos num processo vêm pra cá pra aprovação</p>
       </div>
     </div>
     <div class="panel">
@@ -7936,6 +8004,16 @@ function viewProcessosConfig(){
         <button class="btn" id="btnSincronizarProcessos">🔄 Sincronizar agora</button>
       </div>
     </div>
+    <div class="panel vk-status-panel" style="cursor:pointer;" data-goto="orcamentos-processos">
+      <div class="vk-status-row">
+        <div>
+          <div class="vk-status-label">Orçamentos aguardando decisão</div>
+          <div class="vk-status-value">${orcamentosPendentes.length} item(ns)</div>
+          <div class="vk-status-sub">Pedidos de orçamento feitos dentro de um processo — aprove ou recuse aqui</div>
+        </div>
+        <button class="btn lg" data-goto="orcamentos-processos">📋 Ver orçamentos</button>
+      </div>
+    </div>
     <div class="panel">
       <div class="panel-head"><h2>O que o Livro de Processos precisa expor</h2></div>
       <div class="panel-body" style="padding:16px 20px;font-size:12.5px;color:var(--text-soft);line-height:1.7;">
@@ -7951,6 +8029,74 @@ function viewProcessosConfig(){
         Quando <code>status</code> for <strong>decidido</strong>, <strong>finalizado</strong> ou <strong>concluido</strong> e tiver <code>decisaoFinal</code> preenchido, essa decisão vira automaticamente uma ocorrência na ficha do ativo correspondente, sem duplicar em sincronizações futuras.
       </div>
     </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Orçamentos — esquema esperado (ainda precisa ser feito do lado do Livro de Processos)</h2></div>
+      <div class="panel-body" style="padding:16px 20px;font-size:12.5px;color:var(--text-soft);line-height:1.7;">
+        Uma coleção <strong>orcamentos</strong> no mesmo Firestore, um documento por pedido de orçamento feito dentro de um processo:
+        <div class="note" style="margin:10px 0;font-family:'IBM Plex Mono',monospace;font-size:11.5px;white-space:pre-wrap;">{
+  processoId: "&lt;id do processo&gt;",
+  processoTitulo: "Compra de balança nova",
+  itens: [
+    { descricao: "Balança digital 30kg", quantidade: 1, valorUnitario: 850 }
+  ],
+  valorTotal: 850  // opcional — se não vier, soma os itens sozinho
+}</div>
+        Assim que existir, a sincronização acima já detecta orçamentos novos, gera um <strong>número sequencial</strong> pra cada um e grava de volta no próprio documento (campo <code>numero</code>). O orçamento entra na fila de "Ver orçamentos" pra aprovar ou recusar — a decisão (<code>status: "aprovado"</code> ou <code>"recusado"</code>, mais <code>decididoEm</code>) é gravada de volta automaticamente no documento, pra aparecer no processo lá.
+      </div>
+    </div>
+  `;
+}
+
+function viewOrcamentosProcessos(){
+  const todos = state.orcamentosProcessos||[];
+  const pendentes = todos.filter(o=>o.status==='pendente').sort((a,b)=>a.numero-b.numero);
+  const decididos = todos.filter(o=>o.status!=='pendente').sort((a,b)=>(b.decididoEm||'').localeCompare(a.decididoEm||''));
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="processos">← Integração Livro de Processos</span>
+        <h1 style="margin-top:6px;">Orçamentos — Livro de Processos</h1>
+        <p>Orçamentos pedidos dentro de um processo, aguardando aprovação ou recusa</p>
+      </div>
+    </div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:16px;">
+      <div class="card saldo"><div class="label">Aguardando decisão</div><div class="value mono">${pendentes.length}</div></div>
+      <div class="card"><div class="label">Valor total pendente</div><div class="value mono">${brl(pendentes.reduce((s,o)=>s+o.valorTotal,0))}</div></div>
+    </div>
+    ${pendentes.length ? pendentes.map(o=>`
+      <div class="panel" style="margin-bottom:14px;">
+        <div class="panel-head">
+          <h2>Orçamento N° ${o.numero}${o.processoTitulo?' — '+escapeHTML(o.processoTitulo):''}</h2>
+          <span class="mono" style="font-weight:700;">${brl(o.valorTotal)}</span>
+        </div>
+        <div class="panel-body" style="padding:0;">
+          ${o.itens.length ? o.itens.map(it=>`
+            <div class="ledger-row compact" style="grid-template-columns:1fr auto;">
+              <span style="font-size:12.5px;">${escapeHTML(it.descricao)} <span style="color:var(--text-soft);">× ${it.quantidade}</span></span>
+              <span class="mono" style="font-size:12.5px;">${brl(it.quantidade*it.valorUnitario)}</span>
+            </div>
+          `).join('') : `<div class="empty">Sem itens detalhados.</div>`}
+        </div>
+        <div style="padding:14px 20px;display:flex;gap:8px;">
+          <button class="btn ghost" data-action="recusar-orcamento-processo" data-id="${o.id}" style="color:var(--danger);border-color:#F3C6C2;">✕ Recusar</button>
+          <button class="btn" data-action="aprovar-orcamento-processo" data-id="${o.id}">✓ Aprovar</button>
+        </div>
+      </div>
+    `).join('') : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum orçamento aguardando decisão no momento.</div></div>`}
+    ${decididos.length ? `
+    <details class="panel-details">
+      <summary>Já decididos (${decididos.length})</summary>
+      <div class="panel-body">
+        ${decididos.slice(0,50).map(o=>`
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
+            <div class="desc-cell"><div>Orçamento N° ${o.numero}${o.processoTitulo?' — '+escapeHTML(o.processoTitulo):''}</div><div class="cat">${o.decididoEm ? new Date(o.decididoEm).toLocaleString('pt-BR') : ''}</div></div>
+            <span class="mono">${brl(o.valorTotal)}</span>
+            <span style="font-size:11.5px;font-weight:600;color:${o.status==='aprovado'?'var(--success)':'var(--danger)'};">${o.status==='aprovado'?'✓ Aprovado':'✕ Recusado'}</span>
+          </div>
+        `).join('')}
+      </div>
+    </details>` : ''}
+    <div class="note" style="margin-top:0;">Ao aprovar ou recusar, o Livro de Processos é avisado automaticamente — a decisão aparece de volta no processo lá.</div>
   `;
 }
 
@@ -8916,6 +9062,7 @@ function renderConfigFirebase(){
     ['Aprovações VK aguardando revisão', (state.vkAprovacoes||[]).length],
     ['Insumos no espelho de estoque', (state.estoqueInsumos||[]).length],
     ['Previsões de gasto futuro', (state.previsoesGastoFuturo||[]).length],
+    ['Orçamentos de processos', (state.orcamentosProcessos||[]).length],
     ['Fornecedores', (state.fornecedores||[]).length],
     ['Recorrências', (state.recorrencias||[]).length],
     ['Registros no log de auditoria', (state.logAuditoria||[]).length],
@@ -10620,6 +10767,18 @@ function attachViewHandlers(){
     btnSincronizarProcessos.textContent = 'Sincronizando...';
     btnSincronizarProcessos.disabled = true;
     sincronizarProcessos();
+  });
+  document.querySelectorAll('[data-action="aprovar-orcamento-processo"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!confirm('Aprovar esse orçamento? O Livro de Processos vai ser avisado.')) return;
+      decidirOrcamentoProcesso(btn.dataset.id, true);
+    });
+  });
+  document.querySelectorAll('[data-action="recusar-orcamento-processo"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!confirm('Recusar esse orçamento? O Livro de Processos vai ser avisado.')) return;
+      decidirOrcamentoProcesso(btn.dataset.id, false);
+    });
   });
 
   const btnSalvarConfigVK = document.getElementById('btnSalvarConfigVK');
