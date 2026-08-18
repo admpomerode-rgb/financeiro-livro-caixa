@@ -5285,6 +5285,9 @@ function renderDRE(periodo){
   };
   const receitas = porCategoria('entrada');
   const despesas = porCategoria('saida');
+  // Soma uma categoria E suas subcategorias ("Pai / Sub") — receitas['Rendimentos'] sozinho não pega
+  // "Rendimentos / Juros Bancários" por exemplo, então Resultado Financeiro ficava zerado por engano.
+  const somaCategoriaEFilhas = (mapa, nomePai) => Object.entries(mapa).filter(([k])=>k===nomePai || k.startsWith(nomePai+' / ')).reduce((s,[,v])=>s+v,0);
   const totalReceitas = Object.values(receitas).reduce((a,b)=>a+b,0);
   const totalDespesas = Object.values(despesas).reduce((a,b)=>a+b,0);
   const totalDescontos = lancamentosPeriodo.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+(l.descontoConcedido||0),0);
@@ -5354,24 +5357,24 @@ function renderDRE(periodo){
       : `Análise horizontal: variação de cada total comparada ao período anterior de mesma duração (${fmtDate(deAnterior)} a ${fmtDate(ateAnterior)}).`}</div>
     <div class="report-block">
       <div class="report-title">Receita Operacional</div>
-      ${(()=>{ const op = Object.entries(receitas).filter(([k])=>k!=='Rendimentos'); return op.length ? op.map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">${brl(v)}${pctVertical(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma receita operacional no período</span><span class="v">${brl(0)}</span></div>`; })()}
-      ${totalDescontos>0.004 ? (()=>{ const totalReceitaOp = totalReceitas - (receitas['Rendimentos']||0); const bruta = totalReceitaOp + totalDescontos; return `
+      ${(()=>{ const op = Object.entries(receitas).filter(([k])=>k!=='Rendimentos' && !k.startsWith('Rendimentos / ')); return op.length ? op.map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">${brl(v)}${pctVertical(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma receita operacional no período</span><span class="v">${brl(0)}</span></div>`; })()}
+      ${totalDescontos>0.004 ? (()=>{ const totalReceitaOp = totalReceitas - somaCategoriaEFilhas(receitas,'Rendimentos'); const bruta = totalReceitaOp + totalDescontos; return `
       <div class="report-line sub"><span>Receita Bruta de Vendas</span><span class="v">${brl(bruta)}</span></div>
       <div class="report-line sub"><span>(-) Descontos Concedidos</span><span class="v">(${brl(totalDescontos)})</span></div>`; })() : ''}
       ${totalBonificado>0.004 ? `
       <div class="report-line sub"><span>Vendas Bonificadas (informativo)</span><span class="v">${brl(totalBonificado)}</span></div>
       <div class="report-line sub"><span>(-) Desconto por Bonificação</span><span class="v">(${brl(totalBonificado)})</span></div>` : ''}
-      ${(()=>{ const totalReceitaOp = totalReceitas - (receitas['Rendimentos']||0); return `<div class="report-line total"><span>(=) Total de Receita Operacional</span><span class="v">${brl(totalReceitaOp)}</span></div>`; })()}
+      ${(()=>{ const totalReceitaOp = totalReceitas - somaCategoriaEFilhas(receitas,'Rendimentos'); return `<div class="report-line total"><span>(=) Total de Receita Operacional</span><span class="v">${brl(totalReceitaOp)}</span></div>`; })()}
       <div class="report-line sub"><span>(-) Pedidos Cancelados${canceladosVK.length?' ('+canceladosVK.length+')':''}</span><span class="v">(${brl(totalCancelados)})</span></div>
 
       <div class="report-title">Despesas Operacionais</div>
-      ${(()=>{ const op = Object.entries(despesas).filter(([k])=>k!=='Despesas Financeiras'); return op.length ? op.map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">(${brl(v)})${pctVertical(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma despesa operacional no período</span><span class="v">${brl(0)}</span></div>`; })()}
-      ${(()=>{ const totalDespesaOp = totalDespesas - (despesas['Despesas Financeiras']||0); return `<div class="report-line total"><span>(=) Total de Despesas Operacionais</span><span class="v">(${brl(totalDespesaOp)})</span></div>`; })()}
+      ${(()=>{ const op = Object.entries(despesas).filter(([k])=>k!=='Despesas Financeiras' && !k.startsWith('Despesas Financeiras / ')); return op.length ? op.map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">(${brl(v)})${pctVertical(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma despesa operacional no período</span><span class="v">${brl(0)}</span></div>`; })()}
+      ${(()=>{ const totalDespesaOp = totalDespesas - somaCategoriaEFilhas(despesas,'Despesas Financeiras'); return `<div class="report-line total"><span>(=) Total de Despesas Operacionais</span><span class="v">(${brl(totalDespesaOp)})</span></div>`; })()}
 
       ${(()=>{
-        const receitasFinanceiras = receitas['Rendimentos']||0;
-        const despesasFinanceiras = despesas['Despesas Financeiras']||0;
-        const resultadoOperacional = receitaLiquida - (receitas['Rendimentos']||0) - (totalDespesas - (despesas['Despesas Financeiras']||0));
+        const receitasFinanceiras = somaCategoriaEFilhas(receitas,'Rendimentos');
+        const despesasFinanceiras = somaCategoriaEFilhas(despesas,'Despesas Financeiras');
+        const resultadoOperacional = receitaLiquida - receitasFinanceiras - (totalDespesas - despesasFinanceiras);
         const resultadoFinanceiro = receitasFinanceiras - despesasFinanceiras;
         return `
       <div class="report-line total"><span>(=) Resultado Operacional</span><span class="v">${brl(resultadoOperacional)}</span></div>
