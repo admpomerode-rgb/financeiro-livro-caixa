@@ -12393,10 +12393,10 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
       <div class="field"><label>Valor líquido da nota (R$) — o que efetivamente sai/entra da conta</label><input type="text" inputmode="decimal" id="notaLiquido"></div>
       <div class="note" id="notaTipoNota" style="margin-top:0;"></div>
       <div class="field">
-        <label>Ganho ou perda de capital na venda (R$) — deixe 0 se não houve venda ou se não souber calcular</label>
+        <label>Ganho ou perda de capital na venda (R$)</label>
         <input type="text" inputmode="decimal" id="notaGanhoPerda" value="0">
       </div>
-      <div class="note" style="margin-top:0;">Ganho de capital entra como receita financeira (categoria Rendimentos); perda de capital entra como despesa financeira (categoria Investimentos). Use valor negativo pra registrar perda.</div>
+      <div class="note" style="margin-top:0;">Se preencher o "Preço médio de compra" em cada linha de venda acima, esse total é calculado sozinho (soma o ganho/perda de cada venda) — mas você ainda pode digitar/ajustar aqui manualmente se preferir. Ganho de capital entra como receita financeira (categoria Rendimentos); perda de capital entra como despesa financeira (categoria Investimentos). Use valor negativo pra registrar perda.</div>
       <div class="field"><label>Conta bancária de origem/destino</label>
         <select id="notaContaBancaria">${state.contas.map(c=>`<option value="${c.id}" ${(notaEmRevisao?notaEmRevisao.contaBancariaId===c.id:contaPreSelecionadaId===c.id)?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
       </div>
@@ -12420,7 +12420,19 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     const subs = contaRV ? state.subcontasInvestimento.filter(s=>s.contaId===contaRV.id) : [];
     return subs.map(s=>`<option value="${s.id}">${escapeHTML(s.nome)}</option>`).join('');
   };
-  const linhaOperacaoHTML = (op, idx)=>`
+  const precoMedioAtivo = (ticker, subContaId)=>{
+    if(!contaInvRVExistente || !ticker) return null;
+    const doTicker = state.ativosInvestimento.filter(a=>a.contaId===contaInvRVExistente.id && a.ticker===ticker && !a.manual && !a.resgatado);
+    if(!doTicker.length) return null;
+    const match = subContaId ? doTicker.find(a=>a.subContaId===subContaId) : null;
+    return (match || doTicker[0]).precoMedio ?? null;
+  };
+  const linhaOperacaoHTML = (op, idx)=>{
+    const ehVenda = op.tipo==='V';
+    const precoMedioSugerido = ehVenda ? (op.precoMedioCompra!=null ? op.precoMedioCompra : precoMedioAtivo(op.ticker, op.subContaId)) : null;
+    const qtdNum = numBR(op.quantidade)||0, precoNum = numBR(op.preco)||0, precoMedioNum = numBR(precoMedioSugerido)||0;
+    const ganhoCalc = ehVenda && precoMedioSugerido!=null ? (precoNum-precoMedioNum)*qtdNum : null;
+    return `
     <div class="field-row nota-op-row" data-idx="${idx}" style="align-items:flex-end;flex-wrap:wrap;">
       <div class="field" style="max-width:70px;"><label>C/V</label>
         <select class="op-tipo">
@@ -12445,15 +12457,20 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
         </select>
       </div>
       <button type="button" class="icon-btn btn-remover-op" style="margin-bottom:14px;">✕</button>
+      ${ehVenda ? `
+      <div class="field" style="max-width:140px;"><label>Preço médio de compra</label><input type="text" inputmode="decimal" class="op-preco-medio" value="${precoMedioSugerido!=null?precoMedioSugerido:''}" placeholder="0,00"></div>
+      <div class="field" style="max-width:140px;"><label>Ganho/perda dessa venda</label><input type="text" class="op-ganho-display mono" value="${ganhoCalc!=null?brl(ganhoCalc):'—'}" readonly style="background:var(--bone);color:${ganhoCalc!=null?(ganhoCalc>=0?'var(--success)':'var(--danger)'):'var(--text-soft)'};font-weight:600;"></div>
+      ` : ''}
     </div>
-  `;
+  `;};
   const lerOperacoesDoDOM = ()=>[...document.querySelectorAll('.nota-op-row')].map(row=>({
     tipo: row.querySelector('.op-tipo').value,
     tipoAtivo: row.querySelector('.op-tipoativo').value,
     ticker: row.querySelector('.op-ticker').value.trim().toUpperCase(),
     quantidade: row.querySelector('.op-qtd').value,
     preco: row.querySelector('.op-preco').value,
-    subContaId: (row.querySelector('.op-subconta').value && row.querySelector('.op-subconta').value!=='__nova__') ? row.querySelector('.op-subconta').value : null
+    subContaId: (row.querySelector('.op-subconta').value && row.querySelector('.op-subconta').value!=='__nova__') ? row.querySelector('.op-subconta').value : null,
+    precoMedioCompra: row.querySelector('.op-preco-medio') ? (row.querySelector('.op-preco-medio').value || null) : null
   }));
   const criarSubcontaParaLinha = (selectEl)=>{
     if(selectEl.value!=='__nova__') return;
@@ -12474,6 +12491,31 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     });
     selectEl.value = nova.id;
   };
+  const recalcularGanhosVenda = ()=>{
+    let somaGanhos = 0, temAlgumCalculado = false;
+    document.querySelectorAll('.nota-op-row').forEach(row=>{
+      const display = row.querySelector('.op-ganho-display');
+      if(!display) return;
+      const qtd = numBR(row.querySelector('.op-qtd').value)||0;
+      const preco = numBR(row.querySelector('.op-preco').value)||0;
+      const precoMedioEl = row.querySelector('.op-preco-medio');
+      const precoMedio = precoMedioEl ? numBR(precoMedioEl.value) : NaN;
+      if(!isNaN(precoMedio) && qtd>0){
+        const ganho = (preco-precoMedio)*qtd;
+        display.value = brl(ganho);
+        display.style.color = ganho>=0 ? 'var(--success)' : 'var(--danger)';
+        somaGanhos += ganho;
+        temAlgumCalculado = true;
+      } else {
+        display.value = '—';
+        display.style.color = 'var(--text-soft)';
+      }
+    });
+    if(temAlgumCalculado){
+      const campoTotal = document.getElementById('notaGanhoPerda');
+      if(campoTotal) campoTotal.value = (Math.round(somaGanhos*100)/100).toString().replace('.',',');
+    }
+  };
   const pintarOperacoes = ()=>{
     document.getElementById('notaOperacoesTable').innerHTML = operacoesAtuais.map((op,i)=>linhaOperacaoHTML(op,i)).join('') || `<div class="empty">Nenhuma operação identificada — adicione manualmente.</div>`;
     document.querySelectorAll('.btn-remover-op').forEach(btn=>{
@@ -12491,7 +12533,11 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
         operacoesAtuais = lerOperacoesDoDOM();
         criarSubcontaParaLinha(this);
       });
+      row.querySelectorAll('.op-preco-medio, .op-preco, .op-qtd').forEach(campo=>{
+        campo.addEventListener('input', recalcularGanhosVenda);
+      });
     });
+    recalcularGanhosVenda();
   };
 
   document.getElementById('btnAdicionarLinhaOp').addEventListener('click', ()=>{
