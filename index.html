@@ -878,10 +878,15 @@ function aplicarMigracoes(s){
   if(!s.faturasPendentes) s.faturasPendentes = [];
   if(!s.categorias){
     s.categorias = {
-      saida: CATEGORIAS_SAIDA.map(nome=>({ id: uid(), nome, subcategorias: [] })),
-      entrada: CATEGORIAS_ENTRADA.map(nome=>({ id: uid(), nome, subcategorias: [] }))
+      saida: CATEGORIAS_SAIDA.map(nome=>({ id: uid(), nome, subcategorias: [], ehFinanceira: nome==='Despesas Financeiras' })),
+      entrada: CATEGORIAS_ENTRADA.map(nome=>({ id: uid(), nome, subcategorias: [], ehFinanceira: nome==='Rendimentos' }))
     };
   }
+  ['saida','entrada'].forEach(tipo=>{
+    (s.categorias[tipo]||[]).forEach(c=>{
+      if(c.ehFinanceira===undefined) c.ehFinanceira = (c.nome==='Rendimentos' || c.nome==='Despesas Financeiras');
+    });
+  });
   if(!s.vendedores) s.vendedores = [];
   if(!s.comissoesPagas) s.comissoesPagas = [];
   if(!s.comissoesManuais) s.comissoesManuais = [];
@@ -5301,7 +5306,12 @@ function renderDRE(periodo){
   const despesas = porCategoria('saida');
   // Soma uma categoria E suas subcategorias ("Pai / Sub") — receitas['Rendimentos'] sozinho não pega
   // "Rendimentos / Juros Bancários" por exemplo, então Resultado Financeiro ficava zerado por engano.
-  const somaCategoriaEFilhas = (mapa, nomePai) => Object.entries(mapa).filter(([k])=>k===nomePai || k.startsWith(nomePai+' / ')).reduce((s,[,v])=>s+v,0);
+  // Categoria financeira agora é definida pelo usuário (checkbox "É uma categoria financeira" no cadastro),
+  // não mais por um nome fixo — assim funciona com "Rendimentos", "Receitas Financeiras" ou qualquer nome escolhido.
+  const nomesFinanceirosReceita = (state.categorias.entrada||[]).filter(c=>c.ehFinanceira).map(c=>c.nome);
+  const nomesFinanceirosDespesa = (state.categorias.saida||[]).filter(c=>c.ehFinanceira).map(c=>c.nome);
+  const somaCategoriasFinanceiras = (mapa, nomesPai) => Object.entries(mapa).filter(([k])=>nomesPai.some(p=>k===p || k.startsWith(p+' / '))).reduce((s,[,v])=>s+v,0);
+  const ehCategoriaFinanceira = (nomesPai, k) => nomesPai.some(p=>k===p || k.startsWith(p+' / '));
   const totalReceitas = Object.values(receitas).reduce((a,b)=>a+b,0);
   const totalDespesas = Object.values(despesas).reduce((a,b)=>a+b,0);
   const totalDescontos = lancamentosPeriodo.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+(l.descontoConcedido||0),0);
@@ -5371,32 +5381,36 @@ function renderDRE(periodo){
       : `Análise horizontal: variação de cada total comparada ao período anterior de mesma duração (${fmtDate(deAnterior)} a ${fmtDate(ateAnterior)}).`}</div>
     <div class="report-block">
       <div class="report-title">Receita Operacional</div>
-      ${(()=>{ const op = Object.entries(receitas).filter(([k])=>k!=='Rendimentos' && !k.startsWith('Rendimentos / ')); return op.length ? op.map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">${brl(v)}${pctVertical(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma receita operacional no período</span><span class="v">${brl(0)}</span></div>`; })()}
-      ${totalDescontos>0.004 ? (()=>{ const totalReceitaOp = totalReceitas - somaCategoriaEFilhas(receitas,'Rendimentos'); const bruta = totalReceitaOp + totalDescontos; return `
+      ${(()=>{ const op = Object.entries(receitas).filter(([k])=>!ehCategoriaFinanceira(nomesFinanceirosReceita,k)); return op.length ? op.map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">${brl(v)}${pctVertical(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma receita operacional no período</span><span class="v">${brl(0)}</span></div>`; })()}
+      ${totalDescontos>0.004 ? (()=>{ const totalReceitaOp = totalReceitas - somaCategoriasFinanceiras(receitas,nomesFinanceirosReceita); const bruta = totalReceitaOp + totalDescontos; return `
       <div class="report-line sub"><span>Receita Bruta de Vendas</span><span class="v">${brl(bruta)}</span></div>
       <div class="report-line sub"><span>(-) Descontos Concedidos</span><span class="v">(${brl(totalDescontos)})</span></div>`; })() : ''}
       ${totalBonificado>0.004 ? `
       <div class="report-line sub"><span>Vendas Bonificadas (informativo)</span><span class="v">${brl(totalBonificado)}</span></div>
       <div class="report-line sub"><span>(-) Desconto por Bonificação</span><span class="v">(${brl(totalBonificado)})</span></div>` : ''}
-      ${(()=>{ const totalReceitaOp = totalReceitas - somaCategoriaEFilhas(receitas,'Rendimentos'); return `<div class="report-line total"><span>(=) Total de Receita Operacional</span><span class="v">${brl(totalReceitaOp)}</span></div>`; })()}
+      ${(()=>{ const totalReceitaOp = totalReceitas - somaCategoriasFinanceiras(receitas,nomesFinanceirosReceita); return `<div class="report-line total"><span>(=) Total de Receita Operacional</span><span class="v">${brl(totalReceitaOp)}</span></div>`; })()}
       <div class="report-line sub"><span>(-) Pedidos Cancelados${canceladosVK.length?' ('+canceladosVK.length+')':''}</span><span class="v">(${brl(totalCancelados)})</span></div>
 
       <div class="report-title">Despesas Operacionais</div>
-      ${(()=>{ const op = Object.entries(despesas).filter(([k])=>k!=='Despesas Financeiras' && !k.startsWith('Despesas Financeiras / ')); return op.length ? op.map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">(${brl(v)})${pctVertical(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma despesa operacional no período</span><span class="v">${brl(0)}</span></div>`; })()}
-      ${(()=>{ const totalDespesaOp = totalDespesas - somaCategoriaEFilhas(despesas,'Despesas Financeiras'); return `<div class="report-line total"><span>(=) Total de Despesas Operacionais</span><span class="v">(${brl(totalDespesaOp)})</span></div>`; })()}
+      ${(()=>{ const op = Object.entries(despesas).filter(([k])=>!ehCategoriaFinanceira(nomesFinanceirosDespesa,k)); return op.length ? op.map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">(${brl(v)})${pctVertical(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma despesa operacional no período</span><span class="v">${brl(0)}</span></div>`; })()}
+      ${(()=>{ const totalDespesaOp = totalDespesas - somaCategoriasFinanceiras(despesas,nomesFinanceirosDespesa); return `<div class="report-line total"><span>(=) Total de Despesas Operacionais</span><span class="v">(${brl(totalDespesaOp)})</span></div>`; })()}
 
       ${(()=>{
-        const receitasFinanceiras = somaCategoriaEFilhas(receitas,'Rendimentos');
-        const despesasFinanceiras = somaCategoriaEFilhas(despesas,'Despesas Financeiras');
+        const receitasFinanceiras = somaCategoriasFinanceiras(receitas,nomesFinanceirosReceita);
+        const despesasFinanceiras = somaCategoriasFinanceiras(despesas,nomesFinanceirosDespesa);
         const resultadoOperacional = receitaLiquida - receitasFinanceiras - (totalDespesas - despesasFinanceiras);
         const resultadoFinanceiro = receitasFinanceiras - despesasFinanceiras;
+        const pendentesFinanceiros = state.lancamentos.filter(l=>l.status==='pendente' && ehCategoriaFinanceira(l.tipo==='entrada'?nomesFinanceirosReceita:nomesFinanceirosDespesa, l.categoria||'') && l.dataVencimento>=de && l.dataVencimento<=ate);
+        const totalPendenteFinanceiro = pendentesFinanceiros.reduce((s,l)=>s+valorEmAberto(l),0);
         return `
       <div class="report-line total"><span>(=) Resultado Operacional</span><span class="v">${brl(resultadoOperacional)}</span></div>
 
       <div class="report-title">Resultado Financeiro</div>
       <div class="report-line sub"><span>(+) Receitas Financeiras</span><span class="v">${brl(receitasFinanceiras)}</span></div>
       <div class="report-line sub"><span>(-) Despesas Financeiras</span><span class="v">(${brl(despesasFinanceiras)})</span></div>
-      <div class="report-line total"><span>(=) Resultado Financeiro</span><span class="v" style="color:${resultadoFinanceiro>=0?'var(--success)':'var(--danger)'}">${brl(resultadoFinanceiro)}</span></div>`;
+      <div class="report-line total"><span>(=) Resultado Financeiro</span><span class="v" style="color:${resultadoFinanceiro>=0?'var(--success)':'var(--danger)'}">${brl(resultadoFinanceiro)}</span></div>
+      ${!nomesFinanceirosReceita.length && !nomesFinanceirosDespesa.length ? `<div class="note" style="border-color:var(--warn);">⚠️ Nenhuma categoria está marcada como financeira ainda — vá em Categorias, edite a categoria certa (ex: "Receitas Financeiras") e marque "💰 É uma categoria financeira".</div>` : ''}
+      ${pendentesFinanceiros.length ? `<div class="note" style="border-color:var(--warn);">⚠️ Tem ${brl(totalPendenteFinanceiro)} em ${pendentesFinanceiros.length} lançamento(s) de Rendimentos/Despesas Financeiras <strong>ainda pendente(s)</strong> nesse período (${pendentesFinanceiros.map(l=>l.descricao).slice(0,3).join(', ')}${pendentesFinanceiros.length>3?'…':''}) — só entram aqui quando forem confirmados como recebido/pago em Contas a Receber/Pagar. É provavelmente por isso que o Resultado Financeiro está menor do que você esperava.</div>` : ''}`;
       })()}
 
       <div class="report-line result"><span>${resultado>=0?'Lucro':'Prejuízo'} do Período</span><span class="v" style="color:${resultado>=0?'var(--success)':'var(--danger)'}">${brl(resultado)}${variacaoHTML(resultado, resultadoAnt, resultadoAnoAnt)}</span></div>
@@ -14037,6 +14051,11 @@ function openCategoriaModal(tipo, existing){
         ${CATEGORIA_CORES.map((cor,i)=>`<span class="cat-cor-swatch ${(!isEdit && i===0) || (isEdit && existing.cor===cor) ? 'selected' : ''}" data-cor="${cor}" style="width:28px;height:28px;border-radius:50%;background:${cor};cursor:pointer;display:inline-block;border:3px solid transparent;"></span>`).join('')}
       </div>
     </div>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;font-size:13.5px;margin-top:4px;">
+      <input type="checkbox" id="catEhFinanceira" style="width:17px;height:17px;" ${existing?.ehFinanceira?'checked':''}>
+      💰 É uma categoria financeira
+    </label>
+    <div class="note" style="margin-top:6px;">Marca essa categoria (e as subcategorias dela) pra entrar no "Resultado Financeiro" da DRE, separado da Receita/Despesa Operacional — em vez de misturar juros, dividendos, rendimentos etc. com vendas/despesas normais do negócio.</div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       <button class="btn" id="btnSalvarCategoria">Salvar</button>
@@ -14059,11 +14078,13 @@ function openCategoriaModal(tipo, existing){
   });
   document.getElementById('btnSalvarCategoria').addEventListener('click', ()=>{
     const nome = document.getElementById('catNome').value.trim();
+    const ehFinanceira = document.getElementById('catEhFinanceira').checked;
     if(!nome){ showToast('Informe o nome da categoria'); return; }
     if(isEdit){
       const oldNome = existing.nome;
       existing.nome = nome;
       existing.cor = corSelecionada;
+      existing.ehFinanceira = ehFinanceira;
       if(oldNome !== nome){
         state.lancamentos.forEach(l=>{
           if(l.categoria===oldNome) l.categoria = nome;
@@ -14075,7 +14096,7 @@ function openCategoriaModal(tipo, existing){
         });
       }
     } else {
-      state.categorias[tipo].push({ id: uid(), nome, cor: corSelecionada, subcategorias: [] });
+      state.categorias[tipo].push({ id: uid(), nome, cor: corSelecionada, subcategorias: [], ehFinanceira });
     }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Categoria atualizada' : 'Categoria criada');
