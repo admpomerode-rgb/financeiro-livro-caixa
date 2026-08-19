@@ -1382,10 +1382,13 @@ function faturaStatus(cartaoId, competencia){
   const ids = idsLancamentosFatura(fech);
   const lancs = ids.map(id=>state.lancamentos.find(l=>l.id===id)).filter(Boolean);
   if(!lancs.length) return 'aberta';
-  return lancs.every(l=>l.status!=='pendente') ? 'paga' : 'fechada';
+  return lancs.every(l=>l.status!=='pendente' || valorEmAberto(l)<=0.01) ? 'paga' : 'fechada';
 }
 function totalCompetencia(cartaoId, competencia){
   return state.comprasCartao.filter(p=>p.cartaoId===cartaoId && p.competencia===competencia).reduce((s,p)=>s+p.valor,0);
+}
+function totalAdiantadoCompetencia(cartaoId, competencia){
+  return state.lancamentos.filter(l=>l.origem==='cartao_adiantamento' && l.cartaoId===cartaoId && l.competencia===competencia).reduce((s,l)=>s+l.valor,0);
 }
 function dividaCartaoAberta(cartaoId){
   const porCompetencia = {};
@@ -4308,14 +4311,23 @@ function viewFatura(cartaoId, competencia){
             <div class="desc-cell"><div>${escapeHTML(p.descricao)}${p.totalParcelas>1?` <span style="color:var(--text-soft);font-size:11.5px;">(${p.parcela}/${p.totalParcelas})</span>`:''}</div></div>
             <span class="col-cat" style="font-size:12px;color:var(--text-soft);">${escapeHTML(p.categoria)}</span>
             <span class="mono" style="font-weight:600;color:var(--danger);">${brl(p.valor)}</span>
-            <span>${status==='aberta' ? `<button class="icon-btn icon-btn-danger" data-action="excluir-compra-cartao" data-id="${p.id}" title="Excluir essa despesa">🗑️</button>` : ''}</span>
+            <span style="display:flex;gap:4px;">${status==='aberta' ? `<button class="icon-btn" data-action="editar-compra-cartao" data-id="${p.id}" title="Editar essa despesa">✎</button><button class="icon-btn icon-btn-danger" data-action="excluir-compra-cartao" data-id="${p.id}" title="Excluir essa despesa">🗑️</button>` : ''}</span>
           </div>
         `).join('') : `<div class="empty">Nenhuma compra lançada nesta fatura ainda.</div>`}
       </div>
     </div>
-    ${status==='aberta' && total>0 ? `
+    ${status==='aberta' && total>0 ? (()=>{
+      const adiantado = totalAdiantadoCompetencia(cartaoId, compAtual);
+      const saldoRestante = Math.max(0, Math.round((total-adiantado)*100)/100);
+      return `
     <div class="panel">
       <div class="panel-body" style="padding:18px 20px;">
+        ${adiantado>0.004 ? `
+          <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;"><span>Total da fatura até agora</span><span class="mono">${brl(total)}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;color:var(--success);"><span>Já pago adiantado</span><span class="mono">${brl(adiantado)}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;font-weight:700;border-top:1px solid var(--line);margin:4px 0 12px;"><span>Falta (se fechar agora)</span><span class="mono">${brl(saldoRestante)}</span></div>
+        ` : ''}
+        <button class="btn ghost" data-action="adiantar-pagamento-fatura" style="margin-bottom:14px;">💰 Fazer um pagamento parcial agora (antes de fechar)</button>
         <div class="field-row">
           <div class="field" style="max-width:280px;">
             <label>Conta para pagar esta fatura</label>
@@ -4329,7 +4341,7 @@ function viewFatura(cartaoId, competencia){
         <div class="note" id="faturaParcelasSaldoNota" style="margin-top:0;display:none;"></div>
         <button class="btn" id="btnFecharFatura">Fechar fatura e lançar como conta a pagar</button>
       </div>
-    </div>` : ''}
+    </div>`; })() : ''}
     ${status==='fechada' || status==='paga' ? (()=>{
       const fechamento = state.faturasFechadas.find(f=>f.cartaoId===cartaoId && f.competencia===compAtual);
       const ids = fechamento ? idsLancamentosFatura(fechamento) : [];
@@ -4347,7 +4359,7 @@ function viewFatura(cartaoId, competencia){
               <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;color:var(--success);"><span>Já pago</span><span class="mono">${brl(jaPago)}</span></div>
               <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;font-weight:700;border-top:1px solid var(--line);margin:4px 0 10px;"><span>Falta pagar</span><span class="mono">${brl(falta)}</span></div>
             ` : `<div class="note" style="margin-top:0;">Falta pagar: <strong class="mono">${brl(falta)}</strong></div>`}
-            ${lanc.status==='pendente' ? `<button class="btn" data-action="pagar-parcela-fatura" data-id="${lanc.id}">Registrar pagamento (pode ser parcial)</button>` : `<div class="note" style="margin-top:0;border-color:var(--success);">✓ Fatura totalmente paga.</div>`}
+            ${lanc.status==='pendente' && valorEmAberto(lanc)>0.01 ? `<button class="btn" data-action="pagar-parcela-fatura" data-id="${lanc.id}">Registrar pagamento (pode ser parcial)</button>` : `<div class="note" style="margin-top:0;border-color:var(--success);">✓ Fatura totalmente paga${lanc.status==='pendente'?' (coberta pelos pagamentos antecipados)':''}.</div>`}
           </div>
         </div>`;
       }
@@ -4356,13 +4368,15 @@ function viewFatura(cartaoId, competencia){
       <div class="panel">
         <div class="panel-head"><h2>Saldo parcelado em ${lancs.length}x</h2></div>
         <div class="panel-body">
-          ${lancs.map((l,i)=>`
+          ${lancs.map((l,i)=>{
+            const paga = l.status!=='pendente' || valorEmAberto(l)<=0.01;
+            return `
             <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
-              <div class="desc-cell"><div>Parcela ${i+1}/${lancs.length}</div><div class="cat">vence ${fmtDate(l.dataVencimento)}${l.status!=='pendente'?' · paga':''}</div></div>
+              <div class="desc-cell"><div>Parcela ${i+1}/${lancs.length}</div><div class="cat">vence ${fmtDate(l.dataVencimento)}${paga?' · paga':''}</div></div>
               <span class="mono" style="font-weight:600;">${brl(l.valor)}</span>
-              ${l.status==='pendente' ? `<button class="btn ghost sm" data-action="pagar-parcela-fatura" data-id="${l.id}">Pagar</button>` : `<span style="color:var(--success);font-size:12px;">✓ paga</span>`}
+              ${!paga ? `<button class="btn ghost sm" data-action="pagar-parcela-fatura" data-id="${l.id}">Pagar</button>` : `<span style="color:var(--success);font-size:12px;">✓ paga</span>`}
             </div>
-          `).join('')}
+          `;}).join('')}
         </div>
       </div>`;
     })() : ''}
@@ -10500,6 +10514,9 @@ function attachViewHandlers(){
     faturaCompetenciaAtual = faturaCompetenciaSelect.value;
     render();
   });
+  document.querySelectorAll('[data-action="editar-compra-cartao"]').forEach(btn=>{
+    btn.addEventListener('click', ()=> openEditarCompraCartaoModal(btn.dataset.id));
+  });
   document.querySelectorAll('[data-action="excluir-compra-cartao"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const p = state.comprasCartao.find(x=>x.id===btn.dataset.id);
@@ -10542,30 +10559,45 @@ function attachViewHandlers(){
     faturaParcelasSaldoSel.addEventListener('change', atualizarNotaParcelas);
     atualizarNotaParcelas();
   }
+  document.querySelectorAll('[data-action="adiantar-pagamento-fatura"]').forEach(btn=>{
+    btn.addEventListener('click', ()=> openAdiantamentoFaturaModal(faturaCartaoId, faturaCompetenciaAtual));
+  });
   const btnFecharFatura = document.getElementById('btnFecharFatura');
   if(btnFecharFatura) btnFecharFatura.addEventListener('click', ()=>{
     const cartao = state.cartoes.find(c=>c.id===faturaCartaoId);
     const comp = faturaCompetenciaAtual;
     const total = totalCompetencia(cartao.id, comp);
+    const jaAdiantado = totalAdiantadoCompetencia(cartao.id, comp);
     const contaId = document.getElementById('faturaContaPagamento').value;
     const parcelasSaldo = parseInt(document.getElementById('faturaParcelasSaldo')?.value || '1');
-    const msgConfirm = parcelasSaldo>1
+    const msgConfirm = (parcelasSaldo>1
       ? `Fechar a fatura de ${competenciaLabel(comp)} (${brl(total)}) e lançar como conta a pagar, parcelada em ${parcelasSaldo}x?`
-      : `Fechar a fatura de ${competenciaLabel(comp)} (${brl(total)}) e lançar como conta a pagar?`;
+      : `Fechar a fatura de ${competenciaLabel(comp)} (${brl(total)}) e lançar como conta a pagar?`)
+      + (jaAdiantado>0.004 ? `\n\n${brl(jaAdiantado)} já foi pago adiantado e vai ser descontado.` : '');
     if(!confirm(msgConfirm)) return;
     const vencBase = dataVencimentoFatura(cartao, comp);
     const valorParcela = Math.round((total/parcelasSaldo)*100)/100;
     const lancamentoIds = [];
+    let adiantadoRestante = jaAdiantado;
     for(let i=1;i<=parcelasSaldo;i++){
       const lancId = uid();
       const [vy,vm,vd] = vencBase.split('-').map(Number);
       const dtVenc = new Date(vy, vm-1+(i-1), vd);
+      const valorEstaParcela = i===parcelasSaldo ? Math.round((total - valorParcela*(parcelasSaldo-1))*100)/100 : valorParcela;
+      const coberto = Math.min(adiantadoRestante, valorEstaParcela);
+      adiantadoRestante = Math.round((adiantadoRestante-coberto)*100)/100;
+      // Importante: NÃO marca como "pago" mesmo se totalmente coberto pelo adiantamento — o dinheiro já saiu
+      // de verdade através do(s) lançamento(s) de "Pagamento parcial" (origem cartao_adiantamento), que já
+      // contam como despesa realizada na data certa. Marcar essa parcela como paga de novo contaria o
+      // mesmo dinheiro duas vezes no DRE/relatórios. valorRecebido só serve pra mostrar "falta R$0" aqui.
       state.lancamentos.push({
         id: lancId, tipo:'saida', categoria:'Cartão de Crédito',
         descricao: parcelasSaldo>1 ? `Fatura ${cartao.nome} — ${competenciaLabel(comp)} (${i}/${parcelasSaldo})` : `Fatura ${cartao.nome} — ${competenciaLabel(comp)}`,
-        valor: i===parcelasSaldo ? Math.round((total - valorParcela*(parcelasSaldo-1))*100)/100 : valorParcela,
-        contaId, status:'pendente',
-        dataVencimento: dtVenc.toISOString().slice(0,10), dataPagamento: null,
+        valor: valorEstaParcela, contaId,
+        status: 'pendente',
+        valorRecebido: coberto>0.004 ? coberto : 0,
+        dataVencimento: dtVenc.toISOString().slice(0,10),
+        dataPagamento: null,
         origem:'cartao', cartaoId: cartao.id, competencia: comp, criadoEm: new Date().toISOString()
       });
       lancamentoIds.push(lancId);
@@ -12234,6 +12266,87 @@ function openEscolherCartaoModal(){
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   modal.querySelectorAll('[data-cartao-id]').forEach(btn=>{
     btn.addEventListener('click', ()=>openCompraCartaoModal(btn.dataset.cartaoId));
+  });
+}
+
+function openAdiantamentoFaturaModal(cartaoId, competencia){
+  const cartao = state.cartoes.find(c=>c.id===cartaoId);
+  const total = totalCompetencia(cartaoId, competencia);
+  const jaAdiantado = totalAdiantadoCompetencia(cartaoId, competencia);
+  const restante = Math.max(0, Math.round((total-jaAdiantado)*100)/100);
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Pagamento parcial — ${escapeHTML(cartao.nome)} (${competenciaLabel(competencia)})</h3>
+    <div class="note" style="margin-top:0;">Fatura ainda em aberto (${brl(total)} até agora) — esse pagamento sai da conta agora e é descontado quando você fechar a fatura. Falta pagar, considerando o que já foi lançado: <strong>${brl(restante)}</strong>.</div>
+    <div class="field"><label>Valor a pagar agora (R$)</label><input type="text" inputmode="decimal" id="adValor" value="${restante>0?restante:''}"></div>
+    <div class="field-row">
+      <div class="field"><label>Data</label><input type="date" id="adData" value="${todayISO()}"></div>
+      <div class="field"><label>Conta</label><select id="adConta">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarAdiantamento">Confirmar pagamento</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnConfirmarAdiantamento').addEventListener('click', ()=>{
+    const valor = numBR(document.getElementById('adValor').value);
+    const data = document.getElementById('adData').value || todayISO();
+    const contaId = document.getElementById('adConta').value;
+    if(isNaN(valor) || valor<=0){ showToast('Informe um valor válido'); return; }
+    state.lancamentos.push({
+      id: uid(), tipo:'saida', categoria:'Cartão de Crédito',
+      descricao: `Pagamento parcial — Fatura ${cartao.nome} (${competenciaLabel(competencia)})`,
+      valor, contaId, status:'pago', dataVencimento: data, dataPagamento: data,
+      origem:'cartao_adiantamento', cartaoId, competencia, criadoEm: new Date().toISOString()
+    });
+    persist(); closeModal(); render();
+    showToast('Pagamento registrado — será descontado quando a fatura fechar');
+  });
+}
+
+function openEditarCompraCartaoModal(compraId){
+  const p = state.comprasCartao.find(x=>x.id===compraId);
+  if(!p) return;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Editar despesa${p.totalParcelas>1?` (parcela ${p.parcela}/${p.totalParcelas})`:''}</h3>
+    ${p.totalParcelas>1 ? `<div class="note" style="margin-top:0;">Isso edita só essa parcela — as outras (${p.totalParcelas-1} restante(s)) continuam com o valor/categoria/descrição que estavam.</div>` : ''}
+    <div class="field">
+      <label>Descrição</label>
+      <input type="text" id="ecDescricao" value="${escapeHTML(p.descricao)}">
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Valor (R$)</label>
+        <input type="text" inputmode="decimal" id="ecValor" value="${p.valor}">
+      </div>
+      <div class="field">
+        <label>Data da compra</label>
+        <input type="date" id="ecData" value="${p.dataCompra}">
+      </div>
+    </div>
+    <div class="field">
+      <label>Categoria</label>
+      <select id="ecCategoria">${opcoesCategoriaHTML('saida', p.categoria)}</select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarEdicaoCompra">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarEdicaoCompra').addEventListener('click', ()=>{
+    const descricao = document.getElementById('ecDescricao').value.trim();
+    const valor = numBR(document.getElementById('ecValor').value);
+    const data = document.getElementById('ecData').value;
+    const categoria = document.getElementById('ecCategoria').value;
+    if(!descricao || isNaN(valor) || valor<=0 || !data){ showToast('Preencha descrição, valor e data'); return; }
+    p.descricao = descricao; p.valor = valor; p.dataCompra = data; p.categoria = categoria;
+    persist(); closeModal(); render();
+    showToast('Despesa atualizada');
   });
 }
 
