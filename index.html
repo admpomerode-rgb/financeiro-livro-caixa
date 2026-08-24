@@ -1875,25 +1875,41 @@ async function sincronizarCustosProdutosVK(){
       await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
     }
     const db = vkFirebaseApp.firestore();
-    const [produtosSnap, fichasSnap, insumosSnap] = await Promise.all([
+    const [produtosSnap, fichasSnap, insumosSnap, entradasSnap] = await Promise.all([
       db.collection('produtos').get({ source: 'server' }),
-      db.collection('fichasTecnicas').get({ source: 'server' }).catch(()=>({docs:[]})),
-      db.collection('insumos').get({ source: 'server' }).catch(()=>({docs:[]}))
+      db.collection('fichas_tecnicas').get({ source: 'server' }).catch(()=>({docs:[]})),
+      db.collection('insumos').get({ source: 'server' }).catch(()=>({docs:[]})),
+      db.collection('entradas_estoque').get({ source: 'server' }).catch(()=>({docs:[]}))
     ]);
     const produtosVK = produtosSnap.docs.map(d=>({ id: d.id, ...d.data() }));
     const fichasVK = fichasSnap.docs.map(d=>({ id: d.id, ...d.data() }));
     const insumosVK = insumosSnap.docs.map(d=>({ id: d.id, ...d.data() }));
+    const entradasVK = entradasSnap.docs.map(d=>({ id: d.id, ...d.data() }));
 
-    const precoInsumo = (insumoId, insumoNome)=>{
-      const i = insumosVK.find(x=>x.id===insumoId) || insumosVK.find(x=>x.nome===insumoNome);
-      if(!i) return 0;
-      return Number(i.precoMedio ?? i.custoMedio ?? i.preco ?? 0) || 0;
+    // O VK Industrial NÃO guarda preço médio no cadastro do insumo — ele calcula na hora,
+    // fazendo a média ponderada de todas as entradas de estoque daquele insumo (mesma fórmula
+    // usada lá: soma(quantidade×valorUnitario) ÷ soma(quantidade)). Reproduzindo aqui igual.
+    const precoMedioPorInsumo = {};
+    entradasVK.forEach(ent=>{
+      (ent.itens||[]).forEach(it=>{
+        const pid = it.produtoId;
+        if(!pid || !(Number(it.quantidade)>0)) return;
+        if(!precoMedioPorInsumo[pid]) precoMedioPorInsumo[pid] = { somaQtd:0, somaValor:0 };
+        precoMedioPorInsumo[pid].somaQtd += Number(it.quantidade)||0;
+        precoMedioPorInsumo[pid].somaValor += (Number(it.quantidade)||0)*(Number(it.valorUnitario)||0);
+      });
+    });
+    const precoInsumo = (insumoId)=>{
+      const acc = precoMedioPorInsumo[insumoId];
+      if(acc && acc.somaQtd>0) return acc.somaValor/acc.somaQtd;
+      const i = insumosVK.find(x=>x.id===insumoId);
+      return i ? Number(i.precoMedio ?? i.custoMedio ?? i.preco ?? 0) || 0 : 0;
     };
 
     const novosCustos = produtosVK.map(p=>{
       const tipo = p.tipo || 'fabricado';
       const nome = p.nome || 'Produto sem nome';
-      const precoVendaVK = Number(p.precoVenda ?? p.preco ?? 0) || 0;
+      const precoVendaVK = Number(p.valorPadrao ?? p.precoVenda ?? p.preco ?? 0) || 0;
 
       if(tipo==='revenda'){
         const custoUnitario = Number(p.custoCompra ?? p.custo ?? 0) || 0;
@@ -1901,14 +1917,15 @@ async function sincronizarCustosProdutosVK(){
       }
 
       const ficha = fichasVK.find(f=>f.produtoId===p.id);
-      if(!ficha || !ficha.itens || !ficha.itens.length){
+      const ingredientes = ficha ? (ficha.ingredientes || ficha.itens || []) : [];
+      if(!ficha || !ingredientes.length){
         return { produtoId: p.id, nome, tipo, custoUnitario: null, precoVendaVK, rendimento: null, itensCusto: [] };
       }
       const rendimento = Number(ficha.rendimento ?? 1) || 1;
-      const itensCusto = ficha.itens.map(it=>{
+      const itensCusto = ingredientes.map(it=>{
         const quantidade = Number(it.quantidade ?? 0) || 0;
         const insumo = insumosVK.find(x=>x.id===it.insumoId);
-        const custoUnitInsumo = precoInsumo(it.insumoId, it.insumoNome);
+        const custoUnitInsumo = precoInsumo(it.insumoId);
         return {
           insumoNome: it.insumoNome || insumo?.nome || 'Insumo',
           quantidade, custoUnitInsumo,
@@ -1952,17 +1969,35 @@ async function sincronizarEstoqueInsumosVK(){
       await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
     }
     const db = vkFirebaseApp.firestore();
-    const insumosSnap = await db.collection('insumos').get({ source: 'server' });
+    const [insumosSnap, entradasSnap] = await Promise.all([
+      db.collection('insumos').get({ source: 'server' }),
+      db.collection('entradas_estoque').get({ source: 'server' }).catch(()=>({docs:[]}))
+    ]);
     const insumosVK = insumosSnap.docs.map(d=>({ id: d.id, ...d.data() }));
+    const entradasVK = entradasSnap.docs.map(d=>({ id: d.id, ...d.data() }));
+
+    // Preço médio também não é campo salvo no insumo — calcula pela média ponderada das
+    // entradas de estoque desse insumo (mesma fórmula do VK Industrial: calcularPrecoMedio).
+    const precoMedioPorInsumo = {};
+    entradasVK.forEach(ent=>{
+      (ent.itens||[]).forEach(it=>{
+        const pid = it.produtoId;
+        if(!pid || !(Number(it.quantidade)>0)) return;
+        if(!precoMedioPorInsumo[pid]) precoMedioPorInsumo[pid] = { somaQtd:0, somaValor:0 };
+        precoMedioPorInsumo[pid].somaQtd += Number(it.quantidade)||0;
+        precoMedioPorInsumo[pid].somaValor += (Number(it.quantidade)||0)*(Number(it.valorUnitario)||0);
+      });
+    });
 
     const novoEstoque = insumosVK.map(i=>{
-      const quantidade = Number(i.quantidadeAtual ?? i.estoqueAtual ?? i.quantidade ?? i.estoque ?? 0) || 0;
-      const precoMedio = Number(i.precoMedio ?? i.custoMedio ?? i.preco ?? 0) || 0;
+      const quantidade = Number(i.saldoAtual ?? i.quantidadeAtual ?? i.estoqueAtual ?? i.quantidade ?? i.estoque ?? 0) || 0;
+      const acc = precoMedioPorInsumo[i.id];
+      const precoMedio = (acc && acc.somaQtd>0) ? (acc.somaValor/acc.somaQtd) : (Number(i.precoMedio ?? i.custoMedio ?? i.preco ?? 0) || 0);
       return {
         insumoId: i.id,
         nome: i.nome || 'Insumo sem nome',
         unidade: i.unidade || 'un',
-        categoria: i.categoria || '',
+        categoria: i.categoriaPrincipal || i.categoria || '',
         quantidade,
         precoMedio,
         valorTotal: Math.round(quantidade*precoMedio*100)/100,
@@ -2013,29 +2048,47 @@ async function sincronizarEntradasEstoqueVK(){
     const fornecedoresVK = fornecedoresSnap.docs.map(d=>({ id: d.id, ...d.data() }));
     const soDigitos = v => (v||'').toString().replace(/\D/g,'');
 
+    // Diagnóstico — se os nomes continuarem "não identificado", abra o console do navegador (F12 no
+    // computador, ou "Inspecionar" no celular via cabo/desktop mode) e veja essas linhas: elas mostram
+    // a estrutura EXATA que o VK Industrial está mandando, pra descobrir o nome certo dos campos.
+    if(entradas.length){
+      console.log('[Diagnóstico VK] Exemplo de entrada de estoque crua:', entradas[0]);
+      if(entradas[0].itens && entradas[0].itens.length) console.log('[Diagnóstico VK] Exemplo de item dentro da entrada:', entradas[0].itens[0]);
+    }
+    if(insumosVK.length) console.log('[Diagnóstico VK] Exemplo de insumo cru:', insumosVK[0]);
+    if(fornecedoresVK.length) console.log('[Diagnóstico VK] Exemplo de fornecedor cru:', fornecedoresVK[0]);
+
     function resolverFornecedor(fornecedorId){
       const fVK = fornecedoresVK.find(f=>f.id===fornecedorId);
-      if(!fVK) return { nome: '', cnpj: '' };
-      const cnpj = fVK.cnpj || fVK.cnpjCpf || '';
+      if(!fVK) return { nome: '', cnpj: '', naoIdentificado: true };
+      const nomeVK = fVK.nome || fVK.nomeFantasia || fVK.razaoSocial || fVK.nomeEmpresa || fVK.empresa || fVK.descricao || '';
+      const cnpj = fVK.cnpj || fVK.cnpjCpf || fVK.documento || '';
       let fornecedorLocal = cnpj ? state.fornecedores.find(f=>soDigitos(f.cnpjCpf)===soDigitos(cnpj)) : null;
-      if(!fornecedorLocal && fVK.nome){
-        fornecedorLocal = state.fornecedores.find(f=>f.nome.toLowerCase()===fVK.nome.toLowerCase());
+      if(!fornecedorLocal && nomeVK){
+        fornecedorLocal = state.fornecedores.find(f=>f.nome.toLowerCase()===nomeVK.toLowerCase());
       }
+      const naoIdentificado = !nomeVK;
       if(!fornecedorLocal){
-        fornecedorLocal = { id: uid(), nome: fVK.nome || 'Fornecedor VK sem nome', cnpjCpf: cnpj, telefone: fVK.telefone||'', email: fVK.email||'', endereco: fVK.endereco||'', observacao: '' };
+        fornecedorLocal = { id: uid(), nome: nomeVK || 'Fornecedor VK sem nome', cnpjCpf: cnpj, telefone: fVK.telefone||'', email: fVK.email||'', endereco: fVK.endereco||'', observacao: '' };
         state.fornecedores.push(fornecedorLocal);
       }
-      return { nome: fornecedorLocal.nome, cnpj: fornecedorLocal.cnpjCpf };
+      return { nome: fornecedorLocal.nome, cnpj: fornecedorLocal.cnpjCpf, naoIdentificado };
     }
 
+    let itensSemNomeContagem = 0, fornecedoresSemNomeContagem = 0;
+
     function montarEntrada(e){
-      const { nome: fornecedorNome } = resolverFornecedor(e.fornecedorId);
+      const { nome: fornecedorNome, naoIdentificado: fornecedorSemNome } = resolverFornecedor(e.fornecedorId);
+      if(fornecedorSemNome) fornecedoresSemNomeContagem++;
       const itensBrutos = e.itens || [];
       const itens = itensBrutos.map(it=>{
-        const insumo = insumosVK.find(i=>i.id===it.insumoId);
-        const nomeInsumo = it.insumoNome || insumo?.nome || 'Insumo não identificado';
+        // O VK Industrial chama o campo de "produtoId" (não "insumoId") no item da entrada — confirmado
+        // olhando o código-fonte de lá. Mantém insumoId como fallback só por segurança.
+        const insumo = insumosVK.find(i=>i.id===(it.produtoId||it.insumoId));
+        const nomeInsumo = it.insumoNome || it.nome || it.descricao || insumo?.nome || insumo?.nomeInsumo || insumo?.descricao || insumo?.nomeProduto;
+        if(!nomeInsumo) itensSemNomeContagem++;
         return {
-          nome: nomeInsumo, quantidade: Number(it.quantidade)||0, valorUnitario: Number(it.valorUnitario)||0,
+          nome: nomeInsumo || 'Insumo não identificado', quantidade: Number(it.quantidade)||0, valorUnitario: Number(it.valorUnitario)||0,
           valor: Math.round((Number(it.quantidade)||0)*(Number(it.valorUnitario)||0)*100)/100
         };
       });
@@ -2142,6 +2195,8 @@ async function sincronizarEntradasEstoqueVK(){
     if(excluidosAutomaticamente>0) partes.push(`${excluidosAutomaticamente} removida(s) (apagadas no VK)`);
     if(duplicatasEvitadas>0) partes.push(`${duplicatasEvitadas} duplicata(s) evitada(s)`);
     if(divergentes.length>0) partes.push(`${divergentes.length} precisam de conferência`);
+    if(itensSemNomeContagem>0) partes.push(`⚠️ ${itensSemNomeContagem} item(ns) sem nome vindo do VK (veja o console — F12)`);
+    if(fornecedoresSemNomeContagem>0) partes.push(`⚠️ ${fornecedoresSemNomeContagem} fornecedor(es) sem nome vindo do VK`);
     showToast(partes.length ? partes.join(' · ') : `Nenhuma novidade (${entradas.length} no total no VK, ${jaImportados} já importadas)`);
   }catch(e){
     console.error('Erro ao sincronizar entradas de estoque do VK Industrial:', e);
@@ -8383,9 +8438,11 @@ function viewVK(){
     { insumoId: string, quantidade: number, valorUnitario: number }
   ]
 }</pre>
-        <strong style="color:var(--ink);">Coleção "fornecedores"</strong> — precisa ter pelo menos <span class="mono">nome</span> e <span class="mono">cnpj</span> (ou <span class="mono">cnpjCpf</span>) por documento, pra vincular com o cadastro de fornecedores já existente aqui no Livro Caixa.
+        <strong style="color:var(--ink);">Coleção "fornecedores"</strong> — precisa do nome em algum destes campos (usa o primeiro que existir): <span class="mono">nome</span>, <span class="mono">nomeFantasia</span>, <span class="mono">razaoSocial</span>, <span class="mono">nomeEmpresa</span>, <span class="mono">empresa</span> ou <span class="mono">descricao</span>; e o documento em <span class="mono">cnpj</span> ou <span class="mono">cnpjCpf</span> (ou <span class="mono">documento</span>), pra vincular com o cadastro de fornecedores já existente aqui no Livro Caixa.
         <br><br>
-        <strong style="color:var(--ink);">Coleção "insumos"</strong> — precisa ter pelo menos <span class="mono">nome</span> por documento; usada aqui só pra montar a descrição dos itens na observação do lançamento (o valor do estoque em si é lido separadamente, veja abaixo).
+        <strong style="color:var(--ink);">Coleção "insumos"</strong> — nome em <span class="mono">nome</span>, <span class="mono">nomeInsumo</span>, <span class="mono">descricao</span> ou <span class="mono">nomeProduto</span>; usada aqui só pra montar a descrição dos itens na observação do lançamento. O item dentro de "entradas_estoque" também pode já vir com o nome embutido (<span class="mono">insumoNome</span>, <span class="mono">nome</span> ou <span class="mono">descricao</span> dentro do próprio item), o que evita depender do <span class="mono">insumoId</span> bater certinho.
+        <br><br>
+        <strong style="color:var(--danger);">Se algum item ainda aparecer como "não identificado"</strong> mesmo com esses nomes: abra o navegador no computador com a página do Livro Caixa, aperte F12 (ferramentas do desenvolvedor) → aba "Console", sincronize de novo, e vai aparecer o formato exato que o VK Industrial está mandando — aí dá pra ajustar certeiro em vez de ficar tentando adivinhar.
       </div>
     </details>
 
