@@ -2030,18 +2030,23 @@ async function sincronizarEntradasEstoqueVK(){
 
     function montarEntrada(e){
       const { nome: fornecedorNome } = resolverFornecedor(e.fornecedorId);
-      const itens = e.itens || [];
-      const valor = itens.reduce((s,it)=> s + (Number(it.quantidade)||0) * (Number(it.valorUnitario)||0), 0);
-      const itensTexto = itens.map(it=>{
+      const itensBrutos = e.itens || [];
+      const itens = itensBrutos.map(it=>{
         const insumo = insumosVK.find(i=>i.id===it.insumoId);
-        return `${fmtQtdBR(it.quantidade)} ${insumo ? insumo.nome : 'insumo desconhecido'} (${brl(it.valorUnitario)}/un)`;
-      }).join(', ');
+        const nomeInsumo = it.insumoNome || insumo?.nome || 'Insumo não identificado';
+        return {
+          nome: nomeInsumo, quantidade: Number(it.quantidade)||0, valorUnitario: Number(it.valorUnitario)||0,
+          valor: Math.round((Number(it.quantidade)||0)*(Number(it.valorUnitario)||0)*100)/100
+        };
+      });
+      const valor = itens.reduce((s,it)=>s+it.valor, 0);
+      const itensTexto = itens.map(it=>`${fmtQtdBR(it.quantidade)} ${it.nome} (${brl(it.valorUnitario)}/un)`).join(', ');
       const descricao = `Entrada de estoque${e.numeroNF ? ' — NF ' + e.numeroNF : ''}`;
       const observacao = `Fornecedor: ${fornecedorNome || '—'}\nItens: ${itensTexto || '—'}${e.semNF ? '\nSem nota fiscal — regularizar depois' : ''}`;
-      return { descricao, valor, fornecedorNome, observacao };
+      return { descricao, valor, fornecedorNome, observacao, itens, numeroNF: e.numeroNF||null };
     }
 
-    let novos = 0, atualizados = 0, jaImportados = 0, excluidosAutomaticamente = 0, atualizadosAprovacao = 0, excluidosAprovacao = 0;
+    let novos = 0, atualizados = 0, jaImportados = 0, excluidosAutomaticamente = 0, atualizadosAprovacao = 0, excluidosAprovacao = 0, duplicatasEvitadas = 0;
     const divergentes = [];
     const idsAtuais = new Set(entradas.map(e=>e.id));
 
@@ -2075,6 +2080,8 @@ async function sincronizarEntradasEstoqueVK(){
             existente.dataVencimento = e.data || existente.dataVencimento;
             existente.semNF = !!e.semNF;
             existente.descricao = montada.descricao;
+            existente.numeroNF = montada.numeroNF;
+            existente.itens = montada.itens;
             atualizados++;
           } else {
             divergentes.push({ tipo:'editada', entradaId: e.id, lancamentoId: existente.id, valorAntigo: existente.valor, valorNovo: montada.valor, status: existente.status });
@@ -2093,9 +2100,19 @@ async function sincronizarEntradasEstoqueVK(){
           emAprovacao.dataVencimento = e.data || emAprovacao.dataVencimento;
           emAprovacao.semNF = !!e.semNF;
           emAprovacao.descricao = montada.descricao;
+          emAprovacao.itens = montada.itens;
           atualizadosAprovacao++;
         }
         return;
+      }
+
+      // Trava extra: mesmo com um vkEntradaId novo (ex: o VK Industrial reprocessou a mesma NF e
+      // gerou outro documento), se já existe uma entrada IGUAL (mesmo número de NF + fornecedor + valor)
+      // já importada ou aguardando aprovação, não duplica — só ignora e avisa no resumo.
+      if(montada.numeroNF){
+        const duplicataLancamento = state.lancamentos.find(l=>l.origem==='vk-estoque' && l.numeroNF===montada.numeroNF && l.fornecedor===montada.fornecedorNome && Math.abs(l.valor-montada.valor)<0.01);
+        const duplicataAprovacao = state.vkAprovacoes.find(a=>a.tipo==='despesa' && a.numeroNF===montada.numeroNF && a.contraparte===montada.fornecedorNome && Math.abs(a.valor-montada.valor)<0.01);
+        if(duplicataLancamento || duplicataAprovacao){ duplicatasEvitadas++; return; }
       }
 
       state.vkAprovacoes.push({
@@ -2107,6 +2124,8 @@ async function sincronizarEntradasEstoqueVK(){
         dataVencimento: e.data || todayISO(),
         categoria: cfg.categoriaEstoque || 'Insumos',
         semNF: !!e.semNF,
+        numeroNF: montada.numeroNF,
+        itens: montada.itens,
         ehCartao: false, cartaoId: null,
         criadoEm: new Date().toISOString()
       });
@@ -2121,6 +2140,7 @@ async function sincronizarEntradasEstoqueVK(){
     if(novos>0) partes.push(`${novos} entrada(s) aguardando aprovação`);
     if(atualizados>0) partes.push(`${atualizados} corrigida(s)`);
     if(excluidosAutomaticamente>0) partes.push(`${excluidosAutomaticamente} removida(s) (apagadas no VK)`);
+    if(duplicatasEvitadas>0) partes.push(`${duplicatasEvitadas} duplicata(s) evitada(s)`);
     if(divergentes.length>0) partes.push(`${divergentes.length} precisam de conferência`);
     showToast(partes.length ? partes.join(' · ') : `Nenhuma novidade (${entradas.length} no total no VK, ${jaImportados} já importadas)`);
   }catch(e){
@@ -8467,10 +8487,22 @@ function viewVKAprovacoes(){
             <div class="mono" style="font-weight:700;font-size:16px;color:${ehPedido?'var(--success)':'var(--danger)'};">${ehPedido?'+':'-'} ${brl(item.valor)}</div>
           </div>
           ${item.observacao ? `<div class="note" style="margin:12px 0 0;white-space:pre-wrap;">${escapeHTML(item.observacao)}</div>` : ''}
+          ${!ehPedido && item.itens && item.itens.length>1 ? `
+          <div style="margin-top:14px;">
+            <label style="font-size:12.5px;font-weight:600;color:var(--text-soft);">Categoria de cada item (${item.itens.length} itens)</label>
+            ${item.itens.map((it,idx)=>`
+              <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
+                <span style="flex:1;min-width:140px;font-size:12.5px;">${escapeHTML(it.nome)} <span class="mono" style="color:var(--text-soft);">${brl(it.valor)}</span></span>
+                <select class="aprov-item-categoria" data-id="${item.id}" data-idx="${idx}" style="max-width:200px;flex:1;min-width:160px;">${opcoesCategoriaHTML('saida', item.categoriasItens?.[idx] || item.categoria)}</select>
+              </div>
+            `).join('')}
+          </div>
+          ` : `
           <div class="field" style="margin-top:14px;max-width:340px;">
             <label>Categoria</label>
             <select id="aprovCategoria_${item.id}">${opcoesCategoriaHTML(ehPedido?'entrada':'saida', item.categoria)}</select>
           </div>
+          `}
           ${!ehPedido ? `
           <label style="display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;margin-top:12px;">
             <input type="checkbox" class="aprov-cartao-toggle" data-id="${item.id}" style="width:17px;height:17px;" ${item.ehCartao?'checked':''}>
@@ -8646,29 +8678,60 @@ function aprovarItemVK(id){
   } else {
     const ehCartaoEl = document.getElementById('aprovCartaoToggle_'+id) || document.querySelector(`.aprov-cartao-toggle[data-id="${id}"]`);
     const ehCartao = ehCartaoEl ? ehCartaoEl.checked : false;
+    const itensSelects = [...document.querySelectorAll(`.aprov-item-categoria[data-id="${id}"]`)];
+    const temVariosItens = item.itens && item.itens.length>1 && itensSelects.length===item.itens.length;
+
     if(ehCartao){
       const cartaoId = document.getElementById('aprovCartaoSelect_'+id)?.value;
       const cartao = state.cartoes.find(c=>c.id===cartaoId);
       if(!cartao){ showToast('Escolha um cartão pra lançar essa despesa'); return; }
       const dataCompra = item.dataVencimento || todayISO();
       const competencia = competenciaFromDate(cartao, dataCompra);
-      state.comprasCartao.push({
-        id: uid(), cartaoId, grupoId: uid(),
-        descricao: item.descricao, categoria, valor: item.valor,
-        dataCompra, competencia, parcela: 1, totalParcelas: 1
-      });
-      registrarLog('Entrada de estoque VK aprovada como compra no cartão', `"${item.descricao}" — ${brl(item.valor)} — ${cartao.nome}`);
+      if(temVariosItens){
+        const grupoId = uid();
+        item.itens.forEach((it,idx)=>{
+          const catItem = itensSelects.find(s=>parseInt(s.dataset.idx)===idx)?.value || categoria;
+          state.comprasCartao.push({
+            id: uid(), cartaoId, grupoId,
+            descricao: `${it.nome} (${item.descricao})`, categoria: catItem, valor: it.valor,
+            dataCompra, competencia, parcela: 1, totalParcelas: 1
+          });
+        });
+        registrarLog('Entrada de estoque VK aprovada como compra no cartão (por item)', `"${item.descricao}" — ${item.itens.length} item(ns) — ${brl(item.valor)} — ${cartao.nome}`);
+      } else {
+        state.comprasCartao.push({
+          id: uid(), cartaoId, grupoId: uid(),
+          descricao: item.descricao, categoria, valor: item.valor,
+          dataCompra, competencia, parcela: 1, totalParcelas: 1
+        });
+        registrarLog('Entrada de estoque VK aprovada como compra no cartão', `"${item.descricao}" — ${brl(item.valor)} — ${cartao.nome}`);
+      }
     } else {
       if(!cfg.contaIdEstoque){ showToast('Configure a conta bancária de destino do estoque nas configurações da integração'); return; }
-      state.lancamentos.push({
-        id: uid(), tipo:'saida', categoria,
-        descricao: item.descricao, valor: item.valor, fornecedor: item.contraparte,
-        observacao: item.observacao, contaId: cfg.contaIdEstoque, dataVencimento: item.dataVencimento,
-        status: 'pendente', dataPagamento: null,
-        origem: 'vk-estoque', vkEntradaId: item.vkEntradaId, semNF: !!item.semNF,
-        criadoEm: new Date().toISOString()
-      });
-      registrarLog('Entrada de estoque VK aprovada', `"${item.descricao}" — ${brl(item.valor)}`);
+      if(temVariosItens){
+        item.itens.forEach((it,idx)=>{
+          const catItem = itensSelects.find(s=>parseInt(s.dataset.idx)===idx)?.value || categoria;
+          state.lancamentos.push({
+            id: uid(), tipo:'saida', categoria: catItem,
+            descricao: `${it.nome} (${item.descricao})`, valor: it.valor, fornecedor: item.contraparte,
+            observacao: item.observacao, contaId: cfg.contaIdEstoque, dataVencimento: item.dataVencimento,
+            status: 'pendente', dataPagamento: null,
+            origem: 'vk-estoque', vkEntradaId: item.vkEntradaId, semNF: !!item.semNF, numeroNF: item.numeroNF||null,
+            criadoEm: new Date().toISOString()
+          });
+        });
+        registrarLog('Entrada de estoque VK aprovada por item', `"${item.descricao}" — ${item.itens.length} item(ns) categorizados individualmente — ${brl(item.valor)}`);
+      } else {
+        state.lancamentos.push({
+          id: uid(), tipo:'saida', categoria,
+          descricao: item.descricao, valor: item.valor, fornecedor: item.contraparte,
+          observacao: item.observacao, contaId: cfg.contaIdEstoque, dataVencimento: item.dataVencimento,
+          status: 'pendente', dataPagamento: null,
+          origem: 'vk-estoque', vkEntradaId: item.vkEntradaId, semNF: !!item.semNF, numeroNF: item.numeroNF||null,
+          criadoEm: new Date().toISOString()
+        });
+        registrarLog('Entrada de estoque VK aprovada', `"${item.descricao}" — ${brl(item.valor)}`);
+      }
     }
   }
   state.vkAprovacoes = state.vkAprovacoes.filter(a=>a.id!==id);
