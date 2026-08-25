@@ -4402,27 +4402,37 @@ function viewFatura(cartaoId, competencia){
             const itensGrupo = grupos[chave];
             if(itensGrupo.length===1){
               const p = itensGrupo[0];
+              const tituloLinha = p.fornecedor || p.descricao;
               return `
               <div class="ledger-row">
                 <span class="dot saida"></span>
                 <span class="mono" style="font-size:12.5px;color:var(--text-soft)">${fmtDate(p.dataCompra)}</span>
-                <div class="desc-cell"><div>${escapeHTML(p.descricao)}${p.totalParcelas>1?` <span style="color:var(--text-soft);font-size:11.5px;">(${p.parcela}/${p.totalParcelas})</span>`:''}</div></div>
+                <div class="desc-cell">
+                  <div>${escapeHTML(tituloLinha)}${p.totalParcelas>1?` <span style="color:var(--text-soft);font-size:11.5px;">(${p.parcela}/${p.totalParcelas})</span>`:''}</div>
+                  <div class="cat">${p.numeroNF ? `NF ${escapeHTML(p.numeroNF)}` : (p.fornecedor ? escapeHTML(p.descricao) : '')}</div>
+                </div>
                 <span class="col-cat" style="font-size:12px;color:var(--text-soft);">${escapeHTML(p.categoria)}</span>
                 <span class="mono" style="font-weight:600;color:var(--danger);">${brl(p.valor)}</span>
                 <span style="display:flex;gap:4px;">${status==='aberta' ? `<button class="icon-btn" data-action="editar-compra-cartao" data-id="${p.id}" title="Editar essa despesa">✎</button><button class="icon-btn icon-btn-danger" data-action="excluir-compra-cartao" data-id="${p.id}" title="Excluir essa despesa">🗑️</button>` : ''}</span>
               </div>`;
             }
             // Vários itens da mesma nota (categorizados individualmente na aprovação) — mostra uma linha só,
-            // clica pra expandir e ver/editar cada item.
+            // clica pra expandir e ver/editar cada item. Título = fornecedor (mais legível que "Entrada de
+            // estoque"), com o número da NF numa linha embaixo.
             const totalGrupo = itensGrupo.reduce((s,p)=>s+p.valor,0);
-            const descricaoComum = (itensGrupo[0].descricao.match(/\(([^)]+)\)\s*$/) || [,itensGrupo[0].descricao])[1];
+            const fornecedorGrupo = itensGrupo[0].fornecedor || '';
+            const numeroNFGrupo = itensGrupo[0].numeroNF || null;
+            const tituloGrupo = fornecedorGrupo || (itensGrupo[0].descricao.match(/\(([^)]+)\)\s*$/) || [,itensGrupo[0].descricao])[1];
             const categoriasUnicas = [...new Set(itensGrupo.map(p=>p.categoria))];
             return `
             <details class="fatura-grupo-item">
               <summary class="ledger-row" style="cursor:pointer;">
                 <span class="dot saida"></span>
                 <span class="mono" style="font-size:12.5px;color:var(--text-soft)">${fmtDate(itensGrupo[0].dataCompra)}</span>
-                <div class="desc-cell"><div>${escapeHTML(descricaoComum)} <span style="color:var(--text-soft);font-size:11.5px;">(${itensGrupo.length} itens)</span></div></div>
+                <div class="desc-cell">
+                  <div>${escapeHTML(tituloGrupo)} <span style="color:var(--text-soft);font-size:11.5px;">(${itensGrupo.length} itens)</span></div>
+                  <div class="cat">${numeroNFGrupo ? `NF ${escapeHTML(numeroNFGrupo)}` : ''}</div>
+                </div>
                 <span class="col-cat" style="font-size:12px;color:var(--text-soft);">${categoriasUnicas.length===1?escapeHTML(categoriasUnicas[0]):'várias'}</span>
                 <span class="mono" style="font-weight:600;color:var(--danger);">${brl(totalGrupo)}</span>
                 <span></span>
@@ -8795,6 +8805,7 @@ function aprovarItemVK(id){
           state.comprasCartao.push({
             id: uid(), cartaoId, grupoId,
             descricao: `${it.nome} (${item.descricao})`, categoria: catItem, valor: it.valor,
+            fornecedor: item.contraparte||'', numeroNF: item.numeroNF||null,
             dataCompra, competencia, parcela: 1, totalParcelas: 1
           });
         });
@@ -8803,6 +8814,7 @@ function aprovarItemVK(id){
         state.comprasCartao.push({
           id: uid(), cartaoId, grupoId: uid(),
           descricao: item.descricao, categoria, valor: item.valor,
+          fornecedor: item.contraparte||'', numeroNF: item.numeroNF||null,
           dataCompra, competencia, parcela: 1, totalParcelas: 1
         });
         registrarLog('Entrada de estoque VK aprovada como compra no cartão', `"${item.descricao}" — ${brl(item.valor)} — ${cartao.nome}`);
