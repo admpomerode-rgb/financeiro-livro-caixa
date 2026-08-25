@@ -218,6 +218,10 @@
   .custo-produto-item summary{list-style:none;}
   .custo-produto-item summary::-webkit-details-marker{display:none;}
   .panel-details[open] summary::before{content:'▾ ';}
+  .fatura-grupo-item summary{list-style:none;}
+  .fatura-grupo-item summary::-webkit-details-marker{display:none;}
+  .fatura-grupo-item summary .desc-cell > div:first-child::before{content:'▸ ';color:var(--text-soft);}
+  .fatura-grupo-item[open] summary .desc-cell > div:first-child::before{content:'▾ ';}
   .panel-details[open] summary{border-bottom:1px solid var(--line);}
   .alerta-panel{padding:2px;}
   .alerta-linha{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;font-size:13px;flex-wrap:wrap;gap:6px 12px;}
@@ -285,6 +289,7 @@
   }
   .modal-overlay.open{display:flex;}
   .modal{background:var(--white);border-radius:12px;width:100%;max-width:460px;padding:24px;}
+  .modal.modal-wide{max-width:820px;}
   .modal h3{font-size:16px;margin-bottom:18px;}
   .field{margin-bottom:14px;}
   .field label{display:block;font-size:12.5px;color:var(--text-soft);margin-bottom:5px;font-weight:500;}
@@ -4384,17 +4389,56 @@ function viewFatura(cartaoId, competencia){
         <span></span><span>Data</span><span>Descrição</span><span class="col-cat">Categoria</span><span>Valor</span><span></span>
       </div>
       <div class="panel-body">
-        ${parcelas.length? parcelas.map(p=>`
-          <div class="ledger-row">
-            <span class="dot saida"></span>
-            <span class="mono" style="font-size:12.5px;color:var(--text-soft)">${fmtDate(p.dataCompra)}</span>
-            <div class="desc-cell"><div>${escapeHTML(p.descricao)}${p.totalParcelas>1?` <span style="color:var(--text-soft);font-size:11.5px;">(${p.parcela}/${p.totalParcelas})</span>`:''}</div></div>
-            <span class="col-cat" style="font-size:12px;color:var(--text-soft);">${escapeHTML(p.categoria)}</span>
-            <span class="mono" style="font-weight:600;color:var(--danger);">${brl(p.valor)}</span>
-            <span style="display:flex;gap:4px;">${status==='aberta' ? `<button class="icon-btn" data-action="editar-compra-cartao" data-id="${p.id}" title="Editar essa despesa">✎</button><button class="icon-btn icon-btn-danger" data-action="excluir-compra-cartao" data-id="${p.id}" title="Excluir essa despesa">🗑️</button>` : ''}</span>
-          </div>
-        `).join('') : `<div class="empty">Nenhuma compra lançada nesta fatura ainda.</div>`}
-      </div>
+        ${!parcelas.length ? `<div class="empty">Nenhuma compra lançada nesta fatura ainda.</div>` : (()=>{
+          const grupos = {};
+          const ordem = [];
+          parcelas.forEach(p=>{
+            const chave = p.grupoId || p.id;
+            if(!grupos[chave]){ grupos[chave] = []; ordem.push(chave); }
+            grupos[chave].push(p);
+          });
+          if(!ordem.length) return '';
+          return ordem.map(chave=>{
+            const itensGrupo = grupos[chave];
+            if(itensGrupo.length===1){
+              const p = itensGrupo[0];
+              return `
+              <div class="ledger-row">
+                <span class="dot saida"></span>
+                <span class="mono" style="font-size:12.5px;color:var(--text-soft)">${fmtDate(p.dataCompra)}</span>
+                <div class="desc-cell"><div>${escapeHTML(p.descricao)}${p.totalParcelas>1?` <span style="color:var(--text-soft);font-size:11.5px;">(${p.parcela}/${p.totalParcelas})</span>`:''}</div></div>
+                <span class="col-cat" style="font-size:12px;color:var(--text-soft);">${escapeHTML(p.categoria)}</span>
+                <span class="mono" style="font-weight:600;color:var(--danger);">${brl(p.valor)}</span>
+                <span style="display:flex;gap:4px;">${status==='aberta' ? `<button class="icon-btn" data-action="editar-compra-cartao" data-id="${p.id}" title="Editar essa despesa">✎</button><button class="icon-btn icon-btn-danger" data-action="excluir-compra-cartao" data-id="${p.id}" title="Excluir essa despesa">🗑️</button>` : ''}</span>
+              </div>`;
+            }
+            // Vários itens da mesma nota (categorizados individualmente na aprovação) — mostra uma linha só,
+            // clica pra expandir e ver/editar cada item.
+            const totalGrupo = itensGrupo.reduce((s,p)=>s+p.valor,0);
+            const descricaoComum = (itensGrupo[0].descricao.match(/\(([^)]+)\)\s*$/) || [,itensGrupo[0].descricao])[1];
+            const categoriasUnicas = [...new Set(itensGrupo.map(p=>p.categoria))];
+            return `
+            <details class="fatura-grupo-item">
+              <summary class="ledger-row" style="cursor:pointer;">
+                <span class="dot saida"></span>
+                <span class="mono" style="font-size:12.5px;color:var(--text-soft)">${fmtDate(itensGrupo[0].dataCompra)}</span>
+                <div class="desc-cell"><div>${escapeHTML(descricaoComum)} <span style="color:var(--text-soft);font-size:11.5px;">(${itensGrupo.length} itens)</span></div></div>
+                <span class="col-cat" style="font-size:12px;color:var(--text-soft);">${categoriasUnicas.length===1?escapeHTML(categoriasUnicas[0]):'várias'}</span>
+                <span class="mono" style="font-weight:600;color:var(--danger);">${brl(totalGrupo)}</span>
+                <span></span>
+              </summary>
+              <div style="padding:0 0 8px 34px;">
+                ${itensGrupo.map(p=>`
+                  <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
+                    <div class="desc-cell"><div>${escapeHTML(p.descricao.replace(/\s*\([^)]+\)\s*$/,''))}</div><div class="cat">${escapeHTML(p.categoria)}</div></div>
+                    <span class="mono" style="font-size:12.5px;">${brl(p.valor)}</span>
+                    <span style="display:flex;gap:4px;">${status==='aberta' ? `<button class="icon-btn" data-action="editar-compra-cartao" data-id="${p.id}" title="Editar esse item">✎</button><button class="icon-btn icon-btn-danger" data-action="excluir-compra-cartao" data-id="${p.id}" title="Excluir esse item">🗑️</button>` : ''}</span>
+                  </div>
+                `).join('')}
+              </div>
+            </details>`;
+          }).join('');
+        })()}
     </div>
     ${status==='aberta' && total>0 ? (()=>{
       const adiantado = totalAdiantadoCompetencia(cartaoId, compAtual);
@@ -12687,6 +12731,7 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
   const notaEmRevisao = notaPendenteId ? (state.notasPendentes||[]).find(n=>n.id===notaPendenteId) : null;
   const contaInvRVExistente = state.contasInvestimento.find(c=>c.tipo==='renda_variavel');
   const modal = document.getElementById('modalContent');
+  modal.className = 'modal modal-wide';
   modal.innerHTML = `
     <h3>${notaEmRevisao ? 'Revisar nota de corretagem' : 'Importar nota de corretagem'}</h3>
     ${notaEmRevisao ? `
@@ -14436,6 +14481,7 @@ function closeModal(){
   if(typeof pararCameraQRAtiva==='function') pararCameraQRAtiva();
   document.getElementById('modalOverlay').classList.remove('open');
   document.getElementById('modalContent').innerHTML = '';
+  document.getElementById('modalContent').className = 'modal';
 }
 document.getElementById('modalOverlay').addEventListener('click', (e)=>{ if(e.target.id==='modalOverlay') closeModal(); });
 
