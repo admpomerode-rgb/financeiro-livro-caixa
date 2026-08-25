@@ -1397,8 +1397,40 @@ function faturaStatus(cartaoId, competencia){
 function totalCompetencia(cartaoId, competencia){
   return state.comprasCartao.filter(p=>p.cartaoId===cartaoId && p.competencia===competencia).reduce((s,p)=>s+p.valor,0);
 }
-function totalAdiantadoCompetencia(cartaoId, competencia){
-  return state.lancamentos.filter(l=>l.origem==='cartao_adiantamento' && l.cartaoId===cartaoId && l.competencia===competencia).reduce((s,l)=>s+l.valor,0);
+// Acha o lançamento "sombra" (ainda não fechado) que representa o saldo da fatura em aberto —
+// se já foi fechada (registrada em faturasFechadas), esse lançamento não é mais "sombra", é definitivo.
+function lancamentoAbertoFatura(cartaoId, competencia){
+  const jaFechada = state.faturasFechadas.some(f=>f.cartaoId===cartaoId && f.competencia===competencia);
+  if(jaFechada) return null;
+  return state.lancamentos.find(l=>l.origem==='cartao' && l.cartaoId===cartaoId && l.competencia===competencia) || null;
+}
+// Chamado toda vez que uma compra é adicionada/editada/excluída — mantém uma conta a pagar sempre
+// visível e crescendo junto com a fatura, mesmo antes dela ser formalmente "fechada". Sem isso, o
+// valor da fatura em aberto ficava invisível em Contas a Pagar até alguém clicar em "Fechar fatura".
+function sincronizarLancamentoAbertoFatura(cartaoId, competencia){
+  const cartao = state.cartoes.find(c=>c.id===cartaoId);
+  if(!cartao) return;
+  const jaFechada = state.faturasFechadas.some(f=>f.cartaoId===cartaoId && f.competencia===competencia);
+  if(jaFechada) return; // já virou lançamento definitivo, não mexe mais por aqui
+  const total = totalCompetencia(cartaoId, competencia);
+  let lanc = state.lancamentos.find(l=>l.origem==='cartao' && l.cartaoId===cartaoId && l.competencia===competencia);
+  if(total<=0.004){
+    // sem compras nessa competência — remove o lançamento sombra, mas só se nunca recebeu pagamento
+    if(lanc && !(lanc.valorRecebido>0.004)) state.lancamentos = state.lancamentos.filter(l=>l.id!==lanc.id);
+    return;
+  }
+  if(!lanc){
+    state.lancamentos.push({
+      id: uid(), tipo:'saida', categoria:'Cartão de Crédito',
+      descricao: `Fatura ${cartao.nome} — ${competenciaLabel(competencia)}`,
+      valor: total, contaId: state.contas[0] ? state.contas[0].id : null,
+      status:'pendente', valorRecebido: 0,
+      dataVencimento: dataVencimentoFatura(cartao, competencia), dataPagamento: null,
+      origem:'cartao', cartaoId, competencia, criadoEm: new Date().toISOString()
+    });
+  } else {
+    lanc.valor = total;
+  }
 }
 function dividaCartaoAberta(cartaoId){
   const porCompetencia = {};
@@ -4460,17 +4492,19 @@ function viewFatura(cartaoId, competencia){
         })()}
     </div>
     ${status==='aberta' && total>0 ? (()=>{
-      const adiantado = totalAdiantadoCompetencia(cartaoId, compAtual);
-      const saldoRestante = Math.max(0, Math.round((total-adiantado)*100)/100);
+      const lancAberto = lancamentoAbertoFatura(cartaoId, compAtual);
+      const jaPago = lancAberto ? (lancAberto.valorRecebido||0) : 0;
+      const saldoRestante = lancAberto ? valorEmAberto(lancAberto) : total;
       return `
     <div class="panel">
       <div class="panel-body" style="padding:18px 20px;">
-        ${adiantado>0.004 ? `
+        <div class="note" style="margin-top:0;">Essa fatura já aparece em Contas a Pagar como uma conta pendente, crescendo junto com as despesas lançadas — não precisa esperar fechar pra ela ficar visível.</div>
+        ${jaPago>0.004 ? `
           <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;"><span>Total da fatura até agora</span><span class="mono">${brl(total)}</span></div>
-          <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;color:var(--success);"><span>Já pago adiantado</span><span class="mono">${brl(adiantado)}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;color:var(--success);"><span>Já pago</span><span class="mono">${brl(jaPago)}</span></div>
           <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;font-weight:700;border-top:1px solid var(--line);margin:4px 0 12px;"><span>Falta (se fechar agora)</span><span class="mono">${brl(saldoRestante)}</span></div>
         ` : ''}
-        <button class="btn ghost" data-action="adiantar-pagamento-fatura" style="margin-bottom:14px;">💰 Fazer um pagamento parcial agora (antes de fechar)</button>
+        ${lancAberto ? `<button class="btn ghost" data-action="pagar-parcela-fatura" data-id="${lancAberto.id}" style="margin-bottom:14px;">💰 Fazer um pagamento parcial agora (antes de fechar)</button>` : ''}
         <div class="field-row">
           <div class="field" style="max-width:280px;">
             <label>Conta para pagar esta fatura</label>
@@ -8828,6 +8862,7 @@ function aprovarItemVK(id){
         });
         registrarLog('Entrada de estoque VK aprovada como compra no cartão', `"${item.descricao}" — ${brl(item.valor)} — ${cartao.nome}`);
       }
+      sincronizarLancamentoAbertoFatura(cartaoId, competencia);
     } else {
       if(!cfg.contaIdEstoque){ showToast('Configure a conta bancária de destino do estoque nas configurações da integração'); return; }
       if(temVariosItens){
@@ -9040,7 +9075,10 @@ function abrirQuitarModal(id){
 function excluirLancamento(id){
   const l = state.lancamentos.find(x=>x.id===id);
   if(!l) return;
-  const msg = l.origem==='transferencia' ? 'Excluir esta transferência? As duas pontas (saída e entrada) serão removidas.' : 'Excluir este lançamento?';
+  const ehFaturaAbertaSombra = l.origem==='cartao' && !state.faturasFechadas.some(f=>idsLancamentosFatura(f).includes(l.id));
+  const msg = l.origem==='transferencia' ? 'Excluir esta transferência? As duas pontas (saída e entrada) serão removidas.'
+    : ehFaturaAbertaSombra ? 'Esse valor é a soma das despesas da fatura ainda aberta — excluir aqui não apaga as despesas, e ele volta a aparecer sozinho na próxima vez que alguma delas mudar. Pra remover de verdade, exclua as despesas dentro da tela da fatura. Excluir mesmo assim?'
+    : 'Excluir este lançamento?';
   if(!confirm(msg)) return;
   registrarLog('Lançamento excluído', `${l.tipo==='entrada'?'Receita':'Despesa'} "${l.descricao}" — ${brl(l.valor)}`);
   if(l.origem==='transferencia' && l.transferenciaId){
@@ -10726,15 +10764,19 @@ function attachViewHandlers(){
         const escolha = prompt(`"${p.descricao}" é parcelado em ${p.totalParcelas}x (essa é a parcela ${p.parcela}/${p.totalParcelas}, ${brl(p.valor)}).\n\nDigite:\n1 — excluir só essa parcela (${brl(p.valor)})\n2 — excluir a compra inteira, todas as ${p.totalParcelas} parcelas (${brl(totalGrupo)})\n\nOu cancele pra não fazer nada.`);
         if(escolha==='1'){
           state.comprasCartao = state.comprasCartao.filter(x=>x.id!==p.id);
+          sincronizarLancamentoAbertoFatura(p.cartaoId, p.competencia);
           persist(); render(); showToast('Parcela removida');
         } else if(escolha==='2'){
+          const competenciasAfetadas = [...new Set(parcelasGrupo.map(x=>x.competencia))];
           state.comprasCartao = state.comprasCartao.filter(x=>x.grupoId!==p.grupoId);
+          competenciasAfetadas.forEach(comp=>sincronizarLancamentoAbertoFatura(p.cartaoId, comp));
           persist(); render(); showToast(`Compra removida (todas as ${p.totalParcelas} parcelas)`);
         }
         return;
       }
       if(!confirm(`Excluir "${p.descricao}" (${brl(p.valor)}) dessa fatura?`)) return;
       state.comprasCartao = state.comprasCartao.filter(x=>x.id!==p.id);
+      sincronizarLancamentoAbertoFatura(p.cartaoId, p.competencia);
       persist(); render();
       showToast('Despesa removida da fatura');
     });
@@ -10758,37 +10800,46 @@ function attachViewHandlers(){
     faturaParcelasSaldoSel.addEventListener('change', atualizarNotaParcelas);
     atualizarNotaParcelas();
   }
-  document.querySelectorAll('[data-action="adiantar-pagamento-fatura"]').forEach(btn=>{
-    btn.addEventListener('click', ()=> openAdiantamentoFaturaModal(faturaCartaoId, faturaCompetenciaAtual));
-  });
   const btnFecharFatura = document.getElementById('btnFecharFatura');
   if(btnFecharFatura) btnFecharFatura.addEventListener('click', ()=>{
     const cartao = state.cartoes.find(c=>c.id===faturaCartaoId);
     const comp = faturaCompetenciaAtual;
     const total = totalCompetencia(cartao.id, comp);
-    const jaAdiantado = totalAdiantadoCompetencia(cartao.id, comp);
+    const lancAberto = lancamentoAbertoFatura(cartao.id, comp);
+    const jaPago = lancAberto ? (lancAberto.valorRecebido||0) : 0;
     const contaId = document.getElementById('faturaContaPagamento').value;
     const parcelasSaldo = parseInt(document.getElementById('faturaParcelasSaldo')?.value || '1');
     const msgConfirm = (parcelasSaldo>1
       ? `Fechar a fatura de ${competenciaLabel(comp)} (${brl(total)}) e lançar como conta a pagar, parcelada em ${parcelasSaldo}x?`
       : `Fechar a fatura de ${competenciaLabel(comp)} (${brl(total)}) e lançar como conta a pagar?`)
-      + (jaAdiantado>0.004 ? `\n\n${brl(jaAdiantado)} já foi pago adiantado e vai ser descontado.` : '');
+      + (jaPago>0.004 ? `\n\n${brl(jaPago)} já foi pago e vai ser descontado.` : '');
     if(!confirm(msgConfirm)) return;
+
+    if(parcelasSaldo===1 && lancAberto){
+      // Já existe o lançamento (crescia sozinho em Contas a Pagar desde a 1ª compra) — só oficializa,
+      // sem criar um novo do zero. O que já foi pago (valorRecebido/historicoRecebimentos) permanece intacto.
+      lancAberto.contaId = contaId;
+      lancAberto.descricao = `Fatura ${cartao.nome} — ${competenciaLabel(comp)}`;
+      state.faturasFechadas.push({ cartaoId: cartao.id, competencia: comp, lancamentoIds:[lancAberto.id], lancamentoId: lancAberto.id });
+      persist(); render();
+      showToast('Fatura fechada e lançada em Contas a Pagar');
+      return;
+    }
+
+    // Parcelamento em Nx (ou não havia lançamento ainda) — monta do zero, distribuindo o que já foi pago
+    // entre as parcelas na ordem.
+    if(lancAberto) state.lancamentos = state.lancamentos.filter(l=>l.id!==lancAberto.id);
     const vencBase = dataVencimentoFatura(cartao, comp);
     const valorParcela = Math.round((total/parcelasSaldo)*100)/100;
     const lancamentoIds = [];
-    let adiantadoRestante = jaAdiantado;
+    let restanteCoberto = jaPago;
     for(let i=1;i<=parcelasSaldo;i++){
       const lancId = uid();
       const [vy,vm,vd] = vencBase.split('-').map(Number);
       const dtVenc = new Date(vy, vm-1+(i-1), vd);
       const valorEstaParcela = i===parcelasSaldo ? Math.round((total - valorParcela*(parcelasSaldo-1))*100)/100 : valorParcela;
-      const coberto = Math.min(adiantadoRestante, valorEstaParcela);
-      adiantadoRestante = Math.round((adiantadoRestante-coberto)*100)/100;
-      // Importante: NÃO marca como "pago" mesmo se totalmente coberto pelo adiantamento — o dinheiro já saiu
-      // de verdade através do(s) lançamento(s) de "Pagamento parcial" (origem cartao_adiantamento), que já
-      // contam como despesa realizada na data certa. Marcar essa parcela como paga de novo contaria o
-      // mesmo dinheiro duas vezes no DRE/relatórios. valorRecebido só serve pra mostrar "falta R$0" aqui.
+      const coberto = Math.min(restanteCoberto, valorEstaParcela);
+      restanteCoberto = Math.round((restanteCoberto-coberto)*100)/100;
       state.lancamentos.push({
         id: lancId, tipo:'saida', categoria:'Cartão de Crédito',
         descricao: parcelasSaldo>1 ? `Fatura ${cartao.nome} — ${competenciaLabel(comp)} (${i}/${parcelasSaldo})` : `Fatura ${cartao.nome} — ${competenciaLabel(comp)}`,
@@ -11195,6 +11246,8 @@ function attachViewHandlers(){
 /* ---------------- Modal de lançamento ---------------- */
 function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
   const isEdit = !!existing;
+  const ehFaturaAbertaSombra = existing?.origem==='cartao' && !state.faturasFechadas.some(f=>idsLancamentosFatura(f).includes(existing.id));
+  const valorTravado = existing?.origem==='vk' || ehFaturaAbertaSombra;
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
     <div style="height:5px;margin:-4px -4px 14px;border-radius:10px 10px 0 0;background:${tipo==='saida'?'var(--danger)':'var(--success)'};"></div>
@@ -11209,12 +11262,15 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
         <select id="fCategoria">${opcoesCategoriaHTML(tipo, existing?.categoria)}</select>
       </div>
       <div class="field">
-        <label>Valor (R$)${existing?.origem==='vk' ? ' 🔒' : ''}</label>
-        <input type="text" inputmode="decimal" id="fValor" value="${existing ? existing.valor : ''}" placeholder="0,00" ${existing?.origem==='vk' ? 'readonly style="background:var(--bone);color:var(--text-soft);cursor:not-allowed;"' : ''}>
+        <label>Valor (R$)${valorTravado ? ' 🔒' : ''}</label>
+        <input type="text" inputmode="decimal" id="fValor" value="${existing ? existing.valor : ''}" placeholder="0,00" ${valorTravado ? 'readonly style="background:var(--bone);color:var(--text-soft);cursor:not-allowed;"' : ''}>
       </div>
     </div>
     ${existing?.origem==='vk' ? `
     <div class="note" style="margin-top:0;">🔒 Esse pedido veio do VK Industrial — o valor não pode ser editado aqui, pra não ficar diferente do que está lá. Pra corrigir o valor, altere o pedido no VK Industrial; a próxima sincronização atualiza aqui sozinha (se o pedido ainda estiver pendente).</div>
+    ` : ''}
+    ${ehFaturaAbertaSombra ? `
+    <div class="note" style="margin-top:0;">🔒 Esse valor é a soma das despesas lançadas na fatura ainda aberta — some sozinho conforme você lança mais despesas no cartão. Edite/exclua as despesas dentro da tela da fatura em vez de mudar aqui.</div>
     ` : ''}
     ${existing?.descontoConcedido>0.004 ? `
     <div class="note" style="margin-top:0;border-color:var(--warn);">🏷️ Esse pedido teve <strong>${brl(existing.descontoConcedido)}</strong> de desconto concedido no VK Industrial — valor bruto original: ${brl(existing.valor+existing.descontoConcedido)}. O valor acima já é o líquido (o que realmente entra). O desconto aparece separado no DRE.</div>
@@ -11588,7 +11644,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
   document.getElementById('btnSalvarLancamento').addEventListener('click', ()=>{
     const categoria = document.getElementById('fCategoria').value;
     const descricao = document.getElementById('fDescricao').value.trim() || categoria;
-    const valor = existing?.origem==='vk' ? existing.valor : numBR(document.getElementById('fValor').value);
+    const valor = valorTravado ? existing.valor : numBR(document.getElementById('fValor').value);
     if(!valor || isNaN(valor) || valor<=0){ showToast('Preencha um valor válido'); return; }
 
     if(formaPagtoAtual==='cartao'){
@@ -12469,43 +12525,6 @@ function openEscolherCartaoModal(){
   });
 }
 
-function openAdiantamentoFaturaModal(cartaoId, competencia){
-  const cartao = state.cartoes.find(c=>c.id===cartaoId);
-  const total = totalCompetencia(cartaoId, competencia);
-  const jaAdiantado = totalAdiantadoCompetencia(cartaoId, competencia);
-  const restante = Math.max(0, Math.round((total-jaAdiantado)*100)/100);
-  const modal = document.getElementById('modalContent');
-  modal.innerHTML = `
-    <h3>Pagamento parcial — ${escapeHTML(cartao.nome)} (${competenciaLabel(competencia)})</h3>
-    <div class="note" style="margin-top:0;">Fatura ainda em aberto (${brl(total)} até agora) — esse pagamento sai da conta agora e é descontado quando você fechar a fatura. Falta pagar, considerando o que já foi lançado: <strong>${brl(restante)}</strong>.</div>
-    <div class="field"><label>Valor a pagar agora (R$)</label><input type="text" inputmode="decimal" id="adValor" value="${restante>0?restante:''}"></div>
-    <div class="field-row">
-      <div class="field"><label>Data</label><input type="date" id="adData" value="${todayISO()}"></div>
-      <div class="field"><label>Conta</label><select id="adConta">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select></div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
-      <button class="btn" id="btnConfirmarAdiantamento">Confirmar pagamento</button>
-    </div>
-  `;
-  document.getElementById('modalOverlay').classList.add('open');
-  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  document.getElementById('btnConfirmarAdiantamento').addEventListener('click', ()=>{
-    const valor = numBR(document.getElementById('adValor').value);
-    const data = document.getElementById('adData').value || todayISO();
-    const contaId = document.getElementById('adConta').value;
-    if(isNaN(valor) || valor<=0){ showToast('Informe um valor válido'); return; }
-    state.lancamentos.push({
-      id: uid(), tipo:'saida', categoria:'Cartão de Crédito',
-      descricao: `Pagamento parcial — Fatura ${cartao.nome} (${competenciaLabel(competencia)})`,
-      valor, contaId, status:'pago', dataVencimento: data, dataPagamento: data,
-      origem:'cartao_adiantamento', cartaoId, competencia, criadoEm: new Date().toISOString()
-    });
-    persist(); closeModal(); render();
-    showToast('Pagamento registrado — será descontado quando a fatura fechar');
-  });
-}
-
 function openEditarCompraCartaoModal(compraId){
   const p = state.comprasCartao.find(x=>x.id===compraId);
   if(!p) return;
@@ -12544,7 +12563,12 @@ function openEditarCompraCartaoModal(compraId){
     const data = document.getElementById('ecData').value;
     const categoria = document.getElementById('ecCategoria').value;
     if(!descricao || isNaN(valor) || valor<=0 || !data){ showToast('Preencha descrição, valor e data'); return; }
-    p.descricao = descricao; p.valor = valor; p.dataCompra = data; p.categoria = categoria;
+    const cartao = state.cartoes.find(c=>c.id===p.cartaoId);
+    const competenciaAntiga = p.competencia;
+    const novaCompetencia = competenciaFromDate(cartao, data);
+    p.descricao = descricao; p.valor = valor; p.dataCompra = data; p.categoria = categoria; p.competencia = novaCompetencia;
+    sincronizarLancamentoAbertoFatura(p.cartaoId, competenciaAntiga);
+    if(novaCompetencia!==competenciaAntiga) sincronizarLancamentoAbertoFatura(p.cartaoId, novaCompetencia);
     persist(); closeModal(); render();
     showToast('Despesa atualizada');
   });
@@ -12607,14 +12631,17 @@ function openCompraCartaoModal(cartaoId){
     const grupoId = uid();
     const valorParcela = Math.round((valorTotal/parcelas)*100)/100;
     let compAtual = faturaEscolhida || competenciaFromDate(cartao, data);
+    const competenciasAfetadas = new Set();
     for(let i=1;i<=parcelas;i++){
       state.comprasCartao.push({
         id: uid(), cartaoId, grupoId, descricao, categoria,
         valor: i===parcelas ? Math.round((valorTotal - valorParcela*(parcelas-1))*100)/100 : valorParcela,
         dataCompra: data, competencia: compAtual, parcela: i, totalParcelas: parcelas
       });
+      competenciasAfetadas.add(compAtual);
       compAtual = addMonthsComp(compAtual, 1);
     }
+    competenciasAfetadas.forEach(comp=>sincronizarLancamentoAbertoFatura(cartaoId, comp));
     persist(); closeModal(); render();
     showToast(parcelas>1 ? `Compra lançada em ${parcelas}x` : 'Compra lançada');
   });
