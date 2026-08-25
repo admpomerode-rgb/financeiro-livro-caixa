@@ -2150,7 +2150,7 @@ async function sincronizarEntradasEstoqueVK(){
 
       if(emAprovacao){
         jaImportados++;
-        const mudouAprov = emAprovacao.valor!==montada.valor || emAprovacao.contraparte!==montada.fornecedorNome || emAprovacao.dataVencimento!==(e.data||emAprovacao.dataVencimento) || emAprovacao.observacao!==montada.observacao || emAprovacao.semNF!==!!e.semNF;
+        const mudouAprov = emAprovacao.valor!==montada.valor || emAprovacao.contraparte!==montada.fornecedorNome || emAprovacao.dataVencimento!==(e.data||emAprovacao.dataVencimento) || emAprovacao.observacao!==montada.observacao || emAprovacao.semNF!==!!e.semNF || (emAprovacao.numeroNF||null)!==(montada.numeroNF||null) || !emAprovacao.itens || emAprovacao.itens.length!==montada.itens.length;
         if(mudouAprov){
           emAprovacao.valor = montada.valor;
           emAprovacao.contraparte = montada.fornecedorNome;
@@ -2159,6 +2159,7 @@ async function sincronizarEntradasEstoqueVK(){
           emAprovacao.semNF = !!e.semNF;
           emAprovacao.descricao = montada.descricao;
           emAprovacao.itens = montada.itens;
+          emAprovacao.numeroNF = montada.numeroNF;
           atualizadosAprovacao++;
         }
         return;
