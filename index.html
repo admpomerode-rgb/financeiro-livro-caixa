@@ -851,6 +851,13 @@ function aplicarMigracoes(s){
   const idPadrao = s.contas[0].id;
   (s.lancamentos||[]).forEach(l=>{ if(!l.contaId) l.contaId = idPadrao; });
   if(!s.cartoes) s.cartoes = [];
+  s.cartoes.forEach(c=>{
+    if(c.limitesCategorias===undefined) c.limitesCategorias = [];
+    if(c.validade===undefined) c.validade = null;
+    if(c.anuidadeValor===undefined) c.anuidadeValor = 0;
+    if(c.anuidadeMes===undefined) c.anuidadeMes = null;
+    if(c.anuidadeLancadaAno===undefined) c.anuidadeLancadaAno = {};
+  });
   if(!s.comprasCartao) s.comprasCartao = [];
   if(!s.faturasFechadas) s.faturasFechadas = [];
   if(!s.contasInvestimento) s.contasInvestimento = [];
@@ -1444,6 +1451,17 @@ function dividaCartaoAberta(cartaoId){
   return total;
 }
 function limiteDisponivel(cartao){ return (cartao.limite||0) - dividaCartaoAberta(cartao.id); }
+function checarLimiteCategoria(cartaoId, competencia, categoria){
+  const cartao = state.cartoes.find(c=>c.id===cartaoId);
+  if(!cartao || !cartao.limitesCategorias) return null;
+  const lc = cartao.limitesCategorias.find(x=>x.categoria===categoria);
+  if(!lc || !(lc.limite>0)) return null;
+  const totalCategoria = state.comprasCartao.filter(p=>p.cartaoId===cartaoId && p.competencia===competencia && p.categoria===categoria).reduce((s,p)=>s+p.valor,0);
+  if(totalCategoria > lc.limite){
+    return `⚠️ "${categoria}" já passou do limite mensal que você definiu pra esse cartão (${brl(totalCategoria)} de ${brl(lc.limite)}).`;
+  }
+  return null;
+}
 function competenciasDoCartao(cartaoId){
   const set = new Set(state.comprasCartao.filter(p=>p.cartaoId===cartaoId).map(p=>p.competencia));
   set.add(competenciaAtual(state.cartoes.find(c=>c.id===cartaoId)));
@@ -2560,13 +2578,67 @@ function alertasInteligentesHTML(){
       alertas.push({ cat, media, projecao, variacao: Math.round((projecao/media-1)*100) });
     }
   });
-  if(!alertas.length) return '';
+  const alertasCartao = [];
+  (state.cartoes||[]).forEach(cartao=>{
+    // Limite de crédito baixo
+    const disponivel = limiteDisponivel(cartao);
+    if(cartao.limite>0){
+      const pctUsado = ((cartao.limite - disponivel) / cartao.limite) * 100;
+      if(pctUsado >= 85){
+        alertasCartao.push({ tipo:'limite', texto: `💳 <strong>${escapeHTML(cartao.nome)}</strong> já usou ${pctUsado.toFixed(0)}% do limite — disponível: ${brl(disponivel)}` });
+      }
+    }
+    // Validade do cartão próxima (dentro de 60 dias)
+    if(cartao.validade){
+      const [vy,vm] = cartao.validade.split('-').map(Number);
+      const dataValidade = new Date(vy, vm, 0);
+      const diasParaVencer = Math.round((dataValidade - hoje) / 86400000);
+      if(diasParaVencer>=0 && diasParaVencer<=60){
+        alertasCartao.push({ tipo:'validade', texto: `💳 <strong>${escapeHTML(cartao.nome)}</strong> vence em ${diasParaVencer} dia(s) (${competenciaLabel(cartao.validade)}) — hora de pedir a renovação` });
+      }
+    }
+    // Anuidade se aproximando (mesmo mês, ainda não lançada esse ano)
+    if(cartao.anuidadeValor>0 && cartao.anuidadeMes){
+      const anoAtual = hoje.getFullYear();
+      const jaLancada = (cartao.anuidadeLancadaAno||{})[anoAtual];
+      if(!jaLancada && (hoje.getMonth()+1)===cartao.anuidadeMes){
+        alertasCartao.push({ tipo:'anuidade', texto: `💳 Anuidade de <strong>${escapeHTML(cartao.nome)}</strong> (${brl(cartao.anuidadeValor)}) cai esse mês` });
+      }
+    }
+    // Fatura fechada com vencimento próximo (7 dias) e ainda não totalmente paga
+    (state.faturasFechadas||[]).filter(f=>f.cartaoId===cartao.id).forEach(f=>{
+      if(faturaStatus(cartao.id, f.competencia)!=='fechada') return;
+      const venc = dataVencimentoFatura(cartao, f.competencia);
+      const diasVenc = Math.round((new Date(venc) - hoje) / 86400000);
+      if(diasVenc>=0 && diasVenc<=7){
+        alertasCartao.push({ tipo:'vencimento', texto: `💳 Fatura de <strong>${escapeHTML(cartao.nome)}</strong> (${competenciaLabel(f.competencia)}) vence em ${diasVenc} dia(s) — ${brl(totalCompetencia(cartao.id, f.competencia))}` });
+      }
+    });
+    // Fatura em aberto muito acima da média das últimas 3 faturas fechadas desse cartão
+    const compAberta = competenciaAtual(cartao);
+    const totalAberto = totalCompetencia(cartao.id, compAberta);
+    if(totalAberto>0){
+      const fechadasAnteriores = (state.faturasFechadas||[]).filter(f=>f.cartaoId===cartao.id && f.competencia!==compAberta).map(f=>totalCompetencia(cartao.id, f.competencia)).filter(v=>v>0).slice(-3);
+      if(fechadasAnteriores.length>=2){
+        const media = fechadasAnteriores.reduce((s,v)=>s+v,0)/fechadasAnteriores.length;
+        if(totalAberto > media*1.3){
+          alertasCartao.push({ tipo:'anormal', texto: `💳 Fatura de <strong>${escapeHTML(cartao.nome)}</strong> em aberto já está ${Math.round((totalAberto/media-1)*100)}% acima da média (${brl(totalAberto)} vs méd. ${brl(media)})` });
+        }
+      }
+    }
+  });
+  if(!alertas.length && !alertasCartao.length) return '';
   return `
     <div class="panel alerta-panel">
       ${alertas.map(a=>`
         <div class="alerta-linha">
           <span>📈 Gasto com <strong>${escapeHTML(a.cat)}</strong> projetado ${a.variacao}% acima da média dos últimos meses</span>
           <span class="mono">${vm(brl(a.projecao)+' (méd. '+brl(a.media)+')')}</span>
+        </div>
+      `).join('')}
+      ${alertasCartao.map(a=>`
+        <div class="alerta-linha">
+          <span>${a.texto}</span>
         </div>
       `).join('')}
     </div>
@@ -4393,7 +4465,54 @@ function viewCartoes(){
       `;}).join('')}
       <div class="add-conta-card" id="btnNovoCartao">+ Adicionar cartão</div>
     </div>
-    ${!state.cartoes.length ? '' : `<div class="note" style="margin-top:0;">A fatura fecha no dia de fechamento configurado em cada cartão e vira uma conta a pagar quando você clicar em "Fechar fatura" dentro da tela de fatura do cartão.</div>`}
+    ${!state.cartoes.length ? '' : `<div class="note" style="margin-top:0;">O valor da fatura já aparece em Contas a Pagar assim que a primeira despesa é lançada, crescendo junto com o mês — "Fechar fatura" só oficializa o valor final e define o vencimento certo.</div>`}
+  `;
+}
+
+function historicoCartaoHTML(cartaoId, compAtual){
+  const cartao = state.cartoes.find(c=>c.id===cartaoId);
+  if(!cartao) return '';
+  // Comparativo — últimas 6 competências com movimento (incluindo a atual em aberto)
+  const todasComps = competenciasDoCartao(cartaoId).filter(c=>c<=compAtual).slice(-6);
+  const totais = todasComps.map(c=>({ comp:c, total: totalCompetencia(cartaoId,c) }));
+  const maxTotal = Math.max(1, ...totais.map(t=>t.total));
+  const comparativoHTML = totais.length ? `
+    <div style="display:flex;align-items:flex-end;gap:10px;height:110px;padding:8px 4px 0;">
+      ${totais.map(t=>`
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;">
+          <span class="mono" style="font-size:10px;color:var(--text-soft);margin-bottom:4px;">${t.total>0?brl(t.total).replace('R$ ',''):''}</span>
+          <div style="width:100%;max-width:36px;background:${t.comp===compAtual?'var(--blue-accent)':'var(--bone)'};border:1px solid var(--line);border-radius:4px 4px 0 0;height:${Math.max(3,Math.round(t.total/maxTotal*80))}px;"></div>
+          <span style="font-size:10px;color:var(--text-soft);margin-top:4px;white-space:nowrap;">${competenciaLabel(t.comp).split('/')[0].slice(0,3)}</span>
+        </div>
+      `).join('')}
+    </div>
+  ` : `<div class="empty">Sem histórico suficiente ainda.</div>`;
+
+  // Ranking de categoria — só da competência que está sendo visualizada
+  const comprasComp = state.comprasCartao.filter(p=>p.cartaoId===cartaoId && p.competencia===compAtual);
+  const totalComp = comprasComp.reduce((s,p)=>s+p.valor,0);
+  const porCategoria = {};
+  comprasComp.forEach(p=>{ porCategoria[p.categoria] = (porCategoria[p.categoria]||0)+p.valor; });
+  const ranking = Object.entries(porCategoria).sort((a,b)=>b[1]-a[1]);
+  const maxCat = ranking.length ? ranking[0][1] : 1;
+  const rankingHTML = ranking.length ? ranking.map(([cat,v])=>`
+    <div style="margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;"><span>${escapeHTML(cat)}</span><span class="mono">${brl(v)} (${totalComp>0?Math.round(v/totalComp*100):0}%)</span></div>
+      <div style="background:var(--bone);border-radius:5px;height:6px;overflow:hidden;"><div style="width:${Math.round(v/maxCat*100)}%;height:100%;background:var(--danger);"></div></div>
+    </div>
+  `).join('') : `<div class="empty">Nenhuma despesa nessa competência ainda.</div>`;
+
+  return `
+    <div class="cards" style="grid-template-columns:1fr 1fr;align-items:start;">
+      <div>
+        <h3 style="font-size:12.5px;font-weight:700;margin-bottom:6px;color:var(--text-soft);">Últimos meses</h3>
+        ${comparativoHTML}
+      </div>
+      <div>
+        <h3 style="font-size:12.5px;font-weight:700;margin-bottom:6px;color:var(--text-soft);">Por categoria — ${competenciaLabel(compAtual)}</h3>
+        ${rankingHTML}
+      </div>
+    </div>
   `;
 }
 
@@ -4416,6 +4535,10 @@ function viewFatura(cartaoId, competencia){
         <p>Vencimento previsto: ${fmtDate(vencimento)}</p>
       </div>
     </div>
+    <details class="panel-details" style="margin-bottom:16px;">
+      <summary>📊 Comparativo e categorias desse cartão</summary>
+      <div class="panel-body">${historicoCartaoHTML(cartaoId, compAtual)}</div>
+    </details>
     <div class="panel">
       <div class="filter-bar">
         <div class="fatura-select-wrap">
@@ -4449,7 +4572,7 @@ function viewFatura(cartaoId, competencia){
                 <span class="dot saida"></span>
                 <span class="mono" style="font-size:12.5px;color:var(--text-soft)">${fmtDate(p.dataCompra)}</span>
                 <div class="desc-cell">
-                  <div>${escapeHTML(tituloLinha)}${p.totalParcelas>1?` <span style="color:var(--text-soft);font-size:11.5px;">(${p.parcela}/${p.totalParcelas})</span>`:''}</div>
+                  <div>${escapeHTML(tituloLinha)}${p.totalParcelas>1?` <span style="color:var(--text-soft);font-size:11.5px;">(${p.parcela}/${p.totalParcelas})</span>`:''}${p.comprovanteFoto ? ` <span data-action="ver-comprovante-cartao" data-id="${p.id}" style="cursor:pointer;font-size:11px;" title="Ver comprovante">📎</span>` : ''}</div>
                   <div class="cat">${p.numeroNF ? `NF ${escapeHTML(p.numeroNF)}` : (p.fornecedor ? escapeHTML(p.descricao) : '')}</div>
                 </div>
                 <span class="col-cat" style="font-size:12px;color:var(--text-soft);">${escapeHTML(p.categoria)}</span>
@@ -4481,7 +4604,7 @@ function viewFatura(cartaoId, competencia){
               <div style="padding:0 0 8px 34px;">
                 ${itensGrupo.map(p=>`
                   <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
-                    <div class="desc-cell"><div>${escapeHTML(p.descricao.replace(/\s*\([^)]+\)\s*$/,''))}</div><div class="cat">${escapeHTML(p.categoria)}</div></div>
+                    <div class="desc-cell"><div>${escapeHTML(p.descricao.replace(/\s*\([^)]+\)\s*$/,''))}${p.comprovanteFoto ? ` <span data-action="ver-comprovante-cartao" data-id="${p.id}" style="cursor:pointer;font-size:10.5px;" title="Ver comprovante">📎</span>` : ''}</div><div class="cat">${escapeHTML(p.categoria)}</div></div>
                     <span class="mono" style="font-size:12.5px;">${brl(p.valor)}</span>
                     <span style="display:flex;gap:4px;">${status==='aberta' ? `<button class="icon-btn" data-action="editar-compra-cartao" data-id="${p.id}" title="Editar esse item">✎</button><button class="icon-btn icon-btn-danger" data-action="excluir-compra-cartao" data-id="${p.id}" title="Excluir esse item">🗑️</button>` : ''}</span>
                   </div>
@@ -10754,6 +10877,17 @@ function attachViewHandlers(){
   document.querySelectorAll('[data-action="editar-compra-cartao"]').forEach(btn=>{
     btn.addEventListener('click', ()=> openEditarCompraCartaoModal(btn.dataset.id));
   });
+  document.querySelectorAll('[data-action="ver-comprovante-cartao"]').forEach(el=>{
+    el.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const p = state.comprasCartao.find(x=>x.id===el.dataset.id);
+      if(!p || !p.comprovanteFoto) return;
+      const modal = document.getElementById('modalContent');
+      modal.innerHTML = `<h3>Comprovante</h3><img src="${p.comprovanteFoto}" style="width:100%;border-radius:8px;margin-top:10px;"><div class="modal-actions"><button class="btn ghost" id="btnCancelarModal">Fechar</button></div>`;
+      document.getElementById('modalOverlay').classList.add('open');
+      document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+    });
+  });
   document.querySelectorAll('[data-action="excluir-compra-cartao"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const p = state.comprasCartao.find(x=>x.id===btn.dataset.id);
@@ -11916,6 +12050,31 @@ function gerarLancamentosRecorrentes(){
   if(gerouAlgum) persist();
 }
 
+function processarAnuidadesCartao(){
+  if(!state.cartoes || !state.cartoes.length) return;
+  const hoje = new Date();
+  const anoAtual = hoje.getFullYear();
+  const mesAtual = hoje.getMonth()+1;
+  let gerouAlgum = false;
+  state.cartoes.forEach(cartao=>{
+    if(!(cartao.anuidadeValor>0) || !cartao.anuidadeMes) return;
+    if(mesAtual !== cartao.anuidadeMes) return;
+    if(!cartao.anuidadeLancadaAno) cartao.anuidadeLancadaAno = {};
+    if(cartao.anuidadeLancadaAno[anoAtual]) return;
+    const ultimoDiaMes = new Date(anoAtual, mesAtual, 0).getDate();
+    const dataVenc = `${anoAtual}-${String(mesAtual).padStart(2,'0')}-${String(Math.min(cartao.diaVencimento||10, ultimoDiaMes)).padStart(2,'0')}`;
+    state.lancamentos.push({
+      id: uid(), tipo:'saida', categoria:'Cartão de Crédito', descricao:`Anuidade — ${cartao.nome}`,
+      valor: cartao.anuidadeValor, contaId: state.contas[0] ? state.contas[0].id : null, status:'pendente',
+      dataVencimento: dataVenc, dataPagamento: null,
+      origem: 'anuidade_cartao', cartaoId: cartao.id, criadoEm: new Date().toISOString()
+    });
+    cartao.anuidadeLancadaAno[anoAtual] = true;
+    gerouAlgum = true;
+  });
+  if(gerouAlgum) persist();
+}
+
 function viewRecorrencias(){
   const lista = [...(state.recorrencias||[])].sort((a,b)=>a.descricao.localeCompare(b.descricao));
   return `
@@ -12473,11 +12632,40 @@ function openCartaoModal(existing){
         <input type="number" min="1" max="31" id="ccVencimento" value="${existing ? existing.diaVencimento : '5'}">
       </div>
     </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Validade do cartão (opcional)</label>
+        <input type="month" id="ccValidade" value="${existing?.validade||''}">
+      </div>
+      <div class="field">
+        <label>Anuidade (R$, opcional)</label>
+        <input type="text" inputmode="decimal" id="ccAnuidade" value="${existing?.anuidadeValor||''}" placeholder="0,00">
+      </div>
+    </div>
+    <div class="field" id="ccAnuidadeMesWrap" style="display:${existing?.anuidadeValor?'block':'none'};">
+      <label>Mês em que a anuidade é cobrada</label>
+      <select id="ccAnuidadeMes">
+        ${['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'].map((m,i)=>`<option value="${i+1}" ${existing?.anuidadeMes===(i+1)?'selected':''}>${m}</option>`).join('')}
+      </select>
+    </div>
     <div class="field">
       <label>Cor de identificação</label>
       <div class="color-pick" id="ccCorPick">
         ${CONTA_CORES.map(c=>`<span style="background:${c}" data-cor="${c}" class="${c===corSelecionada?'sel':''}"></span>`).join('')}
       </div>
+    </div>
+    <div style="margin-top:6px;">
+      <label style="font-size:12.5px;font-weight:600;color:var(--text-soft);">Limite mensal por categoria (opcional — avisa se passar, não bloqueia)</label>
+      <div id="ccLimitesCategoriaWrap">
+        ${(existing?.limitesCategorias||[{categoria:'',limite:''}]).map((lc,i)=>`
+          <div class="field-row cc-limite-cat-row" style="align-items:flex-end;">
+            <div class="field"><label>Categoria</label><select class="cc-limite-categoria">${opcoesCategoriaHTML('saida', lc.categoria)}</select></div>
+            <div class="field" style="max-width:130px;"><label>Limite/mês (R$)</label><input type="text" inputmode="decimal" class="cc-limite-valor" value="${lc.limite||''}"></div>
+            <button type="button" class="icon-btn btn-remover-limite-cat" style="margin-bottom:14px;">✕</button>
+          </div>
+        `).join('')}
+      </div>
+      <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" id="btnAddLimiteCategoria">+ Adicionar categoria</span>
     </div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
@@ -12486,6 +12674,24 @@ function openCartaoModal(existing){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('ccAnuidade').addEventListener('input', function(){
+    document.getElementById('ccAnuidadeMesWrap').style.display = numBR(this.value)>0 ? 'block' : 'none';
+  });
+  document.getElementById('btnAddLimiteCategoria').addEventListener('click', ()=>{
+    const wrap = document.getElementById('ccLimitesCategoriaWrap');
+    const div = document.createElement('div');
+    div.className = 'field-row cc-limite-cat-row';
+    div.style.alignItems = 'flex-end';
+    div.innerHTML = `
+      <div class="field"><label>Categoria</label><select class="cc-limite-categoria">${opcoesCategoriaHTML('saida')}</select></div>
+      <div class="field" style="max-width:130px;"><label>Limite/mês (R$)</label><input type="text" inputmode="decimal" class="cc-limite-valor"></div>
+      <button type="button" class="icon-btn btn-remover-limite-cat" style="margin-bottom:14px;">✕</button>
+    `;
+    wrap.appendChild(div);
+  });
+  document.getElementById('ccLimitesCategoriaWrap').addEventListener('click', (e)=>{
+    if(e.target.classList.contains('btn-remover-limite-cat')) e.target.closest('.cc-limite-cat-row').remove();
+  });
   let corAtual = corSelecionada;
   document.getElementById('ccCorPick').addEventListener('click', (e)=>{
     const el = e.target.closest('span[data-cor]');
@@ -12501,7 +12707,18 @@ function openCartaoModal(existing){
     if(!nome || isNaN(limite) || isNaN(diaFechamento) || isNaN(diaVencimento)){ showToast('Preencha todos os campos obrigatórios'); return; }
     const opt = document.getElementById('ccBandeira');
     const optSel = opt.options[opt.selectedIndex];
-    const payload = { nome, bandeira: optSel.value, bandeiraDominio: optSel.dataset.dominio, banco: document.getElementById('ccBanco').value.trim(), limite, diaFechamento, diaVencimento, cor: corAtual };
+    const anuidadeValor = numBR(document.getElementById('ccAnuidade').value) || 0;
+    const limitesCategorias = [...document.querySelectorAll('.cc-limite-cat-row')].map(row=>({
+      categoria: row.querySelector('.cc-limite-categoria').value,
+      limite: numBR(row.querySelector('.cc-limite-valor').value) || 0
+    })).filter(lc=>lc.limite>0);
+    const payload = {
+      nome, bandeira: optSel.value, bandeiraDominio: optSel.dataset.dominio, banco: document.getElementById('ccBanco').value.trim(),
+      limite, diaFechamento, diaVencimento, cor: corAtual,
+      validade: document.getElementById('ccValidade').value || null,
+      anuidadeValor, anuidadeMes: anuidadeValor>0 ? parseInt(document.getElementById('ccAnuidadeMes').value) : null,
+      limitesCategorias
+    };
     if(isEdit){ Object.assign(existing, payload); }
     else { state.cartoes.push({ id: uid(), ...payload }); }
     persist(); closeModal(); render();
@@ -12550,6 +12767,15 @@ function openEditarCompraCartaoModal(compraId){
       <label>Categoria</label>
       <select id="ecCategoria">${opcoesCategoriaHTML('saida', p.categoria)}</select>
     </div>
+    <div class="field">
+      <label>Comprovante / nota fiscal (foto, opcional)</label>
+      <input type="file" id="ecComprovanteInput" accept="image/*" style="display:none;">
+      <div id="ecComprovantePreviewWrap" style="${p.comprovanteFoto?'':'display:none;'}margin-bottom:8px;">
+        <img id="ecComprovantePreview" src="${p.comprovanteFoto||''}" style="max-width:140px;border-radius:8px;border:1px solid var(--line);display:block;">
+        <button type="button" class="btn ghost sm" id="btnRemoverComprovanteEc" style="margin-top:6px;">Remover foto</button>
+      </div>
+      <button type="button" class="btn ghost sm" id="btnAnexarComprovanteEc">${p.comprovanteFoto?'Trocar foto':'📎 Anexar foto'}</button>
+    </div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       <button class="btn" id="btnSalvarEdicaoCompra">Salvar</button>
@@ -12557,6 +12783,23 @@ function openEditarCompraCartaoModal(compraId){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  let comprovanteAtualEc = p.comprovanteFoto || null;
+  document.getElementById('btnAnexarComprovanteEc').addEventListener('click', ()=>document.getElementById('ecComprovanteInput').click());
+  document.getElementById('ecComprovanteInput').addEventListener('change', async ()=>{
+    const file = document.getElementById('ecComprovanteInput').files[0];
+    if(!file) return;
+    try{
+      comprovanteAtualEc = await comprimirImagem(file);
+      document.getElementById('ecComprovantePreview').src = comprovanteAtualEc;
+      document.getElementById('ecComprovantePreviewWrap').style.display = 'block';
+      document.getElementById('btnAnexarComprovanteEc').textContent = 'Trocar foto';
+    }catch(e){ console.error('Erro ao processar comprovante:', e); showToast('Não foi possível processar a foto'); }
+  });
+  document.getElementById('btnRemoverComprovanteEc').addEventListener('click', ()=>{
+    comprovanteAtualEc = null;
+    document.getElementById('ecComprovantePreviewWrap').style.display = 'none';
+    document.getElementById('btnAnexarComprovanteEc').textContent = '📎 Anexar foto';
+  });
   document.getElementById('btnSalvarEdicaoCompra').addEventListener('click', ()=>{
     const descricao = document.getElementById('ecDescricao').value.trim();
     const valor = numBR(document.getElementById('ecValor').value);
@@ -12566,7 +12809,7 @@ function openEditarCompraCartaoModal(compraId){
     const cartao = state.cartoes.find(c=>c.id===p.cartaoId);
     const competenciaAntiga = p.competencia;
     const novaCompetencia = competenciaFromDate(cartao, data);
-    p.descricao = descricao; p.valor = valor; p.dataCompra = data; p.categoria = categoria; p.competencia = novaCompetencia;
+    p.descricao = descricao; p.valor = valor; p.dataCompra = data; p.categoria = categoria; p.competencia = novaCompetencia; p.comprovanteFoto = comprovanteAtualEc;
     sincronizarLancamentoAbertoFatura(p.cartaoId, competenciaAntiga);
     if(novaCompetencia!==competenciaAntiga) sincronizarLancamentoAbertoFatura(p.cartaoId, novaCompetencia);
     persist(); closeModal(); render();
@@ -12643,7 +12886,8 @@ function openCompraCartaoModal(cartaoId){
     }
     competenciasAfetadas.forEach(comp=>sincronizarLancamentoAbertoFatura(cartaoId, comp));
     persist(); closeModal(); render();
-    showToast(parcelas>1 ? `Compra lançada em ${parcelas}x` : 'Compra lançada');
+    const avisoLimite = checarLimiteCategoria(cartaoId, [...competenciasAfetadas][0], categoria);
+    showToast(avisoLimite || (parcelas>1 ? `Compra lançada em ${parcelas}x` : 'Compra lançada'));
   });
 }
 
@@ -14609,6 +14853,7 @@ auth.onAuthStateChanged(async user=>{
       state = await carregarDados();
       dadosCarregados = true;
       gerarLancamentosRecorrentes();
+      processarAnuidadesCartao();
       render();
     }catch(e){
       console.error('Erro ao carregar dados:', e);
