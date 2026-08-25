@@ -2076,6 +2076,14 @@ async function sincronizarEntradasEstoqueVK(){
       if(!fornecedorLocal){
         fornecedorLocal = { id: uid(), nome: nomeVK || 'Fornecedor VK sem nome', cnpjCpf: cnpj, telefone: fVK.telefone||'', email: fVK.email||'', endereco: fVK.endereco||'', observacao: '' };
         state.fornecedores.push(fornecedorLocal);
+      } else if(nomeVK && fornecedorLocal.nome!==nomeVK && !fornecedorLocal.nomeEditadoManualmente){
+        // Corrige um fornecedor local que ficou travado com um nome ruim de uma sincronização antiga
+        // (ex: "Fornecedor VK sem nome" de quando a resolução do nome ainda não funcionava certo) —
+        // sempre que o VK resolver um nome de verdade, atualiza aqui também, a não ser que o nome
+        // tenha sido corrigido manualmente no Livro Caixa (aí respeita a correção do usuário).
+        const nomeAntigo = fornecedorLocal.nome;
+        fornecedorLocal.nome = nomeVK;
+        state.lancamentos.forEach(l=>{ if(l.fornecedor===nomeAntigo) l.fornecedor = nomeVK; });
       }
       return { nome: fornecedorLocal.nome, cnpj: fornecedorLocal.cnpjCpf, naoIdentificado };
     }
@@ -11818,6 +11826,7 @@ function openFornecedorModal(existing){
       const nomeAntigo = existing.nome;
       Object.assign(existing, payload);
       if(nomeAntigo !== nome){
+        existing.nomeEditadoManualmente = true;
         state.lancamentos.forEach(l=>{ if(l.fornecedor===nomeAntigo) l.fornecedor = nome; });
       }
     } else {
