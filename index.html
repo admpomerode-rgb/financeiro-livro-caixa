@@ -11472,7 +11472,11 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       </div>
       <div class="field" id="wrapContaDespesa">
         <label>Conta</label>
-        <select id="fConta">${state.contas.map(c=>`<option value="${c.id}" ${(existing?.contaId||contaPreSelecionadaId||state.contas[0].id)===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
+        <select id="fConta">
+          ${isEdit && !existing.contaId ? `<option value="" selected>— Nenhuma conta ainda (pedido não efetivado) —</option>` : ''}
+          ${state.contas.map(c=>`<option value="${c.id}" ${(existing?.contaId||contaPreSelecionadaId||(isEdit?'':state.contas[0].id))===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}
+        </select>
+        ${isEdit && !existing.contaId ? `<div class="note" style="margin-top:6px;">Esse pedido ainda não tem conta bancária vinculada — normal pra pedidos vindos do VK Industrial ainda não recebidos. Escolha uma conta aqui se quiser definir agora, ou deixe em branco e escolha só na hora de confirmar o recebimento.</div>` : ''}
       </div>
     </div>
     ${tipo==='saida' ? `
@@ -11877,7 +11881,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       canalVenda: (fCanalVenda && fCanalVenda.value!=='__novo__') ? fCanalVenda.value : (existing?.canalVenda||''),
       comprovanteFoto: comprovanteAtual,
       observacao: document.getElementById('fObservacao').value.trim(),
-      contaId: document.getElementById('fConta').value,
+      contaId: document.getElementById('fConta').value || null,
       dataVencimento: vencimentoInformado || dataEfetivacao || todayISO(),
       status,
       dataPagamento: efetivado ? dataEfetivacao : null,
