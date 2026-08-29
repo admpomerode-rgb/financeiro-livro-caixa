@@ -844,6 +844,16 @@ function aplicarMigracoes(s){
       if(l.origem==='vk' && l.status==='pendente' && l.contaId) l.contaId = null;
     });
   }
+  // Corrige ativos de investimento presos numa conta errada (bug antigo: nota de corretagem com mais
+  // de uma conta de Renda Variável podia salvar o ativo na conta ERRADA mesmo com a subconta certa
+  // marcada) — realinha pra conta que realmente é dona da subconta escolhida.
+  if(s.ativosInvestimento && s.subcontasInvestimento){
+    s.ativosInvestimento.forEach(a=>{
+      if(!a.subContaId) return;
+      const sub = s.subcontasInvestimento.find(x=>x.id===a.subContaId);
+      if(sub && sub.contaId && sub.contaId!==a.contaId) a.contaId = sub.contaId;
+    });
+  }
   if(s.vkConfig && s.vkConfig.ultimaSincronizacaoCustosProdutos===undefined) s.vkConfig.ultimaSincronizacaoCustosProdutos = null;
   if(!s.processosConfig){
     s.processosConfig = { firebaseConfig: null, email: '', senha: '', ultimaSincronizacao: null };
@@ -5148,7 +5158,11 @@ function viewAtivosInvestimento(contaId){
   const ativos = state.ativosInvestimento.filter(a=>a.contaId===contaId && !a.resgatado);
   const resgatados = state.ativosInvestimento.filter(a=>a.contaId===contaId && a.resgatado).sort((a,b)=>(b.dataResgate||'').localeCompare(a.dataResgate||''));
   const subcontas = state.subcontasInvestimento.filter(s=>s.contaId===contaId);
-  const semSubconta = ativos.filter(a=>!a.subContaId);
+  const idsSubcontasDestaConta = new Set(subcontas.map(s=>s.id));
+  // "Sem subconta" também pega ativos cuja subconta não existe mais aqui (foi excluída, ou aponta
+  // pra uma subconta de outra conta por engano) — sem isso, o ativo continuava contando no total da
+  // conta mas ficava invisível em qualquer grupo da tela, dando a impressão de "valor fantasma".
+  const semSubconta = ativos.filter(a=>!a.subContaId || !idsSubcontasDestaConta.has(a.subContaId));
   const cabecalho = `
       <div class="ledger-row ativo-row head">
         <span></span><span>Ativo</span><span class="ativo-col-qtd">Qtd / Aplicado</span><span class="ativo-col-preco">Preço méd. / Taxa</span><span class="ativo-col-atual">Preço atual</span><span>Valor atual</span><span></span>
