@@ -1354,10 +1354,10 @@ function saldoConta(contaId){
   const conta = state.contas.find(c=>c.id===contaId);
   if(!conta) return 0;
   let saldo = conta.saldoInicial || 0;
-  state.lancamentos.forEach(l=>{
-    if(l.contaId!==contaId) return;
-    if(l.tipo==='entrada' && l.status==='recebido') saldo += l.valor;
-    if(l.tipo==='saida' && l.status==='pago') saldo -= l.valor;
+  movimentosRealizados().forEach(ev=>{
+    if(ev.contaId!==contaId) return;
+    if(ev.tipo==='entrada') saldo += ev.valor;
+    if(ev.tipo==='saida') saldo -= ev.valor;
   });
   return saldo;
 }
@@ -3077,8 +3077,13 @@ function valorEmAberto(l){
 function movimentosRealizados(){
   const eventos = [];
   state.lancamentos.forEach(l=>{
-    if(l.status!=='pago' && l.status!=='recebido') return;
-    if(l.historicoRecebimentos && l.historicoRecebimentos.length){
+    const finalizado = l.status==='pago' || l.status==='recebido';
+    const temHistorico = l.historicoRecebimentos && l.historicoRecebimentos.length;
+    // Antes só processava lançamentos já 100% pagos/recebidos — isso fazia um pagamento PARCIAL
+    // de algo que continua "pendente" (ex: fatura de cartão paga aos poucos) nunca aparecer no saldo
+    // da conta bancária, porque o dinheiro que já saiu de verdade ficava invisível até quitar tudo.
+    if(!finalizado && !temHistorico) return;
+    if(temHistorico){
       l.historicoRecebimentos.forEach(h=>{
         eventos.push({
           tipo: l.tipo, valor: h.valor, data: h.data, contaId: h.contaId || l.contaId,
@@ -13089,13 +13094,19 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
   let arquivoNomeAtual = notaEmRevisao ? (notaEmRevisao.arquivoNome||'') : '';
 
   const opcoesSubcontaRV = ()=>{
-    const contaRV = state.contasInvestimento.find(c=>c.tipo==='renda_variavel');
-    const subs = contaRV ? state.subcontasInvestimento.filter(s=>s.contaId===contaRV.id) : [];
-    return subs.map(s=>`<option value="${s.id}">${escapeHTML(s.nome)}</option>`).join('');
+    const contasRV = state.contasInvestimento.filter(c=>c.tipo==='renda_variavel');
+    const idsContasRV = new Set(contasRV.map(c=>c.id));
+    const subs = state.subcontasInvestimento.filter(s=>idsContasRV.has(s.contaId));
+    const mostrarNomeConta = contasRV.length>1;
+    return subs.map(s=>{
+      const nomeConta = mostrarNomeConta ? (contasRV.find(c=>c.id===s.contaId)?.nome || '') : '';
+      return `<option value="${s.id}">${escapeHTML(s.nome)}${nomeConta?` (${escapeHTML(nomeConta)})`:''}</option>`;
+    }).join('');
   };
   const precoMedioAtivo = (ticker, subContaId)=>{
-    if(!contaInvRVExistente || !ticker) return null;
-    const doTicker = state.ativosInvestimento.filter(a=>a.contaId===contaInvRVExistente.id && a.ticker===ticker && !a.manual && !a.resgatado);
+    if(!ticker) return null;
+    const idsContasRV = new Set(state.contasInvestimento.filter(c=>c.tipo==='renda_variavel').map(c=>c.id));
+    const doTicker = state.ativosInvestimento.filter(a=>idsContasRV.has(a.contaId) && a.ticker===ticker && !a.manual && !a.resgatado);
     if(!doTicker.length) return null;
     const match = subContaId ? doTicker.find(a=>a.subContaId===subContaId) : null;
     return (match || doTicker[0]).precoMedio ?? null;
