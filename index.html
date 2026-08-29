@@ -836,6 +836,14 @@ function aplicarMigracoes(s){
   if(s.vkConfig && s.vkConfig.ultimaSincronizacaoEstoque===undefined) s.vkConfig.ultimaSincronizacaoEstoque = null;
   if(s.vkConfig && s.vkConfig.ultimaSincronizacaoEstoqueInsumos===undefined) s.vkConfig.ultimaSincronizacaoEstoqueInsumos = null;
   if(s.vkConfig && s.vkConfig.ultimaSincronizacaoRecomendacoes===undefined) s.vkConfig.ultimaSincronizacaoRecomendacoes = null;
+  // Pedidos VK deixaram de ter conta bancária vinculada enquanto ainda pendentes (só recebem uma conta
+  // de verdade no momento de confirmar o recebimento) — limpa retroativamente os que já tinham a conta
+  // "de destino" antiga presa neles, criada só pra satisfazer a exigência que existia antes.
+  if(s.lancamentos){
+    s.lancamentos.forEach(l=>{
+      if(l.origem==='vk' && l.status==='pendente' && l.contaId) l.contaId = null;
+    });
+  }
   if(s.vkConfig && s.vkConfig.ultimaSincronizacaoCustosProdutos===undefined) s.vkConfig.ultimaSincronizacaoCustosProdutos = null;
   if(!s.processosConfig){
     s.processosConfig = { firebaseConfig: null, email: '', senha: '', ultimaSincronizacao: null };
@@ -1583,7 +1591,6 @@ function fmtQtdBR(n){ return (Number(n)||0).toLocaleString('pt-BR', { maximumFra
 async function sincronizarPedidosVK(){
   const cfg = state.vkConfig;
   if(!cfg.firebaseConfig){ showToast('Cole a configuração do Firebase antes de sincronizar'); render(); return; }
-  if(!cfg.contaId){ showToast('Escolha a conta bancária de destino'); render(); return; }
   if(!cfg.email || !cfg.senha){ showToast('Informe o e-mail e a senha de acesso ao VK Industrial'); render(); return; }
   if(typeof firebase === 'undefined'){ showToast('Não foi possível carregar o Firebase — confira a internet'); render(); return; }
 
@@ -1708,7 +1715,7 @@ async function sincronizarPedidosVK(){
           id: uid(), tipo:'entrada', categoria: cfg.categoria || 'Vendas',
           descricao: descricaoPedido, valor: p.valorTotal,
           fornecedor: cliente ? cliente.nome : '', observacao: observacaoNova,
-          contaId: cfg.contaId, dataVencimento: vencimentoNovo,
+          contaId: null, dataVencimento: vencimentoNovo,
           status: 'cancelado', dataPagamento: null,
           origem: 'vk', vkPedidoId: p.id, vendedorId, vendedorNome,
           criadoEm: new Date().toISOString()
@@ -8567,15 +8574,10 @@ function viewVK(){
         </div>
 
         <div style="font-weight:600;font-size:12.5px;margin:18px 0 10px;border-top:1px solid var(--line);padding-top:16px;">Pedidos (contas a receber)</div>
-        <div class="field-row">
-          <div class="field">
-            <label>Conta bancária de destino</label>
-            <select id="vkConta">${state.contas.map(c=>`<option value="${c.id}" ${cfg.contaId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
-          </div>
-          <div class="field">
-            <label>Categoria do lançamento</label>
-            <select id="vkCategoria">${opcoesCategoriaHTML('entrada', cfg.categoria)}</select>
-          </div>
+        <div class="note" style="margin-top:0;">Pedidos entram direto em Contas a Receber, sem conta bancária vinculada — você escolhe a conta certa só na hora de confirmar o recebimento de verdade.</div>
+        <div class="field">
+          <label>Categoria do lançamento</label>
+          <select id="vkCategoria">${opcoesCategoriaHTML('entrada', cfg.categoria)}</select>
         </div>
 
         <div style="font-weight:600;font-size:12.5px;margin:18px 0 10px;border-top:1px solid var(--line);padding-top:16px;">Entradas de estoque (contas a pagar)</div>
@@ -8945,11 +8947,10 @@ function aprovarItemVK(id){
   const cfg = state.vkConfig;
 
   if(item.tipo==='pedido'){
-    if(!cfg.contaId){ showToast('Configure a conta bancária de destino dos pedidos nas configurações da integração'); return; }
     state.lancamentos.push({
       id: uid(), tipo:'entrada', categoria,
       descricao: item.descricao, valor: item.valor, fornecedor: item.contraparte,
-      observacao: item.observacao, contaId: cfg.contaId, dataVencimento: item.dataVencimento,
+      observacao: item.observacao, contaId: null, dataVencimento: item.dataVencimento,
       status: 'pendente', dataPagamento: null,
       origem: 'vk', vkPedidoId: item.vkPedidoId,
       vendedorId: item.vendedorId, vendedorNome: item.vendedorNome,
@@ -11209,7 +11210,6 @@ function attachViewHandlers(){
       state.vkConfig.firebaseConfig = txt ? JSON.parse(txt) : null;
       state.vkConfig.email = document.getElementById('vkEmail').value.trim();
       state.vkConfig.senha = document.getElementById('vkSenha').value;
-      state.vkConfig.contaId = document.getElementById('vkConta').value;
       state.vkConfig.categoria = document.getElementById('vkCategoria').value;
       state.vkConfig.contaIdEstoque = document.getElementById('vkContaEstoque').value;
       state.vkConfig.categoriaEstoque = document.getElementById('vkCategoriaEstoque').value;
@@ -11258,7 +11258,6 @@ function attachViewHandlers(){
     }catch(e){ showToast('JSON do Firebase inválido — confira o formato'); return; }
     state.vkConfig.email = document.getElementById('vkEmail').value.trim();
     state.vkConfig.senha = document.getElementById('vkSenha').value;
-    state.vkConfig.contaId = document.getElementById('vkConta').value;
     state.vkConfig.categoria = document.getElementById('vkCategoria').value;
     persist();
     btnSincronizarVK.textContent = 'Sincronizando...';
