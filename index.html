@@ -4638,6 +4638,17 @@ function viewFatura(cartaoId, competencia){
           <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;"><span>Total da fatura até agora</span><span class="mono">${brl(total)}</span></div>
           <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;color:var(--success);"><span>Já pago</span><span class="mono">${brl(jaPago)}</span></div>
           <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;font-weight:700;border-top:1px solid var(--line);margin:4px 0 12px;"><span>Falta (se fechar agora)</span><span class="mono">${brl(saldoRestante)}</span></div>
+          ${(lancAberto.historicoRecebimentos||[]).length ? `
+          <div style="margin-bottom:14px;">
+            <div style="font-size:11.5px;font-weight:600;color:var(--text-soft);margin-bottom:6px;">Pagamentos parciais já feitos</div>
+            ${lancAberto.historicoRecebimentos.slice().reverse().map(h=>`
+              <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12.5px;border-bottom:1px solid var(--line);">
+                <span>${fmtDate(h.data)}${h.contaId ? ` · ${escapeHTML(nomeConta(h.contaId))}` : ''}${h.formaRecebimento ? ` · ${escapeHTML(h.formaRecebimento)}` : ''}</span>
+                <span class="mono" style="color:var(--success);">${brl(h.valor)}</span>
+              </div>
+            `).join('')}
+          </div>
+          ` : ''}
         ` : ''}
         ${lancAberto ? `<button class="btn ghost" data-action="pagar-parcela-fatura" data-id="${lancAberto.id}" style="margin-bottom:14px;">💰 Fazer um pagamento parcial agora (antes de fechar)</button>` : ''}
         <div class="field-row">
@@ -4670,6 +4681,17 @@ function viewFatura(cartaoId, competencia){
               <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;"><span>Valor total da fatura</span><span class="mono">${brl(lanc.valor)}</span></div>
               <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;color:var(--success);"><span>Já pago</span><span class="mono">${brl(jaPago)}</span></div>
               <div style="display:flex;justify-content:space-between;padding:2px 0;font-size:13px;font-weight:700;border-top:1px solid var(--line);margin:4px 0 10px;"><span>Falta pagar</span><span class="mono">${brl(falta)}</span></div>
+              ${(lanc.historicoRecebimentos||[]).length ? `
+              <div style="margin-bottom:14px;">
+                <div style="font-size:11.5px;font-weight:600;color:var(--text-soft);margin-bottom:6px;">Pagamentos parciais já feitos</div>
+                ${lanc.historicoRecebimentos.slice().reverse().map(h=>`
+                  <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12.5px;border-bottom:1px solid var(--line);">
+                    <span>${fmtDate(h.data)}${h.contaId ? ` · ${escapeHTML(nomeConta(h.contaId))}` : ''}${h.formaRecebimento ? ` · ${escapeHTML(h.formaRecebimento)}` : ''}</span>
+                    <span class="mono" style="color:var(--success);">${brl(h.valor)}</span>
+                  </div>
+                `).join('')}
+              </div>
+              ` : ''}
             ` : `<div class="note" style="margin-top:0;">Falta pagar: <strong class="mono">${brl(falta)}</strong></div>`}
             ${lanc.status==='pendente' && valorEmAberto(lanc)>0.01 ? `<button class="btn" data-action="pagar-parcela-fatura" data-id="${lanc.id}">Registrar pagamento (pode ser parcial)</button>` : `<div class="note" style="margin-top:0;border-color:var(--success);">✓ Fatura totalmente paga${lanc.status==='pendente'?' (coberta pelos pagamentos antecipados)':''}.</div>`}
           </div>
@@ -13235,9 +13257,22 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
 
   // Data de débito acompanha o pregão (D+2 úteis) até o usuário mexer nela manualmente
   let debitoEditadoManualmente = !!(notaEmRevisao && notaEmRevisao.dataDebito);
-  document.getElementById('notaDataDebito').addEventListener('input', ()=>{ debitoEditadoManualmente = true; });
+  const atualizarStatusDebito = ()=>{
+    const el = document.getElementById('notaTipoNota');
+    if(!el) return;
+    const dataDebitoAtual = document.getElementById('notaDataDebito').value;
+    if(!dataDebitoAtual) return;
+    const jaDebitouAgora = dataDebitoAtual <= todayISO();
+    el.innerHTML = jaDebitouAgora
+      ? `✓ A data de débito (${fmtDate(dataDebitoAtual)}) já passou — ao publicar, o valor é descontado/creditado na conta na hora, como já pago.`
+      : `⏳ A data de débito (${fmtDate(dataDebitoAtual)}) ainda não chegou — ao publicar, fica como <strong>pendente</strong> em Contas a Pagar/Receber até essa data; o saldo da conta só muda quando você confirmar o pagamento/recebimento (não é automático).`;
+    el.style.borderColor = jaDebitouAgora ? 'var(--success)' : 'var(--warn)';
+  };
+  document.getElementById('notaDataDebito').addEventListener('input', ()=>{ debitoEditadoManualmente = true; atualizarStatusDebito(); });
+  atualizarStatusDebito();
   document.getElementById('notaData').addEventListener('change', ()=>{
     if(!debitoEditadoManualmente) document.getElementById('notaDataDebito').value = addDiasUteis(document.getElementById('notaData').value, 2);
+    atualizarStatusDebito();
   });
 
   const coletarNotaFormulario = ()=>({
@@ -13391,13 +13426,24 @@ function publicarNotaCorretagem(nota){
   const totalVendas = linhas.filter(l=>l.tipo==='V').reduce((s,l)=>s+l.quantidade*l.preco,0);
   const ganhoPerdaCapital = nota.ganhoPerdaCapital || 0;
 
-  let contaInv = state.contasInvestimento.find(c=>c.tipo==='renda_variavel');
-  if(!contaInv){
-    contaInv = { id: uid(), nome:'Renda Variável', instituicao:'', instituicaoDominio:'', tipo:'renda_variavel', cor: CONTA_CORES[state.contasInvestimento.length % CONTA_CORES.length] };
-    state.contasInvestimento.push(contaInv);
+  let contaInvPadrao = state.contasInvestimento.find(c=>c.tipo==='renda_variavel');
+  if(!contaInvPadrao){
+    contaInvPadrao = { id: uid(), nome:'Renda Variável', instituicao:'', instituicaoDominio:'', tipo:'renda_variavel', cor: CONTA_CORES[state.contasInvestimento.length % CONTA_CORES.length] };
+    state.contasInvestimento.push(contaInvPadrao);
   }
+  // A conta de investimento certa é a DONA da subconta escolhida na linha (se houver mais de uma
+  // conta de Renda Variável, a subconta pode pertencer a uma diferente da primeira encontrada) —
+  // antes usava sempre a primeira conta RV pra tudo, então o ativo podia ficar "preso" numa conta
+  // errada mesmo com a subconta certa marcada.
+  const contaDaSubconta = (subContaId)=>{
+    if(!subContaId) return contaInvPadrao;
+    const sub = state.subcontasInvestimento.find(s=>s.id===subContaId);
+    const conta = sub ? state.contasInvestimento.find(c=>c.id===sub.contaId) : null;
+    return conta || contaInvPadrao;
+  };
 
   linhas.forEach(l=>{
+    const contaInv = contaDaSubconta(l.subContaId);
     const taxaProporcional = totalCompras>0 ? (l.quantidade*l.preco/totalCompras)*taxasTotal : 0;
     if(l.tipo==='C'){
       let ativo = state.ativosInvestimento.find(a=>a.contaId===contaInv.id && a.ticker===l.ticker && !a.manual && a.subContaId===l.subContaId);
@@ -13412,7 +13458,7 @@ function publicarNotaCorretagem(nota){
       }
     } else {
       let ativo = state.ativosInvestimento.find(a=>a.contaId===contaInv.id && a.ticker===l.ticker && !a.manual && a.subContaId===l.subContaId);
-      if(!ativo) ativo = state.ativosInvestimento.find(a=>a.contaId===contaInv.id && a.ticker===l.ticker && !a.manual);
+      if(!ativo) ativo = state.ativosInvestimento.find(a=>a.ticker===l.ticker && !a.manual);
       if(ativo){
         ativo.quantidade = Math.max(0, (ativo.quantidade||0) - l.quantidade);
       }
