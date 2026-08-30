@@ -5279,6 +5279,7 @@ function viewIntegracoes(){
 
 function viewRelatorios(){
   const cards = [
+    { id:'executivo', icone:'🧭', nome:'Dashboard Executivo', desc:'Resumo visual com semáforos — receita, lucro, EBITDA, margem, evolução mensal e top clientes/categorias' },
     { id:'mensal', icone:'📅', nome:'Super Relatório Mensal', desc:'Tudo sobre o mês — DRE, indicadores, orçamento, alertas — num relatório só' },
     { id:'dre', icone:'📊', nome:'DRE', desc:'Demonstrativo de resultado, com análise vertical e horizontal' },
     { id:'balanco', icone:'⚖️', nome:'Balanço Patrimonial', desc:'Ativos, passivos e patrimônio líquido' },
@@ -5287,7 +5288,7 @@ function viewRelatorios(){
     { id:'investimentos', icone:'💰', nome:'Relatório de Investimentos', desc:'Total aplicado no mês (renda fixa + variável), ativos mais investidos e custos das operações' },
     { id:'liquidez', icone:'💧', nome:'Índices de Liquidez', desc:'Liquidez imediata, seca, corrente e geral + capital de giro, endividamento e solvência' },
     { id:'cartoes', icone:'💳', nome:'Cartões de Crédito', desc:'Uso do limite por cartão, gastos por categoria, comprometido futuro e maiores compras' },
-    { id:'abc_clientes', icone:'👥', nome:'Curva ABC de Clientes', desc:'Classifica clientes em A/B/C pelo volume de receita gerada (últimos 12 meses)' },
+    { id:'abc_clientes', icone:'👥', nome:'Curva ABC de Clientes', desc:'Ranking de clientes (ticket médio, frequência) + classificação A/B/C pelo volume de receita (últimos 12 meses)' },
     { id:'abc_despesas', icone:'📉', nome:'Curva ABC de Despesas', desc:'Classifica categorias de despesa em A/B/C pelo volume gasto (últimos 12 meses)' },
     { id:'abc_fornecedores', icone:'🏭', nome:'Auditoria de Fornecedores', desc:'Curva ABC de compras por fornecedor, com prazo médio de pagamento (PMP)' },
     { id:'inadimplencia_cac', icone:'⚠️', nome:'Inadimplência e CAC', desc:'Taxa de inadimplência, perfil de clientes atrasados e custo de aquisição de clientes' },
@@ -5324,7 +5325,7 @@ function viewRelatorios(){
 }
 
 const RELATORIOS_NOMES = {
-  dre:'DRE', balanco:'Balanço Patrimonial', mei:'Declaração MEI', indicadores:'Indicadores Financeiros',
+  executivo:'Dashboard Executivo', dre:'DRE', balanco:'Balanço Patrimonial', mei:'Declaração MEI', indicadores:'Indicadores Financeiros',
   produto:'Rentabilidade por Produto', investimentos:'Relatório de Investimentos', liquidez:'Índices de Liquidez', aging:'Aging — Vencidos por Faixa', dfc:'DFC — Fluxo de Caixa', cartoes:'Cartões de Crédito',
   abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações'
 };
@@ -6715,17 +6716,131 @@ function scoreCreditoCliente(nome){
   return { score, nivel, cor, total, pontuais, atrasadas, atrasoMedio };
 }
 
+function renderDashboardExecutivo(){
+  const t = totaisPorMesRef(mesGlobalRef);
+  const hoje = todayISO();
+  const mesAtualRef = hoje.slice(0,7);
+  const ateReal = mesRef => mesRef === mesAtualRef ? hoje : (mesRef < mesAtualRef ? `${mesRef}-31` : mesRef+'-01');
+  const de = t.de, ate = ateReal(mesGlobalRef);
+  const { receitaOp, despesaOp, resultadoOp, receitaTotal, despesaTotal, lucroLiquido } = resultadoOperacionalPeriodo(de, ate);
+  const ebitda = ebitdaPeriodo(de, ate, 1);
+  const margemLiquida = receitaTotal>0 ? (lucroLiquido/receitaTotal*100) : 0;
+  const margemEbitda = receitaTotal>0 ? (ebitda/receitaTotal*100) : 0;
+  const margemOp = receitaOp>0 ? (resultadoOp/receitaOp*100) : 0;
+
+  // Mês anterior, pra comparação e pra decidir a cor do semáforo do jeito mais justo (relativo ao
+  // seu próprio histórico, não um número fixo que não faz sentido pra todo negócio).
+  const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
+  const mesAnteriorRef = mesM===1 ? `${anoM-1}-12` : `${anoM}-${String(mesM-1).padStart(2,'0')}`;
+  const tAnt = totaisPorMesRef(mesAnteriorRef);
+  const { lucroLiquido: lucroAnt, receitaTotal: receitaAnt } = resultadoOperacionalPeriodo(tAnt.de, tAnt.ateMes<hoje?tAnt.ateMes:hoje);
+  const margemLiquidaAnt = receitaAnt>0 ? (lucroAnt/receitaAnt*100) : 0;
+
+  // Evolução mensal — últimos 6 meses com movimento
+  const comps6 = Array.from({length:6},(_,i)=>{
+    const d = new Date(anoM, mesM-1-(5-i), 1);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  });
+  const historico6 = comps6.map(comp=>{
+    const tt = totaisPorMesRef(comp);
+    const r = resultadoOperacionalPeriodo(tt.de, ateReal(comp));
+    return { comp, receita: r.receitaTotal, despesa: r.despesaTotal, lucro: r.lucroLiquido };
+  });
+  const maxBarra = Math.max(1, ...historico6.map(h=>Math.max(h.receita,h.despesa)));
+
+  // Top clientes e top categorias de despesa do mês
+  const eventosDoMes = movimentosRealizados().filter(ev=>ev.data>=de && ev.data<=ate && ev.origem!=='transferencia');
+  const porCliente = {};
+  eventosDoMes.filter(ev=>ev.tipo==='entrada').forEach(ev=>{ const n=ev.fornecedor||'Sem identificação'; porCliente[n]=(porCliente[n]||0)+ev.valor; });
+  const topClientes = Object.entries(porCliente).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const porCategoriaDespesa = {};
+  eventosDoMes.filter(ev=>ev.tipo==='saida' && !(ev.categoria==='Investimentos'&&ev.origem==='investimento')).forEach(ev=>{ porCategoriaDespesa[ev.categoria]=(porCategoriaDespesa[ev.categoria]||0)+ev.valor; });
+  const topDespesas = Object.entries(porCategoriaDespesa).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const maxTopCliente = topClientes.length ? topClientes[0][1] : 1;
+  const maxTopDespesa = topDespesas.length ? topDespesas[0][1] : 1;
+
+  const kpiCard = (label, valor, sem, sub)=>`
+    <div class="card">
+      <div class="label">${sem} ${label}</div>
+      <div class="value mono">${valor}</div>
+      ${sub ? `<div style="font-size:10.5px;color:var(--text-soft);margin-top:2px;">${sub}</div>` : ''}
+    </div>`;
+
+  return `
+    <div class="report-controls"><span style="font-size:12.5px;color:var(--text-soft);">${competenciaLabel(mesGlobalRef)} · comparado com ${competenciaLabel(mesAnteriorRef)}</span></div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
+      ${kpiCard('Receita Total', brl(receitaTotal), semaforo(receitaTotal, receitaAnt, receitaAnt*0.85), receitaAnt>0?`${receitaTotal>=receitaAnt?'+':''}${(((receitaTotal/receitaAnt)-1)*100).toFixed(1)}% vs mês anterior`:'')}
+      ${kpiCard('Despesas Totais', brl(despesaTotal), '', '')}
+      ${kpiCard('Lucro Líquido', brl(lucroLiquido), semaforo(margemLiquida, margemLiquidaAnt, margemLiquidaAnt*0.7), `margem ${margemLiquida.toFixed(1)}%`)}
+      ${kpiCard('EBITDA', brl(ebitda), semaforo(margemEbitda, 15, 5), `margem EBITDA ${margemEbitda.toFixed(1)}%`)}
+      ${kpiCard('Margem Operacional', margemOp.toFixed(1)+'%', semaforo(margemOp, 15, 5), '')}
+      ${kpiCard('Margem Líquida', margemLiquida.toFixed(1)+'%', semaforo(margemLiquida, 10, 3), '')}
+    </div>
+    <div class="note" style="margin-top:0;">EBITDA = Resultado Operacional + Depreciação do mês (${brl(depreciacaoMensal())}) — não isola juros/impostos separadamente, é uma aproximação. Semáforo: 🟢 saudável · 🟡 atenção · 🔴 abaixo do esperado — comparado ao seu próprio histórico, não um número fixo de mercado.</div>
+
+    <div class="dash-section-label">Evolução mensal — últimos 6 meses</div>
+    <div class="panel">
+      <div class="panel-body" style="padding:16px 18px;">
+        <div style="display:flex;align-items:flex-end;gap:10px;height:130px;">
+          ${historico6.map(h=>`
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:2px;">
+              <div style="display:flex;align-items:flex-end;gap:2px;height:100px;">
+                <div style="width:10px;background:var(--success);border-radius:2px 2px 0 0;height:${Math.max(2,Math.round(h.receita/maxBarra*100))}px;" title="Receita ${brl(h.receita)}"></div>
+                <div style="width:10px;background:var(--danger);border-radius:2px 2px 0 0;height:${Math.max(2,Math.round(h.despesa/maxBarra*100))}px;" title="Despesa ${brl(h.despesa)}"></div>
+              </div>
+              <span style="font-size:10px;color:var(--text-soft);">${competenciaLabel(h.comp).split('/')[0].slice(0,3)}</span>
+            </div>
+          `).join('')}
+        </div>
+        <div style="display:flex;gap:14px;margin-top:10px;font-size:11px;color:var(--text-soft);">
+          <span><span style="display:inline-block;width:8px;height:8px;background:var(--success);border-radius:2px;margin-right:4px;"></span>Receita</span>
+          <span><span style="display:inline-block;width:8px;height:8px;background:var(--danger);border-radius:2px;margin-right:4px;"></span>Despesa</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="cards" style="grid-template-columns:1fr 1fr;align-items:start;margin-top:16px;">
+      <div class="panel">
+        <div class="panel-head"><h2>Top 5 clientes do mês</h2></div>
+        <div class="panel-body" style="padding:14px 18px;">
+          ${topClientes.length ? topClientes.map(([nome,v])=>`
+            <div style="margin-bottom:10px;">
+              <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;"><span>${escapeHTML(nome)}</span><span class="mono">${brl(v)}</span></div>
+              <div style="background:var(--bone);border-radius:5px;height:6px;overflow:hidden;"><div style="width:${Math.round(v/maxTopCliente*100)}%;height:100%;background:var(--blue-accent);"></div></div>
+            </div>
+          `).join('') : `<div class="empty">Nenhuma receita recebida ainda.</div>`}
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Top 5 categorias de despesa</h2></div>
+        <div class="panel-body" style="padding:14px 18px;">
+          ${topDespesas.length ? topDespesas.map(([cat,v])=>`
+            <div style="margin-bottom:10px;">
+              <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;"><span>${escapeHTML(cat)}</span><span class="mono">${brl(v)}</span></div>
+              <div style="background:var(--bone);border-radius:5px;height:6px;overflow:hidden;"><div style="width:${Math.round(v/maxTopDespesa*100)}%;height:100%;background:var(--danger);"></div></div>
+            </div>
+          `).join('') : `<div class="empty">Nenhuma despesa paga ainda.</div>`}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderRelatorioABCClientes(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
   const porCliente = {};
   state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{
     const nome = l.fornecedor || 'Sem identificação';
-    porCliente[nome] = (porCliente[nome]||0) + l.valor;
+    if(!porCliente[nome]) porCliente[nome] = { valor:0, qtd:0 };
+    porCliente[nome].valor += l.valor;
+    porCliente[nome].qtd += 1;
   });
-  const lista = classificarABC(Object.entries(porCliente).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor));
+  const lista = classificarABC(Object.entries(porCliente).map(([nome,d])=>({nome,valor:d.valor})).sort((a,b)=>b.valor-a.valor));
   const classeA = lista.filter(i=>i.classe==='A');
   const totalGeral = lista.reduce((s,i)=>s+i.valor,0);
   const comScore = lista.map(i=>({...i, score: scoreCreditoCliente(i.nome)})).filter(i=>i.score).sort((a,b)=>a.score.score-b.score.score);
+  const rankingTop = Object.entries(porCliente).map(([nome,d])=>({ nome, valor:d.valor, qtd:d.qtd, ticket: d.qtd>0 ? d.valor/d.qtd : 0 })).sort((a,b)=>b.valor-a.valor).slice(0,8);
+  const maxRanking = rankingTop.length ? rankingTop[0].valor : 1;
 
   return `
     <div class="report-controls"><span style="font-size:12.5px;color:var(--text-soft);">Curva ABC de Clientes — últimos 12 meses (${fmtDate(de)} a ${fmtDate(ate)})</span></div>
@@ -6736,6 +6851,18 @@ function renderRelatorioABCClientes(){
         <div class="card"><div class="label">% da receita na classe A</div><div class="value mono">${classeA.reduce((s,i)=>s+i.pct,0).toFixed(1)}%</div></div>
       </div>
       <div class="note">Classe A: clientes que somam até 80% da receita — são o núcleo do faturamento, merecem atenção prioritária de relacionamento. Classe B: até 95%. Classe C: os 5% finais, mais pulverizados.</div>
+    </div>
+    <div class="dash-section-label">Ranking de clientes — quem mais compra, ticket médio e frequência</div>
+    <div class="panel">
+      <div class="panel-body" style="padding:14px 18px;">
+        ${rankingTop.length ? rankingTop.map(r=>`
+          <div style="margin-bottom:12px;">
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:2px;"><span>${escapeHTML(r.nome)}</span><span class="mono" style="font-weight:600;">${brl(r.valor)}</span></div>
+            <div style="background:var(--bone);border-radius:5px;height:6px;overflow:hidden;margin-bottom:3px;"><div style="width:${Math.round(r.valor/maxRanking*100)}%;height:100%;background:var(--blue-accent);"></div></div>
+            <div style="font-size:10.5px;color:var(--text-soft);">${r.qtd} compra(s) neste período · ticket médio ${brl(r.ticket)}</div>
+          </div>
+        `).join('') : `<div class="empty">Nenhuma receita recebida nesse período.</div>`}
+      </div>
     </div>
     <div class="panel"><div class="panel-body">${lista.length ? renderTabelaABC(lista, 'Cliente') : `<div class="empty">Nenhuma receita recebida nesse período.</div>`}</div></div>
     ${comScore.length ? `
@@ -7080,6 +7207,39 @@ function calcDepreciacao(a){
   return { valorAtual, depreciacaoAcumulada, depreciacaoAnual, pctDepreciado, totalmenteDepreciado, valorDepreciavel, baseValor, baseData, reavaliado: !!ultimaReaval };
 }
 function totalAtivosPatrimoniais(){ return state.ativosPatrimoniais.filter(a=>!a.baixa).reduce((s,a)=>s+calcDepreciacao(a).valorAtual, 0); }
+
+function depreciacaoMensal(){
+  return state.ativosPatrimoniais.filter(a=>!a.baixa).reduce((s,a)=>{
+    const d = calcDepreciacao(a);
+    return s + (d.totalmenteDepreciado ? 0 : d.depreciacaoAnual/12);
+  }, 0);
+}
+// Receita/despesa/lucro operacional (exclui transferência, aporte de investimento, e categorias
+// marcadas como financeiras) — mesma régua usada no DRE, só que devolvendo números crus em vez de HTML,
+// pra reaproveitar em cards/rankings sem duplicar toda a lógica de novo.
+function resultadoOperacionalPeriodo(de, ate){
+  const nomesFinReceita = (state.categorias.entrada||[]).filter(c=>c.ehFinanceira).map(c=>c.nome);
+  const nomesFinDespesa = (state.categorias.saida||[]).filter(c=>c.ehFinanceira).map(c=>c.nome);
+  const ehFinanceira = (nomesPai, k) => nomesPai.some(p=>k===p || k.startsWith(p+' / '));
+  const eventos = movimentosRealizados().filter(ev=>ev.data && ev.data>=de && ev.data<=ate && ev.origem!=='transferencia' && !(ev.categoria==='Investimentos' && ev.origem==='investimento'));
+  const receitaOp = eventos.filter(ev=>ev.tipo==='entrada' && !ehFinanceira(nomesFinReceita, ev.categoria||'')).reduce((s,ev)=>s+ev.valor,0);
+  const despesaOp = eventos.filter(ev=>ev.tipo==='saida' && !ehFinanceira(nomesFinDespesa, ev.categoria||'')).reduce((s,ev)=>s+ev.valor,0);
+  const receitaTotal = eventos.filter(ev=>ev.tipo==='entrada').reduce((s,ev)=>s+ev.valor,0);
+  const despesaTotal = eventos.filter(ev=>ev.tipo==='saida').reduce((s,ev)=>s+ev.valor,0);
+  return { receitaOp, despesaOp, resultadoOp: receitaOp-despesaOp, receitaTotal, despesaTotal, lucroLiquido: receitaTotal-despesaTotal };
+}
+function ebitdaPeriodo(de, ate, mesesNoPeriodo){
+  const { resultadoOp } = resultadoOperacionalPeriodo(de, ate);
+  const deprec = depreciacaoMensal() * (mesesNoPeriodo||1);
+  return resultadoOp + deprec;
+}
+// 🟢🟡🔴 — semáforo simples: valor >= limiteVerde é verde, >= limiteAmarelo é amarelo, senão vermelho.
+// Se inverso=true (ex: inadimplência, onde MENOR é melhor), inverte a lógica.
+function semaforo(valor, limiteVerde, limiteAmarelo, inverso){
+  if(valor==null || isNaN(valor)) return '⚪';
+  if(inverso) return valor<=limiteVerde ? '🟢' : valor<=limiteAmarelo ? '🟡' : '🔴';
+  return valor>=limiteVerde ? '🟢' : valor>=limiteAmarelo ? '🟡' : '🔴';
+}
 
 function viewAtivosPatrimoniais(){
   const totalAquisicao = state.ativosPatrimoniais.reduce((s,a)=>s+a.valorAquisicao,0);
@@ -9888,6 +10048,7 @@ function attachViewHandlers(){
         relatorioAtivo==='aging' ? renderAging() :
         relatorioAtivo==='dfc' ? renderDFC() :
         relatorioAtivo==='cartoes' ? renderRelatorioCartoes() :
+        relatorioAtivo==='executivo' ? renderDashboardExecutivo() :
         relatorioAtivo==='abc_clientes' ? renderRelatorioABCClientes() :
         relatorioAtivo==='abc_despesas' ? renderRelatorioABCDespesas() :
         relatorioAtivo==='abc_fornecedores' ? renderRelatorioABCFornecedores() :
