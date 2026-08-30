@@ -5284,6 +5284,7 @@ function viewRelatorios(){
     { id:'dre', icone:'📊', nome:'DRE', desc:'Demonstrativo de resultado, com análise vertical e horizontal' },
     { id:'balanco', icone:'⚖️', nome:'Balanço Patrimonial', desc:'Ativos, passivos e patrimônio líquido' },
     { id:'indicadores', icone:'📈', nome:'Indicadores Financeiros', desc:'Margem, liquidez, ticket médio, ponto de equilíbrio e mais' },
+    { id:'custos_margem_produtos', icone:'🧮', nome:'Custos e Margem de Produtos', desc:'Custo de produção (vindo do VK Industrial) cruzado com outras despesas do produto (juros, energia, comissão etc.) lançadas aqui', viewDireta:'custos-margem-produtos' },
     { id:'produto', icone:'🍪', nome:'Rentabilidade por Produto', desc:'Receita, custo e margem por produto ou linha' },
     { id:'investimentos', icone:'💰', nome:'Relatório de Investimentos', desc:'Total aplicado no mês (renda fixa + variável), ativos mais investidos e custos das operações' },
     { id:'liquidez', icone:'💧', nome:'Índices de Liquidez', desc:'Liquidez imediata, seca, corrente e geral + capital de giro, endividamento e solvência' },
@@ -5312,7 +5313,7 @@ function viewRelatorios(){
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px;">
       ${cards.map(c=>`
-        <div class="more-item" data-action="abrir-relatorio" data-relatorio="${c.id}" style="flex-direction:row;text-align:left;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;">
+        <div class="more-item" ${c.viewDireta ? `data-goto="${c.viewDireta}"` : `data-action="abrir-relatorio" data-relatorio="${c.id}"`} style="flex-direction:row;text-align:left;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;">
           <span style="font-size:22px;flex-shrink:0;">${c.icone}</span>
           <div style="min-width:0;">
             <div style="font-weight:600;font-size:13px;">${c.nome}</div>
@@ -11753,7 +11754,11 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     ` : ''}
     <div class="field">
       <label>Produto / linha (opcional — pra ver rentabilidade por produto nos relatórios)</label>
-      <input type="text" id="fProduto" value="${existing?.produtoTag ? escapeHTML(existing.produtoTag) : ''}" placeholder="Ex: Biscoito Amanteigado, Bolacha Recheada...">
+      <input type="text" id="fProduto" list="fProdutoLista" value="${existing?.produtoTag ? escapeHTML(existing.produtoTag) : ''}" placeholder="Ex: Biscoito Amanteigado, Bolacha Recheada...">
+      <datalist id="fProdutoLista">
+        ${(state.custosProdutosVK||[]).map(c=>`<option value="${escapeHTML(c.nome)}">`).join('')}
+      </datalist>
+      ${(state.custosProdutosVK||[]).length ? `<div class="note" style="margin-top:6px;">Escolha um nome da lista (produtos já sincronizados do VK Industrial) pra bater certinho com a tela "Custos e Margem de Produtos" — digitar diferente (mesmo que pareça igual) não vai casar com o produto de lá.</div>` : ''}
     </div>
     ${tipo==='entrada' ? `
     <div class="field">
