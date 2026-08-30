@@ -4825,6 +4825,14 @@ function parseNotaCorretagem(linhas){
   const dm = (linhaData || texto).match(/(\d{2}\/\d{2}\/\d{4})/);
   if(dm) dataPregao = dm[1].split('/').reverse().join('-');
 
+  // Número da nota — costuma aparecer como "Nr. nota", "N° Nota", "Nota de Negociação Nº" etc.
+  let numeroNota = '';
+  const linhaNumNota = linhas.find(l=>/n[ºor°]\.?\s*(da\s*)?nota|nota\s*n[ºor°]/i.test(l));
+  if(linhaNumNota){
+    const nm = linhaNumNota.match(/(\d{3,10})/);
+    if(nm) numeroNota = nm[1];
+  }
+
   const taxas = {
     corretagem: valorNaLinhaContendo(/\bcorretagem\b/i),
     liquidacao: valorNaLinhaContendo(/taxa de liquida[çc][ãa]o/i),
@@ -4836,7 +4844,7 @@ function parseNotaCorretagem(linhas){
   };
   const liquido = valorNaLinhaContendo(/l[ií]quido\s+para/i);
 
-  return { dataPregao, operacoes, taxas, liquido };
+  return { dataPregao, numeroNota, operacoes, taxas, liquido };
 }
 
 // Fatura de cartão: extrai linhas "dd/mm  descrição  valor" — formato comum à maioria
@@ -13290,7 +13298,10 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
         <div class="field"><label>Data de débito na conta</label><input type="date" id="notaDataDebito"></div>
       </div>
       <div class="note" style="margin-top:0;">A data de débito é quando o valor realmente sai (ou entra) da conta bancária — na B3 a liquidação normalmente é 2 dias úteis depois do pregão. Se cair no futuro, o lançamento fica como pendente até lá.</div>
-      <div class="field"><label>Corretora</label><input type="text" id="notaCorretora" placeholder="Ex: XP Investimentos"></div>
+      <div class="field-row">
+        <div class="field"><label>Nº da nota</label><input type="text" id="notaNumero" placeholder="Ex: 12345"></div>
+        <div class="field"><label>Corretora</label><input type="text" id="notaCorretora" placeholder="Ex: XP Investimentos"></div>
+      </div>
       <label style="font-size:12.5px;font-weight:600;display:block;margin:10px 0 6px;">Operações identificadas</label>
       <div id="notaOperacoesTable"></div>
       <button type="button" class="btn ghost sm" id="btnAdicionarLinhaOp" style="margin-top:8px;">+ Adicionar linha</button>
@@ -13497,6 +13508,7 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     dataPregao: document.getElementById('notaData').value || todayISO(),
     dataDebito: document.getElementById('notaDataDebito').value || document.getElementById('notaData').value || todayISO(),
     corretora: document.getElementById('notaCorretora').value.trim(),
+    numeroNota: document.getElementById('notaNumero').value.trim(),
     operacoes: lerOperacoesDoDOM(),
     taxas: {
       corretagem: numBR(document.getElementById('notaTxCorretagem').value) || 0,
@@ -13517,6 +13529,7 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     document.getElementById('notaData').value = notaEmRevisao.dataPregao || todayISO();
     document.getElementById('notaDataDebito').value = notaEmRevisao.dataDebito || addDiasUteis(notaEmRevisao.dataPregao, 2);
     document.getElementById('notaCorretora').value = notaEmRevisao.corretora || '';
+    document.getElementById('notaNumero').value = notaEmRevisao.numeroNota || '';
     const t = notaEmRevisao.taxas || {};
     document.getElementById('notaTxCorretagem').value = t.corretagem || 0;
     document.getElementById('notaTxLiquidacao').value = t.liquidacao || 0;
@@ -13561,6 +13574,7 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
       operacoesAtuais = dados.operacoes;
       document.getElementById('notaData').value = dados.dataPregao;
       document.getElementById('notaDataDebito').value = addDiasUteis(dados.dataPregao, 2);
+      document.getElementById('notaNumero').value = dados.numeroNota || '';
       document.getElementById('notaTxCorretagem').value = dados.taxas.corretagem || 0;
       document.getElementById('notaTxLiquidacao').value = dados.taxas.liquidacao || 0;
       document.getElementById('notaTxEmolumentos').value = dados.taxas.emolumentos || 0;
@@ -13683,23 +13697,26 @@ function publicarNotaCorretagem(nota){
     }
   });
 
+  const numeroNota = (nota.numeroNota||'').trim();
+  const sufixoNota = numeroNota ? ` — Nota N° ${numeroNota}` : '';
+
   if(totalCompras>0){
     state.lancamentos.push({
       id: uid(), tipo:'saida', categoria:'Investimentos',
-      descricao: `Compra de ativos${corretora ? ' — '+corretora : ''} (nota de corretagem)`,
+      descricao: `Compra de ativos${corretora ? ' — '+corretora : ''} (nota de corretagem)${sufixoNota}`,
       valor: Math.round(totalCompras*100)/100, contaId: contaBancariaId, status: statusSaida,
       dataVencimento: dataDebito, dataPagamento,
-      origem:'investimento', observacao: 'Operações: '+linhas.filter(l=>l.tipo==='C').map(l=>`${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', '),
+      origem:'investimento', numeroNota: numeroNota||null, observacao: 'Operações: '+linhas.filter(l=>l.tipo==='C').map(l=>`${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', '),
       criadoEm: new Date().toISOString()
     });
   }
   if(totalVendas>0){
     state.lancamentos.push({
       id: uid(), tipo:'entrada', categoria:'Outros',
-      descricao: `Venda de ativos${corretora ? ' — '+corretora : ''} (nota de corretagem)`,
+      descricao: `Venda de ativos${corretora ? ' — '+corretora : ''} (nota de corretagem)${sufixoNota}`,
       valor: Math.round(totalVendas*100)/100, contaId: contaBancariaId, status: statusEntrada,
       dataVencimento: dataDebito, dataPagamento,
-      origem:'investimento', observacao: 'Operações: '+linhas.filter(l=>l.tipo==='V').map(l=>`${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', '),
+      origem:'investimento', numeroNota: numeroNota||null, observacao: 'Operações: '+linhas.filter(l=>l.tipo==='V').map(l=>`${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', '),
       criadoEm: new Date().toISOString()
     });
   }
@@ -13707,17 +13724,17 @@ function publicarNotaCorretagem(nota){
     if(ganhoPerdaCapital>0){
       state.lancamentos.push({
         id: uid(), tipo:'entrada', categoria:'Rendimentos',
-        descricao: `Ganho de capital${corretora ? ' — '+corretora : ''} (nota de corretagem)`,
+        descricao: `Ganho de capital${corretora ? ' — '+corretora : ''} (nota de corretagem)${sufixoNota}`,
         valor: Math.round(ganhoPerdaCapital*100)/100, contaId: contaBancariaId, status: statusEntrada,
-        dataVencimento: dataDebito, dataPagamento,
+        dataVencimento: dataDebito, dataPagamento, numeroNota: numeroNota||null,
         criadoEm: new Date().toISOString()
       });
     } else {
       state.lancamentos.push({
         id: uid(), tipo:'saida', categoria:'Despesas Financeiras',
-        descricao: `Perda de capital${corretora ? ' — '+corretora : ''} (nota de corretagem)`,
+        descricao: `Perda de capital${corretora ? ' — '+corretora : ''} (nota de corretagem)${sufixoNota}`,
         valor: Math.round(Math.abs(ganhoPerdaCapital)*100)/100, contaId: contaBancariaId, status: statusSaida,
-        dataVencimento: dataDebito, dataPagamento,
+        dataVencimento: dataDebito, dataPagamento, numeroNota: numeroNota||null,
         criadoEm: new Date().toISOString()
       });
     }
@@ -13729,17 +13746,17 @@ function publicarNotaCorretagem(nota){
     garantirCategoriasNotaCorretagem();
     const baseCusto = {
       tipo:'saida', contaId: contaBancariaId, status: statusSaida,
-      dataVencimento: dataDebito, dataPagamento,
+      dataVencimento: dataDebito, dataPagamento, numeroNota: numeroNota||null,
       origem:'investimento', criadoEm: new Date().toISOString()
     };
     if(taxaLiquidacao>0){
       state.lancamentos.push({ ...baseCusto, id: uid(), categoria:'Investimentos / Taxa de Liquidação',
-        descricao: `Taxa de liquidação — nota de corretagem${corretora ? ' — '+corretora : ''}`,
+        descricao: `Taxa de liquidação — nota de corretagem${corretora ? ' — '+corretora : ''}${sufixoNota}`,
         valor: Math.round(taxaLiquidacao*100)/100, observacao: `Liquidação: ${brl(taxaLiquidacao)}` });
     }
     if(taxaEmolumentos>0){
       state.lancamentos.push({ ...baseCusto, id: uid(), categoria:'Investimentos / Emolumentos',
-        descricao: `Emolumentos — nota de corretagem${corretora ? ' — '+corretora : ''}`,
+        descricao: `Emolumentos — nota de corretagem${corretora ? ' — '+corretora : ''}${sufixoNota}`,
         valor: Math.round(taxaEmolumentos*100)/100, observacao: `Emolumentos: ${brl(taxaEmolumentos)}` });
     }
     const tarifasDiversas = Math.round((taxaCorretagem + taxaRegistro + taxaIss + taxaOutras + irrf)*100)/100;
@@ -13751,7 +13768,7 @@ function publicarNotaCorretagem(nota){
       if(taxaOutras) partes.push(`Outras: ${brl(taxaOutras)}`);
       if(irrf) partes.push(`IRRF: ${brl(irrf)}`);
       state.lancamentos.push({ ...baseCusto, id: uid(), categoria:'Investimentos / Tarifas Diversas B3',
-        descricao: `Tarifas diversas B3 — nota de corretagem${corretora ? ' — '+corretora : ''}`,
+        descricao: `Tarifas diversas B3 — nota de corretagem${corretora ? ' — '+corretora : ''}${sufixoNota}`,
         valor: tarifasDiversas, observacao: partes.join(' · ') });
     }
   }
