@@ -1628,8 +1628,14 @@ async function sincronizarPedidosVK(){
 
     pedidos.forEach(p=>{
       const ehBonificacao = p.bonificacao===true || p.isBonificacao===true || p.tipoPedido==='bonificacao' || p.tipo==='bonificacao';
+      // "Vendas Diretas" — pedido sem cliente identificado, feito direto (ex: balcão). Campo ainda não
+      // existe no VK Industrial (combinado, mas não implementado lá) — detecta por qualquer um desses
+      // nomes prováveis, documentado também na tela de configuração da integração.
+      const ehVendaDireta = p.vendaDireta===true || p.isVendaDireta===true || p.tipoPedido==='venda_direta' || p.tipo==='venda_direta';
+      const pagamentoJaRealizado = p.pagamentoRealizado===true || p.jaPago===true || p.pagoNoAto===true;
       const cliente = clientes.find(c=>c.id===p.clienteId);
-      const descricaoPedido = `Pedido N° ${p.numero}`;
+      const nomeContraparte = cliente ? cliente.nome : (ehVendaDireta ? 'Venda Direta' : '');
+      const descricaoPedido = `Pedido N° ${p.numero}${ehVendaDireta ? ' 🏷️ Venda Direta' : ''}`;
       const existenteAntigo = `Pedido N° ${p.numero}${cliente ? ' — '+cliente.nome : ''}`;
       // Prioriza o ID único do pedido (vkPedidoId) — é o único jeito confiável de saber que é o MESMO pedido.
       // O match por texto da descrição só serve de fallback pra lançamentos bem antigos que nunca tiveram
@@ -1706,7 +1712,7 @@ async function sincronizarPedidosVK(){
           }
         }
       }
-      const observacaoNova = `Cliente: ${cliente ? cliente.nome : '—'}\nItens: ${itensTexto || '—'}`;
+      const observacaoNova = `Cliente: ${nomeContraparte || '—'}\nItens: ${itensTexto || '—'}${pagamentoJaRealizado ? '\n💰 Pagamento já realizado no ato (venda direta)' : ''}`;
       const vencimentoNovo = p.dataEntrega || todayISO();
       const descontoConcedido = Number(p.desconto ?? p.valorDesconto ?? p.descontoValor ?? 0) || 0;
 
@@ -1740,11 +1746,11 @@ async function sincronizarPedidosVK(){
         if(existente.vendedorId!==vendedorId || existente.vendedorNome!==vendedorNome){
           existente.vendedorId = vendedorId; existente.vendedorNome = vendedorNome;
         }
-        const mudou = existente.valor!==p.valorTotal || existente.fornecedor!==(cliente?cliente.nome:'') || existente.dataVencimento!==vencimentoNovo || existente.observacao!==observacaoNova || (existente.descontoConcedido||0)!==descontoConcedido;
+        const mudou = existente.valor!==p.valorTotal || existente.fornecedor!==nomeContraparte || existente.dataVencimento!==vencimentoNovo || existente.observacao!==observacaoNova || (existente.descontoConcedido||0)!==descontoConcedido;
         if(mudou){
           if(existente.status==='pendente'){
             existente.valor = p.valorTotal;
-            existente.fornecedor = cliente ? cliente.nome : '';
+            existente.fornecedor = nomeContraparte;
             existente.dataVencimento = vencimentoNovo;
             existente.observacao = observacaoNova;
             existente.descontoConcedido = descontoConcedido;
@@ -1761,13 +1767,16 @@ async function sincronizarPedidosVK(){
         if(emAprovacao.vendedorId!==vendedorId || emAprovacao.vendedorNome!==vendedorNome){
           emAprovacao.vendedorId = vendedorId; emAprovacao.vendedorNome = vendedorNome;
         }
-        const mudouAprov = emAprovacao.valor!==p.valorTotal || emAprovacao.contraparte!==(cliente?cliente.nome:'') || emAprovacao.dataVencimento!==vencimentoNovo || emAprovacao.observacao!==observacaoNova || (emAprovacao.descontoConcedido||0)!==descontoConcedido;
+        const mudouAprov = emAprovacao.valor!==p.valorTotal || emAprovacao.contraparte!==nomeContraparte || emAprovacao.dataVencimento!==vencimentoNovo || emAprovacao.observacao!==observacaoNova || (emAprovacao.descontoConcedido||0)!==descontoConcedido || !!emAprovacao.vendaDireta!==ehVendaDireta || !!emAprovacao.pagamentoJaRealizado!==pagamentoJaRealizado;
         if(mudouAprov){
           emAprovacao.valor = p.valorTotal;
-          emAprovacao.contraparte = cliente ? cliente.nome : '';
+          emAprovacao.contraparte = nomeContraparte;
           emAprovacao.dataVencimento = vencimentoNovo;
           emAprovacao.observacao = observacaoNova;
           emAprovacao.descontoConcedido = descontoConcedido;
+          emAprovacao.descricao = descricaoPedido;
+          emAprovacao.vendaDireta = ehVendaDireta;
+          emAprovacao.pagamentoJaRealizado = pagamentoJaRealizado;
           atualizadosAprovacao++;
         }
         return;
@@ -1777,12 +1786,14 @@ async function sincronizarPedidosVK(){
         id: uid(), tipo:'pedido', vkPedidoId: p.id,
         descricao: descricaoPedido,
         valor: p.valorTotal,
-        contraparte: cliente ? cliente.nome : '',
+        contraparte: nomeContraparte,
         observacao: observacaoNova,
         dataVencimento: vencimentoNovo,
         categoria: cfg.categoria || 'Vendas',
         vendedorId, vendedorNome,
         descontoConcedido,
+        vendaDireta: ehVendaDireta,
+        pagamentoJaRealizado,
         criadoEm: new Date().toISOString()
       });
       novos++;
@@ -8756,6 +8767,20 @@ function viewVK(){
     </details>
 
     <details class="panel-details">
+      <summary>Esquema esperado — Vendas Diretas (ainda precisa ser feito do lado do VK Industrial)</summary>
+      <div style="padding:16px 20px;font-size:12px;color:var(--text-soft);line-height:1.7;">
+        Também é peça pra construir <strong>do lado do VK Industrial</strong>: um modelo de pedido sem cliente identificado, pra venda direta (ex: balcão). A ideia é que continue usando a mesma coleção <span class="mono">pedidos</span> e a mesma numeração de sempre — só precisa vir com esses campos a mais:
+        <pre class="mono" style="background:var(--bone);padding:10px 12px;border-radius:8px;margin:8px 0;white-space:pre-wrap;font-size:11px;">{
+  // campos que já existem no pedido continuam iguais (numero, valorTotal, itens, representanteId...)
+  clienteId: null,                  // sem cliente identificado, tudo bem deixar vazio/nulo
+  vendaDireta: boolean,             // true pra identificar que é venda direta (etiqueta 🏷️ aqui no Livro Caixa)
+  pagamentoRealizado: boolean       // true quando o pagamento já foi feito no ato da venda
+}</pre>
+        Assim que esses campos existirem, a sincronização de pedidos aqui já detecta sozinha: marca o pedido com a etiqueta "🏷️ Venda Direta", troca "Cliente: —" por "Cliente: Venda Direta" na observação, e — se <span class="mono">pagamentoRealizado</span> vier true — oferece na tela de aprovação um campo pra escolher em qual conta bancária o dinheiro entrou, lançando já como recebido em vez de pendente (ou deixa pendente pra confirmar depois, se preferir). Não precisa de nenhuma sincronização nova, é a mesma que já existe pra pedidos normais.
+      </div>
+    </details>
+
+    <details class="panel-details">
       <summary>Esquema esperado — Custos e Margem de Produtos</summary>
       <div style="padding:16px 20px;font-size:12px;color:var(--text-soft);line-height:1.7;">
         Essa sincronização lê três coleções do mesmo projeto <span class="mono">vk-provisorio</span>: <span class="mono">produtos</span>, <span class="mono">fichasTecnicas</span> e <span class="mono">insumos</span> (essa última já usada na sincronização de estoque, aqui é só pra pegar o preço médio de cada insumo):
@@ -8800,13 +8825,22 @@ function viewVKAprovacoes(){
         <div class="panel-body" style="padding:18px 20px;">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
             <div>
-              <div style="font-weight:600;font-size:14px;">${escapeHTML(item.descricao)}${item.semNF ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;">⚠️ sem NF</span>' : ''}</div>
+              <div style="font-weight:600;font-size:14px;">${escapeHTML(item.descricao)}${item.semNF ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;">⚠️ sem NF</span>' : ''}${item.vendaDireta ? ' <span style="color:var(--blue-accent);font-size:11px;font-weight:600;">🏷️ Venda Direta</span>' : ''}</div>
               <div style="font-size:12px;color:var(--text-soft);margin-top:2px;">${ehPedido?'Cliente':'Fornecedor'}: ${escapeHTML(item.contraparte||'—')} · Vencimento: ${fmtDate(item.dataVencimento)}</div>
               ${item.descontoConcedido>0 ? `<div style="font-size:11.5px;color:var(--warn);margin-top:2px;">Valor bruto ${brl(item.valor+item.descontoConcedido)} − desconto ${brl(item.descontoConcedido)}</div>` : ''}
             </div>
             <div class="mono" style="font-weight:700;font-size:16px;color:${ehPedido?'var(--success)':'var(--danger)'};">${ehPedido?'+':'-'} ${brl(item.valor)}</div>
           </div>
           ${item.observacao ? `<div class="note" style="margin:12px 0 0;white-space:pre-wrap;">${escapeHTML(item.observacao)}</div>` : ''}
+          ${ehPedido && item.pagamentoJaRealizado ? `
+          <div class="field" style="margin-top:14px;max-width:340px;">
+            <label>💰 Pagamento já realizado — em qual conta entrou?</label>
+            <select id="aprovContaRecebida_${item.id}">
+              <option value="">Deixar pendente (confirmo depois)</option>
+              ${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}
+            </select>
+          </div>
+          ` : ''}
           ${!ehPedido && item.itens && item.itens.length>1 ? `
           <div style="margin-top:14px;">
             <label style="font-size:12.5px;font-weight:600;color:var(--text-soft);">Categoria de cada item (${item.itens.length} itens)</label>
@@ -8983,17 +9017,21 @@ function aprovarItemVK(id){
   const cfg = state.vkConfig;
 
   if(item.tipo==='pedido'){
+    const contaRecebidaEl = document.getElementById('aprovContaRecebida_'+id);
+    const contaRecebidaId = contaRecebidaEl ? contaRecebidaEl.value : '';
+    const jaMarcarRecebido = !!contaRecebidaId;
     state.lancamentos.push({
       id: uid(), tipo:'entrada', categoria,
       descricao: item.descricao, valor: item.valor, fornecedor: item.contraparte,
-      observacao: item.observacao, contaId: null, dataVencimento: item.dataVencimento,
-      status: 'pendente', dataPagamento: null,
+      observacao: item.observacao, contaId: jaMarcarRecebido ? contaRecebidaId : null, dataVencimento: item.dataVencimento,
+      status: jaMarcarRecebido ? 'recebido' : 'pendente', dataPagamento: jaMarcarRecebido ? todayISO() : null,
       origem: 'vk', vkPedidoId: item.vkPedidoId,
       vendedorId: item.vendedorId, vendedorNome: item.vendedorNome,
       descontoConcedido: item.descontoConcedido || 0,
+      vendaDireta: !!item.vendaDireta,
       criadoEm: new Date().toISOString()
     });
-    registrarLog('Pedido VK aprovado', `"${item.descricao}" — ${brl(item.valor)}`);
+    registrarLog('Pedido VK aprovado', `"${item.descricao}" — ${brl(item.valor)}${jaMarcarRecebido?' — já marcado como recebido':''}`);
   } else {
     const ehCartaoEl = document.getElementById('aprovCartaoToggle_'+id) || document.querySelector(`.aprov-cartao-toggle[data-id="${id}"]`);
     const ehCartao = ehCartaoEl ? ehCartaoEl.checked : false;
