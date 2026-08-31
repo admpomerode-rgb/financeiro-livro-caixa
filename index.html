@@ -7616,6 +7616,27 @@ function viewAtivoPatrimonialDetalhe(id){
       </div>
     </div>` : ''}
 
+    ${!a.baixa && a.sugestaoBaixa ? `
+    <div class="panel alerta-panel">
+      <div class="alerta-linha atrasado" style="align-items:flex-start;">
+        <span>⚠️ <strong>Sugestão de baixa</strong> vinda do processo ${a.sugestaoBaixa.processoNome ? escapeHTML(a.sugestaoBaixa.processoNome) : ''} (${fmtDate(a.sugestaoBaixa.data)}): ${escapeHTML(a.sugestaoBaixa.motivo)}</span>
+      </div>
+      <div style="padding:0 20px 14px;display:flex;gap:8px;">
+        <button class="btn sm" id="btnConfirmarSugestaoBaixa">Confirmar baixa</button>
+        <button class="btn ghost sm" id="btnDescartarSugestaoBaixa">Descartar sugestão</button>
+      </div>
+    </div>` : ''}
+
+    ${!a.baixa && a.emObservacao ? `
+    <div class="panel alerta-panel">
+      <div class="alerta-linha" style="align-items:flex-start;background:rgba(202,138,4,0.08);">
+        <span>👁️ <strong>Em observação</strong> — vindo do processo ${a.emObservacao.processoNome ? escapeHTML(a.emObservacao.processoNome) : ''} (${fmtDate(a.emObservacao.data)}): ${escapeHTML(a.emObservacao.motivo)}</span>
+      </div>
+      <div style="padding:0 20px 14px;">
+        <button class="btn ghost sm" id="btnLimparObservacao">Remover sinalização</button>
+      </div>
+    </div>` : ''}
+
     <div class="cards">
       <div class="card"><div class="label">Valor de aquisição</div><div class="value mono">${brl(a.valorAquisicao)}</div></div>
       <div class="card"><div class="label">Depreciação acumulada</div><div class="value mono neg">${brl(d.depreciacaoAcumulada)}</div></div>
@@ -7884,19 +7905,20 @@ function openOcorrenciaModal(ativo){
   });
 }
 
-function openBaixaModal(ativo){
+function openBaixaModal(ativo, prefill){
+  prefill = prefill || {};
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
     <h3>Dar baixa — ${escapeHTML(ativo.nome)}</h3>
     <div class="field">
       <label>Motivo</label>
-      <select id="bxMotivo">${MOTIVOS_BAIXA.map(m=>`<option>${m}</option>`).join('')}</select>
+      <select id="bxMotivo">${MOTIVOS_BAIXA.map(m=>`<option ${prefill.motivo===m?'selected':''}>${m}</option>`).join('')}</select>
     </div>
     <div class="field-row">
       <div class="field"><label>Data</label><input type="date" id="bxData" value="${todayISO()}"></div>
       <div class="field" id="bxValorGrupo" style="display:none;"><label>Valor de venda (R$)</label><input type="text" inputmode="decimal" id="bxValor" placeholder="0,00"></div>
     </div>
-    <div class="field"><label>Observação (opcional)</label><input type="text" id="bxObservacao" placeholder="Detalhes sobre a baixa"></div>
+    <div class="field"><label>Observação (opcional)</label><input type="text" id="bxObservacao" placeholder="Detalhes sobre a baixa" value="${escapeHTML(prefill.observacao||'')}"></div>
     <div id="bxContaGrupoWrap" style="display:none;">
       <div class="field">
         <label style="display:flex;align-items:center;gap:8px;font-weight:500;"><input type="checkbox" id="bxRegistrarEntrada" style="width:auto;"> Registrar entrada do valor de venda em uma conta bancária</label>
@@ -7931,6 +7953,7 @@ function openBaixaModal(ativo){
     const valorVenda = valorVendaRaw ? numBR(valorVendaRaw) : 0;
     if(!confirm(`Confirmar baixa deste ativo por motivo "${motivo}"? Essa ação marca o ativo como baixado.`)) return;
     ativo.baixa = { motivo, data, observacao, valorVenda: motivo==='Venda' ? valorVenda : 0 };
+    if(ativo.sugestaoBaixa) ativo.sugestaoBaixa = null;
     if(motivo==='Venda' && valorVenda>0 && chkEntrada.checked){
       const contaId = document.getElementById('bxConta').value;
       state.lancamentos.push({
@@ -8624,6 +8647,19 @@ async function sincronizarProcessos(){
         texto: p.decisaoFinal, data: p.dataDecisao || todayISO(), origem: 'processo'
       });
       novasOcorrencias++;
+      // Item pedido pelo usuário: a decisão do processo pode pedir uma ação automática
+      // na ficha do ativo além de só registrar o histórico acima.
+      if(p.patrimonioAcao === 'observacao'){
+        ativo.emObservacao = {
+          motivo: p.decisaoFinal, processoId: p.id, processoNome: p.titulo || p.nome || '',
+          data: p.dataDecisao || todayISO()
+        };
+      } else if(p.patrimonioAcao === 'sugerir_baixa'){
+        ativo.sugestaoBaixa = {
+          motivo: p.decisaoFinal, processoId: p.id, processoNome: p.titulo || p.nome || '',
+          data: p.dataDecisao || todayISO()
+        };
+      }
     });
 
     // Orçamentos pedidos dentro de um processo — viram fila de aprovação aqui.
@@ -8760,9 +8796,10 @@ function viewProcessosConfig(){
   decisaoFinal: "Balança fica em uso — defeito registrado na ficha",
   dataDecisao: "2026-07-27",
   ativoPatrimonialId: "&lt;id do ativo no Livro Caixa, se souber&gt;",
-  ativoNome: "Balança" (alternativa, se não tiver o id — o sistema tenta achar pelo nome)
+  ativoNome: "Balança" (alternativa, se não tiver o id — o sistema tenta achar pelo nome),
+  patrimonioAcao: "historico" | "observacao" | "sugerir_baixa"  // opcional, padrão é só "historico"
 }</div>
-        Quando <code>status</code> for <strong>decidido</strong>, <strong>finalizado</strong> ou <strong>concluido</strong> e tiver <code>decisaoFinal</code> preenchido, essa decisão vira automaticamente uma ocorrência na ficha do ativo correspondente, sem duplicar em sincronizações futuras.
+        Quando <code>status</code> for <strong>decidido</strong>, <strong>finalizado</strong> ou <strong>concluido</strong> e tiver <code>decisaoFinal</code> preenchido, essa decisão vira automaticamente uma ocorrência na ficha do ativo correspondente, sem duplicar em sincronizações futuras. Se <code>patrimonioAcao</code> vier como <strong>"observacao"</strong>, a ficha ganha um aviso "Em observação" (só visual, sem afetar valores). Se vier como <strong>"sugerir_baixa"</strong>, aparece um aviso de sugestão de baixa pendente de confirmação — nada é baixado automaticamente, é preciso confirmar manualmente na ficha do ativo (isso preenche o formulário de baixa já com o motivo, mas quem confirma valores e datas é sempre uma pessoa).
       </div>
     </div>
     <div class="panel">
@@ -11080,6 +11117,19 @@ function attachViewHandlers(){
       });
     });
     document.getElementById('btnDarBaixa')?.addEventListener('click', ()=>openBaixaModal(ativoDetalheAtual));
+    document.getElementById('btnConfirmarSugestaoBaixa')?.addEventListener('click', ()=>{
+      const s = ativoDetalheAtual.sugestaoBaixa;
+      openBaixaModal(ativoDetalheAtual, { observacao: s ? s.motivo : '' });
+    });
+    document.getElementById('btnDescartarSugestaoBaixa')?.addEventListener('click', ()=>{
+      if(!confirm('Descartar esta sugestão de baixa? O ativo continua ativo normalmente.')) return;
+      ativoDetalheAtual.sugestaoBaixa = null;
+      persist(); render(); showToast('Sugestão descartada');
+    });
+    document.getElementById('btnLimparObservacao')?.addEventListener('click', ()=>{
+      ativoDetalheAtual.emObservacao = null;
+      persist(); render(); showToast('Sinalização removida');
+    });
     document.getElementById('btnReverterBaixa')?.addEventListener('click', ()=>{
       if(!confirm('Reverter a baixa deste ativo? Ele volta a ser contado como ativo normalmente.')) return;
       ativoDetalheAtual.baixa = null;
