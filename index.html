@@ -5287,6 +5287,7 @@ function viewIntegracoes(){
 
 function viewRelatorios(){
   const cards = [
+    { id:'gerencial', icone:'📊', nome:'Dashboard Gerencial', desc:'Visão anual completa — receita/despesa por mês, saídas e entradas por categoria, margem de contribuição, lucro e ponto de equilíbrio' },
     { id:'executivo', icone:'🧭', nome:'Dashboard Executivo', desc:'Resumo visual com semáforos — receita, lucro, EBITDA, margem, evolução mensal e top clientes/categorias' },
     { id:'mensal', icone:'📅', nome:'Super Relatório Mensal', desc:'Tudo sobre o mês — DRE, indicadores, orçamento, alertas — num relatório só' },
     { id:'dre', icone:'📊', nome:'DRE', desc:'Demonstrativo de resultado, com análise vertical e horizontal' },
@@ -5334,7 +5335,7 @@ function viewRelatorios(){
 }
 
 const RELATORIOS_NOMES = {
-  executivo:'Dashboard Executivo', dre:'DRE', balanco:'Balanço Patrimonial', mei:'Declaração MEI', indicadores:'Indicadores Financeiros',
+  gerencial:'Dashboard Gerencial', executivo:'Dashboard Executivo', dre:'DRE', balanco:'Balanço Patrimonial', mei:'Declaração MEI', indicadores:'Indicadores Financeiros',
   produto:'Rentabilidade por Produto', investimentos:'Relatório de Investimentos', liquidez:'Índices de Liquidez', aging:'Aging — Vencidos por Faixa', dfc:'DFC — Fluxo de Caixa', cartoes:'Cartões de Crédito',
   abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações'
 };
@@ -6723,6 +6724,190 @@ function scoreCreditoCliente(nome){
   const nivel = score>=85 ? 'Ótimo' : score>=65 ? 'Bom' : score>=40 ? 'Atenção' : 'Ruim';
   const cor = score>=85 ? 'var(--success)' : score>=65 ? 'var(--success)' : score>=40 ? 'var(--warn)' : 'var(--danger)';
   return { score, nivel, cor, total, pontuais, atrasadas, atrasoMedio };
+}
+
+// Receita, despesa, custo fixo/variável, margem de contribuição e ponto de equilíbrio de um mês —
+// mesma régua usada no relatório de Ponto de Equilíbrio, só que reutilizável mês a mês e com filtro
+// opcional de centro de custo, pra montar o Dashboard Gerencial anual.
+function dadosMesGerencial(mesRef, centroCusto){
+  const [anoM, mesM] = mesRef.split('-').map(Number);
+  const deMes = `${mesRef}-01`;
+  const ateMes = `${mesRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
+  const filtroCentro = l => !centroCusto || centroCusto==='todos' || (l.centroCusto||'')===centroCusto;
+  const receitasLanc = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=deMes && l.dataPagamento<=ateMes && filtroCentro(l));
+  const despesasLanc = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento') && l.dataPagamento>=deMes && l.dataPagamento<=ateMes && filtroCentro(l));
+  const receita = receitasLanc.reduce((s,l)=>s+l.valor,0);
+  const despesasPorCategoria = {}, entradasPorCategoria = {};
+  despesasLanc.forEach(l=>{ despesasPorCategoria[l.categoria] = (despesasPorCategoria[l.categoria]||0)+l.valor; });
+  receitasLanc.forEach(l=>{ entradasPorCategoria[l.categoria] = (entradasPorCategoria[l.categoria]||0)+l.valor; });
+  const despesaTotal = despesasLanc.reduce((s,l)=>s+l.valor,0);
+  const fixas = new Set(state.categoriasFixas||[]);
+  const custoFixo = Object.keys(despesasPorCategoria).filter(c=>fixas.has(c)).reduce((s,c)=>s+despesasPorCategoria[c],0);
+  const custoVariavel = despesaTotal - custoFixo;
+  const margemContribPct = receita>0 ? (receita-custoVariavel)/receita : null;
+  const pontoEquilibrio = (margemContribPct!==null && margemContribPct>0) ? custoFixo/margemContribPct : null;
+  const lucro = receita - despesaTotal;
+  const margemLiquidaPct = receita>0 ? (lucro/receita*100) : 0;
+  return { mesRef, receita, despesaTotal, despesasPorCategoria, entradasPorCategoria, custoFixo, custoVariavel, margemContribPct, pontoEquilibrio, lucro, margemLiquidaPct };
+}
+
+function renderDashboardGerencial(ano, centroCusto){
+  const meses = Array.from({length:12},(_,i)=>`${ano}-${String(i+1).padStart(2,'0')}`);
+  const dadosMeses = meses.map(m=>dadosMesGerencial(m, centroCusto));
+  const receitaAno = dadosMeses.reduce((s,d)=>s+d.receita,0);
+  const despesaAno = dadosMeses.reduce((s,d)=>s+d.despesaTotal,0);
+  const custoFixoAno = dadosMeses.reduce((s,d)=>s+d.custoFixo,0);
+  const custoVariavelAno = dadosMeses.reduce((s,d)=>s+d.custoVariavel,0);
+  const margemContribAno = receitaAno>0 ? (receitaAno-custoVariavelAno)/receitaAno : null;
+  const pontoEquilibrioAno = (margemContribAno!==null && margemContribAno>0) ? custoFixoAno/margemContribAno : null;
+  const saldoAno = receitaAno - despesaAno;
+  const tAno = totaisPorMesRef(`${ano}-12`);
+
+  const anosComDados = [...new Set(state.lancamentos.filter(l=>l.dataPagamento).map(l=>l.dataPagamento.slice(0,4)))].sort().reverse();
+  if(!anosComDados.includes(String(ano))) anosComDados.unshift(String(ano));
+
+  // Saídas/Entradas por categoria no ano inteiro
+  const saidasAnoPorCat = {}, entradasAnoPorCat = {};
+  dadosMeses.forEach(d=>{
+    Object.entries(d.despesasPorCategoria).forEach(([c,v])=>{ saidasAnoPorCat[c]=(saidasAnoPorCat[c]||0)+v; });
+    Object.entries(d.entradasPorCategoria).forEach(([c,v])=>{ entradasAnoPorCat[c]=(entradasAnoPorCat[c]||0)+v; });
+  });
+  const saidasRanking = Object.entries(saidasAnoPorCat).sort((a,b)=>b[1]-a[1]);
+  const entradasRanking = Object.entries(entradasAnoPorCat).sort((a,b)=>b[1]-a[1]);
+  const maxSaida = saidasRanking.length ? saidasRanking[0][1] : 1;
+  const maxEntrada = entradasRanking.length ? entradasRanking[0][1] : 1;
+
+  // Saldo acumulado mês a mês (usa a mesma régua de totaisPorMesRef, ponto final de cada mês)
+  const saldoPorMes = meses.map(m=>totaisPorMesRef(m).saldoAtual);
+  const maxSaldoAbs = Math.max(1, ...saldoPorMes.map(v=>Math.abs(v)));
+
+  const maxReceitaDespesa = Math.max(1, ...dadosMeses.map(d=>Math.max(d.receita, d.despesaTotal)));
+  const maxMargemContrib = Math.max(1, ...dadosMeses.map(d=>d.receita * (d.margemContribPct||0)));
+  const maxLucro = Math.max(1, ...dadosMeses.map(d=>Math.abs(d.lucro)));
+  const maxReceitaPE = Math.max(1, ...dadosMeses.map(d=>Math.max(d.receita, d.pontoEquilibrio||0)));
+
+  const mesAbrev = m => competenciaLabel(m).split('/')[0].slice(0,3);
+  const barrasDuplas = (dados, chaveA, chaveB, corA, corB, max)=>`
+    <div style="display:flex;align-items:flex-end;gap:6px;height:120px;overflow-x:auto;">
+      ${dados.map(d=>`
+        <div style="flex:1;min-width:22px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;">
+          <div style="display:flex;align-items:flex-end;gap:1.5px;height:95px;">
+            <div style="width:7px;background:${corA};border-radius:2px 2px 0 0;height:${Math.max(1,Math.round(d[chaveA]/max*90))}px;"></div>
+            <div style="width:7px;background:${corB};border-radius:2px 2px 0 0;height:${Math.max(1,Math.round(d[chaveB]/max*90))}px;"></div>
+          </div>
+          <span style="font-size:9px;color:var(--text-soft);margin-top:3px;">${mesAbrev(d.mesRef)}</span>
+        </div>
+      `).join('')}
+    </div>`;
+
+  return `
+    <div class="report-controls" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <select id="gerencialAnoSelect">${anosComDados.map(a=>`<option value="${a}" ${String(ano)===a?'selected':''}>${a}</option>`).join('')}</select>
+      ${(state.centrosCusto||[]).length ? `
+      <select id="gerencialCentroSelect">
+        <option value="todos" ${!centroCusto||centroCusto==='todos'?'selected':''}>Todos os centros de custo</option>
+        ${state.centrosCusto.map(c=>`<option value="${escapeHTML(c)}" ${centroCusto===c?'selected':''}>${escapeHTML(c)}</option>`).join('')}
+      </select>` : ''}
+    </div>
+    <div class="note" style="margin-top:0;">Regime de caixa (o que já entrou/saiu de verdade da conta) — pra ver por competência (o mês em que a venda/despesa foi gerada, independente de quando pagou), use o DRE. Ponto de equilíbrio usa a mesma classificação fixo/variável configurada no relatório "Ponto de Equilíbrio".</div>
+
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
+      <div class="card saldo"><div class="label">Receitas Totais</div><div class="value mono">${brl(receitaAno)}</div></div>
+      <div class="card"><div class="label">Custos/Despesas Totais</div><div class="value mono">${brl(despesaAno)}</div></div>
+      <div class="card"><div class="label">Saldo do ano</div><div class="value mono" style="color:${saldoAno>=0?'var(--success)':'var(--danger)'};">${brl(saldoAno)}</div></div>
+      <div class="card"><div class="label">Margem de Contribuição</div><div class="value mono">${margemContribAno!==null?(margemContribAno*100).toFixed(1)+'%':'—'}</div></div>
+      <div class="card"><div class="label">Ponto de Equilíbrio (méd/mês)</div><div class="value mono">${pontoEquilibrioAno!==null?brl(pontoEquilibrioAno/12):'—'}</div></div>
+    </div>
+
+    <div class="dash-section-label">Receitas x Custos/Despesas — mês a mês</div>
+    <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+      ${barrasDuplas(dadosMeses, 'receita', 'despesaTotal', 'var(--success)', 'var(--danger)', maxReceitaDespesa)}
+      <div style="display:flex;gap:14px;margin-top:8px;font-size:11px;color:var(--text-soft);">
+        <span><span style="display:inline-block;width:8px;height:8px;background:var(--success);border-radius:2px;margin-right:4px;"></span>Receitas</span>
+        <span><span style="display:inline-block;width:8px;height:8px;background:var(--danger);border-radius:2px;margin-right:4px;"></span>Custos/Despesas</span>
+      </div>
+    </div></div>
+
+    <div class="cards" style="grid-template-columns:1fr 1fr;align-items:start;">
+      <div class="panel">
+        <div class="panel-head"><h2>Saídas por categoria (ano)</h2></div>
+        <div class="panel-body" style="padding:14px 18px;">
+          ${saidasRanking.length ? saidasRanking.slice(0,8).map(([cat,v])=>`
+            <div style="margin-bottom:10px;">
+              <div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:3px;"><span>${escapeHTML(cat)}</span><span class="mono">${brl(v)}</span></div>
+              <div style="background:var(--bone);border-radius:5px;height:6px;overflow:hidden;"><div style="width:${Math.round(v/maxSaida*100)}%;height:100%;background:var(--danger);"></div></div>
+            </div>
+          `).join('') : `<div class="empty">Nenhuma despesa paga nesse ano.</div>`}
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Entradas por categoria (ano)</h2></div>
+        <div class="panel-body" style="padding:14px 18px;">
+          ${entradasRanking.length ? entradasRanking.slice(0,8).map(([cat,v])=>`
+            <div style="margin-bottom:10px;">
+              <div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:3px;"><span>${escapeHTML(cat)}</span><span class="mono">${brl(v)}</span></div>
+              <div style="background:var(--bone);border-radius:5px;height:6px;overflow:hidden;"><div style="width:${Math.round(v/maxEntrada*100)}%;height:100%;background:var(--success);"></div></div>
+            </div>
+          `).join('') : `<div class="empty">Nenhuma receita recebida nesse ano.</div>`}
+        </div>
+      </div>
+    </div>
+
+    <div class="dash-section-label">Saldo da conta ao longo do ano</div>
+    <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+      <div style="display:flex;align-items:center;gap:6px;height:100px;overflow-x:auto;">
+        ${saldoPorMes.map((v,i)=>`
+          <div style="flex:1;min-width:22px;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;">
+            <div style="width:10px;background:${v>=0?'var(--blue-accent)':'var(--danger)'};border-radius:2px;height:${Math.max(2,Math.round(Math.abs(v)/maxSaldoAbs*45))}px;margin-top:${v>=0?0:45}px;"></div>
+            <span style="font-size:9px;color:var(--text-soft);margin-top:3px;">${mesAbrev(meses[i])}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div></div>
+
+    <div class="dash-section-label">Margem de Contribuição — mês a mês</div>
+    <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+      <div style="display:flex;align-items:flex-end;gap:6px;height:110px;overflow-x:auto;">
+        ${dadosMeses.map(d=>`
+          <div style="flex:1;min-width:26px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;">
+            <span style="font-size:9px;color:var(--text-soft);margin-bottom:2px;">${d.margemContribPct!==null?(d.margemContribPct*100).toFixed(0)+'%':''}</span>
+            <div style="width:14px;background:var(--blue-accent);border-radius:2px 2px 0 0;height:${Math.max(1,Math.round((d.receita*(d.margemContribPct||0))/maxMargemContrib*75))}px;"></div>
+            <span style="font-size:9px;color:var(--text-soft);margin-top:3px;">${mesAbrev(d.mesRef)}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div></div>
+
+    <div class="dash-section-label">Lucro Líquido e Margem Líquida — mês a mês</div>
+    <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+      <div style="display:flex;align-items:center;gap:6px;height:120px;overflow-x:auto;">
+        ${dadosMeses.map(d=>`
+          <div style="flex:1;min-width:26px;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;">
+            <span style="font-size:9px;color:var(--text-soft);">${d.margemLiquidaPct.toFixed(0)}%</span>
+            <div style="width:14px;background:${d.lucro>=0?'var(--success)':'var(--danger)'};border-radius:2px;height:${Math.max(2,Math.round(Math.abs(d.lucro)/maxLucro*45))}px;margin-top:${d.lucro>=0?0:45}px;"></div>
+            <span style="font-size:9px;color:var(--text-soft);margin-top:3px;">${mesAbrev(d.mesRef)}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div></div>
+
+    <div class="dash-section-label">Receitas Operacionais x Ponto de Equilíbrio — mês a mês</div>
+    <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+      <div style="display:flex;align-items:flex-end;gap:6px;height:120px;overflow-x:auto;">
+        ${dadosMeses.map(d=>{
+          const abaixo = d.pontoEquilibrio!==null && d.receita < d.pontoEquilibrio;
+          return `
+          <div style="flex:1;min-width:26px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;">
+            <div style="width:16px;background:${abaixo?'var(--danger)':'var(--success)'};border-radius:2px 2px 0 0;height:${Math.max(1,Math.round(d.receita/maxReceitaPE*90))}px;position:relative;">
+              ${d.pontoEquilibrio!==null ? `<div style="position:absolute;left:-3px;right:-3px;border-top:2px dashed var(--ink);top:${Math.max(0,90-Math.round(d.pontoEquilibrio/maxReceitaPE*90))}px;"></div>` : ''}
+            </div>
+            <span style="font-size:9px;color:var(--text-soft);margin-top:3px;">${mesAbrev(d.mesRef)}</span>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="note" style="margin-top:10px;">Barra vermelha = mês fechou abaixo do ponto de equilíbrio (linha tracejada). Ponto de equilíbrio calculado com a classificação fixo/variável atual — ajuste em "Ponto de Equilíbrio" no menu de relatórios se as categorias mudarem.</div>
+    </div></div>
+  `;
 }
 
 function renderDashboardExecutivo(){
@@ -10037,6 +10222,8 @@ function attachViewHandlers(){
   const reportSelect = document.getElementById('reportSelect');
   if(reportSelect){
     let meiAnoAtual = new Date().getFullYear();
+    let gerencialAnoAtual = new Date().getFullYear();
+    let gerencialCentroAtivo = 'todos';
     let mensalMesRef = mesGlobalRef;
     const paint = ()=>{
       reportSelect.value = relatorioAtivo;
@@ -10057,6 +10244,7 @@ function attachViewHandlers(){
         relatorioAtivo==='aging' ? renderAging() :
         relatorioAtivo==='dfc' ? renderDFC() :
         relatorioAtivo==='cartoes' ? renderRelatorioCartoes() :
+        relatorioAtivo==='gerencial' ? renderDashboardGerencial(gerencialAnoAtual, gerencialCentroAtivo) :
         relatorioAtivo==='executivo' ? renderDashboardExecutivo() :
         relatorioAtivo==='abc_clientes' ? renderRelatorioABCClientes() :
         relatorioAtivo==='abc_despesas' ? renderRelatorioABCDespesas() :
@@ -10234,6 +10422,18 @@ function attachViewHandlers(){
       if(meiAno) meiAno.addEventListener('change', ()=>{
         meiAnoAtual = meiAno.value;
         document.getElementById('reportPanel').innerHTML = renderMEI(meiAnoAtual);
+        bindReportInner();
+      });
+      const gerencialAno = document.getElementById('gerencialAnoSelect');
+      if(gerencialAno) gerencialAno.addEventListener('change', ()=>{
+        gerencialAnoAtual = gerencialAno.value;
+        document.getElementById('reportPanel').innerHTML = renderDashboardGerencial(gerencialAnoAtual, gerencialCentroAtivo);
+        bindReportInner();
+      });
+      const gerencialCentro = document.getElementById('gerencialCentroSelect');
+      if(gerencialCentro) gerencialCentro.addEventListener('change', ()=>{
+        gerencialCentroAtivo = gerencialCentro.value;
+        document.getElementById('reportPanel').innerHTML = renderDashboardGerencial(gerencialAnoAtual, gerencialCentroAtivo);
         bindReportInner();
       });
       document.querySelectorAll('.mei-cat-tipo').forEach(sel=>{
