@@ -8631,7 +8631,11 @@ async function sincronizarProcessos(){
 
     let novasOcorrencias = 0, semDecisao = 0, semAtivoCorrespondente = 0;
     processos.forEach(p=>{
-      if(!p.decisaoFinal || !['decidido','finalizado','concluido'].includes(p.status)){ semDecisao++; return; }
+      const statusOk = ['decidido','finalizado','concluido'].includes(p.status);
+      // Decisões finais que concluem o processo exigem status compatível; decisões
+      // intermediárias com vínculo explícito de ativo (patrimonioAcao) passam direto,
+      // já que o processo continua tramitando e nunca vai ter esses status.
+      if(!p.decisaoFinal || (!statusOk && !p.patrimonioAcao)){ semDecisao++; return; }
       let ativo = null;
       if(p.ativoPatrimonialId) ativo = state.ativosPatrimoniais.find(a=>a.id===p.ativoPatrimonialId || a.vkAtivoId===p.ativoPatrimonialId);
       if(!ativo && p.ativoNome){
@@ -8640,11 +8644,18 @@ async function sincronizarProcessos(){
       }
       if(!ativo){ semAtivoCorrespondente++; return; }
       if(!ativo.ocorrencias) ativo.ocorrencias = [];
-      const jaImportado = ativo.ocorrencias.some(o=>o.processoId===p.id);
+      // Dedup por processo+andamento (patrimonioVinculoSeq) quando existir — permite
+      // várias decisões (ex: intermediárias) do mesmo processo virarem ocorrências
+      // separadas. Processos antigos sem esse campo caem no dedup só por processo,
+      // como já funcionava antes.
+      const jaImportado = p.patrimonioVinculoSeq != null
+        ? ativo.ocorrencias.some(o=>o.processoId===p.id && o.patrimonioSeq===p.patrimonioVinculoSeq)
+        : ativo.ocorrencias.some(o=>o.processoId===p.id && o.patrimonioSeq==null);
       if(jaImportado) return;
       ativo.ocorrencias.push({
         id: uid(), processoId: p.id, processoNome: p.titulo || p.nome || '',
-        texto: p.decisaoFinal, data: p.dataDecisao || todayISO(), origem: 'processo'
+        texto: p.decisaoFinal, data: p.dataDecisao || todayISO(), origem: 'processo',
+        patrimonioSeq: p.patrimonioVinculoSeq != null ? p.patrimonioVinculoSeq : null
       });
       novasOcorrencias++;
       // Item pedido pelo usuário: a decisão do processo pode pedir uma ação automática
@@ -8797,9 +8808,10 @@ function viewProcessosConfig(){
   dataDecisao: "2026-07-27",
   ativoPatrimonialId: "&lt;id do ativo no Livro Caixa, se souber&gt;",
   ativoNome: "Balança" (alternativa, se não tiver o id — o sistema tenta achar pelo nome),
-  patrimonioAcao: "historico" | "observacao" | "sugerir_baixa"  // opcional, padrão é só "historico"
+  patrimonioAcao: "historico" | "observacao" | "sugerir_baixa",  // opcional, padrão é só "historico"
+  patrimonioVinculoSeq: 12  // opcional — nº do andamento que gerou o vínculo, permite várias decisões do mesmo processo virarem ocorrências separadas
 }</div>
-        Quando <code>status</code> for <strong>decidido</strong>, <strong>finalizado</strong> ou <strong>concluido</strong> e tiver <code>decisaoFinal</code> preenchido, essa decisão vira automaticamente uma ocorrência na ficha do ativo correspondente, sem duplicar em sincronizações futuras. Se <code>patrimonioAcao</code> vier como <strong>"observacao"</strong>, a ficha ganha um aviso "Em observação" (só visual, sem afetar valores). Se vier como <strong>"sugerir_baixa"</strong>, aparece um aviso de sugestão de baixa pendente de confirmação — nada é baixado automaticamente, é preciso confirmar manualmente na ficha do ativo (isso preenche o formulário de baixa já com o motivo, mas quem confirma valores e datas é sempre uma pessoa).
+        Quando <code>status</code> for <strong>decidido</strong>, <strong>finalizado</strong> ou <strong>concluido</strong> e tiver <code>decisaoFinal</code> preenchido, essa decisão vira automaticamente uma ocorrência na ficha do ativo correspondente. Decisões <strong>intermediárias</strong> vinculadas a um ativo (com <code>patrimonioAcao</code> preenchido) também são aceitas mesmo sem esse status, já que o processo continua tramitando — nesse caso, <code>patrimonioVinculoSeq</code> evita duplicar e permite que o mesmo processo gere várias ocorrências ao longo do tempo. Se <code>patrimonioAcao</code> vier como <strong>"observacao"</strong>, a ficha ganha um aviso "Em observação" (só visual, sem afetar valores). Se vier como <strong>"sugerir_baixa"</strong>, aparece um aviso de sugestão de baixa pendente de confirmação — nada é baixado automaticamente, é preciso confirmar manualmente na ficha do ativo (isso preenche o formulário de baixa já com o motivo, mas quem confirma valores e datas é sempre uma pessoa).
       </div>
     </div>
     <div class="panel">
