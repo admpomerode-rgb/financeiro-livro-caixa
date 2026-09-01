@@ -8783,8 +8783,11 @@ async function sincronizarProcessos(){
     const writesNumero = [];
     orcamentosVK.forEach(o=>{
       const existente = state.orcamentosProcessos.find(x=>x.processoOrcamentoId===o.id);
-      const itens = (o.itens||[]).map(it=>({ descricao: it.descricao||'', quantidade: Number(it.quantidade)||0, valorUnitario: Number(it.valorUnitario)||0 }));
-      const valorTotal = o.valorTotal!=null ? Number(o.valorTotal) : itens.reduce((s,it)=>s+it.quantidade*it.valorUnitario,0);
+      const itens = (o.itens||[]).map(it=>{
+        const valorItem = it.valor != null ? Number(it.valor) : (Number(it.quantidade)||0)*(Number(it.valorUnitario)||0);
+        return { descricao: it.descricao||'', quantidade: it.quantidade!=null?Number(it.quantidade):1, valorUnitario: it.valorUnitario!=null?Number(it.valorUnitario):valorItem, valor: valorItem, link: it.link||null };
+      });
+      const valorTotal = o.valorTotal!=null ? Number(o.valorTotal) : itens.reduce((s,it)=>s+it.valor,0);
       if(existente){
         if(existente.status==='pendente'){
           existente.itens = itens; existente.valorTotal = valorTotal;
@@ -8808,6 +8811,7 @@ async function sincronizarProcessos(){
       state.orcamentosProcessos.push({
         id: uid(), processoOrcamentoId: o.id, processoId: o.processoId || null,
         processoTitulo: o.processoTitulo || o.titulo || '', numero, itens, valorTotal,
+        descricaoPedido: o.descricaoPedido || null, driveLink: o.driveLink || null,
         status: 'pendente', criadoEm: new Date().toISOString(), decididoEm: null
       });
       orcamentosNovos++;
@@ -8837,13 +8841,48 @@ async function sincronizarProcessos(){
   }
 }
 
-async function decidirOrcamentoProcesso(id, aprovado){
+function openAprovarOrcamentoModal(o, respostaAtual){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Aprovar Orçamento N° ${o.numero}</h3>
+    <div class="note" style="margin-top:0;">Preenche os dados da compra que vai ser feita — isso volta pro Livro de Processos.</div>
+    <div class="field"><label>Loja / fornecedor</label><input type="text" id="apvLoja" placeholder="Ex: Casa do Forneiro Ltda"></div>
+    <div class="field"><label>Descrição</label><input type="text" id="apvDescricao" placeholder="O que vai ser comprado"></div>
+    <div class="field-row">
+      <div class="field"><label>Valor (R$)</label><input type="text" inputmode="decimal" id="apvValor" placeholder="0,00"></div>
+      <div class="field"><label>Link (Drive, site, etc.)</label><input type="text" id="apvLink" placeholder="https://..."></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarAprovacaoOrc">Confirmar aprovação</button>
+    </div>
+  `;
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnConfirmarAprovacaoOrc').addEventListener('click', ()=>{
+    const loja = document.getElementById('apvLoja').value.trim();
+    const descricao = document.getElementById('apvDescricao').value.trim();
+    const valor = parseFloat(document.getElementById('apvValor').value.replace(',','.'))||0;
+    const link = document.getElementById('apvLink').value.trim();
+    closeModal();
+    decidirOrcamentoProcesso(o.id, 'aprovado', {
+      resposta: respostaAtual,
+      detalhesCompra: { loja, descricao, valor, link }
+    });
+  });
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+async function decidirOrcamentoProcesso(id, decisao, extras){
+  extras = extras || {};
   const orc = (state.orcamentosProcessos||[]).find(o=>o.id===id);
   if(!orc) return;
-  orc.status = aprovado ? 'aprovado' : 'recusado';
+  orc.status = decisao;
   orc.decididoEm = new Date().toISOString();
+  if(extras.resposta) orc.resposta = extras.resposta;
+  if(decisao === 'recusado' && extras.motivoRecusa) orc.motivoRecusa = extras.motivoRecusa;
+  if(decisao === 'aprovado' && extras.detalhesCompra) orc.detalhesCompra = extras.detalhesCompra;
   persist(); render();
-  showToast(aprovado ? `Orçamento N° ${orc.numero} aprovado` : `Orçamento N° ${orc.numero} recusado`);
+  showToast(`Orçamento N° ${orc.numero} ${decisao === 'aprovado' ? 'aprovado' : 'recusado'}`);
 
   const cfg = state.processosConfig;
   if(!cfg.firebaseConfig || !cfg.email || !cfg.senha){
@@ -8855,10 +8894,11 @@ async function decidirOrcamentoProcesso(id, aprovado){
     const auth = processosFirebaseApp.auth();
     if(!auth.currentUser) await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
     const db = processosFirebaseApp.firestore();
-    await db.collection('orcamentos').doc(orc.processoOrcamentoId).update({
-      status: aprovado ? 'aprovado' : 'recusado',
-      decididoEm: new Date().toISOString()
-    });
+    const payload = { status: decisao, decididoEm: new Date().toISOString() };
+    if(extras.resposta) payload.resposta = extras.resposta;
+    if(decisao === 'recusado' && extras.motivoRecusa) payload.motivoRecusa = extras.motivoRecusa;
+    if(decisao === 'aprovado' && extras.detalhesCompra) payload.detalhesCompra = extras.detalhesCompra;
+    await db.collection('orcamentos').doc(orc.processoOrcamentoId).update(payload);
     showToast('Livro de Processos avisado da decisão');
   }catch(e){
     console.error('Erro ao avisar decisão do orçamento:', e);
@@ -8997,19 +9037,25 @@ function viewOrcamentosProcessos(){
     ${pendentes.length ? pendentes.map(o=>`
       <div class="panel" style="margin-bottom:14px;">
         <div class="panel-head">
-          <h2>Orçamento N° ${o.numero}${o.processoTitulo?' — '+escapeHTML(o.processoTitulo):''}</h2>
+          <h2>Orçamento N° ${o.numero}${o.processoTitulo?' — '+escapeHTML(o.processoTitulo):''}${o.adiado ? ' <span style="color:var(--warn);font-size:12px;">⏳ Adiado</span>' : ''}</h2>
           <span class="mono" style="font-weight:700;">${brl(o.valorTotal)}</span>
         </div>
+        ${o.descricaoPedido ? `<div class="note" style="margin:0 20px 10px;">${escapeHTML(o.descricaoPedido)}</div>` : ''}
+        ${o.driveLink ? `<div style="padding:0 20px 10px;"><a href="${escapeHTML(o.driveLink)}" target="_blank" rel="noreferrer" style="font-size:12.5px;">📎 Ver documento/fotos no Google Drive</a></div>` : ''}
         <div class="panel-body" style="padding:0;">
           ${o.itens.length ? o.itens.map(it=>`
             <div class="ledger-row compact" style="grid-template-columns:1fr auto;">
-              <span style="font-size:12.5px;">${escapeHTML(it.descricao)} <span style="color:var(--text-soft);">× ${it.quantidade}</span></span>
-              <span class="mono" style="font-size:12.5px;">${brl(it.quantidade*it.valorUnitario)}</span>
+              <span style="font-size:12.5px;">${escapeHTML(it.descricao)}${it.link ? ` — <a href="${escapeHTML(it.link)}" target="_blank" rel="noreferrer">link</a>` : ''}</span>
+              <span class="mono" style="font-size:12.5px;">${brl(it.valor)}</span>
             </div>
           `).join('') : `<div class="empty">Sem itens detalhados.</div>`}
         </div>
-        <div style="padding:14px 20px;display:flex;gap:8px;">
+        <div style="padding:14px 20px 0;">
+          <textarea id="resposta-${o.id}" placeholder="Resposta / observação (opcional)" style="width:100%;min-height:52px;resize:vertical;"></textarea>
+        </div>
+        <div style="padding:10px 20px 20px;display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn ghost" data-action="recusar-orcamento-processo" data-id="${o.id}" style="color:var(--danger);border-color:#F3C6C2;">✕ Recusar</button>
+          <button class="btn ghost" data-action="adiar-orcamento-processo" data-id="${o.id}">⏳ Adiar</button>
           <button class="btn" data-action="aprovar-orcamento-processo" data-id="${o.id}">✓ Aprovar</button>
         </div>
       </div>
@@ -9020,7 +9066,10 @@ function viewOrcamentosProcessos(){
       <div class="panel-body">
         ${decididos.slice(0,50).map(o=>`
           <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
-            <div class="desc-cell"><div>Orçamento N° ${o.numero}${o.processoTitulo?' — '+escapeHTML(o.processoTitulo):''}</div><div class="cat">${o.decididoEm ? new Date(o.decididoEm).toLocaleString('pt-BR') : ''}</div></div>
+            <div class="desc-cell">
+              <div>Orçamento N° ${o.numero}${o.processoTitulo?' — '+escapeHTML(o.processoTitulo):''}</div>
+              <div class="cat">${o.decididoEm ? new Date(o.decididoEm).toLocaleString('pt-BR') : ''}${o.motivoRecusa ? ' · Motivo: '+escapeHTML(o.motivoRecusa) : ''}${o.detalhesCompra && o.detalhesCompra.loja ? ' · Loja: '+escapeHTML(o.detalhesCompra.loja) : ''}${o.resposta ? ' · Resposta: '+escapeHTML(o.resposta) : ''}</div>
+            </div>
             <span class="mono">${brl(o.valorTotal)}</span>
             <span style="font-size:11.5px;font-weight:600;color:${o.status==='aprovado'?'var(--success)':'var(--danger)'};">${o.status==='aprovado'?'✓ Aprovado':'✕ Recusado'}</span>
           </div>
@@ -11850,14 +11899,45 @@ function attachViewHandlers(){
   });
   document.querySelectorAll('[data-action="aprovar-orcamento-processo"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
-      if(!confirm('Aprovar esse orçamento? O Livro de Processos vai ser avisado.')) return;
-      decidirOrcamentoProcesso(btn.dataset.id, true);
+      const o = (state.orcamentosProcessos||[]).find(x=>x.id===btn.dataset.id);
+      if(!o) return;
+      const resposta = (document.getElementById(`resposta-${o.id}`)||{}).value || '';
+      openAprovarOrcamentoModal(o, resposta);
     });
   });
   document.querySelectorAll('[data-action="recusar-orcamento-processo"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
-      if(!confirm('Recusar esse orçamento? O Livro de Processos vai ser avisado.')) return;
-      decidirOrcamentoProcesso(btn.dataset.id, false);
+      const o = (state.orcamentosProcessos||[]).find(x=>x.id===btn.dataset.id);
+      if(!o) return;
+      const resposta = (document.getElementById(`resposta-${o.id}`)||{}).value || '';
+      const motivo = prompt('Motivo da recusa (obrigatório):', '');
+      if(motivo === null) return;
+      if(!motivo.trim()){ alert('Precisa informar o motivo da recusa.'); return; }
+      decidirOrcamentoProcesso(o.id, 'recusado', { resposta, motivoRecusa: motivo.trim() });
+    });
+  });
+  document.querySelectorAll('[data-action="adiar-orcamento-processo"]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const o = (state.orcamentosProcessos||[]).find(x=>x.id===btn.dataset.id);
+      if(!o) return;
+      const resposta = (document.getElementById(`resposta-${o.id}`)||{}).value || '';
+      if(!confirm('Adiar esse orçamento? Ele continua pendente, só fica sinalizado.')) return;
+      o.adiado = true;
+      o.adiadoEm = new Date().toISOString();
+      if(resposta.trim()) o.resposta = resposta.trim();
+      persist(); render();
+      showToast('Orçamento marcado como adiado — continua pendente');
+      const cfg = state.processosConfig;
+      if(!cfg.firebaseConfig || !cfg.email || !cfg.senha) return;
+      try{
+        if(!processosFirebaseApp) processosFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'livro-processos');
+        const auth = processosFirebaseApp.auth();
+        if(!auth.currentUser) await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
+        const db = processosFirebaseApp.firestore();
+        const payload = { adiado: true, adiadoEm: o.adiadoEm };
+        if(resposta.trim()) payload.resposta = resposta.trim();
+        await db.collection('orcamentos').doc(o.processoOrcamentoId).update(payload);
+      }catch(e){ console.error('Erro ao avisar adiamento:', e); }
     });
   });
 
