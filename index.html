@@ -921,6 +921,7 @@ function aplicarMigracoes(s){
   if(!s.comissoesPagas) s.comissoesPagas = [];
   if(!s.comissoesManuais) s.comissoesManuais = [];
   if(!s.ativosPatrimoniais) s.ativosPatrimoniais = [];
+  if(!s.comprasProcessosPendentes) s.comprasProcessosPendentes = [];
   if(!s.categoriaMEI) s.categoriaMEI = {};
   if(!s.meiEmpregadoPorAno) s.meiEmpregadoPorAno = {};
   if(!s.fornecedores) s.fornecedores = [];
@@ -7439,11 +7440,29 @@ function viewAtivosPatrimoniais(){
   const totalAquisicao = state.ativosPatrimoniais.reduce((s,a)=>s+a.valorAquisicao,0);
   const totalAtual = totalAtivosPatrimoniais();
   const totalDepreciado = totalAquisicao - totalAtual;
+  const pendentesProcessos = state.comprasProcessosPendentes||[];
   return `
     <div class="topbar">
       <div><h1>Ativos Patrimoniais</h1><p>Bens da empresa com depreciação linear conforme as taxas da Receita Federal (IN RFB nº 1.700/2017)</p></div>
       <button class="btn" id="btnNovoAtivoPatrimonial">+ Ativo</button>
     </div>
+    ${pendentesProcessos.length ? `
+    <div class="panel alerta-panel">
+      <div class="alerta-linha" style="align-items:flex-start;background:rgba(30,73,226,0.08);">
+        <span>📦 <strong>${pendentesProcessos.length} compra(s)</strong> vinda(s) do Livro de Processos pendente(s) de cadastro em Ativos Patrimoniais.</span>
+      </div>
+      <div class="panel-body" style="padding:0;">
+        ${pendentesProcessos.map(pp=>`
+          <div class="ficha-historico-row">
+            <div>
+              <div>${escapeHTML(pp.nome)}${pp.fornecedor?' — '+escapeHTML(pp.fornecedor):''}</div>
+              <div class="sub">${brl(pp.valorAquisicao)} · ${fmtDate(pp.dataAquisicao)} · processo "${escapeHTML(pp.processoTitulo||'')}"</div>
+            </div>
+            <button class="btn ghost sm" data-action="revisar-compra-pendente" data-id="${pp.id}">Revisar e cadastrar</button>
+          </div>
+        `).join('')}
+      </div>
+    </div>` : ''}
     <div class="cards">
       <div class="card"><div class="label">Valor de aquisição (total)</div><div class="value mono">${brl(totalAquisicao)}</div></div>
       <div class="card"><div class="label">Depreciação acumulada</div><div class="value mono neg">${brl(totalDepreciado)}</div></div>
@@ -7483,14 +7502,16 @@ function rowAtivoPatrimonialHTML(a){
   `;
 }
 
-function openAtivoPatrimonialModal(existing){
+function openAtivoPatrimonialModal(existing, prefillPendente){
   const isEdit = !!existing;
+  const pref = prefillPendente || null;
   const modal = document.getElementById('modalContent');
   const categoriaInicial = existing?.categoria || CATEGORIAS_ATIVO_PATRIMONIAL[0];
   const vidaUtilInicial = existing ? existing.vidaUtilAnos : (VIDA_UTIL_RFB[categoriaInicial] || 10);
   modal.innerHTML = `
     <h3>${isEdit ? 'Editar ativo' : 'Novo ativo patrimonial'}</h3>
-    <div class="field"><label>Nome / descrição</label><input type="text" id="apNome" value="${existing?escapeHTML(existing.nome):''}" placeholder="Ex: Forno industrial, Fiat Fiorino 2022"></div>
+    ${pref ? `<div class="note" style="margin-top:0;border-color:#BFD4F7;background:#EEF3FD;">Vindo da compra registrada no processo "${escapeHTML(pref.processoTitulo||'')}" — confira os dados e complete a vida útil antes de salvar.</div>` : ''}
+    <div class="field"><label>Nome / descrição</label><input type="text" id="apNome" value="${existing?escapeHTML(existing.nome):(pref?escapeHTML(pref.nome||''):'')}" placeholder="Ex: Forno industrial, Fiat Fiorino 2022"></div>
     <div class="field-row">
       <div class="field"><label>Categoria</label>
         <select id="apCategoria">${CATEGORIAS_ATIVO_PATRIMONIAL.map(c=>`<option ${categoriaInicial===c?'selected':''}>${c}</option>`).join('')}</select>
@@ -7502,12 +7523,12 @@ function openAtivoPatrimonialModal(existing){
       <div class="note" style="margin-top:6px;">Nesse caso, o adesivo de patrimônio vai colado na Ficha de Patrimônio impressa (PDF), não no objeto.</div>
     </div>
     <div class="field-row">
-      <div class="field"><label>Data de aquisição</label><input type="date" id="apData" value="${existing?.dataAquisicao || todayISO()}"></div>
-      <div class="field"><label>Valor de aquisição (R$)</label><input type="text" inputmode="decimal" id="apValor" value="${existing?existing.valorAquisicao:''}"></div>
+      <div class="field"><label>Data de aquisição</label><input type="date" id="apData" value="${existing?.dataAquisicao || (pref?pref.dataAquisicao:todayISO())}"></div>
+      <div class="field"><label>Valor de aquisição (R$)</label><input type="text" inputmode="decimal" id="apValor" value="${existing?existing.valorAquisicao:(pref?pref.valorAquisicao:'')}"></div>
     </div>
     <div class="field-row">
-      <div class="field"><label>Fornecedor</label><input type="text" id="apFornecedor" value="${existing?escapeHTML(existing.fornecedor||''):''}" placeholder="Ex: Casa do Forneiro Ltda"></div>
-      <div class="field"><label>Nº da nota fiscal</label><input type="text" id="apNotaFiscal" value="${existing?escapeHTML(existing.notaFiscal||''):''}" placeholder="Ex: 123456"></div>
+      <div class="field"><label>Fornecedor</label><input type="text" id="apFornecedor" value="${existing?escapeHTML(existing.fornecedor||''):(pref?escapeHTML(pref.fornecedor||''):'')}" placeholder="Ex: Casa do Forneiro Ltda"></div>
+      <div class="field"><label>Nº da nota fiscal</label><input type="text" id="apNotaFiscal" value="${existing?escapeHTML(existing.notaFiscal||''):(pref?escapeHTML(pref.notaFiscal||''):'')}" placeholder="Ex: 123456"></div>
     </div>
     <div class="field-row">
       <div class="field"><label>Vida útil (anos)</label><input type="text" inputmode="decimal" id="apVidaUtil" value="${vidaUtilInicial||''}"></div>
@@ -7515,13 +7536,14 @@ function openAtivoPatrimonialModal(existing){
     </div>
     <div class="note" id="apVidaUtilNota" style="margin-top:-6px;"></div>
     <div class="field"><label>Garantia (meses, opcional)</label><input type="text" inputmode="decimal" id="apGarantiaMeses" value="${existing&&existing.garantiaMeses?existing.garantiaMeses:''}" placeholder="Ex: 12"></div>
-    ${!isEdit ? `
+    ${!isEdit && !pref ? `
     <div class="field" style="margin-top:4px;">
       <label style="display:flex;align-items:center;gap:8px;font-weight:500;"><input type="checkbox" id="apDescontarConta" style="width:auto;"> Descontar o valor de uma conta bancária agora</label>
     </div>
     <div id="apContaGrupo" style="display:none;margin-bottom:14px;">
       <select id="apConta">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select>
     </div>` : ''}
+    ${pref ? `<div class="note" style="margin-top:0;">Essa compra já foi lançada como Conta a Pagar separadamente — não desconta de conta aqui de novo.</div>` : ''}
     <div class="note" style="margin-top:0;">Depreciação linear (método aceito pela Receita Federal) e vida útil sugerida conforme a Instrução Normativa RFB nº 1.700/2017, Anexo III. Você pode ajustar o prazo se tiver laudo técnico que justifique um valor diferente do padrão.</div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
@@ -7569,7 +7591,11 @@ function openAtivoPatrimonialModal(existing){
       Object.assign(existing, { nome, categoria, numeroPatrimonio, semAdesivo, fornecedor, notaFiscal, dataAquisicao, valorAquisicao, vidaUtilAnos, valorResidual, garantiaMeses });
     } else {
       const novoId = uid();
-      state.ativosPatrimoniais.push({ id: novoId, nome, categoria, numeroPatrimonio, semAdesivo, fornecedor, notaFiscal, dataAquisicao, valorAquisicao, vidaUtilAnos, valorResidual, garantiaMeses, fotos: [], fichas: [], manutencoes: [], baixa: null });
+      state.ativosPatrimoniais.push({
+        id: novoId, nome, categoria, numeroPatrimonio, semAdesivo, fornecedor, notaFiscal, dataAquisicao, valorAquisicao,
+        vidaUtilAnos, valorResidual, garantiaMeses, fotos: [], fichas: [], manutencoes: [], baixa: null,
+        origemProcessoId: pref ? pref.processoId : null, origemCompraSeq: pref ? pref.compraSeq : null
+      });
       if(chkDesconto && chkDesconto.checked){
         const contaId = document.getElementById('apConta').value;
         state.lancamentos.push({
@@ -7580,6 +7606,9 @@ function openAtivoPatrimonialModal(existing){
           origem:'ativo_patrimonial', ativoPatrimonialId: novoId,
           criadoEm: new Date().toISOString()
         });
+      }
+      if(pref){
+        state.comprasProcessosPendentes = (state.comprasProcessosPendentes||[]).filter(x=>!(x.processoId===pref.processoId && x.compraSeq===pref.compraSeq));
       }
     }
     persist(); closeModal(); render();
@@ -8673,6 +8702,41 @@ async function sincronizarProcessos(){
       }
     });
 
+    // Etapas 4 e 5 do fluxo de orçamento: compra registrada lá no processo vira
+    // Conta a Pagar automaticamente aqui e, se marcada como objeto físico, entra
+    // numa fila de pendentes de cadastro em Ativos Patrimoniais pra revisão.
+    let comprasNovas = 0;
+    if(!state.comprasProcessosPendentes) state.comprasProcessosPendentes = [];
+    processos.forEach(p=>{
+      const c = p.compraRegistrada;
+      if(!c) return;
+      const jaLancado = state.lancamentos.some(l=>l.origem==='processo_compra' && l.processoId===p.id && l.compraSeq===c.seq);
+      if(jaLancado) return;
+      state.lancamentos.push({
+        id: uid(), tipo:'saida', categoria:'Fornecedores',
+        descricao: `${c.descricao || p.titulo || 'Compra'}${c.fornecedor ? ' — '+c.fornecedor : ''} (Livro de Processos${p.titulo ? ' — '+p.titulo : ''})`,
+        valor: Number(c.valor)||0, status:'pendente',
+        dataVencimento: c.data || todayISO(), contaId: null,
+        numeroNota: c.notaFiscal || null,
+        origem:'processo_compra', processoId: p.id, compraSeq: c.seq,
+        criadoEm: new Date().toISOString()
+      });
+      comprasNovas++;
+      if(c.ehAtivo){
+        const jaNaFila = state.comprasProcessosPendentes.some(x=>x.processoId===p.id && x.compraSeq===c.seq);
+        const jaVirouAtivo = state.ativosPatrimoniais.some(a=>a.origemProcessoId===p.id && a.origemCompraSeq===c.seq);
+        if(!jaNaFila && !jaVirouAtivo){
+          state.comprasProcessosPendentes.push({
+            id: uid(), processoId: p.id, compraSeq: c.seq,
+            nome: c.descricao || p.titulo || 'Ativo vindo de processo',
+            fornecedor: c.fornecedor || '', notaFiscal: c.notaFiscal || '',
+            valorAquisicao: Number(c.valor)||0, dataAquisicao: c.data || todayISO(),
+            processoTitulo: p.titulo || ''
+          });
+        }
+      }
+    });
+
     // Orçamentos pedidos dentro de um processo — viram fila de aprovação aqui.
     const snapOrc = await db.collection('orcamentos').get({ source: 'server' }).catch(()=>({docs:[]}));
     const orcamentosVK = snapOrc.docs.map(d=>({ id: d.id, ...d.data() }));
@@ -8714,6 +8778,7 @@ async function sincronizarProcessos(){
     if(semAtivoCorrespondente>0) partes.push(`${semAtivoCorrespondente} processo(s) sem ativo correspondente`);
     if(orcamentosNovos>0) partes.push(`${orcamentosNovos} orçamento(s) novo(s) aguardando decisão`);
     if(orcamentosAtualizados>0) partes.push(`${orcamentosAtualizados} orçamento(s) atualizado(s)`);
+    if(comprasNovas>0) partes.push(`${comprasNovas} compra(s) nova(s) lançada(s) em Contas a Pagar`);
     showToast(partes.length ? partes.join(' · ') : 'Nada novo pra importar');
   }catch(e){
     console.error('Erro ao sincronizar com o Livro de Processos:', e);
@@ -8815,9 +8880,9 @@ function viewProcessosConfig(){
       </div>
     </div>
     <div class="panel">
-      <div class="panel-head"><h2>Orçamentos — esquema esperado (ainda precisa ser feito do lado do Livro de Processos)</h2></div>
+      <div class="panel-head"><h2>Orçamentos — esquema já implementado dos dois lados</h2></div>
       <div class="panel-body" style="padding:16px 20px;font-size:12.5px;color:var(--text-soft);line-height:1.7;">
-        Uma coleção <strong>orcamentos</strong> no mesmo Firestore, um documento por pedido de orçamento feito dentro de um processo:
+        Uma coleção <strong>orcamentos</strong> no mesmo Firestore, um documento por pedido de orçamento (ou por pesquisas de preço enviadas pra segunda aprovação) feito dentro de um processo:
         <div class="note" style="margin:10px 0;font-family:'IBM Plex Mono',monospace;font-size:11.5px;white-space:pre-wrap;">{
   processoId: "&lt;id do processo&gt;",
   processoTitulo: "Compra de balança nova",
@@ -8826,7 +8891,25 @@ function viewProcessosConfig(){
   ],
   valorTotal: 850  // opcional — se não vier, soma os itens sozinho
 }</div>
-        Assim que existir, a sincronização acima já detecta orçamentos novos, gera um <strong>número sequencial</strong> pra cada um e grava de volta no próprio documento (campo <code>numero</code>). O orçamento entra na fila de "Ver orçamentos" pra aprovar ou recusar — a decisão (<code>status: "aprovado"</code> ou <code>"recusado"</code>, mais <code>decididoEm</code>) é gravada de volta automaticamente no documento, pra aparecer no processo lá.
+        A sincronização acima detecta orçamentos novos, gera um <strong>número sequencial</strong> pra cada um e grava de volta no próprio documento (campo <code>numero</code>). O orçamento entra na fila de "Orçamentos — Livro de Processos" pra aprovar ou recusar — a decisão (<code>status: "aprovado"</code> ou <code>"recusado"</code>, mais <code>decididoEm</code>) é gravada de volta automaticamente no documento, pra aparecer no processo lá. As pesquisas de preço (2ª etapa, depois do pedido inicial aprovado) usam exatamente essa mesma coleção e o mesmo fluxo de aprovação — não precisam de nada especial.
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Compra registrada → Conta a Pagar e Ativos Patrimoniais</h2></div>
+      <div class="panel-body" style="padding:16px 20px;font-size:12.5px;color:var(--text-soft);line-height:1.7;">
+        Depois que as pesquisas de preço são aprovadas, o processo pode gravar um campo <code>compraRegistrada</code> direto no documento dele, na coleção <strong>processos</strong>:
+        <div class="note" style="margin:10px 0;font-family:'IBM Plex Mono',monospace;font-size:11.5px;white-space:pre-wrap;">{
+  compraRegistrada: {
+    seq: 14,  // nº do andamento — evita lançar a mesma compra duas vezes
+    descricao: "Balança nova 30kg",
+    fornecedor: "Casa do Forneiro Ltda",
+    valor: 850,
+    notaFiscal: "123456",
+    ehAtivo: true,  // objeto físico? entra na fila de Ativos Patrimoniais
+    data: "2026-08-31"
+  }
+}</div>
+        A sincronização lança isso automaticamente como <strong>Conta a Pagar</strong> (categoria Fornecedores, status pendente). Se <code>ehAtivo</code> vier true, também entra numa fila de "pendente de cadastro" em Ativos Patrimoniais — aparece lá com um aviso, pra você revisar e completar a vida útil antes de virar um ativo de verdade (nunca cria o ativo sozinho, sempre com revisão humana).
       </div>
     </div>
   `;
@@ -11040,6 +11123,12 @@ function attachViewHandlers(){
 
   // Ativos Patrimoniais
   document.getElementById('btnNovoAtivoPatrimonial')?.addEventListener('click', ()=>openAtivoPatrimonialModal());
+  document.querySelectorAll('[data-action="revisar-compra-pendente"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const pp = (state.comprasProcessosPendentes||[]).find(x=>x.id===btn.dataset.id);
+      if(pp) openAtivoPatrimonialModal(null, pp);
+    });
+  });
   document.querySelectorAll('[data-action="editar-ativo-patrimonial"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const a = state.ativosPatrimoniais.find(x=>x.id===btn.dataset.id);
