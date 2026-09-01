@@ -995,6 +995,7 @@ let extratoModoBusca = 'conta';
 let conciliacaoContaId = null;
 let pararCameraQRAtiva = null;
 let relatorioAtivo = 'dre';
+let __fluxoCategoriaAtiva = '';
 let configAtivo = 'armazenamento';
 let dreAnaliseAtiva = 'horizontal';
 let custosProdutoPeriodo = 'mes';
@@ -1309,7 +1310,7 @@ function render(){
   if(currentView==='dashboard') main.innerHTML = viewDashboard();
   else if(currentView==='pagar') main.innerHTML = viewLancamentos('saida');
   else if(currentView==='receber') main.innerHTML = viewLancamentos('entrada');
-  else if(currentView==='fluxo') main.innerHTML = viewFluxo();
+  else if(currentView==='fluxo') main.innerHTML = viewFluxo(__fluxoCategoriaAtiva);
   else if(currentView==='contas') main.innerHTML = viewContas();
   else if(currentView==='extrato') main.innerHTML = viewExtrato(extratoContaId);
   else if(currentView==='conciliacao') main.innerHTML = viewConciliacao(conciliacaoContaId);
@@ -3271,55 +3272,141 @@ function relatorioInadimplenciaHTML(){
   `;
 }
 
-function viewFluxo(){
+function viewFluxo(categoriaFiltro){
+  categoriaFiltro = categoriaFiltro || '';
   const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
   const deMes = `${mesGlobalRef}-01`;
   const ateMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
+  const hoje = todayISO();
 
-  const todosRealizados = state.lancamentos.filter(l=>(l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && l.origem!=='investimento');
+  // Corrigido: usa movimentosRealizados() (cada parcela na sua data real), não mais um filtro direto
+  // que ignorava pagamento PARCIAL de algo que segue pendente (ex: fatura de cartão paga aos poucos).
+  const todosEventos = movimentosRealizados().filter(ev=>ev.origem!=='transferencia' && ev.origem!=='investimento');
   let saldo = 0;
-  todosRealizados.filter(l=>(l.dataPagamento||'')<deMes).forEach(l=>{ saldo += l.tipo==='entrada' ? l.valor : -l.valor; });
+  todosEventos.filter(ev=>(ev.data||'')<deMes).forEach(ev=>{ saldo += ev.tipo==='entrada' ? ev.valor : -ev.valor; });
   const saldoInicioMes = saldo;
 
-  let lista = todosRealizados.filter(l=>(l.dataPagamento||'')>=deMes && (l.dataPagamento||'')<=ateMes);
-  lista.sort((a,b)=> (a.dataPagamento||'').localeCompare(b.dataPagamento||''));
-  lista.forEach(l=>{ saldo += l.tipo==='entrada' ? l.valor : -l.valor; });
+  let eventosMes = todosEventos.filter(ev=>(ev.data||'')>=deMes && (ev.data||'')<=ateMes);
+  if(categoriaFiltro) eventosMes = eventosMes.filter(ev=>ev.categoria===categoriaFiltro || (ev.categoria||'').startsWith(categoriaFiltro+' / '));
+  eventosMes.sort((a,b)=> (a.data||'').localeCompare(b.data||''));
+  eventosMes.forEach(ev=>{ saldo += ev.tipo==='entrada' ? ev.valor : -ev.valor; });
   const saldoFimMes = saldo;
-  const rows = lista.map(rowHTML).join('');
 
-  const hoje = todayISO();
+  const rowsHTML = eventosMes.map(ev=>`
+    <div class="ledger-row" data-id="${ev.lancamentoId}" data-action="abrir-lancamento" style="cursor:pointer;">
+      <span class="dot ${ev.tipo}"></span>
+      <span class="mono" style="font-size:12.5px;color:var(--text-soft)">${fmtDate(ev.data)}</span>
+      <div class="desc-cell"><div>${escapeHTML(ev.descricao)}</div><div class="cat">${escapeHTML(ev.categoria)}</div></div>
+      <span class="col-cat"></span><span class="col-status"></span>
+      <span class="mono" style="font-weight:600;text-align:right;color:${ev.tipo==='entrada'?'var(--success)':'var(--danger)'};">${ev.tipo==='entrada'?'+':'-'} ${brl(ev.valor)}</span>
+    </div>
+  `).join('');
+
+  // Gráfico do saldo acumulado dia a dia dentro do mês
+  const ultimoDia = new Date(anoM, mesM, 0).getDate();
+  const diasDoMes = Array.from({length:ultimoDia},(_,i)=>`${mesGlobalRef}-${String(i+1).padStart(2,'0')}`);
+  let saldoCorrida = saldoInicioMes;
+  const saldoPorDia = diasDoMes.map(dia=>{
+    todosEventos.filter(ev=>ev.data===dia && (!categoriaFiltro || ev.categoria===categoriaFiltro || (ev.categoria||'').startsWith(categoriaFiltro+' / '))).forEach(ev=>{ saldoCorrida += ev.tipo==='entrada' ? ev.valor : -ev.valor; });
+    return { dia, saldo: saldoCorrida };
+  });
+  const maxSaldoAbs = Math.max(1, ...saldoPorDia.map(d=>Math.abs(d.saldo)));
+
+  // Fôlego de caixa (Runway): saldo atual ÷ gasto médio diário dos últimos 90 dias
+  const de90 = new Date(); de90.setDate(de90.getDate()-90);
+  const de90ISO = de90.toISOString().slice(0,10);
+  const gastos90dias = todosEventos.filter(ev=>ev.tipo==='saida' && ev.data>=de90ISO && ev.data<=hoje).reduce((s,ev)=>s+ev.valor,0);
+  const gastoMedioDiario = gastos90dias / 90;
+  const saldoAtualReal = totaisRealizados().saldo;
+  const foldegoDias = gastoMedioDiario>0 ? Math.round(saldoAtualReal/gastoMedioDiario) : null;
+
+  // Categorias disponíveis pro filtro (só as que têm movimento no mês)
+  const categoriasNoMes = [...new Set(todosEventos.filter(ev=>(ev.data||'')>=deMes && (ev.data||'')<=ateMes).map(ev=>ev.categoria))].sort();
+
   const em60dias = new Date(); em60dias.setDate(em60dias.getDate()+60);
   const em60ISO = em60dias.toISOString().slice(0,10);
   let pendentes = state.lancamentos.filter(l=>l.status==='pendente' && l.origem!=='transferencia' && l.origem!=='investimento' && l.dataVencimento && l.dataVencimento<=em60ISO);
   pendentes.sort((a,b)=>(a.dataVencimento||'').localeCompare(b.dataVencimento||''));
   let saldoProjetado = saldo;
-  pendentes.forEach(l=>{ saldoProjetado += l.tipo==='entrada' ? l.valor : -l.valor; });
-  const rowsProjetado = pendentes.map(rowHTML).join('');
+  pendentes.forEach(l=>{ saldoProjetado += l.tipo==='entrada' ? valorEmAberto(l) : -valorEmAberto(l); });
+
+  // Agrupa a projeção de 60 dias por semana (segunda a domingo), pra ficar rápido de ler
+  const inicioSemana = d => { const dt = new Date(d+'T12:00:00'); const dia = dt.getDay(); const diff = dia===0?-6:1-dia; dt.setDate(dt.getDate()+diff); return dt.toISOString().slice(0,10); };
+  const semanas = {};
+  const ordemSemanas = [];
+  let saldoAcumSemana = saldo;
+  pendentes.forEach(l=>{
+    const chave = inicioSemana(l.dataVencimento);
+    if(!semanas[chave]){ semanas[chave] = { inicio: chave, entradas:0, saidas:0, itens:[] }; ordemSemanas.push(chave); }
+    const v = valorEmAberto(l);
+    if(l.tipo==='entrada') semanas[chave].entradas += v; else semanas[chave].saidas += v;
+    semanas[chave].itens.push(l);
+  });
+  const semanasArr = ordemSemanas.map(chave=>{
+    saldoAcumSemana += semanas[chave].entradas - semanas[chave].saidas;
+    return { ...semanas[chave], saldoAcumulado: saldoAcumSemana };
+  });
+  const fmtSemana = iso => { const d = new Date(iso+'T12:00:00'); const fim = new Date(d); fim.setDate(fim.getDate()+6); return `${d.getDate()}/${d.getMonth()+1} a ${fim.getDate()}/${fim.getMonth()+1}`; };
 
   return `
     <div class="topbar">
       <div><h1>Fluxo de Caixa</h1><p>Lançamentos realizados, em ordem cronológica, com saldo acumulado (transferências entre contas próprias e aplicações financeiras não entram aqui — veja o extrato da conta)</p></div>
+      <button class="btn ghost sm" id="btnBaixarFluxoPDF">📄 Baixar PDF</button>
     </div>
     ${mesNavHTML()}
+
+    <div class="cards cards-compact">
+      <div class="card"><div class="label">Saldo início do mês</div><div class="value mono">${vm(brl(saldoInicioMes))}</div></div>
+      <div class="card"><div class="label">Saldo fim do mês</div><div class="value mono ${saldoFimMes>=0?'':'neg'}">${vm(brl(saldoFimMes))}</div></div>
+      <div class="card"><div class="label">🔋 Fôlego de caixa</div><div class="value mono">${foldegoDias===null?'—':foldegoDias+' dia(s)'}</div></div>
+    </div>
+    ${foldegoDias!==null ? `<div class="note" style="margin-top:0;">Fôlego de caixa: se você parasse de receber agora, no ritmo médio de gastos dos últimos 90 dias (${brl(gastoMedioDiario)}/dia), o saldo atual (${brl(saldoAtualReal)}) aguentaria mais ${foldegoDias} dia(s).</div>` : ''}
+
+    <div class="dash-section-label">Saldo dia a dia — ${competenciaLabel(mesGlobalRef)}</div>
+    <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+      <div style="display:flex;align-items:center;gap:2px;height:90px;overflow-x:auto;">
+        ${saldoPorDia.map(d=>`
+          <div style="flex:1;min-width:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;" title="${fmtDate(d.dia)}: ${brl(d.saldo)}">
+            <div style="width:4px;background:${d.saldo>=0?'var(--blue-accent)':'var(--danger)'};border-radius:2px;height:${Math.max(1,Math.round(Math.abs(d.saldo)/maxSaldoAbs*40))}px;margin-top:${d.saldo>=0?0:40}px;"></div>
+          </div>
+        `).join('')}
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-soft);margin-top:6px;">
+        <span>dia 1</span><span>dia ${ultimoDia}</span>
+      </div>
+    </div></div>
+
     <div class="panel">
       <div class="panel-head"><h2>Realizado no mês</h2><span style="font-size:12px;color:var(--text-soft);">Início: <span class="mono">${vm(brl(saldoInicioMes))}</span> · Fim: <span class="mono">${vm(brl(saldoFimMes))}</span></span></div>
+      ${categoriasNoMes.length ? `
+      <div style="padding:12px 20px 0;">
+        <select id="fluxoCategoriaFiltro" style="max-width:280px;">
+          <option value="">Todas as categorias</option>
+          ${categoriasNoMes.map(c=>`<option value="${escapeHTML(c)}" ${categoriaFiltro===c?'selected':''}>${escapeHTML(c)}</option>`).join('')}
+        </select>
+      </div>` : ''}
       <div class="ledger-row head">
         <span></span><span>Data</span><span>Descrição</span><span class="col-cat">Venc. orig.</span><span class="col-status">Status</span><span style="text-align:right;">Valor</span>
       </div>
       <div class="panel-body">
-        ${lista.length? rows : `<div class="empty">Nenhum lançamento realizado (pago/recebido) neste mês. Saldo início do mês: ${brl(saldoInicioMes)}</div>`}
+        ${eventosMes.length? rowsHTML : `<div class="empty">${categoriaFiltro?'Nenhum lançamento dessa categoria neste mês.':'Nenhum lançamento realizado (pago/recebido) neste mês.'} Saldo início do mês: ${brl(saldoInicioMes)}</div>`}
       </div>
     </div>
 
-    <details class="panel-details" ${pendentes.length?'open':''}>
-      <summary>Fluxo de caixa projetado — próximos 60 dias (${pendentes.length} conta(s) pendente(s)) · Saldo previsto: ${brl(saldoProjetado)}</summary>
+    <details class="panel-details" ${semanasArr.length?'open':''}>
+      <summary>Fluxo de caixa projetado — próximos 60 dias, por semana (${pendentes.length} conta(s) pendente(s)) · Saldo previsto: ${brl(saldoProjetado)}</summary>
       <div>
-        <div class="note" style="margin:0;border-radius:0;border-top:1px solid var(--line);">Projeção baseada nas contas a pagar e a receber já cadastradas com vencimento até 60 dias. Não considera contas que ainda não foram lançadas.</div>
-        ${pendentes.length ? `
-        <div class="ledger-row head">
-          <span></span><span>Vence</span><span>Descrição</span><span class="col-cat">Venc. orig.</span><span class="col-status">Status</span><span style="text-align:right;">Valor</span>
-        </div>
-        ${rowsProjetado}` : `<div class="empty">Nenhuma conta pendente nos próximos 60 dias.</div>`}
+        <div class="note" style="margin:0;border-radius:0;border-top:1px solid var(--line);">Projeção baseada nas contas a pagar e a receber já cadastradas com vencimento até 60 dias, agrupadas por semana. Não considera contas que ainda não foram lançadas.</div>
+        ${semanasArr.length ? semanasArr.map(sem=>`
+          <details class="fatura-grupo-item">
+            <summary class="ledger-row" style="grid-template-columns:1fr auto auto;cursor:pointer;">
+              <div class="desc-cell"><div>Semana de ${fmtSemana(sem.inicio)}</div><div class="cat">${sem.itens.length} conta(s)</div></div>
+              <span class="mono" style="font-size:12px;"><span style="color:var(--success);">+${brl(sem.entradas)}</span> <span style="color:var(--danger);">−${brl(sem.saidas)}</span></span>
+              <span class="mono" style="font-weight:600;${sem.saldoAcumulado<0?'color:var(--danger);':''}">${brl(sem.saldoAcumulado)}</span>
+            </summary>
+            <div style="padding:0 0 8px 20px;">${sem.itens.map(rowHTML).join('')}</div>
+          </details>
+        `).join('') : `<div class="empty">Nenhuma conta pendente nos próximos 60 dias.</div>`}
       </div>
     </details>
 
@@ -3328,6 +3415,70 @@ function viewFluxo(){
       <div id="projecaoMultiMesPanel" style="padding:16px 20px;"></div>
     </details>
   `;
+}
+
+function gerarFluxoCaixaPDF(mesRef, categoriaFiltro){
+  if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
+  const [anoM, mesM] = mesRef.split('-').map(Number);
+  const deMes = `${mesRef}-01`;
+  const ateMes = `${mesRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
+  const todosEventos = movimentosRealizados().filter(ev=>ev.origem!=='transferencia' && ev.origem!=='investimento');
+  let saldo = 0;
+  todosEventos.filter(ev=>(ev.data||'')<deMes).forEach(ev=>{ saldo += ev.tipo==='entrada' ? ev.valor : -ev.valor; });
+  const saldoInicio = saldo;
+  let eventosMes = todosEventos.filter(ev=>(ev.data||'')>=deMes && (ev.data||'')<=ateMes);
+  if(categoriaFiltro) eventosMes = eventosMes.filter(ev=>ev.categoria===categoriaFiltro || (ev.categoria||'').startsWith(categoriaFiltro+' / '));
+  eventosMes.sort((a,b)=>(a.data||'').localeCompare(b.data||''));
+  if(!eventosMes.length){ showToast('Nenhuma movimentação nesse mês pra gerar o PDF'); return; }
+
+  const { jsPDF } = window.jspdf;
+  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+  const M = 18, W = 210 - M*2;
+  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
+  let y = 22;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
+  docPdf.text('Livro Caixa Financeiro VK', M, y);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
+  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
+  y += 7;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 9;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
+  docPdf.text(`Fluxo de Caixa — ${competenciaLabel(mesRef)}`, M, y);
+  y += 6;
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
+  docPdf.text(`Saldo início do mês: ${brl(saldoInicio)}${categoriaFiltro?` · Categoria: ${categoriaFiltro}`:''}`, M, y);
+  y += 9;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(8.5); docPdf.setTextColor(...SOFT);
+  docPdf.text('DATA', M, y); docPdf.text('DESCRIÇÃO', M+22, y); docPdf.text('VALOR', M+W, y, { align:'right' });
+  y += 4;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 5;
+
+  let saldoCorrida = saldoInicio;
+  eventosMes.forEach(ev=>{
+    if(y > 270){ docPdf.addPage(); y = 20; }
+    saldoCorrida += ev.tipo==='entrada' ? ev.valor : -ev.valor;
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...INK);
+    docPdf.text(fmtDate(ev.data), M, y);
+    const desc = (ev.descricao||'').length>48 ? ev.descricao.slice(0,48)+'…' : (ev.descricao||'');
+    docPdf.text(desc, M+22, y);
+    docPdf.setTextColor(...(ev.tipo==='entrada'?SUCCESS:DANGER));
+    docPdf.text(`${ev.tipo==='entrada'?'+':'-'} ${brl(ev.valor)}`, M+W, y, { align:'right' });
+    y += 5.5;
+  });
+
+  y += 3;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 6;
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10.5); docPdf.setTextColor(...INK);
+  docPdf.text('Saldo final do mês', M, y);
+  docPdf.text(brl(saldoCorrida), M+W, y, { align:'right' });
+
+  docPdf.save(`fluxo-caixa-${mesRef}.pdf`);
 }
 
 function calcularProjecaoMultiMes(mesesAFrente, cenario){
@@ -10596,6 +10747,13 @@ function attachViewHandlers(){
       render();
     });
   });
+  const fluxoCategoriaFiltro = document.getElementById('fluxoCategoriaFiltro');
+  if(fluxoCategoriaFiltro) fluxoCategoriaFiltro.addEventListener('change', ()=>{
+    __fluxoCategoriaAtiva = fluxoCategoriaFiltro.value;
+    render();
+  });
+  const btnBaixarFluxoPDF = document.getElementById('btnBaixarFluxoPDF');
+  if(btnBaixarFluxoPDF) btnBaixarFluxoPDF.addEventListener('click', ()=> gerarFluxoCaixaPDF(mesGlobalRef, __fluxoCategoriaAtiva));
   document.querySelectorAll('[data-goto]').forEach(el=>{
     el.addEventListener('click', ()=>{
       currentView = el.dataset.goto;
