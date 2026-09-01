@@ -883,6 +883,7 @@ function aplicarMigracoes(s){
   if(!s.ativosInvestimento) s.ativosInvestimento = [];
   if(!s.notasPendentes) s.notasPendentes = [];
   if(!s.balancoManual) s.balancoManual = { estoques:0, realizavelLP:0, passivoNaoCirculante:0 };
+  if(s.balancoManual.aliquotaEfetiva===undefined) s.balancoManual.aliquotaEfetiva = 0;
   if(!s.centrosCusto) s.centrosCusto = [];
   if(!s.canaisVenda) s.canaisVenda = ['E-commerce','Loja Física','Marketplace','B2B','Representante'];
   if(!s.categoriasFixas) s.categoriasFixas = [];
@@ -3037,6 +3038,29 @@ function viewDashboard(){
       <div class="card"><div class="label">📥 A receber</div><div class="value mono pos">${vm(brl(pend.aReceber))}</div></div>
     </div>
 
+    ${(()=>{
+      const hoje = todayISO();
+      const ateReal = mesGlobalRef===hoje.slice(0,7) ? hoje : t.ateMes;
+      const { receitaTotal, lucroLiquido } = resultadoOperacionalPeriodo(t.de, ateReal);
+      const ebitdaMes = ebitdaPeriodo(t.de, ateReal, 1);
+      const margemLiquida = receitaTotal>0 ? (lucroLiquido/receitaTotal*100) : 0;
+      const margemEbitda = receitaTotal>0 ? (ebitdaMes/receitaTotal*100) : 0;
+      const [anoMD2, mesMD2] = mesGlobalRef.split('-').map(Number);
+      const mesAnteriorRef = mesMD2===1 ? `${anoMD2-1}-12` : `${anoMD2}-${String(mesMD2-1).padStart(2,'0')}`;
+      const tAnt = totaisPorMesRef(mesAnteriorRef);
+      const { lucroLiquido: lucroAnt, receitaTotal: receitaAnt } = resultadoOperacionalPeriodo(tAnt.de, tAnt.ateMes<hoje?tAnt.ateMes:hoje);
+      const margemLiquidaAnt = receitaAnt>0 ? (lucroAnt/receitaAnt*100) : 0;
+      if(receitaTotal<=0 && receitaAnt<=0) return '';
+      return `
+    <div class="dash-section-label">Saúde do negócio — ${nomeMes}</div>
+    <div class="cards cards-compact" style="grid-template-columns:repeat(auto-fit,minmax(115px,1fr));">
+      <div class="card"><div class="label">${semaforo(margemLiquida, margemLiquidaAnt, margemLiquidaAnt*0.7)} Margem Líquida</div><div class="value mono">${vm(margemLiquida.toFixed(1)+'%')}</div></div>
+      <div class="card"><div class="label">${semaforo(margemEbitda,15,5)} EBITDA</div><div class="value mono">${vm(brl(ebitdaMes))}</div></div>
+      <div class="card"><div class="label">${semaforo(margemEbitda,15,5)} Margem EBITDA</div><div class="value mono">${vm(margemEbitda.toFixed(1)+'%')}</div></div>
+      <div class="card" style="display:flex;align-items:center;justify-content:center;"><span data-ir-relatorio="executivo" style="cursor:pointer;font-size:12px;color:var(--blue-accent);font-weight:600;text-align:center;">Ver Dashboard<br>Executivo →</span></div>
+    </div>`;
+    })()}
+
     <div class="dash-economia-avisos-row">
       <div class="dash-economia-col">
         ${economiaMensalHTML(mesGlobalRef)}
@@ -3092,6 +3116,16 @@ function viewDashboard(){
     ${resumoCartoesHTML()}
 
     ${orcadoRealizadoHTML(mesGlobalRef)}
+
+    <div class="dash-section-label">Explorar</div>
+    <div class="panel">
+      <div class="panel-body" style="padding:6px 0;">
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="gerencial"><span>📊 Dashboard Gerencial — visão anual completa</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="centro_lucro"><span>🏢 Centro de Lucro / Unidade de Negócio</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="rolling_forecast"><span>🔁 Rolling Forecast — próximos 12 meses</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="indicadores"><span>📈 Ciclo Financeiro e Giro de Estoque</span><span style="color:var(--blue-accent);">→</span></div>
+      </div>
+    </div>
   `;
 }
 
@@ -5307,6 +5341,8 @@ function viewRelatorios(){
     { id:'canal_venda', icone:'🛒', nome:'Receita por Canal de Venda', desc:'Compara receita, participação e ticket médio entre canais de venda' },
     { id:'comissoes', icone:'🤝', nome:'Desempenho Comercial e Comissões', desc:'Comissões por vendedor, metas e ticket médio (abre a tela de Comissões)' },
     { id:'orcamento', icone:'🎯', nome:'Orçado vs. Realizado', desc:'Comparativo entre o planejado e o executado por categoria (abre Orçamento e Planejamento)' },
+    { id:'rolling_forecast', icone:'🔁', nome:'Rolling Forecast 12 Meses', desc:'Projeção contínua dos próximos 12 meses, sempre recalculada a partir de hoje, com base no seu histórico recente' },
+    { id:'centro_lucro', icone:'🏢', nome:'Centro de Lucro / Unidade de Negócio', desc:'Resultado (receita − despesa) completo por centro de custo, lado a lado' },
     { id:'breakeven', icone:'⚖️', nome:'Ponto de Equilíbrio', desc:'Vendas mínimas pra cobrir os custos, em 3 cenários (otimista/realista/pessimista)' },
     { id:'valuation', icone:'💎', nome:'Valuation Estimado', desc:'Estimativa educacional de valor da empresa por múltiplos de EBITDA e faturamento' },
     { id:'aging', icone:'⏳', nome:'Aging — Vencidos por Faixa', desc:'Contas a receber e a pagar por faixa de atraso, com ranking de inadimplentes' },
@@ -5339,7 +5375,7 @@ function viewRelatorios(){
 const RELATORIOS_NOMES = {
   gerencial:'Dashboard Gerencial', executivo:'Dashboard Executivo', dre:'DRE', balanco:'Balanço Patrimonial', mei:'Declaração MEI', indicadores:'Indicadores Financeiros',
   produto:'Rentabilidade por Produto', investimentos:'Relatório de Investimentos', liquidez:'Índices de Liquidez', aging:'Aging — Vencidos por Faixa', dfc:'DFC — Fluxo de Caixa', cartoes:'Cartões de Crédito',
-  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações'
+  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio'
 };
 
 function viewRelatorioDetalhe(){
@@ -5971,8 +6007,34 @@ function renderIndicadores(periodo){
       <div class="report-title">Prazos Médios</div>
       <div class="report-line"><span>Prazo Médio de Recebimento</span><span class="v">${fmtPrazo(prazoRecebimento)}</span></div>
       <div class="report-line"><span>Prazo Médio de Pagamento</span><span class="v">${fmtPrazo(prazoPagamento)}</span></div>
-      <div class="note" style="margin:6px 0 0;">Comparando a data que venceu com a data que foi realmente pago/recebido, no período.</div>
+      <div class="note" style="margin:6px 0 0;">Comparando a data que venceu com a data que foi realmente pago/recebido, no período — mostra se você costuma atrasar ou adiantar.</div>
     </div>
+
+    ${(()=>{
+      const dias = Math.max(1, Math.round((new Date(ate)-new Date(de))/86400000)+1);
+      const estoqueMedio = totalEstoqueInsumos();
+      const categoriaEstoque = state.vkConfig?.categoriaEstoque || 'Insumos';
+      const cmvPeriodo = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate && (l.categoria===categoriaEstoque || (l.categoria||'').startsWith(categoriaEstoque+' / '))).reduce((s,l)=>s+l.valor,0);
+      const pmeTrad = cmvPeriodo>0 ? (estoqueMedio/cmvPeriodo)*dias : null;
+      const aReceberMedio = aReceberPendente;
+      const aPagarMedio = aPagarPendente;
+      const pmrTrad = totalReceitas>0 ? (aReceberMedio/totalReceitas)*dias : null;
+      const pmpTrad = totalDespesas>0 ? (aPagarMedio/totalDespesas)*dias : null;
+      const ccc = (pmrTrad!==null && pmeTrad!==null && pmpTrad!==null) ? (pmrTrad + pmeTrad - pmpTrad) : null;
+      const giroEstoque = (estoqueMedio>0 && cmvPeriodo>0) ? cmvPeriodo/estoqueMedio : null;
+      const fmtD = v => v===null ? '—' : `${v.toFixed(0)} dia(s)`;
+      return `
+    <div class="report-block">
+      <div class="report-title">Ciclo Financeiro (Ciclo de Conversão de Caixa) e Giro de Estoque</div>
+      <div class="report-line"><span>Prazo Médio de Estoque (PME)</span><span class="v">${fmtD(pmeTrad)}</span></div>
+      <div class="report-line"><span>Prazo Médio de Recebimento (PMR)</span><span class="v">${fmtD(pmrTrad)}</span></div>
+      <div class="report-line"><span>Prazo Médio de Pagamento (PMP)</span><span class="v">${fmtD(pmpTrad)}</span></div>
+      <div class="report-line total"><span>Ciclo Financeiro (PMR + PME − PMP)</span><span class="v" style="color:${ccc!==null&&ccc<=0?'var(--success)':'var(--warn)'};">${fmtD(ccc)}</span></div>
+      <div class="note" style="margin:6px 0 12px;">É o tempo entre pagar o fornecedor e receber do cliente. Quanto menor (ou negativo), melhor — significa que você recebe antes de precisar pagar, sem precisar de capital de giro emprestado pra cobrir esse intervalo. Estoque médio usa o valor atual sincronizado do VK Industrial (não guardamos histórico ainda, então é uma foto de agora, não uma média real do período).</div>
+      <div class="report-line"><span>Giro de Estoque</span><span class="v">${giroEstoque===null?'—':giroEstoque.toFixed(2)+'x'}</span></div>
+      <div class="note" style="margin:6px 0 0;">Quantas vezes o estoque de insumos "virou" (foi consumido e reposto) no período — CMV do período ÷ estoque médio. Quanto maior, mais rápido o insumo sai da prateleira e vira produto vendido. CMV aqui é uma aproximação: soma das despesas na categoria "${escapeHTML(categoriaEstoque)}" pagas no período.</div>
+    </div>`;
+    })()}
   `;
 }
 
@@ -6458,6 +6520,39 @@ function renderRelatorioLiquidez(){
       ${linhaIndice('Solvência Geral', 'Ativo Total ÷ Passivo Total', solvencia, corIdx(solvencia, 1, 1.5),
         solvencia===null ? 'Não se aplica sem dívidas.' : `Se a empresa vendesse tudo hoje, cobriria as dívidas <strong>${fmtIdx(solvencia)}</strong> vez(es). Abaixo de 1,00 indica passivo a descoberto — situação grave.`)}
 
+      ${(()=>{
+        const hoje = todayISO();
+        const de12 = `${(Number(hoje.slice(0,4))-1)}-${hoje.slice(5,7)}-01`;
+        const dividaLiquida = passivoTotal - disponivel;
+        const ebitdaAno = ebitdaPeriodo(de12, hoje, 12);
+        const alavancagem = ebitdaAno>0 ? dividaLiquida/ebitdaAno : null;
+        const { resultadoOp } = resultadoOperacionalPeriodo(de12, hoje);
+        const nomesFinDespesa = (state.categorias.saida||[]).filter(c=>c.ehFinanceira).map(c=>c.nome);
+        const ehFinanceira = (nomesPai, k) => nomesPai.some(p=>k===p || k.startsWith(p+' / '));
+        const despesasFinanceirasAno = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de12 && ev.data<=hoje && ehFinanceira(nomesFinDespesa, ev.categoria||'')).reduce((s,ev)=>s+ev.valor,0);
+        const icj = despesasFinanceirasAno>0 ? resultadoOp/despesasFinanceirasAno : null;
+        const aliquota = state.balancoManual.aliquotaEfetiva || 0;
+        const nopat = resultadoOp * (1 - aliquota/100);
+        return `
+      <div class="report-title">Alavancagem e Geração de Caixa (últimos 12 meses)</div>
+      ${linhaIndice('Índice de Alavancagem', 'Dívida Líquida ÷ EBITDA', alavancagem, corInversa(alavancagem, 2, 3.5),
+        alavancagem===null ? 'Não se aplica — sem EBITDA positivo nos últimos 12 meses pra medir.' : `Levaria <strong>${fmtIdx(alavancagem)}</strong> ano(s) de EBITDA pra quitar a dívida líquida (${brl(dividaLiquida)}). Referência: até 2x é confortável; acima de 3,5x costuma preocupar bancos.`)}
+      ${linhaIndice('Índice de Cobertura de Juros (ICJ)', 'Resultado Operacional ÷ Despesas Financeiras', icj, corIdx(icj, 1.5, 3),
+        icj===null ? 'Não se aplica — sem despesa financeira registrada nos últimos 12 meses.' : `O resultado operacional cobre as despesas financeiras <strong>${fmtIdx(icj)}</strong> vez(es). Referência: abaixo de 1,5 é sinal de alerta; acima de 3 é confortável.`)}
+      <div class="field" style="max-width:220px;margin-top:10px;">
+        <label>Alíquota efetiva de impostos (%, pro NOPAT)</label>
+        <input type="text" inputmode="decimal" id="liqAliquotaEfetiva" value="${aliquota||''}" placeholder="Ex: 6 (Simples Nacional)">
+      </div>
+      <div class="report-line" style="display:block;border-bottom:1px solid var(--line);padding:10px 0;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;">
+          <span style="font-weight:600;">NOPAT <span style="font-weight:400;font-size:11px;color:var(--text-soft);">· Resultado Operacional × (1 − alíquota)</span></span>
+          <span class="v mono" style="font-size:16px;font-weight:700;">${brl(nopat)}</span>
+        </div>
+        <div style="font-size:11.5px;color:var(--text-soft);margin-top:3px;line-height:1.45;">Lucro que a operação principal gera já descontando o imposto que incide sobre ela — sem considerar juros de dívidas. Preencha a alíquota efetiva (não a nominal) pra ficar realista; se não souber, deixe 0.</div>
+      </div>
+      `;
+      })()}
+
       <div class="note">Os índices usam a posição de hoje: saldos das contas, pendências de pagar/receber, investimentos e ativos patrimoniais já depreciados. Bancos costumam pedir exatamente esses indicadores em análise de crédito.</div>
     </div>
   `;
@@ -6751,6 +6846,109 @@ function dadosMesGerencial(mesRef, centroCusto){
   const lucro = receita - despesaTotal;
   const margemLiquidaPct = receita>0 ? (lucro/receita*100) : 0;
   return { mesRef, receita, despesaTotal, despesasPorCategoria, entradasPorCategoria, custoFixo, custoVariavel, margemContribPct, pontoEquilibrio, lucro, margemLiquidaPct };
+}
+
+function renderRollingForecast(){
+  const hoje = new Date();
+  const anoAtual = hoje.getFullYear(), mesAtual = hoje.getMonth()+1;
+  // Base: média dos últimos 3 meses fechados (sem contar o mês corrente, que ainda não terminou)
+  const mesesBase = Array.from({length:3},(_,i)=>{
+    const d = new Date(anoAtual, mesAtual-1-1-i, 1); // -1 extra pra pular o mês corrente
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  });
+  const dadosBase = mesesBase.map(m=>resultadoOperacionalPeriodo(`${m}-01`, `${m}-31`));
+  const receitaMedia = dadosBase.reduce((s,d)=>s+d.receitaTotal,0) / dadosBase.length;
+  const despesaMedia = dadosBase.reduce((s,d)=>s+d.despesaTotal,0) / dadosBase.length;
+  // Tendência simples: variação entre o mês mais antigo e o mais recente da base, aplicada aos poucos
+  const tendenciaReceita = dadosBase.length>=2 ? (dadosBase[0].receitaTotal - dadosBase[dadosBase.length-1].receitaTotal) / (dadosBase.length-1) : 0;
+  const tendenciaDespesa = dadosBase.length>=2 ? (dadosBase[0].despesaTotal - dadosBase[dadosBase.length-1].despesaTotal) / (dadosBase.length-1) : 0;
+
+  const proximos12 = Array.from({length:12},(_,i)=>{
+    const d = new Date(anoAtual, mesAtual-1+i, 1);
+    const mesRef = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const jaFechado = mesRef < hoje.toISOString().slice(0,7);
+    if(jaFechado || (i===0 && mesRef===hoje.toISOString().slice(0,7))){
+      // mês corrente ou já passado — usa o real, não projeta
+      const real = resultadoOperacionalPeriodo(`${mesRef}-01`, `${mesRef}-31`);
+      return { mesRef, receita: real.receitaTotal, despesa: real.despesaTotal, projetado: i>0 ? false : (mesRef===hoje.toISOString().slice(0,7)) };
+    }
+    const receitaProjetada = Math.max(0, receitaMedia + tendenciaReceita*i);
+    const despesaProjetada = Math.max(0, despesaMedia + tendenciaDespesa*i);
+    return { mesRef, receita: receitaProjetada, despesa: despesaProjetada, projetado: true };
+  });
+
+  const totalReceitaProj = proximos12.reduce((s,d)=>s+d.receita,0);
+  const totalDespesaProj = proximos12.reduce((s,d)=>s+d.despesa,0);
+  const maxRF = Math.max(1, ...proximos12.map(d=>Math.max(d.receita,d.despesa)));
+
+  return `
+    <div class="report-controls"><span style="font-size:12.5px;color:var(--text-soft);">Projeção contínua — sempre os próximos 12 meses a partir de hoje, recalculada toda vez que você abre esse relatório</span></div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
+      <div class="card saldo"><div class="label">Receita projetada (12m)</div><div class="value mono">${brl(totalReceitaProj)}</div></div>
+      <div class="card"><div class="label">Despesa projetada (12m)</div><div class="value mono">${brl(totalDespesaProj)}</div></div>
+      <div class="card"><div class="label">Resultado projetado (12m)</div><div class="value mono" style="color:${totalReceitaProj-totalDespesaProj>=0?'var(--success)':'var(--danger)'};">${brl(totalReceitaProj-totalDespesaProj)}</div></div>
+    </div>
+    <div class="note" style="margin-top:0;">Base: média dos últimos 3 meses fechados, com a tendência de crescimento/queda entre eles projetada pra frente. Meses já reais (passados ou o mês corrente) usam o valor de verdade, não projeção. É uma estimativa simples baseada no seu próprio histórico recente — não considera sazonalidade nem eventos pontuais que você já sabe que vêm por aí.</div>
+    <div class="dash-section-label">Mês a mês</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${proximos12.map(d=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
+          <div class="desc-cell"><div>${competenciaLabel(d.mesRef)}${d.projetado?' <span style="color:var(--blue-accent);font-size:10.5px;">projetado</span>':' <span style="color:var(--text-soft);font-size:10.5px;">real</span>'}</div></div>
+          <span class="mono" style="font-size:12.5px;color:var(--success);">+${brl(d.receita)}</span>
+          <span class="mono" style="font-size:12.5px;color:var(--danger);">−${brl(d.despesa)}</span>
+        </div>
+      `).join('')}
+    </div></div>
+  `;
+}
+
+function renderCentroLucro(mesRef){
+  mesRef = mesRef || mesGlobalRef;
+  const hoje = todayISO();
+  const [anoM, mesM] = mesRef.split('-').map(Number);
+  const de = `${mesRef}-01`;
+  const ateMes = `${mesRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
+  const ate = mesRef===hoje.slice(0,7) ? hoje : ateMes;
+
+  const centros = [...(state.centrosCusto||[]), '(sem centro definido)'];
+  const eventos = movimentosRealizados().filter(ev=>ev.data>=de && ev.data<=ate && ev.origem!=='transferencia' && !(ev.categoria==='Investimentos'&&ev.origem==='investimento'));
+  const porCentro = centros.map(centro=>{
+    const eh = ev => centro==='(sem centro definido)' ? !ev.centroCusto : ev.centroCusto===centro;
+    const receita = eventos.filter(ev=>ev.tipo==='entrada' && eh(ev)).reduce((s,ev)=>s+ev.valor,0);
+    const despesa = eventos.filter(ev=>ev.tipo==='saida' && eh(ev)).reduce((s,ev)=>s+ev.valor,0);
+    return { centro, receita, despesa, resultado: receita-despesa, margem: receita>0 ? (receita-despesa)/receita*100 : null };
+  }).filter(c=>c.receita>0 || c.despesa>0);
+  porCentro.sort((a,b)=>b.resultado-a.resultado);
+
+  const receitaTotal = porCentro.reduce((s,c)=>s+c.receita,0);
+  const despesaTotal = porCentro.reduce((s,c)=>s+c.despesa,0);
+  const maxAbs = Math.max(1, ...porCentro.map(c=>Math.abs(c.resultado)));
+
+  return `
+    <div class="report-controls"><input type="month" id="centroLucroMes" value="${mesRef}"></div>
+    ${!porCentro.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum lançamento com centro de custo marcado nesse mês. Marque o "Centro de Custo" ao lançar receitas e despesas (campo opcional no formulário) pra esse relatório funcionar.</div></div>` : `
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
+      <div class="card saldo"><div class="label">Receita total</div><div class="value mono">${brl(receitaTotal)}</div></div>
+      <div class="card"><div class="label">Despesa total</div><div class="value mono">${brl(despesaTotal)}</div></div>
+      <div class="card"><div class="label">Centros com resultado positivo</div><div class="value mono" style="color:var(--success);">${porCentro.filter(c=>c.resultado>=0).length} <span style="font-size:11px;color:var(--text-soft);">de ${porCentro.length}</span></div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Resultado por centro de custo / unidade</h2></div>
+      <div class="panel-body" style="padding:14px 18px;">
+        ${porCentro.map(c=>`
+          <div style="margin-bottom:14px;">
+            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;"><span style="font-weight:600;">${escapeHTML(c.centro)}</span><span class="mono" style="font-weight:700;color:${c.resultado>=0?'var(--success)':'var(--danger)'};">${brl(c.resultado)}</span></div>
+            <div style="display:flex;gap:10px;font-size:11px;color:var(--text-soft);margin-bottom:5px;">
+              <span>Receita: ${brl(c.receita)}</span><span>Despesa: ${brl(c.despesa)}</span><span>Margem: ${c.margem!==null?c.margem.toFixed(1)+'%':'—'}</span>
+            </div>
+            <div style="background:var(--bone);border-radius:5px;height:6px;overflow:hidden;"><div style="width:${Math.round(Math.abs(c.resultado)/maxAbs*100)}%;height:100%;background:${c.resultado>=0?'var(--success)':'var(--danger)'};"></div></div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+    <div class="note">Resultado = Receita − Despesa lançadas com esse centro de custo marcado no período. "(sem centro definido)" agrupa tudo que não foi marcado com nenhum centro — quanto mais você marcar, mais preciso fica esse relatório.</div>
+    `}
+  `;
 }
 
 function renderDashboardGerencial(ano, centroCusto){
@@ -10391,6 +10589,13 @@ function attachViewHandlers(){
     });
   }
 
+  document.querySelectorAll('[data-ir-relatorio]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      relatorioAtivo = el.dataset.irRelatorio;
+      currentView = 'relatorio-detalhe';
+      render();
+    });
+  });
   document.querySelectorAll('[data-goto]').forEach(el=>{
     el.addEventListener('click', ()=>{
       currentView = el.dataset.goto;
@@ -10497,6 +10702,8 @@ function attachViewHandlers(){
         relatorioAtivo==='abc_fornecedores' ? renderRelatorioABCFornecedores() :
         relatorioAtivo==='inadimplencia_cac' ? renderRelatorioInadimplenciaCAC() :
         relatorioAtivo==='canal_venda' ? renderRelatorioCanalVenda() :
+        relatorioAtivo==='rolling_forecast' ? renderRollingForecast() :
+        relatorioAtivo==='centro_lucro' ? renderCentroLucro() :
         relatorioAtivo==='breakeven' ? renderRelatorioBreakEven() :
         relatorioAtivo==='valuation' ? renderRelatorioValuation() :
         relatorioAtivo==='mensal' ? renderSuperRelatorioMensal(mensalMesRef) :
@@ -10525,18 +10732,24 @@ function attachViewHandlers(){
           bindReportInner();
         });
       });
-      ['liqEstoques','liqRealizavelLP','liqPassivoLP'].forEach(idc=>{
+      ['liqEstoques','liqRealizavelLP','liqPassivoLP','liqAliquotaEfetiva'].forEach(idc=>{
         document.getElementById(idc)?.addEventListener('change', ()=>{
           state.balancoManual = state.balancoManual || {};
           state.balancoManual.estoques = numBR(document.getElementById('liqEstoques').value) || 0;
           state.balancoManual.realizavelLP = numBR(document.getElementById('liqRealizavelLP').value) || 0;
           state.balancoManual.passivoNaoCirculante = numBR(document.getElementById('liqPassivoLP').value) || 0;
+          state.balancoManual.aliquotaEfetiva = numBR(document.getElementById('liqAliquotaEfetiva')?.value) || 0;
           persist();
           document.getElementById('reportPanel').innerHTML = renderRelatorioLiquidez();
           bindReportInner();
         });
       });
       const drePeriodo = document.getElementById('drePeriodo');
+      const centroLucroMes = document.getElementById('centroLucroMes');
+      if(centroLucroMes) centroLucroMes.addEventListener('change', ()=>{
+        document.getElementById('reportPanel').innerHTML = renderCentroLucro(centroLucroMes.value);
+        bindReportInner();
+      });
       const previsaoDiasSel = document.getElementById('previsaoDias');
       if(previsaoDiasSel) previsaoDiasSel.addEventListener('change', ()=>{
         previsaoDiasAtivo = parseInt(previsaoDiasSel.value);
