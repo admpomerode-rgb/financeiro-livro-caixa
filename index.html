@@ -3190,6 +3190,45 @@ function rowHTML(l){
   `;
 }
 
+// Agrupa lançamentos que compartilham grupoId (ex: itens de uma mesma nota fiscal aprovados
+// individualmente) numa única linha expansível — mesmo padrão já usado na fatura de cartão.
+// Itens sem grupo compartilhado (ou sozinhos no grupo) continuam mostrando linha normal.
+function listaLancamentosAgrupadaHTML(lista){
+  const porGrupo = {};
+  const ordem = [];
+  lista.forEach(l=>{
+    const chave = l.grupoId || l.id;
+    if(!porGrupo[chave]){ porGrupo[chave] = []; ordem.push(chave); }
+    porGrupo[chave].push(l);
+  });
+  return ordem.map(chave=>{
+    const itens = porGrupo[chave];
+    if(itens.length===1) return rowHTML(itens[0]);
+    const l0 = itens[0];
+    const total = itens.reduce((s,l)=>s+valorEmAberto(l),0);
+    const statusesUnicos = [...new Set(itens.map(l=>l.status))];
+    const statusUniforme = statusesUnicos.length===1 ? statusesUnicos[0] : null;
+    const statusClass = statusUniforme==='pendente' && l0.dataVencimento && l0.dataVencimento<todayISO() ? 'atrasado' : statusUniforme;
+    const statusLabel = statusUniforme ? ({pago:'Pago', recebido:'Recebido', cancelado:'Cancelado', pendente: statusClass==='atrasado' ? 'Atrasado' : 'Pendente'}[statusUniforme]) : 'Vários';
+    const tituloGrupo = l0.fornecedor || (l0.descricao.match(/\(([^)]+)\)\s*$/) || [,l0.descricao])[1];
+    return `
+    <details class="fatura-grupo-item">
+      <summary class="ledger-row" style="cursor:pointer;">
+        <span class="dot ${l0.tipo}"></span>
+        <span class="mono" style="font-size:12px;color:var(--text-soft)">${fmtDate(l0.dataVencimento)}</span>
+        <div class="desc-cell">
+          <div>${escapeHTML(tituloGrupo)} <span style="color:var(--text-soft);font-size:11px;">(${itens.length} itens)</span></div>
+          <div class="cat">${l0.numeroNF ? `NF ${escapeHTML(l0.numeroNF)}` : ''}</div>
+        </div>
+        <span class="col-cat mono" style="font-size:11.5px;color:var(--text-soft)">${fmtDate(l0.dataVencimento)}</span>
+        <span class="col-status status-chip ${statusClass||''}">${statusLabel}</span>
+        <span class="mono" style="font-weight:600;color:${l0.tipo==='entrada'?'var(--success)':'var(--danger)'};text-align:right;">${l0.tipo==='entrada'?'+':'-'} ${brl(total)}</span>
+      </summary>
+      <div style="padding:0 0 8px 20px;">${itens.map(rowHTML).join('')}</div>
+    </details>`;
+  }).join('');
+}
+
 function viewLancamentos(tipo){
   const titulo = tipo==='saida' ? 'Contas a Pagar' : 'Contas a Receber';
   const categorias = todasCategoriasFlat(tipo);
@@ -3234,7 +3273,7 @@ function viewLancamentos(tipo){
         <span></span><span>Vence</span><span>Descrição</span><span class="col-cat">Venc. orig.</span><span class="col-status">Status</span><span style="text-align:right;">Valor</span>
       </div>
       <div class="panel-body" id="listaLancamentos">
-        ${lista.length? lista.map(rowHTML).join('') : `<div class="empty">Nenhum lançamento em ${titulo.toLowerCase()} neste mês.</div>`}
+        ${lista.length? listaLancamentosAgrupadaHTML(lista) : `<div class="empty">Nenhum lançamento em ${titulo.toLowerCase()} neste mês.</div>`}
       </div>
     </div>
     ${tipo==='entrada' ? relatorioInadimplenciaHTML() : ''}
@@ -9819,6 +9858,13 @@ function viewVKAprovacoes(){
           <div class="field" id="aprovCartaoWrap_${item.id}" style="margin-top:10px;max-width:340px;display:${item.ehCartao?'block':'none'};">
             <label>Cartão</label>
             <select id="aprovCartaoSelect_${item.id}">${state.cartoes.map(c=>`<option value="${c.id}" ${item.cartaoId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('') || '<option value="">Nenhum cartão cadastrado</option>'}</select>
+          </div>
+          <div class="field" id="aprovContaEstoqueWrap_${item.id}" style="margin-top:10px;max-width:340px;display:${item.ehCartao?'none':'block'};">
+            <label>Conta bancária de destino</label>
+            <select id="aprovContaEstoque_${item.id}">
+              <option value="" ${!state.vkConfig?.contaIdEstoque?'selected':''}>Deixar sem conta ainda (escolho na hora de pagar)</option>
+              ${state.contas.map(c=>`<option value="${c.id}" ${state.vkConfig?.contaIdEstoque===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}
+            </select>
           </div>` : ''}
           <div class="modal-actions" style="margin-top:16px;padding-top:0;border-top:none;">
             <button class="btn ghost" data-action="descartar-vk-aprovacao" data-id="${item.id}">Descartar</button>
@@ -10021,14 +10067,16 @@ function aprovarItemVK(id){
       }
       sincronizarLancamentoAbertoFatura(cartaoId, competencia);
     } else {
-      if(!cfg.contaIdEstoque){ showToast('Configure a conta bancária de destino do estoque nas configurações da integração'); return; }
+      const contaEstoqueEl = document.getElementById('aprovContaEstoque_'+id);
+      const contaEstoqueId = contaEstoqueEl ? (contaEstoqueEl.value || null) : (cfg.contaIdEstoque || null);
       if(temVariosItens){
+        const grupoId = uid();
         item.itens.forEach((it,idx)=>{
           const catItem = itensSelects.find(s=>parseInt(s.dataset.idx)===idx)?.value || categoria;
           state.lancamentos.push({
-            id: uid(), tipo:'saida', categoria: catItem,
+            id: uid(), tipo:'saida', categoria: catItem, grupoId,
             descricao: `${it.nome} (${item.descricao})`, valor: it.valor, fornecedor: item.contraparte,
-            observacao: item.observacao, contaId: cfg.contaIdEstoque, dataVencimento: item.dataVencimento,
+            observacao: item.observacao, contaId: contaEstoqueId, dataVencimento: item.dataVencimento,
             status: 'pendente', dataPagamento: null,
             origem: 'vk-estoque', vkEntradaId: item.vkEntradaId, semNF: !!item.semNF, numeroNF: item.numeroNF||null,
             criadoEm: new Date().toISOString()
@@ -10037,9 +10085,9 @@ function aprovarItemVK(id){
         registrarLog('Entrada de estoque VK aprovada por item', `"${item.descricao}" — ${item.itens.length} item(ns) categorizados individualmente — ${brl(item.valor)}`);
       } else {
         state.lancamentos.push({
-          id: uid(), tipo:'saida', categoria,
+          id: uid(), tipo:'saida', categoria, grupoId: uid(),
           descricao: item.descricao, valor: item.valor, fornecedor: item.contraparte,
-          observacao: item.observacao, contaId: cfg.contaIdEstoque, dataVencimento: item.dataVencimento,
+          observacao: item.observacao, contaId: contaEstoqueId, dataVencimento: item.dataVencimento,
           status: 'pendente', dataPagamento: null,
           origem: 'vk-estoque', vkEntradaId: item.vkEntradaId, semNF: !!item.semNF, numeroNF: item.numeroNF||null,
           criadoEm: new Date().toISOString()
@@ -12371,6 +12419,8 @@ function attachViewHandlers(){
     chk.addEventListener('change', ()=>{
       const wrap = document.getElementById('aprovCartaoWrap_'+chk.dataset.id);
       if(wrap) wrap.style.display = chk.checked ? 'block' : 'none';
+      const wrapConta = document.getElementById('aprovContaEstoqueWrap_'+chk.dataset.id);
+      if(wrapConta) wrapConta.style.display = chk.checked ? 'none' : 'block';
     });
   });
   document.querySelectorAll('[data-action="aprovar-vk-aprovacao"]').forEach(btn=>{
