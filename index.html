@@ -924,6 +924,7 @@ function aplicarMigracoes(s){
   if(!s.comissoesManuais) s.comissoesManuais = [];
   if(!s.ativosPatrimoniais) s.ativosPatrimoniais = [];
   if(!s.comprasProcessosPendentes) s.comprasProcessosPendentes = [];
+  if(!s.comprasProcessosDispensadas) s.comprasProcessosDispensadas = [];
   if(!s.categoriaMEI) s.categoriaMEI = {};
   if(!s.meiEmpregadoPorAno) s.meiEmpregadoPorAno = {};
   if(!s.fornecedores) s.fornecedores = [];
@@ -7808,7 +7809,10 @@ function viewAtivosPatrimoniais(){
               <div>${escapeHTML(pp.nome)}${pp.fornecedor?' — '+escapeHTML(pp.fornecedor):''}</div>
               <div class="sub">${brl(pp.valorAquisicao)} · ${fmtDate(pp.dataAquisicao)} · processo "${escapeHTML(pp.processoTitulo||'')}"</div>
             </div>
-            <button class="btn ghost sm" data-action="revisar-compra-pendente" data-id="${pp.id}">Revisar e cadastrar</button>
+            <div style="display:flex;gap:6px;">
+              <button class="btn ghost sm" data-action="revisar-compra-pendente" data-id="${pp.id}">Revisar e cadastrar</button>
+              <button class="icon-btn icon-btn-danger" data-action="excluir-compra-pendente-ativo" data-id="${pp.id}" title="Não cadastrar esse item como ativo">🗑️</button>
+            </div>
           </div>
         `).join('')}
       </div>
@@ -9111,7 +9115,8 @@ async function sincronizarProcessos(){
       if(c.ehAtivo){
         const jaNaFila = state.comprasProcessosPendentes.some(x=>x.processoId===p.id && x.compraSeq===c.seq);
         const jaVirouAtivo = state.ativosPatrimoniais.some(a=>a.origemProcessoId===p.id && a.origemCompraSeq===c.seq);
-        if(!jaNaFila && !jaVirouAtivo){
+        const jaDispensado = (state.comprasProcessosDispensadas||[]).some(x=>x.processoId===p.id && x.compraSeq===c.seq);
+        if(!jaNaFila && !jaVirouAtivo && !jaDispensado){
           state.comprasProcessosPendentes.push({
             id: uid(), processoId: p.id, compraSeq: c.seq,
             nome: c.descricao || p.titulo || 'Ativo vindo de processo',
@@ -11612,6 +11617,18 @@ function attachViewHandlers(){
     btn.addEventListener('click', ()=>{
       const pp = (state.comprasProcessosPendentes||[]).find(x=>x.id===btn.dataset.id);
       if(pp) openAtivoPatrimonialModal(null, pp);
+    });
+  });
+  document.querySelectorAll('[data-action="excluir-compra-pendente-ativo"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const pp = (state.comprasProcessosPendentes||[]).find(x=>x.id===btn.dataset.id);
+      if(!pp) return;
+      if(!confirm(`Não cadastrar "${pp.nome}" (${brl(pp.valorAquisicao)}) como ativo patrimonial? Ela some dessa lista pra sempre (não volta na próxima sincronização) — não mexe no processo lá no Livro de Processos, nem na conta a pagar já lançada dessa compra.`)) return;
+      if(!state.comprasProcessosDispensadas) state.comprasProcessosDispensadas = [];
+      state.comprasProcessosDispensadas.push({ processoId: pp.processoId, compraSeq: pp.compraSeq });
+      state.comprasProcessosPendentes = state.comprasProcessosPendentes.filter(x=>x.id!==pp.id);
+      persist(); render();
+      showToast('Removido da lista de pendentes');
     });
   });
   document.querySelectorAll('[data-action="editar-ativo-patrimonial"]').forEach(btn=>{
