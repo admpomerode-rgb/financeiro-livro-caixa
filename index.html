@@ -7609,11 +7609,47 @@ function openAtivoPatrimonialModal(existing, prefillPendente){
       }
       if(pref){
         state.comprasProcessosPendentes = (state.comprasProcessosPendentes||[]).filter(x=>!(x.processoId===pref.processoId && x.compraSeq===pref.compraSeq));
+        if(pref.orcamentoDocId){
+          avisarAtivoCadastrado(pref.orcamentoDocId, { ativoId: novoId, nome, numeroPatrimonio });
+        }
       }
     }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Ativo atualizado' : 'Ativo cadastrado');
   });
+  if(isEdit){
+    const btnExcluirModal = document.createElement('button');
+    btnExcluirModal.className = 'btn ghost';
+    btnExcluirModal.style.color = 'var(--danger)';
+    btnExcluirModal.style.borderColor = '#F3C6C2';
+    btnExcluirModal.textContent = 'Excluir cadastro';
+    btnExcluirModal.addEventListener('click', ()=>{
+      if(!confirm(`Excluir o cadastro de "${existing.nome}"? Essa ação não pode ser desfeita.`)) return;
+      state.ativosPatrimoniais = state.ativosPatrimoniais.filter(x=>x.id!==existing.id);
+      persist(); closeModal(); render();
+      showToast('Ativo excluído');
+    });
+    document.querySelector('.modal-actions').prepend(btnExcluirModal);
+  }
+}
+
+// Item pedido pelo usuário: quando um ativo pendente de compra é cadastrado de
+// verdade aqui, avisa automaticamente o Livro de Processos (grava no mesmo
+// documento de orçamento que já é lido ao vivo lá) — fecha o ciclo do card.
+async function avisarAtivoCadastrado(orcamentoDocId, dadosAtivo){
+  const cfg = state.processosConfig;
+  if(!cfg.firebaseConfig || !cfg.email || !cfg.senha) return;
+  try{
+    if(!processosFirebaseApp) processosFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'livro-processos');
+    const auth = processosFirebaseApp.auth();
+    if(!auth.currentUser) await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
+    const db = processosFirebaseApp.firestore();
+    await db.collection('orcamentos').doc(orcamentoDocId).update({
+      ativoCadastrado: { ...dadosAtivo, dataCadastro: new Date().toISOString() }
+    });
+  }catch(e){
+    console.error('Erro ao avisar cadastro do ativo pro Livro de Processos:', e);
+  }
 }
 
 function viewAtivoPatrimonialDetalhe(id){
@@ -8731,7 +8767,7 @@ async function sincronizarProcessos(){
             nome: c.descricao || p.titulo || 'Ativo vindo de processo',
             fornecedor: c.fornecedor || '', notaFiscal: c.notaFiscal || '',
             valorAquisicao: Number(c.valor)||0, dataAquisicao: c.data || todayISO(),
-            processoTitulo: p.titulo || ''
+            processoTitulo: p.titulo || '', orcamentoDocId: c.orcamentoDocId || null
           });
         }
       }
