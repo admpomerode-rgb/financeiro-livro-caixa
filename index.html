@@ -14271,6 +14271,7 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
       <div class="field"><label>Ticker</label><input type="text" class="op-ticker mono" style="text-transform:uppercase;" value="${escapeHTML(op.ticker||'')}"></div>
       <div class="field" style="max-width:90px;"><label>Qtd</label><input type="text" inputmode="decimal" class="op-qtd" value="${op.quantidade||''}"></div>
       <div class="field"><label>Preço unit.</label><input type="text" inputmode="decimal" class="op-preco" value="${op.preco||''}"></div>
+      <div class="field" style="max-width:120px;"><label>Total</label><input type="text" class="op-total-display mono" value="${qtdNum && precoNum ? brl(qtdNum*precoNum) : ''}" readonly style="background:var(--bone);color:var(--text-soft);font-weight:600;"></div>
       <div class="field" style="min-width:150px;"><label>Subconta</label>
         <select class="op-subconta">
           <option value="">— nenhuma —</option>
@@ -14312,6 +14313,15 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
       sel.insertBefore(opt, sel.querySelector('option[value="__nova__"]'));
     });
     selectEl.value = nova.id;
+  };
+  const recalcularTotaisOperacoes = ()=>{
+    document.querySelectorAll('.nota-op-row').forEach(row=>{
+      const display = row.querySelector('.op-total-display');
+      if(!display) return;
+      const qtd = numBR(row.querySelector('.op-qtd').value)||0;
+      const preco = numBR(row.querySelector('.op-preco').value)||0;
+      display.value = (qtd && preco) ? brl(qtd*preco) : '';
+    });
   };
   const recalcularGanhosVenda = ()=>{
     let somaGanhos = 0, temAlgumCalculado = false;
@@ -14356,10 +14366,11 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
         criarSubcontaParaLinha(this);
       });
       row.querySelectorAll('.op-preco-medio, .op-preco, .op-qtd').forEach(campo=>{
-        campo.addEventListener('input', recalcularGanhosVenda);
+        campo.addEventListener('input', ()=>{ recalcularGanhosVenda(); recalcularTotaisOperacoes(); });
       });
     });
     recalcularGanhosVenda();
+    recalcularTotaisOperacoes();
   };
 
   document.getElementById('btnAdicionarLinhaOp').addEventListener('click', ()=>{
