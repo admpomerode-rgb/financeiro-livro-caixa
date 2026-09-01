@@ -8756,14 +8756,23 @@ async function sincronizarProcessos(){
         }
         return;
       }
-      state.orcamentosProcessosContador++;
-      const numero = state.orcamentosProcessosContador;
+      // Item pedido pelo usuário: o número do orçamento é único — se esse pedido já
+      // vem vinculado a um número anterior (ex: pesquisas de preço da 2ª etapa,
+      // que reaproveitam o número do pedido original), usa esse número em vez de
+      // gerar um novo pelo contador.
+      let numero;
+      if (o.numeroVinculado) {
+        numero = o.numeroVinculado;
+      } else {
+        state.orcamentosProcessosContador++;
+        numero = state.orcamentosProcessosContador;
+        writesNumero.push({ ref: db.collection('orcamentos').doc(o.id), numero });
+      }
       state.orcamentosProcessos.push({
         id: uid(), processoOrcamentoId: o.id, processoId: o.processoId || null,
         processoTitulo: o.processoTitulo || o.titulo || '', numero, itens, valorTotal,
         status: 'pendente', criadoEm: new Date().toISOString(), decididoEm: null
       });
-      writesNumero.push({ ref: db.collection('orcamentos').doc(o.id), numero });
       orcamentosNovos++;
     });
     for(const w of writesNumero){
@@ -8855,11 +8864,11 @@ function viewProcessosConfig(){
     <div class="panel vk-status-panel" style="cursor:pointer;" data-goto="orcamentos-processos">
       <div class="vk-status-row">
         <div>
-          <div class="vk-status-label">Orçamentos aguardando decisão</div>
+          <div class="vk-status-label">Orçamentos e Compras</div>
           <div class="vk-status-value">${orcamentosPendentes.length} item(ns)</div>
           <div class="vk-status-sub">Pedidos de orçamento feitos dentro de um processo — aprove ou recuse aqui</div>
         </div>
-        <button class="btn lg" data-goto="orcamentos-processos">📋 Ver orçamentos</button>
+        <button class="btn lg" data-goto="orcamentos-processos">📋 Ver Orçamentos e Compras</button>
       </div>
     </div>
     <div class="panel">
@@ -8891,7 +8900,7 @@ function viewProcessosConfig(){
   ],
   valorTotal: 850  // opcional — se não vier, soma os itens sozinho
 }</div>
-        A sincronização acima detecta orçamentos novos, gera um <strong>número sequencial</strong> pra cada um e grava de volta no próprio documento (campo <code>numero</code>). O orçamento entra na fila de "Orçamentos — Livro de Processos" pra aprovar ou recusar — a decisão (<code>status: "aprovado"</code> ou <code>"recusado"</code>, mais <code>decididoEm</code>) é gravada de volta automaticamente no documento, pra aparecer no processo lá. As pesquisas de preço (2ª etapa, depois do pedido inicial aprovado) usam exatamente essa mesma coleção e o mesmo fluxo de aprovação — não precisam de nada especial.
+        A sincronização acima detecta orçamentos novos, gera um <strong>número sequencial</strong> pra cada um e grava de volta no próprio documento (campo <code>numero</code>). O orçamento entra na fila de "Orçamentos e Compras" pra aprovar ou recusar — a decisão (<code>status: "aprovado"</code> ou <code>"recusado"</code>, mais <code>decididoEm</code>) é gravada de volta automaticamente no documento, pra aparecer no processo lá. As pesquisas de preço (2ª etapa, depois do pedido inicial aprovado) usam exatamente essa mesma coleção e o mesmo fluxo de aprovação, reaproveitando o mesmo número do pedido original — não precisam de nada especial.
       </div>
     </div>
     <div class="panel">
@@ -8919,18 +8928,35 @@ function viewOrcamentosProcessos(){
   const todos = state.orcamentosProcessos||[];
   const pendentes = todos.filter(o=>o.status==='pendente').sort((a,b)=>a.numero-b.numero);
   const decididos = todos.filter(o=>o.status!=='pendente').sort((a,b)=>(b.decididoEm||'').localeCompare(a.decididoEm||''));
+  const comprasPendentes = state.comprasProcessosPendentes||[];
   return `
     <div class="topbar">
       <div>
         <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="processos">← Integração Livro de Processos</span>
-        <h1 style="margin-top:6px;">Orçamentos — Livro de Processos</h1>
-        <p>Orçamentos pedidos dentro de um processo, aguardando aprovação ou recusa</p>
+        <h1 style="margin-top:6px;">Orçamentos e Compras</h1>
+        <p>Orçamentos pedidos dentro de um processo (e as compras que eles geram), aguardando aprovação, decisão ou revisão</p>
       </div>
     </div>
     <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:16px;">
       <div class="card saldo"><div class="label">Aguardando decisão</div><div class="value mono">${pendentes.length}</div></div>
       <div class="card"><div class="label">Valor total pendente</div><div class="value mono">${brl(pendentes.reduce((s,o)=>s+o.valorTotal,0))}</div></div>
+      <div class="card"><div class="label">Compras pendentes de cadastro em Ativos</div><div class="value mono">${comprasPendentes.length}</div></div>
     </div>
+    ${comprasPendentes.length ? `
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="panel-head"><h2>📦 Compras pendentes de cadastro em Ativos Patrimoniais</h2></div>
+      <div class="panel-body" style="padding:0;">
+        ${comprasPendentes.map(pp=>`
+          <div class="ficha-historico-row">
+            <div>
+              <div>${escapeHTML(pp.nome)}${pp.fornecedor?' — '+escapeHTML(pp.fornecedor):''}</div>
+              <div class="sub">${brl(pp.valorAquisicao)} · ${fmtDate(pp.dataAquisicao)} · processo "${escapeHTML(pp.processoTitulo||'')}"</div>
+            </div>
+            <button class="btn ghost sm" data-goto="ativos">Revisar em Ativos Patrimoniais</button>
+          </div>
+        `).join('')}
+      </div>
+    </div>` : ''}
     ${pendentes.length ? pendentes.map(o=>`
       <div class="panel" style="margin-bottom:14px;">
         <div class="panel-head">
