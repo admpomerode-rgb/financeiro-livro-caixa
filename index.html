@@ -8792,6 +8792,8 @@ async function sincronizarProcessos(){
         if(existente.status==='pendente'){
           existente.itens = itens; existente.valorTotal = valorTotal;
           existente.processoTitulo = o.processoTitulo || o.titulo || existente.processoTitulo;
+          existente.descricaoPedido = o.descricaoPedido || existente.descricaoPedido || null;
+          existente.driveLink = o.driveLink || existente.driveLink || null;
           orcamentosAtualizados++;
         }
         return;
