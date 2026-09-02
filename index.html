@@ -967,10 +967,12 @@ function aplicarMigracoes(s){
   if(!s.recorrencias) s.recorrencias = [];
   if(!s.orcamentoCategorias) s.orcamentoCategorias = {};
   if(!s.projecaoReceitaCategorias) s.projecaoReceitaCategorias = {};
-  if(!s.logAuditoria) s.logAuditoria = [];
   if(!s.contratos) s.contratos = [];
   if(!s.metasReserva) s.metasReserva = [];
   if(!s.simulacaoAtual) s.simulacaoAtual = [];
+  // Log de auditoria removido — era gravado o tempo todo (41 lugares do sistema) mas nunca tinha
+  // nenhuma tela pra ver esse histórico, só ocupava espaço no documento do Firestore à toa.
+  if(s.logAuditoria) delete s.logAuditoria;
   return s;
 }
 async function carregarDados(){
@@ -989,11 +991,9 @@ function persist(){
   }, 500);
 }
 
-function registrarLog(acao, detalhe){
-  if(!state.logAuditoria) state.logAuditoria = [];
-  state.logAuditoria.unshift({ id: uid(), data: new Date().toISOString(), acao, detalhe });
-  if(state.logAuditoria.length > 500) state.logAuditoria.length = 500;
-}
+// Log de auditoria removido (usuário pediu, ele nunca tinha tela pra ser visto e só ocupava
+// espaço) — mantida como função vazia pra não precisar mexer nos ~41 lugares que a chamavam.
+function registrarLog(){}
 
 function uid(){ return 'l' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 function brl(v){ return (v<0?'-':'') + 'R$ ' + Math.abs(v).toLocaleString('pt-BR',{minimumFractionDigits:2, maximumFractionDigits:2}); }
@@ -10526,7 +10526,7 @@ function renderConfigArmazenamento(){
     contas:'Contas bancárias', cartoes:'Cartões de crédito',
     contasInvestimento:'Contas de investimento', ativosInvestimento:'Ativos de investimento',
     notasPendentes:'Notas de corretagem pendentes', categorias:'Categorias', fornecedores:'Fornecedores',
-    recorrencias:'Lançamentos recorrentes', orcamentoCategorias:'Orçamento', logAuditoria:'Log de auditoria',
+    recorrencias:'Lançamentos recorrentes', orcamentoCategorias:'Orçamento',
     contratos:'Contratos', metasReserva:'Metas de reserva', provisoes:'Provisões', centrosCusto:'Centros de custo',
     vkConfig:'Integração VK Industrial', processosConfig:'Integração Livro de Processos', forneiraConfig:'Integração Forneira',
     categoriaMEI:'Config. MEI', meiEmpregadoPorAno:'Config. MEI (empregado)', investimentos:'Investimentos (legado)'
@@ -10612,7 +10612,6 @@ function renderConfigFirebase(){
     ['Orçamentos de processos', (state.orcamentosProcessos||[]).length],
     ['Fornecedores', (state.fornecedores||[]).length],
     ['Recorrências', (state.recorrencias||[]).length],
-    ['Registros no log de auditoria', (state.logAuditoria||[]).length],
   ];
   return `
     <div class="panel-head"><h2>🔥 Firebase</h2></div>
