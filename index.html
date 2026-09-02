@@ -776,6 +776,22 @@ const VIDA_UTIL_RFB = {
 const MOTIVOS_BAIXA = ['Venda','Perda','Quebra','Doação','Outro'];
 const CATEGORIAS_ENTRADA = ['Vendas', 'Serviços', 'Recebimento de cliente', 'Rendimentos', 'Outros'];
 
+// Movimento de CAPITAL (aporte ou resgate de investimento, devolução de empréstimo, etc.) — dinheiro
+// que já passou pelo caixa antes (ou é só uma troca de posição) e por isso NÃO é receita nem despesa em
+// NENHUM relatório de resultado (nem operacional, nem financeiro) — diferente de "categoria financeira"
+// (ehFinanceira), que É receita/despesa de verdade, só que separada em Resultado Financeiro (ex: juros,
+// rendimentos). Reconhece tanto o mecanismo antigo (categoria "Investimentos" + origem "investimento",
+// usado pelo botão de resgate/aporte automático) quanto qualquer categoria que o usuário marcar
+// manualmente com o checkbox "🔄 É retorno/aporte de capital" em Categorias.
+function ehMovimentoDeCapital(l){
+  if(!l) return false;
+  if(l.categoria==='Investimentos' && l.origem==='investimento') return true;
+  if(!l.categoria) return false;
+  const lista = l.tipo==='saida' ? (state.categorias?.saida||[]) : (state.categorias?.entrada||[]);
+  const cat = lista.find(c=>c.nome===l.categoria || l.categoria.startsWith(c.nome+' / '));
+  return !!(cat && cat.ehCapital);
+}
+
 const CONTA_CORES = ['#3B6FE0','#1E9E6B','#D98F2B','#8A5CF6','#D5473F','#0F9BB0'];
 const CATEGORIA_CORES = ['#3B6FE0','#1E9E6B','#D98F2B','#8A5CF6','#D5473F','#0F9BB0','#E0507A','#6B7280'];
 const BANCOS_BR = [
@@ -1037,7 +1053,7 @@ function viewCustosMargemProdutos(){
     label = new Date(anoM, mesM-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
   }
 
-  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento'));
+  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
 
   const comFicha = (state.custosProdutosVK||[]).filter(c=>c.custoUnitario!==null);
   const semFicha = (state.custosProdutosVK||[]).filter(c=>c.custoUnitario===null);
@@ -2787,7 +2803,7 @@ function rankingCategoriasHTML(mesRef){
   const hoje = todayISO();
   const mesAtualRef = hoje.slice(0,7);
   const ateReal = mesRef === mesAtualRef ? hoje : (mesRef < mesAtualRef ? t.ateMes : t.de);
-  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=t.de && l.dataPagamento<=ateReal && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento'));
+  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=t.de && l.dataPagamento<=ateReal && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
 
   const rank = (tipo)=>{
     const map = {};
@@ -2838,7 +2854,7 @@ function economiaMensalHTML(mesRef){
     state.lancamentos.forEach(l=>{
       const ref = l.dataPagamento;
       if(!ref || ref<de || ref>ateReal) return;
-      const ehMovimentoInvestimento = l.categoria==='Investimentos' && l.origem==='investimento';
+      const ehMovimentoInvestimento = ehMovimentoDeCapital(l);
       // Aporte (comprar um investimento) já não contava como despesa do mês — mas resgate (o
       // principal voltando) estava contando como receita, de forma assimétrica: o dinheiro que
       // já era seu, só voltando de posição, não é economia/faturamento novo, igual o aporte
@@ -5945,7 +5961,7 @@ function renderDRE(periodo){
     label = 'Período personalizado';
   }
   const filtroCentro = l => dreCentroAtivo==='todos' || (l.centroCusto||'') === dreCentroAtivo;
-  const ehAporteInvestimento = l => l.categoria==='Investimentos' && l.origem==='investimento';
+  const ehAporteInvestimento = l => ehMovimentoDeCapital(l);
   // Pra receita/despesa por categoria: usa os eventos de caixa reais (cada parcela na sua data verdadeira).
   const lista = movimentosRealizados().filter(ev=>{
     return ev.data && ev.data>=de && ev.data<=ate && ev.origem!=='transferencia' && !ehAporteInvestimento(ev) && filtroCentro(ev);
@@ -6089,8 +6105,8 @@ function renderSuperRelatorioMensal(mesRef){
   const ultimoDiaAnt = new Date(mesAnteriorDate.getFullYear(), mesAnteriorDate.getMonth()+1, 0).getDate();
   const ateAnt = `${mesAnteriorRef}-${String(ultimoDiaAnt).padStart(2,'0')}`;
 
-  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento'));
-  const realizadosAnt = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=deAnt && l.dataPagamento<=ateAnt && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento'));
+  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
+  const realizadosAnt = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=deAnt && l.dataPagamento<=ateAnt && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
 
   const totalReceitas = realizados.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+l.valor,0);
   const totalDespesas = realizados.filter(l=>l.tipo==='saida').reduce((s,l)=>s+l.valor,0);
@@ -6204,7 +6220,7 @@ function renderIndicadores(periodo){
     label = 'Período personalizado';
   }
 
-  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento'));
+  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
   const receitas = realizados.filter(l=>l.tipo==='entrada');
   const despesas = realizados.filter(l=>l.tipo==='saida');
   const totalReceitas = receitas.reduce((s,l)=>s+l.valor,0);
@@ -6313,7 +6329,7 @@ function renderRentabilidadeProduto(periodo){
     label = 'Período personalizado';
   }
 
-  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento'));
+  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
   const porProduto = {};
   realizados.forEach(l=>{
     const tag = l.produtoTag || 'Não classificado';
@@ -6503,7 +6519,7 @@ function renderSplitSocios(){
   const t = totaisPorMesRef(mesGlobalRef);
   const lista = state.lancamentos.filter(l=>{
     const ref = l.dataPagamento;
-    return ref && ref>=t.de && ref<=t.ateMes && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento');
+    return ref && ref>=t.de && ref<=t.ateMes && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l);
   });
   const receitas = lista.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+l.valor,0);
   const despesas = lista.filter(l=>l.tipo==='saida').reduce((s,l)=>s+l.valor,0);
@@ -6640,7 +6656,7 @@ function renderOrcamentoAnual(){
     const ate = `${ano}-${String(ultimoMes).padStart(2,'0')}-${String(ultimoDia).padStart(2,'0')}`;
     const jaPassou = new Date(ate) < hoje;
     const emAndamento = new Date(de) <= hoje && hoje <= new Date(ate);
-    const realizado = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento') && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+    const realizado = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
     const orcadoTri = orcadoMensalTotal*3;
     return { ...tri, de, ate, realizado, orcadoTri, jaPassou, emAndamento };
   });
@@ -7088,7 +7104,7 @@ function dadosMesGerencial(mesRef, centroCusto){
   const ateMes = `${mesRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
   const filtroCentro = l => !centroCusto || centroCusto==='todos' || (l.centroCusto||'')===centroCusto;
   const receitasLanc = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=deMes && l.dataPagamento<=ateMes && filtroCentro(l));
-  const despesasLanc = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento') && l.dataPagamento>=deMes && l.dataPagamento<=ateMes && filtroCentro(l));
+  const despesasLanc = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=deMes && l.dataPagamento<=ateMes && filtroCentro(l));
   const receita = receitasLanc.reduce((s,l)=>s+l.valor,0);
   const despesasPorCategoria = {}, entradasPorCategoria = {};
   despesasLanc.forEach(l=>{ despesasPorCategoria[l.categoria] = (despesasPorCategoria[l.categoria]||0)+l.valor; });
@@ -7167,7 +7183,7 @@ function renderCentroLucro(mesRef){
   const ate = mesRef===hoje.slice(0,7) ? hoje : ateMes;
 
   const centros = [...(state.centrosCusto||[]), '(sem centro definido)'];
-  const eventos = movimentosRealizados().filter(ev=>ev.data>=de && ev.data<=ate && ev.origem!=='transferencia' && !(ev.categoria==='Investimentos'&&ev.origem==='investimento'));
+  const eventos = movimentosRealizados().filter(ev=>ev.data>=de && ev.data<=ate && ev.origem!=='transferencia' && !ehMovimentoDeCapital(ev));
   const porCentro = centros.map(centro=>{
     const eh = ev => centro==='(sem centro definido)' ? !ev.centroCusto : ev.centroCusto===centro;
     const receita = eventos.filter(ev=>ev.tipo==='entrada' && eh(ev)).reduce((s,ev)=>s+ev.valor,0);
@@ -7404,7 +7420,7 @@ function renderDashboardExecutivo(){
   eventosDoMes.filter(ev=>ev.tipo==='entrada').forEach(ev=>{ const n=ev.fornecedor||'Sem identificação'; porCliente[n]=(porCliente[n]||0)+ev.valor; });
   const topClientes = Object.entries(porCliente).sort((a,b)=>b[1]-a[1]).slice(0,5);
   const porCategoriaDespesa = {};
-  eventosDoMes.filter(ev=>ev.tipo==='saida' && !(ev.categoria==='Investimentos'&&ev.origem==='investimento')).forEach(ev=>{ porCategoriaDespesa[ev.categoria]=(porCategoriaDespesa[ev.categoria]||0)+ev.valor; });
+  eventosDoMes.filter(ev=>ev.tipo==='saida' && !ehMovimentoDeCapital(ev)).forEach(ev=>{ porCategoriaDespesa[ev.categoria]=(porCategoriaDespesa[ev.categoria]||0)+ev.valor; });
   const topDespesas = Object.entries(porCategoriaDespesa).sort((a,b)=>b[1]-a[1]).slice(0,5);
   const maxTopCliente = topClientes.length ? topClientes[0][1] : 1;
   const maxTopDespesa = topDespesas.length ? topDespesas[0][1] : 1;
@@ -7535,7 +7551,7 @@ function renderRelatorioABCClientes(){
 function renderRelatorioABCDespesas(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
   const porCategoria = {};
-  state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento') && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{
+  state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{
     porCategoria[l.categoria] = (porCategoria[l.categoria]||0) + l.valor;
   });
   state.comprasCartao.filter(p=>{
@@ -7707,7 +7723,7 @@ function renderRelatorioBreakEven(){
   const ateMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
   const receitaMes = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=deMes && l.dataPagamento<=ateMes).reduce((s,l)=>s+l.valor,0);
   const despesasMes = {};
-  state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento') && l.dataPagamento>=deMes && l.dataPagamento<=ateMes).forEach(l=>{
+  state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=deMes && l.dataPagamento<=ateMes).forEach(l=>{
     despesasMes[l.categoria] = (despesasMes[l.categoria]||0) + l.valor;
   });
   const categorias = Object.keys(despesasMes).sort((a,b)=>a.localeCompare(b));
@@ -7763,7 +7779,7 @@ function renderRelatorioBreakEven(){
 function renderRelatorioValuation(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
   const receita12m = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
-  const despesas12m = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !(l.categoria==='Investimentos' && l.origem==='investimento') && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+  const despesas12m = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
   const ebitdaEstimado = receita12m - despesas12m;
   const multEbitda = state.valuationConfig?.multEbitda ?? 4;
   const multFaturamento = state.valuationConfig?.multFaturamento ?? 1;
@@ -7871,7 +7887,7 @@ function resultadoOperacionalPeriodo(de, ate){
   const nomesFinReceita = (state.categorias.entrada||[]).filter(c=>c.ehFinanceira).map(c=>c.nome);
   const nomesFinDespesa = (state.categorias.saida||[]).filter(c=>c.ehFinanceira).map(c=>c.nome);
   const ehFinanceira = (nomesPai, k) => nomesPai.some(p=>k===p || k.startsWith(p+' / '));
-  const eventos = movimentosRealizados().filter(ev=>ev.data && ev.data>=de && ev.data<=ate && ev.origem!=='transferencia' && !(ev.categoria==='Investimentos' && ev.origem==='investimento'));
+  const eventos = movimentosRealizados().filter(ev=>ev.data && ev.data>=de && ev.data<=ate && ev.origem!=='transferencia' && !ehMovimentoDeCapital(ev));
   const receitaOp = eventos.filter(ev=>ev.tipo==='entrada' && !ehFinanceira(nomesFinReceita, ev.categoria||'')).reduce((s,ev)=>s+ev.valor,0);
   const despesaOp = eventos.filter(ev=>ev.tipo==='saida' && !ehFinanceira(nomesFinDespesa, ev.categoria||'')).reduce((s,ev)=>s+ev.valor,0);
   const receitaTotal = eventos.filter(ev=>ev.tipo==='entrada').reduce((s,ev)=>s+ev.valor,0);
@@ -15852,7 +15868,12 @@ function openCategoriaModal(tipo, existing){
       <input type="checkbox" id="catEhFinanceira" style="width:17px;height:17px;" ${existing?.ehFinanceira?'checked':''}>
       💰 É uma categoria financeira
     </label>
-    <div class="note" style="margin-top:6px;">Marca essa categoria (e as subcategorias dela) pra entrar no "Resultado Financeiro" da DRE, separado da Receita/Despesa Operacional — em vez de misturar juros, dividendos, rendimentos etc. com vendas/despesas normais do negócio.</div>
+    <div class="note" style="margin-top:6px;">Marca essa categoria (e as subcategorias dela) pra entrar no "Resultado Financeiro" da DRE, separado da Receita/Despesa Operacional — em vez de misturar juros, dividendos, rendimentos etc. com vendas/despesas normais do negócio. Continua sendo receita/despesa de verdade, só que separada.</div>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;font-size:13.5px;margin-top:14px;">
+      <input type="checkbox" id="catEhCapital" style="width:17px;height:17px;" ${existing?.ehCapital?'checked':''}>
+      🔄 É retorno/aporte de capital (não é receita nem despesa)
+    </label>
+    <div class="note" style="margin-top:6px;">Use pra resgate/aporte de investimento, devolução de empréstimo, ou qualquer dinheiro que só está mudando de lugar — não é dinheiro novo ganho nem gasto de verdade. Diferente da opção acima: isso NÃO aparece em nenhum relatório de resultado (nem operacional, nem financeiro) — só no saldo real da conta e no fluxo de caixa.</div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       <button class="btn" id="btnSalvarCategoria">Salvar</button>
@@ -15876,12 +15897,14 @@ function openCategoriaModal(tipo, existing){
   document.getElementById('btnSalvarCategoria').addEventListener('click', ()=>{
     const nome = document.getElementById('catNome').value.trim();
     const ehFinanceira = document.getElementById('catEhFinanceira').checked;
+    const ehCapital = document.getElementById('catEhCapital').checked;
     if(!nome){ showToast('Informe o nome da categoria'); return; }
     if(isEdit){
       const oldNome = existing.nome;
       existing.nome = nome;
       existing.cor = corSelecionada;
       existing.ehFinanceira = ehFinanceira;
+      existing.ehCapital = ehCapital;
       if(oldNome !== nome){
         state.lancamentos.forEach(l=>{
           if(l.categoria===oldNome) l.categoria = nome;
@@ -15893,7 +15916,7 @@ function openCategoriaModal(tipo, existing){
         });
       }
     } else {
-      state.categorias[tipo].push({ id: uid(), nome, cor: corSelecionada, subcategorias: [], ehFinanceira });
+      state.categorias[tipo].push({ id: uid(), nome, cor: corSelecionada, subcategorias: [], ehFinanceira, ehCapital });
     }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Categoria atualizada' : 'Categoria criada');
