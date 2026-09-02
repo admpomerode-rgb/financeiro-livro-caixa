@@ -320,7 +320,7 @@
   .dropdown-menu{position:absolute;top:calc(100% + 6px);right:0;background:var(--white);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(11,15,20,.14);min-width:210px;z-index:50;overflow:hidden;display:none;}
   .fab-novo-wrap{display:none;}
   @media (min-width:900px){
-    .fab-novo-wrap{position:fixed;bottom:28px;right:28px;z-index:60;}
+    .fab-novo-wrap{display:block;position:fixed;bottom:28px;right:28px;z-index:60;}
     .fab-novo{width:56px;height:56px;border-radius:50%;background:var(--blue-accent);color:#fff;border:none;font-size:28px;font-weight:400;line-height:1;cursor:pointer;box-shadow:0 6px 18px rgba(20,49,92,.32);display:flex;align-items:center;justify-content:center;transition:transform .15s;}
     .fab-novo:hover{transform:scale(1.06);}
     .fab-novo-menu{position:absolute;bottom:calc(100% + 10px);right:0;top:auto;}
@@ -14263,9 +14263,9 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     ` : `
     <div class="field">
       <label>Arquivo PDF da nota de corretagem</label>
-      <input type="file" id="notaFileInput" accept="application/pdf">
+      <input type="file" id="notaFileInput" accept="application/pdf" multiple>
     </div>
-    <div id="notaStatus" class="note" style="margin-top:0;">Escolha o PDF da nota — o sistema tenta ler as operações e as taxas automaticamente, e já salva pra revisão sozinho (sem precisar clicar em nada). Pode escolher outro PDF em seguida pra subir várias de uma vez — todas ficam aguardando em "Notas aguardando aprovação", pra você revisar com calma e publicar quando estiver tudo certo.</div>
+    <div id="notaStatus" class="note" style="margin-top:0;">Escolha o(s) PDF(s) da nota — dá pra selecionar vários arquivos de uma vez (segure Ctrl ou Shift no seletor). O sistema tenta ler as operações e as taxas automaticamente de cada um, e já salva pra revisão sozinho (sem precisar clicar em nada). Todas ficam aguardando em "Notas aguardando aprovação", pra você revisar com calma e publicar quando estiver tudo certo.</div>
     `}
     <div id="notaRevisao" style="display:${notaEmRevisao?'block':'none'};">
       <div class="field-row">
@@ -14549,54 +14549,63 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
   }
 
   document.getElementById('notaFileInput').addEventListener('change', async ()=>{
-    const file = document.getElementById('notaFileInput').files[0];
-    if(!file) return;
-    arquivoNomeAtual = file.name || '';
+    const arquivos = [...document.getElementById('notaFileInput').files];
+    if(!arquivos.length) return;
     const status = document.getElementById('notaStatus');
-    status.textContent = 'Lendo o PDF...';
-    let dadosOk = true;
-    try{
-      const linhas = await extrairLinhasPDF(file);
-      const dados = parseNotaCorretagem(linhas);
-      operacoesAtuais = dados.operacoes;
-      document.getElementById('notaData').value = dados.dataPregao;
-      document.getElementById('notaDataDebito').value = addDiasUteis(dados.dataPregao, 2);
-      document.getElementById('notaNumero').value = dados.numeroNota || '';
-      document.getElementById('notaTxCorretagem').value = dados.taxas.corretagem || 0;
-      document.getElementById('notaTxLiquidacao').value = dados.taxas.liquidacao || 0;
-      document.getElementById('notaTxEmolumentos').value = dados.taxas.emolumentos || 0;
-      document.getElementById('notaTxRegistro').value = dados.taxas.registro || 0;
-      document.getElementById('notaTxIss').value = dados.taxas.iss || 0;
-      document.getElementById('notaTxIrrf').value = dados.taxas.irrf || 0;
-      document.getElementById('notaTxOutras').value = dados.taxas.outras || 0;
-      document.getElementById('notaLiquido').value = dados.liquido || 0;
-    }catch(e){
-      console.error('Erro ao ler PDF da nota:', e);
-      dadosOk = false;
+    let salvas = 0, comFalha = 0;
+    for(let i=0; i<arquivos.length; i++){
+      const file = arquivos[i];
+      arquivoNomeAtual = file.name || '';
+      status.textContent = arquivos.length>1 ? `Lendo PDF ${i+1} de ${arquivos.length} (${file.name})...` : 'Lendo o PDF...';
+      let dadosOk = true;
+      try{
+        const linhas = await extrairLinhasPDF(file);
+        const dados = parseNotaCorretagem(linhas);
+        operacoesAtuais = dados.operacoes;
+        document.getElementById('notaData').value = dados.dataPregao;
+        document.getElementById('notaDataDebito').value = addDiasUteis(dados.dataPregao, 2);
+        document.getElementById('notaNumero').value = dados.numeroNota || '';
+        document.getElementById('notaTxCorretagem').value = dados.taxas.corretagem || 0;
+        document.getElementById('notaTxLiquidacao').value = dados.taxas.liquidacao || 0;
+        document.getElementById('notaTxEmolumentos').value = dados.taxas.emolumentos || 0;
+        document.getElementById('notaTxRegistro').value = dados.taxas.registro || 0;
+        document.getElementById('notaTxIss').value = dados.taxas.iss || 0;
+        document.getElementById('notaTxIrrf').value = dados.taxas.irrf || 0;
+        document.getElementById('notaTxOutras').value = dados.taxas.outras || 0;
+        document.getElementById('notaLiquido').value = dados.liquido || 0;
+      }catch(e){
+        console.error('Erro ao ler PDF da nota:', e);
+        dadosOk = false;
+        operacoesAtuais = [];
+        document.getElementById('notaData').value = todayISO();
+        document.getElementById('notaDataDebito').value = addDiasUteis(todayISO(), 2);
+      }
+      // Regra: cada nota é salva na fila de aprovação automaticamente assim que é lida — não precisa
+      // clicar em nada pra cada uma. Selecionando vários PDFs de uma vez, processa todos em sequência.
+      const nota = { id: uid(), ...coletarNotaFormulario(), criadoEm: new Date().toISOString() };
+      if(!state.notasPendentes) state.notasPendentes = [];
+      state.notasPendentes.push(nota);
+      registrarLog('Nota de corretagem recebida', `Nota${nota.corretora?' — '+nota.corretora:''} de ${nota.dataPregao} salva para aprovação automaticamente${dadosOk?'':' (não li automaticamente — vai precisar preencher na revisão)'}`);
+      if(dadosOk) salvas++; else comFalha++;
+      // Reseta os campos pro próximo arquivo do lote
       operacoesAtuais = [];
-      document.getElementById('notaData').value = todayISO();
-      document.getElementById('notaDataDebito').value = addDiasUteis(todayISO(), 2);
+      document.getElementById('notaCorretora').value = '';
+      document.getElementById('notaNumero').value = '';
+      document.getElementById('notaData').value = '';
+      document.getElementById('notaDataDebito').value = '';
+      ['notaTxCorretagem','notaTxLiquidacao','notaTxEmolumentos','notaTxRegistro','notaTxIss','notaTxIrrf','notaTxOutras','notaLiquido'].forEach(idc=>{ const el = document.getElementById(idc); if(el) el.value = 0; });
+      pintarOperacoes();
     }
-    // Regra nova: a nota é salva na fila de aprovação automaticamente assim que o PDF é lido — não
-    // precisa mais clicar em "Enviar para aprovação" pra cada uma. Isso permite subir várias notas
-    // em sequência, deixando tudo pendente pra revisar com calma depois em "Notas aguardando aprovação".
-    const nota = { id: uid(), ...coletarNotaFormulario(), criadoEm: new Date().toISOString() };
-    if(!state.notasPendentes) state.notasPendentes = [];
-    state.notasPendentes.push(nota);
-    registrarLog('Nota de corretagem recebida', `Nota${nota.corretora?' — '+nota.corretora:''} de ${nota.dataPregao} salva para aprovação automaticamente${dadosOk?'':' (não li automaticamente — vai precisar preencher na revisão)'}`);
     persist();
-    showToast(dadosOk ? `Nota salva pra revisão (${operacoesAtuais.length} operação(ões) identificada(s)) — pode enviar a próxima` : 'Nota salva, mas não consegui ler os dados automaticamente — revise ela na fila com calma');
-    // Reseta o formulário pra receber o próximo arquivo, sem fechar o modal
-    operacoesAtuais = [];
     document.getElementById('notaFileInput').value = '';
-    document.getElementById('notaCorretora').value = '';
-    document.getElementById('notaNumero').value = '';
-    document.getElementById('notaData').value = '';
-    document.getElementById('notaDataDebito').value = '';
-    ['notaTxCorretagem','notaTxLiquidacao','notaTxEmolumentos','notaTxRegistro','notaTxIss','notaTxIrrf','notaTxOutras','notaLiquido'].forEach(idc=>{ const el = document.getElementById(idc); if(el) el.value = 0; });
-    pintarOperacoes();
     document.getElementById('notaRevisao').style.display = 'none';
-    status.textContent = 'Pronto pra próxima nota — escolha outro arquivo PDF acima.';
+    if(arquivos.length>1){
+      showToast(`${salvas+comFalha} nota(s) salva(s) pra revisão${comFalha?` (${comFalha} sem leitura automática — revise com atenção)`:''}`);
+      status.textContent = `${salvas+comFalha} nota(s) processada(s). Pode escolher mais arquivos acima, ou ir em "Notas aguardando aprovação" revisar.`;
+    } else {
+      showToast(comFalha ? 'Nota salva, mas não consegui ler os dados automaticamente — revise ela na fila com calma' : `Nota salva pra revisão (${operacoesAtuais.length} operação(ões) identificada(s)) — pode enviar a próxima`);
+      status.textContent = 'Pronto pra próxima nota — escolha outro arquivo PDF acima (pode selecionar vários de uma vez).';
+    }
   });
 }
 
