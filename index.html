@@ -5076,18 +5076,48 @@ function parseNotaCorretagem(linhas){
     }
   });
 
-  let dataPregao = todayISO();
-  const linhaData = linhas.find(l=>/data\s*preg[ãa]o/i.test(l));
-  const dm = (linhaData || texto).match(/(\d{2}\/\d{2}\/\d{4})/);
-  if(dm) dataPregao = dm[1].split('/').reverse().join('-');
+  // Muitas notas de corretagem, depois de extraídas do PDF, separam o RÓTULO de uma coluna do
+  // VALOR dela em linhas diferentes (a extração de texto do PDF não preserva o alinhamento da
+  // tabela) — por isso essas duas funções não olham só a linha do rótulo, checam também as
+  // próximas linhas até achar o valor esperado.
+  const dataNaLinhaOuProximas = (regexRotulo)=>{
+    for(let i=0;i<linhas.length;i++){
+      if(regexRotulo.test(linhas[i])){
+        for(let j=i; j<Math.min(i+4, linhas.length); j++){
+          const dm = linhas[j].match(/(\d{2}\/\d{2}\/\d{4})/);
+          if(dm) return dm[1].split('/').reverse().join('-');
+        }
+      }
+    }
+    return null;
+  };
+  const numeroNaLinhaOuProximas = (regexRotulo)=>{
+    for(let i=0;i<linhas.length;i++){
+      if(regexRotulo.test(linhas[i])){
+        for(let j=i; j<Math.min(i+4, linhas.length); j++){
+          const nm = linhas[j].match(/\b(\d{3,10})\b/);
+          if(nm) return nm[1];
+        }
+      }
+    }
+    return null;
+  };
+
+  let dataPregao = dataNaLinhaOuProximas(/data\s*(do\s*)?preg[ãa]o/i);
+  if(!dataPregao){
+    // Fallback: primeira data que aparecer em qualquer lugar do texto (menos preciso, mas melhor
+    // que nada quando o rótulo "Data pregão" não bate com o texto extraído desta nota específica)
+    const dm = texto.match(/(\d{2}\/\d{2}\/\d{4})/);
+    dataPregao = dm ? dm[1].split('/').reverse().join('-') : todayISO();
+  }
 
   // Número da nota — costuma aparecer como "Nr. nota", "N° Nota", "Nota de Negociação Nº" etc.
-  let numeroNota = '';
-  const linhaNumNota = linhas.find(l=>/n[ºor°]\.?\s*(da\s*)?nota|nota\s*n[ºor°]/i.test(l));
-  if(linhaNumNota){
-    const nm = linhaNumNota.match(/(\d{3,10})/);
-    if(nm) numeroNota = nm[1];
-  }
+  let numeroNota = numeroNaLinhaOuProximas(/n[ºor°]\.?\s*(da\s*)?nota|nota\s*(de\s*negocia[çc][ãa]o\s*)?n[ºor°]/i) || '';
+
+  // Data de liquidação — antes era só calculada (pregão + 2 dias úteis), agora tenta ler de verdade
+  // da nota primeiro; só usa o cálculo estimado como reserva se a nota não trouxer essa informação
+  // explicitamente (nem toda corretora imprime essa data na nota).
+  const dataLiquidacaoLida = dataNaLinhaOuProximas(/data\s*(de\s*)?liquida[çc][ãa]o/i);
 
   const taxas = {
     corretagem: valorNaLinhaContendo(/\bcorretagem\b/i),
@@ -5100,7 +5130,7 @@ function parseNotaCorretagem(linhas){
   };
   const liquido = valorNaLinhaContendo(/l[ií]quido\s+para/i);
 
-  return { dataPregao, numeroNota, operacoes, taxas, liquido };
+  return { dataPregao, numeroNota, dataLiquidacaoLida, operacoes, taxas, liquido };
 }
 
 // Fatura de cartão: extrai linhas "dd/mm  descrição  valor" — formato comum à maioria
@@ -14563,7 +14593,13 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
         const dados = parseNotaCorretagem(linhas);
         operacoesAtuais = dados.operacoes;
         document.getElementById('notaData').value = dados.dataPregao;
-        document.getElementById('notaDataDebito').value = addDiasUteis(dados.dataPregao, 2);
+        if(dados.dataLiquidacaoLida){
+          document.getElementById('notaDataDebito').value = dados.dataLiquidacaoLida;
+          debitoEditadoManualmente = true; // veio da nota — não deixa o cálculo automático (pregão+2) sobrescrever depois
+        } else {
+          document.getElementById('notaDataDebito').value = addDiasUteis(dados.dataPregao, 2);
+          debitoEditadoManualmente = false;
+        }
         document.getElementById('notaNumero').value = dados.numeroNota || '';
         document.getElementById('notaTxCorretagem').value = dados.taxas.corretagem || 0;
         document.getElementById('notaTxLiquidacao').value = dados.taxas.liquidacao || 0;
@@ -14580,6 +14616,10 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
         document.getElementById('notaData').value = todayISO();
         document.getElementById('notaDataDebito').value = addDiasUteis(todayISO(), 2);
       }
+      // Crítico: precisa desenhar as operações lidas na tela ANTES de coletar o formulário — quem
+      // salva (coletarNotaFormulario → lerOperacoesDoDOM) lê da tela, não da variável operacoesAtuais
+      // direto. Sem isso, toda nota salvava sem nenhuma operação (bug relatado pelo usuário).
+      pintarOperacoes();
       // Regra: cada nota é salva na fila de aprovação automaticamente assim que é lida — não precisa
       // clicar em nada pra cada uma. Selecionando vários PDFs de uma vez, processa todos em sequência.
       const nota = { id: uid(), ...coletarNotaFormulario(), criadoEm: new Date().toISOString() };
