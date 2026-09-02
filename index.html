@@ -5539,7 +5539,7 @@ function rowAtivoHTML(a){
       <span class="mono ativo-col-atual" style="font-size:12.5px;">${isManual? '—' : brl(a.precoAtual ?? a.precoMedio ?? 0)}</span>
       <span class="mono" style="font-weight:600;">${brl(valor)}</span>
       <div class="row-actions">
-        ${vencido ? `<button class="icon-btn" data-action="resgatar-ativo-rf" data-id="${a.id}" title="Registrar resgate">💰</button>` : ''}
+        ${isRF ? `<button class="icon-btn" data-action="resgatar-ativo-rf" data-id="${a.id}" title="Registrar resgate">💰</button>` : ''}
         ${isManual ? `<button class="icon-btn" data-action="atualizar-valor-ativo" data-id="${a.id}" title="Atualizar valor">🔄</button>` : ''}
         <button class="icon-btn" data-action="editar-ativo" data-id="${a.id}" title="Editar">✎</button>
         <button class="icon-btn" data-action="excluir-ativo" data-id="${a.id}" title="Excluir">✕</button>
