@@ -6039,6 +6039,16 @@ function renderDRE(periodo){
         <option value="ano" ${periodo==='ano'?'selected':''}>Ano atual</option>
         <option value="custom" ${periodo==='custom'?'selected':''}>Personalizado</option>
       </select>
+      ${periodo==='mes' ? `<select id="dreMes">${(()=>{
+        const opcoes = new Set();
+        const [anoAtualDre, mesAtualDre] = todayISO().split('-').map(Number);
+        for(let i=23;i>=-2;i--){
+          const d = new Date(anoAtualDre, mesAtualDre-1-i, 1);
+          opcoes.add(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+        }
+        opcoes.add(mesGlobalRef); // garante que o mês atualmente selecionado sempre aparece, mesmo se for mais antigo
+        return [...opcoes].sort().map(m=>`<option value="${m}" ${m===mesGlobalRef?'selected':''}>${competenciaLabel(m)}</option>`).join('');
+      })()}</select>` : ''}
       <select id="dreAnalise">
         <option value="horizontal" ${!mostraVertical && !mostraYoy?'selected':''}>Análise horizontal</option>
         <option value="vertical" ${mostraVertical?'selected':''}>Análise vertical</option>
@@ -11174,6 +11184,13 @@ function attachViewHandlers(){
       });
       if(drePeriodo) drePeriodo.addEventListener('change', ()=>{
         document.getElementById('reportPanel').innerHTML = renderDRE(drePeriodo.value);
+        bindReportInner();
+      });
+      const dreMes = document.getElementById('dreMes');
+      if(dreMes) dreMes.addEventListener('change', ()=>{
+        if(!dreMes.value) return;
+        mesGlobalRef = dreMes.value; // mesmo mês global usado em todo o app — troca aqui reflete em qualquer outra tela também
+        document.getElementById('reportPanel').innerHTML = renderDRE('mes');
         bindReportInner();
       });
       const dreDe = document.getElementById('dreDe'), dreAte = document.getElementById('dreAte');
