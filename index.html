@@ -318,6 +318,13 @@
   .filter-bar{display:flex;gap:8px;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center;}
   .dropdown-wrap{position:relative;display:inline-block;}
   .dropdown-menu{position:absolute;top:calc(100% + 6px);right:0;background:var(--white);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(11,15,20,.14);min-width:210px;z-index:50;overflow:hidden;display:none;}
+  .fab-novo-wrap{display:none;}
+  @media (min-width:900px){
+    .fab-novo-wrap{position:fixed;bottom:28px;right:28px;z-index:60;}
+    .fab-novo{width:56px;height:56px;border-radius:50%;background:var(--blue-accent);color:#fff;border:none;font-size:28px;font-weight:400;line-height:1;cursor:pointer;box-shadow:0 6px 18px rgba(20,49,92,.32);display:flex;align-items:center;justify-content:center;transition:transform .15s;}
+    .fab-novo:hover{transform:scale(1.06);}
+    .fab-novo-menu{position:absolute;bottom:calc(100% + 10px);right:0;top:auto;}
+  }
   .dropdown-menu.open{display:block;}
   .dropdown-menu button{display:flex;align-items:center;gap:9px;width:100%;text-align:left;padding:11px 14px;font-size:13px;font-family:'Inter';background:none;border:none;cursor:pointer;color:var(--ink);}
   .dropdown-menu button:hover{background:var(--bone);}
@@ -659,6 +666,19 @@
   </aside>
 
   <main class="main" id="main"></main>
+
+  <div class="fab-novo-wrap" id="fabNovoWrap">
+    <button class="fab-novo" id="fabNovoBtn" title="Novo lançamento rápido">+</button>
+    <div class="dropdown-menu fab-novo-menu" id="fabNovoMenu">
+      <button type="button" data-novo="entrada"><span class="dropdown-dot" style="background:var(--success);"></span> Nova receita</button>
+      <button type="button" data-novo="saida"><span class="dropdown-dot" style="background:var(--danger);"></span> Nova despesa</button>
+      <button type="button" data-novo="recorrente"><span class="dropdown-dot" style="background:#7B5CD6;"></span> Despesa recorrente</button>
+      <button type="button" data-novo="transferencia"><span class="dropdown-dot" style="background:var(--blue-accent);"></span> Transferência entre contas</button>
+      <button type="button" data-novo="investimento"><span class="dropdown-dot" style="background:var(--warn);"></span> Aplicação financeira</button>
+      <button type="button" data-novo="qrnota"><span class="dropdown-dot" style="background:#00A884;"></span> 🧾 Ler nota fiscal (QR Code)</button>
+      <button type="button" data-novo="notafiscalpdf"><span class="dropdown-dot" style="background:#3B6FE0;"></span> 📄 Importar nota fiscal (PDF/foto)</button>
+    </div>
+  </div>
 </div>
 
 <nav class="bottom-nav" id="bottomNav">
@@ -3224,7 +3244,16 @@ function listaLancamentosAgrupadaHTML(lista){
         <span class="col-status status-chip ${statusClass||''}">${statusLabel}</span>
         <span class="mono" style="font-weight:600;color:${l0.tipo==='entrada'?'var(--success)':'var(--danger)'};text-align:right;">${l0.tipo==='entrada'?'+':'-'} ${brl(total)}</span>
       </summary>
-      <div style="padding:0 0 8px 20px;">${itens.map(rowHTML).join('')}</div>
+      <div style="padding:8px 0 8px 20px;">
+        <div style="display:flex;align-items:center;gap:8px;padding:0 16px 10px;flex-wrap:wrap;">
+          <span style="font-size:11px;color:var(--text-soft);">Toque um item abaixo pra editar ele individualmente, ou mude a conta de todos de uma vez:</span>
+          <select class="grupo-mudar-conta" data-grupo="${chave}" style="max-width:220px;">
+            <option value="">Mudar conta de todos p/...</option>
+            ${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}
+          </select>
+        </div>
+        ${itens.map(rowHTML).join('')}
+      </div>
     </details>`;
   }).join('');
 }
@@ -10815,6 +10844,18 @@ function attachViewHandlers(){
     });
   });
 
+  document.querySelectorAll('.grupo-mudar-conta').forEach(sel=>{
+    sel.addEventListener('change', ()=>{
+      if(!sel.value) return;
+      const chave = sel.dataset.grupo;
+      const itensDoGrupo = state.lancamentos.filter(l=>(l.grupoId||l.id)===chave);
+      if(!itensDoGrupo.length) return;
+      if(!confirm(`Mudar a conta bancária de ${itensDoGrupo.length} item(ns) dessa despesa de uma vez?`)) { sel.value=''; return; }
+      itensDoGrupo.forEach(l=>{ l.contaId = sel.value; });
+      persist(); render();
+      showToast('Conta atualizada em todos os itens');
+    });
+  });
   document.querySelectorAll('[data-action]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const id = btn.dataset.id;
@@ -14224,7 +14265,7 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
       <label>Arquivo PDF da nota de corretagem</label>
       <input type="file" id="notaFileInput" accept="application/pdf">
     </div>
-    <div id="notaStatus" class="note" style="margin-top:0;">Escolha o PDF da nota — o sistema tenta ler as operações e as taxas automaticamente. Depois ela fica salva aguardando aprovação: você revisa com calma e publica quando estiver tudo certo.</div>
+    <div id="notaStatus" class="note" style="margin-top:0;">Escolha o PDF da nota — o sistema tenta ler as operações e as taxas automaticamente, e já salva pra revisão sozinho (sem precisar clicar em nada). Pode escolher outro PDF em seguida pra subir várias de uma vez — todas ficam aguardando em "Notas aguardando aprovação", pra você revisar com calma e publicar quando estiver tudo certo.</div>
     `}
     <div id="notaRevisao" style="display:${notaEmRevisao?'block':'none'};">
       <div class="field-row">
@@ -14272,7 +14313,7 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       ${notaEmRevisao
         ? `<button class="btn ghost" id="btnSalvarNota">Salvar alterações</button><button class="btn" id="btnPublicarNota">✓ Publicar</button>`
-        : `<button class="btn" id="btnConfirmarNota" style="display:none;">Enviar para aprovação</button>`}
+        : ''}
     </div>
   `;
   document.getElementById('modalOverlay').classList.add('open');
@@ -14513,6 +14554,7 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     arquivoNomeAtual = file.name || '';
     const status = document.getElementById('notaStatus');
     status.textContent = 'Lendo o PDF...';
+    let dadosOk = true;
     try{
       const linhas = await extrairLinhasPDF(file);
       const dados = parseNotaCorretagem(linhas);
@@ -14528,34 +14570,33 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
       document.getElementById('notaTxIrrf').value = dados.taxas.irrf || 0;
       document.getElementById('notaTxOutras').value = dados.taxas.outras || 0;
       document.getElementById('notaLiquido').value = dados.liquido || 0;
-      pintarOperacoes();
-      document.getElementById('notaRevisao').style.display = 'block';
-      document.getElementById('btnConfirmarNota').style.display = 'inline-flex';
-      status.textContent = operacoesAtuais.length
-        ? `${operacoesAtuais.length} operação(ões) identificada(s). Confira todos os campos — se o campo "Ticker" mostrar o nome da empresa em vez do código (ex: "PETROBRAS PN" em vez de "PETR4"), corrija ali antes de enviar.`
-        : 'Não consegui identificar operações automaticamente nessa nota — adicione as linhas manualmente abaixo.';
     }catch(e){
       console.error('Erro ao ler PDF da nota:', e);
-      status.textContent = 'Não consegui ler esse PDF automaticamente. Você pode preencher tudo manualmente abaixo.';
+      dadosOk = false;
       operacoesAtuais = [];
-      pintarOperacoes();
       document.getElementById('notaData').value = todayISO();
       document.getElementById('notaDataDebito').value = addDiasUteis(todayISO(), 2);
-      document.getElementById('notaRevisao').style.display = 'block';
-      document.getElementById('btnConfirmarNota').style.display = 'inline-flex';
     }
-  });
-
-  document.getElementById('btnConfirmarNota').addEventListener('click', ()=>{
+    // Regra nova: a nota é salva na fila de aprovação automaticamente assim que o PDF é lido — não
+    // precisa mais clicar em "Enviar para aprovação" pra cada uma. Isso permite subir várias notas
+    // em sequência, deixando tudo pendente pra revisar com calma depois em "Notas aguardando aprovação".
     const nota = { id: uid(), ...coletarNotaFormulario(), criadoEm: new Date().toISOString() };
     if(!state.notasPendentes) state.notasPendentes = [];
     state.notasPendentes.push(nota);
-    registrarLog('Nota de corretagem recebida', `Nota${nota.corretora?' — '+nota.corretora:''} de ${nota.dataPregao} salva para aprovação (débito previsto em ${nota.dataDebito})`);
-    persist(); closeModal();
-    currentView = 'investimentos';
-    document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view==='investimentos'));
-    render();
-    showToast('Nota salva — revise e publique no painel "Notas aguardando aprovação"');
+    registrarLog('Nota de corretagem recebida', `Nota${nota.corretora?' — '+nota.corretora:''} de ${nota.dataPregao} salva para aprovação automaticamente${dadosOk?'':' (não li automaticamente — vai precisar preencher na revisão)'}`);
+    persist();
+    showToast(dadosOk ? `Nota salva pra revisão (${operacoesAtuais.length} operação(ões) identificada(s)) — pode enviar a próxima` : 'Nota salva, mas não consegui ler os dados automaticamente — revise ela na fila com calma');
+    // Reseta o formulário pra receber o próximo arquivo, sem fechar o modal
+    operacoesAtuais = [];
+    document.getElementById('notaFileInput').value = '';
+    document.getElementById('notaCorretora').value = '';
+    document.getElementById('notaNumero').value = '';
+    document.getElementById('notaData').value = '';
+    document.getElementById('notaDataDebito').value = '';
+    ['notaTxCorretagem','notaTxLiquidacao','notaTxEmolumentos','notaTxRegistro','notaTxIss','notaTxIrrf','notaTxOutras','notaLiquido'].forEach(idc=>{ const el = document.getElementById(idc); if(el) el.value = 0; });
+    pintarOperacoes();
+    document.getElementById('notaRevisao').style.display = 'none';
+    status.textContent = 'Pronto pra próxima nota — escolha outro arquivo PDF acima.';
   });
 }
 
@@ -14651,7 +14692,7 @@ function publicarNotaCorretagem(nota){
       descricao: `Compra de ativos${corretora ? ' — '+corretora : ''} (nota de corretagem)${sufixoNota}`,
       valor: Math.round(totalCompras*100)/100, contaId: contaBancariaId, status: statusSaida,
       dataVencimento: dataDebito, dataPagamento,
-      origem:'investimento', numeroNota: numeroNota||null, observacao: 'Operações: '+linhas.filter(l=>l.tipo==='C').map(l=>`${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', '),
+      origem:'investimento', numeroNota: numeroNota||null, observacao: `${numeroNota?`Nota N° ${numeroNota} · `:''}Operações: `+linhas.filter(l=>l.tipo==='C').map(l=>`${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', '),
       criadoEm: new Date().toISOString()
     });
   }
@@ -14661,7 +14702,7 @@ function publicarNotaCorretagem(nota){
       descricao: `Venda de ativos${corretora ? ' — '+corretora : ''} (nota de corretagem)${sufixoNota}`,
       valor: Math.round(totalVendas*100)/100, contaId: contaBancariaId, status: statusEntrada,
       dataVencimento: dataDebito, dataPagamento,
-      origem:'investimento', numeroNota: numeroNota||null, observacao: 'Operações: '+linhas.filter(l=>l.tipo==='V').map(l=>`${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', '),
+      origem:'investimento', numeroNota: numeroNota||null, observacao: `${numeroNota?`Nota N° ${numeroNota} · `:''}Operações: `+linhas.filter(l=>l.tipo==='V').map(l=>`${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', '),
       criadoEm: new Date().toISOString()
     });
   }
@@ -14672,6 +14713,7 @@ function publicarNotaCorretagem(nota){
         descricao: `Ganho de capital${corretora ? ' — '+corretora : ''} (nota de corretagem)${sufixoNota}`,
         valor: Math.round(ganhoPerdaCapital*100)/100, contaId: contaBancariaId, status: statusEntrada,
         dataVencimento: dataDebito, dataPagamento, numeroNota: numeroNota||null,
+        observacao: numeroNota ? `Nota N° ${numeroNota}` : '',
         criadoEm: new Date().toISOString()
       });
     } else {
@@ -14680,6 +14722,7 @@ function publicarNotaCorretagem(nota){
         descricao: `Perda de capital${corretora ? ' — '+corretora : ''} (nota de corretagem)${sufixoNota}`,
         valor: Math.round(Math.abs(ganhoPerdaCapital)*100)/100, contaId: contaBancariaId, status: statusSaida,
         dataVencimento: dataDebito, dataPagamento, numeroNota: numeroNota||null,
+        observacao: numeroNota ? `Nota N° ${numeroNota}` : '',
         criadoEm: new Date().toISOString()
       });
     }
@@ -14697,16 +14740,17 @@ function publicarNotaCorretagem(nota){
     if(taxaLiquidacao>0){
       state.lancamentos.push({ ...baseCusto, id: uid(), categoria:'Investimentos / Taxa de Liquidação',
         descricao: `Taxa de liquidação — nota de corretagem${corretora ? ' — '+corretora : ''}${sufixoNota}`,
-        valor: Math.round(taxaLiquidacao*100)/100, observacao: `Liquidação: ${brl(taxaLiquidacao)}` });
+        valor: Math.round(taxaLiquidacao*100)/100, observacao: `${numeroNota?`Nota N° ${numeroNota} · `:''}Liquidação: ${brl(taxaLiquidacao)}` });
     }
     if(taxaEmolumentos>0){
       state.lancamentos.push({ ...baseCusto, id: uid(), categoria:'Investimentos / Emolumentos',
         descricao: `Emolumentos — nota de corretagem${corretora ? ' — '+corretora : ''}${sufixoNota}`,
-        valor: Math.round(taxaEmolumentos*100)/100, observacao: `Emolumentos: ${brl(taxaEmolumentos)}` });
+        valor: Math.round(taxaEmolumentos*100)/100, observacao: `${numeroNota?`Nota N° ${numeroNota} · `:''}Emolumentos: ${brl(taxaEmolumentos)}` });
     }
     const tarifasDiversas = Math.round((taxaCorretagem + taxaRegistro + taxaIss + taxaOutras + irrf)*100)/100;
     if(tarifasDiversas>0){
       const partes = [];
+      if(numeroNota) partes.push(`Nota N° ${numeroNota}`);
       if(taxaCorretagem) partes.push(`Corretagem: ${brl(taxaCorretagem)}`);
       if(taxaRegistro) partes.push(`Registro: ${brl(taxaRegistro)}`);
       if(taxaIss) partes.push(`ISS: ${brl(taxaIss)}`);
@@ -16017,6 +16061,42 @@ function closeModal(){
   document.getElementById('modalContent').className = 'modal';
 }
 document.getElementById('modalOverlay').addEventListener('click', (e)=>{ if(e.target.id==='modalOverlay') closeModal(); });
+
+/* Botão flutuante fixo de lançamento rápido (desktop) — visível em qualquer tela, sem precisar
+   depender do dropdown "+ Novo" de cada tela individualmente. Wiring feito uma única vez, já que
+   o botão fica fora do #main (não é recriado a cada render()). */
+(function(){
+  const fabBtn = document.getElementById('fabNovoBtn');
+  const fabMenu = document.getElementById('fabNovoMenu');
+  if(!fabBtn || !fabMenu) return;
+  const setFabAberto = (aberto)=>{
+    fabMenu.classList.toggle('open', aberto);
+    if(aberto) ajustarPosicaoDropdown(fabMenu);
+  };
+  fabBtn.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    setFabAberto(!fabMenu.classList.contains('open'));
+  });
+  document.addEventListener('click', (e)=>{
+    if(!fabMenu.classList.contains('open')) return;
+    if(!e.target.closest('#fabNovoWrap')) setFabAberto(false);
+  });
+  fabMenu.querySelectorAll('button[data-novo]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      setFabAberto(false);
+      const novoTipo = btn.dataset.novo;
+      if(novoTipo==='transferencia'){
+        if(state.contas.length<2){ showToast('Crie pelo menos 2 contas pra transferir'); return; }
+        openTransferenciaModal();
+      }
+      else if(novoTipo==='recorrente') openRecorrenciaModal();
+      else if(novoTipo==='investimento') openEscolherContaInvestirModal();
+      else if(novoTipo==='qrnota') openLerQRNotaModal();
+      else if(novoTipo==='notafiscalpdf') openImportarNotaFiscalModal();
+      else openLancamentoModal(novoTipo);
+    });
+  });
+})();
 
 /* ---------------- Backup / Restore ---------------- */
 document.getElementById('btnBackup').addEventListener('click', ()=>{
