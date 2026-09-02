@@ -2833,16 +2833,22 @@ function economiaMensalHTML(mesRef){
   const hoje = todayISO();
   const mesAtualRef = hoje.slice(0,7);
   const ateReal = mesRef === mesAtualRef ? hoje : t.ateMes;
-  let saidasMesSemAporte = 0;
+  let saidasMesSemAporte = 0, entradasMesSemResgate = 0;
   if(mesRef <= mesAtualRef){
     state.lancamentos.forEach(l=>{
       const ref = l.dataPagamento;
       if(!ref || ref<de || ref>ateReal) return;
-      if(l.tipo==='saida' && l.status==='pago' && !(l.categoria==='Investimentos' && l.origem==='investimento')) saidasMesSemAporte += l.valor;
+      const ehMovimentoInvestimento = l.categoria==='Investimentos' && l.origem==='investimento';
+      // Aporte (comprar um investimento) já não contava como despesa do mês — mas resgate (o
+      // principal voltando) estava contando como receita, de forma assimétrica: o dinheiro que
+      // já era seu, só voltando de posição, não é economia/faturamento novo, igual o aporte
+      // também não era um gasto novo.
+      if(l.tipo==='saida' && l.status==='pago' && !ehMovimentoInvestimento) saidasMesSemAporte += l.valor;
+      if(l.tipo==='entrada' && l.status==='recebido' && !ehMovimentoInvestimento) entradasMesSemResgate += l.valor;
     });
   }
-  const lucro = t.entradasMes - saidasMesSemAporte;
-  const pct = t.entradasMes>0 ? Math.max(0, Math.min(100, Math.round((lucro/t.entradasMes)*100))) : 0;
+  const lucro = entradasMesSemResgate - saidasMesSemAporte;
+  const pct = entradasMesSemResgate>0 ? Math.max(0, Math.min(100, Math.round((lucro/entradasMesSemResgate)*100))) : 0;
   const cor = lucro>=0 ? 'var(--success)' : 'var(--danger)';
   return `
     <div class="dash-section-label">Economia Mensal</div>
@@ -2855,7 +2861,7 @@ function economiaMensalHTML(mesRef){
           </div>
         </div>
         <div style="flex:1;min-width:160px;">
-          <div class="economia-linha"><span>Receitas consideradas</span><span class="mono" style="color:var(--success);font-weight:600;">${vm(brl(t.entradasMes))}</span></div>
+          <div class="economia-linha"><span>Receitas consideradas</span><span class="mono" style="color:var(--success);font-weight:600;">${vm(brl(entradasMesSemResgate))}</span></div>
           <div class="economia-linha"><span>Despesas consideradas</span><span class="mono" style="color:var(--danger);font-weight:600;">${vm(brl(saidasMesSemAporte))}</span></div>
         </div>
       </div>
