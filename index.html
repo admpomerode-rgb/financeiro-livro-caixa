@@ -150,6 +150,7 @@
   .bolsa-linha .vr.neg{color:#FF9385;}
 
   .dash-section-label{font-size:11.5px;font-weight:700;color:var(--text-soft);text-transform:uppercase;letter-spacing:.05em;margin:22px 0 10px;}
+  .ativo-categoria-label{font-size:11px;font-weight:700;color:var(--text-soft);text-transform:uppercase;letter-spacing:.04em;padding:14px 18px 6px;}
 
   .mes-nav{display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:8px;}
   .mes-nav button{background:var(--white);border:1px solid var(--line);width:28px;height:28px;border-radius:8px;font-size:15px;color:var(--ink);cursor:pointer;}
@@ -1192,6 +1193,10 @@ let categoriaTipoAtivo = 'saida';
 let ordenacaoContas = 'manual';
 let modoCompactoContas = false;
 let mostrarContasArquivadas = false;
+let ativosPatrimoniaisBusca = '';
+let ativosPatrimoniaisCategoria = '';
+let ativosPatrimoniaisOrdenacao = 'nome';
+let ativosPatrimoniaisAba = 'ativos';
 let comissaoVendedorSelecionado = '';
 let comissaoDataDeSelecionada = null;
 let comissaoDataAteSelecionada = null;
@@ -9477,14 +9482,88 @@ function semaforo(valor, limiteVerde, limiteAmarelo, inverso){
 }
 
 function viewAtivosPatrimoniais(){
-  const totalAquisicao = state.ativosPatrimoniais.reduce((s,a)=>s+a.valorAquisicao,0);
+  const hoje = todayISO();
+  const em60ISO = (()=>{ const d=new Date(); d.setDate(d.getDate()+60); return d.toISOString().slice(0,10); })();
+  const todosAtivos = state.ativosPatrimoniais;
+  const ativosVivos = todosAtivos.filter(a=>!a.baixa);
+  const ativosBaixados = todosAtivos.filter(a=>a.baixa);
+  const totalAquisicao = ativosVivos.reduce((s,a)=>s+a.valorAquisicao,0);
   const totalAtual = totalAtivosPatrimoniais();
   const totalDepreciado = totalAquisicao - totalAtual;
   const pendentesProcessos = state.comprasProcessosPendentes||[];
+
+  const categorias = [...new Set(ativosVivos.map(a=>a.categoria).filter(Boolean))].sort();
+
+  // Alertas calculados uma vez, reaproveitados no badge da linha e no resumo
+  const alertasAtivo = (a) => {
+    const d = calcDepreciacao(a);
+    const avisos = [];
+    if(a.garantiaMeses && a.dataAquisicao){
+      const fimGarantia = new Date(a.dataAquisicao); fimGarantia.setMonth(fimGarantia.getMonth()+Number(a.garantiaMeses));
+      const fimISO = fimGarantia.toISOString().slice(0,10);
+      if(fimISO>=hoje && fimISO<=em60ISO) avisos.push({ tipo:'garantia', texto:'Garantia vence em breve' });
+    }
+    if(a.seguroVigenciaFim && a.seguroVigenciaFim>=hoje && a.seguroVigenciaFim<=em60ISO) avisos.push({ tipo:'seguro', texto:'Seguro vence em breve' });
+    if((a.manutencoes||[]).some(m=>m.proximaData && !m.concluida && m.proximaData<=em60ISO)) avisos.push({ tipo:'manutencao', texto:'Manutenção pendente' });
+    if(d.totalmenteDepreciado) avisos.push({ tipo:'depreciado', texto:'Totalmente depreciado' });
+    if(!a.fotos?.length || !a.notaFiscal) avisos.push({ tipo:'incompleto', texto:'Cadastro incompleto' });
+    return avisos;
+  };
+
+  // Lista exibida conforme aba/busca/filtro/ordenação
+  let lista = ativosPatrimoniaisAba==='baixados' ? [...ativosBaixados] : [...ativosVivos];
+  if(ativosPatrimoniaisBusca.trim()){
+    const termo = ativosPatrimoniaisBusca.trim().toLowerCase();
+    lista = lista.filter(a=>a.nome.toLowerCase().includes(termo) || (a.numeroPatrimonio||'').toLowerCase().includes(termo));
+  }
+  if(ativosPatrimoniaisCategoria) lista = lista.filter(a=>a.categoria===ativosPatrimoniaisCategoria);
+  const ordenar = (arr) => {
+    const arr2 = [...arr];
+    if(ativosPatrimoniaisOrdenacao==='valor') arr2.sort((a,b)=>calcDepreciacao(b).valorAtual-calcDepreciacao(a).valorAtual);
+    else if(ativosPatrimoniaisOrdenacao==='data') arr2.sort((a,b)=>(b.dataAquisicao||'').localeCompare(a.dataAquisicao||''));
+    else if(ativosPatrimoniaisOrdenacao==='depreciado') arr2.sort((a,b)=>calcDepreciacao(b).pctDepreciado-calcDepreciacao(a).pctDepreciado);
+    else arr2.sort((a,b)=>a.nome.localeCompare(b.nome));
+    return arr2;
+  };
+
+  const buscaOuFiltroAtivo = !!(ativosPatrimoniaisBusca.trim() || ativosPatrimoniaisCategoria);
+  const agruparPorCategoria = ativosPatrimoniaisAba==='ativos' && !buscaOuFiltroAtivo;
+
+  let corpoListaHTML = '';
+  if(!lista.length){
+    corpoListaHTML = `<div class="empty">${ativosPatrimoniaisAba==='baixados' ? 'Nenhum ativo baixado ainda.' : (buscaOuFiltroAtivo ? 'Nenhum ativo encontrado com esse filtro.' : 'Nenhum ativo cadastrado ainda. Clique em "+ Ativo" para começar.')}</div>`;
+  } else if(agruparPorCategoria){
+    const porCategoria = {};
+    lista.forEach(a=>{ const c = a.categoria||'Sem categoria'; if(!porCategoria[c]) porCategoria[c]=[]; porCategoria[c].push(a); });
+    corpoListaHTML = Object.keys(porCategoria).sort().map(cat=>`
+      <div class="ativo-categoria-label">${escapeHTML(cat)} <span style="font-weight:400;color:var(--text-soft);">(${porCategoria[cat].length})</span></div>
+      <div class="ledger-row head ativo-patrimonial-row">
+        <span></span><span>Ativo</span><span class="ativo-patrimonial-col">Aquisição</span><span class="ativo-patrimonial-col">Depreciado</span><span>Valor atual</span><span></span>
+      </div>
+      ${ordenar(porCategoria[cat]).map(a=>rowAtivoPatrimonialHTML(a, alertasAtivo(a))).join('')}
+    `).join('');
+  } else {
+    corpoListaHTML = `
+      <div class="ledger-row head ativo-patrimonial-row">
+        <span></span><span>Ativo</span><span class="ativo-patrimonial-col">Aquisição</span><span class="ativo-patrimonial-col">Depreciado</span><span>Valor atual</span><span></span>
+      </div>
+      ${ordenar(lista).map(a=>rowAtivoPatrimonialHTML(a, alertasAtivo(a))).join('')}
+    `;
+  }
+
+  // Composição do patrimônio por categoria (só faz sentido pros ativos vivos)
+  const composicaoPorCategoria = {};
+  ativosVivos.forEach(a=>{ const c = a.categoria||'Sem categoria'; composicaoPorCategoria[c] = (composicaoPorCategoria[c]||0) + calcDepreciacao(a).valorAtual; });
+  const composicaoOrdenada = Object.entries(composicaoPorCategoria).sort((a,b)=>b[1]-a[1]);
+  const maxComposicao = composicaoOrdenada.length ? composicaoOrdenada[0][1] : 1;
+
   return `
     <div class="topbar">
       <div><h1>Ativos Patrimoniais</h1><p>Bens da empresa com depreciação linear conforme as taxas da Receita Federal (IN RFB nº 1.700/2017)</p></div>
-      <button class="btn" id="btnNovoAtivoPatrimonial">+ Ativo</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn ghost" id="btnExportarAtivosPDF">📄 Exportar PDF</button>
+        <button class="btn" id="btnNovoAtivoPatrimonial">+ Ativo</button>
+      </div>
     </div>
     ${pendentesProcessos.length ? `
     <div class="panel alerta-panel">
@@ -9511,28 +9590,133 @@ function viewAtivosPatrimoniais(){
       <div class="card"><div class="label">Depreciação acumulada</div><div class="value mono neg">${brl(totalDepreciado)}</div></div>
       <div class="card saldo"><div class="label">Valor atual (total)</div><div class="value mono pos">${brl(totalAtual)}</div></div>
     </div>
+    ${composicaoOrdenada.length>1 ? `
+    <div class="dash-section-label">Composição do patrimônio por categoria</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 18px;">
+      ${composicaoOrdenada.map(([cat,valor])=>`
+        <div style="margin-bottom:10px;">
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px;"><span>${escapeHTML(cat)}</span><span class="mono">${brl(valor)}</span></div>
+          <div style="background:var(--bone);border-radius:5px;height:7px;overflow:hidden;"><div style="width:${Math.max(2,valor/maxComposicao*100)}%;height:100%;background:var(--blue-accent);"></div></div>
+        </div>
+      `).join('')}
+    </div></div>` : ''}
+    <div class="report-controls" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <button class="btn ${ativosPatrimoniaisAba==='ativos'?'':'ghost'} sm" id="btnAbaAtivosVivos">Ativos (${ativosVivos.length})</button>
+      <button class="btn ${ativosPatrimoniaisAba==='baixados'?'':'ghost'} sm" id="btnAbaAtivosBaixados">Baixados (${ativosBaixados.length})</button>
+      <input type="text" id="ativosBuscaInput" placeholder="Buscar por nome ou nº..." value="${escapeHTML(ativosPatrimoniaisBusca)}" style="flex:1;min-width:160px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;">
+      ${categorias.length ? `<select id="ativosCategoriaSelect"><option value="">Todas as categorias</option>${categorias.map(c=>`<option value="${escapeHTML(c)}" ${ativosPatrimoniaisCategoria===c?'selected':''}>${escapeHTML(c)}</option>`).join('')}</select>` : ''}
+      <select id="ativosOrdenacaoSelect">
+        <option value="nome" ${ativosPatrimoniaisOrdenacao==='nome'?'selected':''}>Nome (A-Z)</option>
+        <option value="valor" ${ativosPatrimoniaisOrdenacao==='valor'?'selected':''}>Maior valor atual</option>
+        <option value="data" ${ativosPatrimoniaisOrdenacao==='data'?'selected':''}>Mais recente</option>
+        <option value="depreciado" ${ativosPatrimoniaisOrdenacao==='depreciado'?'selected':''}>Mais depreciado</option>
+      </select>
+    </div>
     <div class="panel">
       <div class="panel-head"><h2>Bens cadastrados</h2></div>
-      <div class="panel-body">
-        ${state.ativosPatrimoniais.length ? `
-        <div class="ledger-row head ativo-patrimonial-row">
-          <span></span><span>Ativo</span><span class="ativo-patrimonial-col">Aquisição</span><span class="ativo-patrimonial-col">Depreciado</span><span>Valor atual</span><span></span>
-        </div>
-        ${state.ativosPatrimoniais.map(rowAtivoPatrimonialHTML).join('')}` : `<div class="empty">Nenhum ativo cadastrado ainda. Clique em "+ Ativo" para começar.</div>`}
+      <div class="panel-body" id="ativosListaConteudo">
+        ${corpoListaHTML}
       </div>
     </div>
   `;
 }
 
-function rowAtivoPatrimonialHTML(a){
+// Recalcula só a lista de ativos (sem redesenhar a tela inteira) — usado pelo campo de busca,
+// pra não perder o foco do cursor a cada letra digitada.
+function atualizarAtivosListaConteudo(){
+  const container = document.getElementById('ativosListaConteudo');
+  if(!container) return;
+  const ativosVivos = state.ativosPatrimoniais.filter(a=>!a.baixa);
+  const ativosBaixados = state.ativosPatrimoniais.filter(a=>a.baixa);
+  const hoje = todayISO();
+  const em60ISO = (()=>{ const d=new Date(); d.setDate(d.getDate()+60); return d.toISOString().slice(0,10); })();
+  const alertasAtivo = (a) => {
+    const d = calcDepreciacao(a);
+    const avisos = [];
+    if(a.garantiaMeses && a.dataAquisicao){
+      const fimGarantia = new Date(a.dataAquisicao); fimGarantia.setMonth(fimGarantia.getMonth()+Number(a.garantiaMeses));
+      const fimISO = fimGarantia.toISOString().slice(0,10);
+      if(fimISO>=hoje && fimISO<=em60ISO) avisos.push({ tipo:'garantia', texto:'Garantia vence em breve' });
+    }
+    if(a.seguroVigenciaFim && a.seguroVigenciaFim>=hoje && a.seguroVigenciaFim<=em60ISO) avisos.push({ tipo:'seguro', texto:'Seguro vence em breve' });
+    if((a.manutencoes||[]).some(m=>m.proximaData && !m.concluida && m.proximaData<=em60ISO)) avisos.push({ tipo:'manutencao', texto:'Manutenção pendente' });
+    if(d.totalmenteDepreciado) avisos.push({ tipo:'depreciado', texto:'Totalmente depreciado' });
+    if(!a.fotos?.length || !a.notaFiscal) avisos.push({ tipo:'incompleto', texto:'Cadastro incompleto' });
+    return avisos;
+  };
+  let lista = ativosPatrimoniaisAba==='baixados' ? [...ativosBaixados] : [...ativosVivos];
+  if(ativosPatrimoniaisBusca.trim()){
+    const termo = ativosPatrimoniaisBusca.trim().toLowerCase();
+    lista = lista.filter(a=>a.nome.toLowerCase().includes(termo) || (a.numeroPatrimonio||'').toLowerCase().includes(termo));
+  }
+  if(ativosPatrimoniaisCategoria) lista = lista.filter(a=>a.categoria===ativosPatrimoniaisCategoria);
+  const ordenar = (arr) => {
+    const arr2 = [...arr];
+    if(ativosPatrimoniaisOrdenacao==='valor') arr2.sort((a,b)=>calcDepreciacao(b).valorAtual-calcDepreciacao(a).valorAtual);
+    else if(ativosPatrimoniaisOrdenacao==='data') arr2.sort((a,b)=>(b.dataAquisicao||'').localeCompare(a.dataAquisicao||''));
+    else if(ativosPatrimoniaisOrdenacao==='depreciado') arr2.sort((a,b)=>calcDepreciacao(b).pctDepreciado-calcDepreciacao(a).pctDepreciado);
+    else arr2.sort((a,b)=>a.nome.localeCompare(b.nome));
+    return arr2;
+  };
+  const buscaOuFiltroAtivo = !!(ativosPatrimoniaisBusca.trim() || ativosPatrimoniaisCategoria);
+  const agruparPorCategoria = ativosPatrimoniaisAba==='ativos' && !buscaOuFiltroAtivo;
+  let corpoListaHTML = '';
+  if(!lista.length){
+    corpoListaHTML = `<div class="empty">${ativosPatrimoniaisAba==='baixados' ? 'Nenhum ativo baixado ainda.' : (buscaOuFiltroAtivo ? 'Nenhum ativo encontrado com esse filtro.' : 'Nenhum ativo cadastrado ainda. Clique em "+ Ativo" para começar.')}</div>`;
+  } else if(agruparPorCategoria){
+    const porCategoria = {};
+    lista.forEach(a=>{ const c = a.categoria||'Sem categoria'; if(!porCategoria[c]) porCategoria[c]=[]; porCategoria[c].push(a); });
+    corpoListaHTML = Object.keys(porCategoria).sort().map(cat=>`
+      <div class="ativo-categoria-label">${escapeHTML(cat)} <span style="font-weight:400;color:var(--text-soft);">(${porCategoria[cat].length})</span></div>
+      <div class="ledger-row head ativo-patrimonial-row">
+        <span></span><span>Ativo</span><span class="ativo-patrimonial-col">Aquisição</span><span class="ativo-patrimonial-col">Depreciado</span><span>Valor atual</span><span></span>
+      </div>
+      ${ordenar(porCategoria[cat]).map(a=>rowAtivoPatrimonialHTML(a, alertasAtivo(a))).join('')}
+    `).join('');
+  } else {
+    corpoListaHTML = `
+      <div class="ledger-row head ativo-patrimonial-row">
+        <span></span><span>Ativo</span><span class="ativo-patrimonial-col">Aquisição</span><span class="ativo-patrimonial-col">Depreciado</span><span>Valor atual</span><span></span>
+      </div>
+      ${ordenar(lista).map(a=>rowAtivoPatrimonialHTML(a, alertasAtivo(a))).join('')}
+    `;
+  }
+  container.innerHTML = corpoListaHTML;
+  container.querySelectorAll('[data-action="editar-ativo-patrimonial"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const a = state.ativosPatrimoniais.find(x=>x.id===btn.dataset.id);
+      if(a) openAtivoPatrimonialModal(a);
+    });
+  });
+  container.querySelectorAll('[data-action="excluir-ativo-patrimonial"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!confirm('Excluir este ativo? O lançamento de aquisição vinculado (se houver) não será excluído automaticamente.')) return;
+      state.ativosPatrimoniais = state.ativosPatrimoniais.filter(x=>x.id!==btn.dataset.id);
+      persist(); render(); showToast('Ativo excluído');
+    });
+  });
+  container.querySelectorAll('[data-action="ver-ativo-patrimonial"]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      ativoPatrimonialDetalheId = el.dataset.id;
+      currentView = 'ativo-detalhe';
+      render();
+    });
+  });
+}
+
+function rowAtivoPatrimonialHTML(a, avisos){
+  avisos = avisos || [];
   const d = calcDepreciacao(a);
   const baixado = !!a.baixa;
+  const ICONES_AVISO = { garantia:'🛡️', seguro:'📋', manutencao:'🔧', depreciado:'⏳', incompleto:'⚠️' };
   return `
     <div class="ledger-row ativo-patrimonial-row" data-id="${a.id}" style="${baixado?'opacity:.6;':''}">
       <span class="dot ${baixado ? 'saida' : (d.totalmenteDepreciado?'saida':'entrada')}"></span>
       <div class="desc-cell" data-action="ver-ativo-patrimonial" data-id="${a.id}" style="cursor:pointer;">
         <div>${escapeHTML(a.nome)}${a.numeroPatrimonio ? ` <span class="mono" style="font-size:11px;color:var(--text-soft);">#${escapeHTML(a.numeroPatrimonio)}</span>` : ''}${baixado ? ' <span style="color:var(--danger);font-size:11px;font-weight:600;">· BAIXADO</span>' : ''}</div>
         <div class="cat">${escapeHTML(a.categoria)} · adquirido em ${fmtDate(a.dataAquisicao)}${!baixado && d.totalmenteDepreciado?' · totalmente depreciado':''}</div>
+        ${!baixado ? `<div style="background:var(--bone);border-radius:4px;height:4px;overflow:hidden;margin-top:6px;max-width:160px;"><div style="width:${d.pctDepreciado}%;height:100%;background:${d.pctDepreciado>=100?'var(--danger)':'var(--warn)'};"></div></div>` : ''}
+        ${!baixado && avisos.length ? `<div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap;">${avisos.map(av=>`<span style="font-size:10px;background:var(--bone);border-radius:8px;padding:2px 7px;color:var(--text-soft);">${ICONES_AVISO[av.tipo]||''} ${av.texto}</span>`).join('')}</div>` : ''}
       </div>
       <span class="mono ativo-patrimonial-col" style="font-size:12.5px;">${brl(a.valorAquisicao)}</span>
       <span class="mono ativo-patrimonial-col" style="font-size:12.5px;color:var(--danger);">-${brl(d.depreciacaoAcumulada)}</span>
@@ -9543,6 +9727,67 @@ function rowAtivoPatrimonialHTML(a){
       </div>
     </div>
   `;
+}
+
+// PDF da lista de Ativos Patrimoniais — ativos vivos, agrupados por categoria
+function gerarAtivosPatrimoniaisPDF(){
+  if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
+  const ativosVivos = state.ativosPatrimoniais.filter(a=>!a.baixa);
+  if(!ativosVivos.length){ showToast('Nenhum ativo pra exportar'); return; }
+
+  const { jsPDF } = window.jspdf;
+  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+  const M = 18, W = 210 - M*2;
+  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], DANGER=[194,74,61];
+  let y = 22;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
+  docPdf.text('Livro Caixa Financeiro VK', M, y);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
+  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
+  y += 7;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 9;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
+  docPdf.text('Ativos Patrimoniais', M, y);
+  y += 9;
+
+  const totalAquisicao = ativosVivos.reduce((s,a)=>s+a.valorAquisicao,0);
+  const totalAtual = totalAtivosPatrimoniais();
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
+  docPdf.text(`Valor de aquisição: ${brl(totalAquisicao)}   ·   Valor atual: ${brl(totalAtual)}   ·   ${ativosVivos.length} bem(ns)`, M, y);
+  y += 10;
+
+  const porCategoria = {};
+  ativosVivos.forEach(a=>{ const c = a.categoria||'Sem categoria'; if(!porCategoria[c]) porCategoria[c]=[]; porCategoria[c].push(a); });
+
+  Object.keys(porCategoria).sort().forEach(cat=>{
+    if(y > 265){ docPdf.addPage(); y = 20; }
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(11); docPdf.setTextColor(...BLUEDEEP);
+    docPdf.text(cat, M, y);
+    y += 6;
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(8); docPdf.setTextColor(...SOFT);
+    docPdf.text('BEM', M, y); docPdf.text('AQUISIÇÃO', M+95, y); docPdf.text('VALOR ATUAL', M+W, y, { align:'right' });
+    y += 4;
+    docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+    y += 5;
+    porCategoria[cat].sort((a,b)=>a.nome.localeCompare(b.nome)).forEach(a=>{
+      if(y > 275){ docPdf.addPage(); y = 20; }
+      const d = calcDepreciacao(a);
+      docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...INK);
+      const nome = a.nome.length>42 ? a.nome.slice(0,42)+'…' : a.nome;
+      docPdf.text(`${nome}${a.numeroPatrimonio?' #'+a.numeroPatrimonio:''}`, M, y);
+      docPdf.setTextColor(...SOFT);
+      docPdf.text(brl(a.valorAquisicao), M+95, y);
+      docPdf.setTextColor(...(d.totalmenteDepreciado?DANGER:INK));
+      docPdf.text(brl(d.valorAtual), M+W, y, { align:'right' });
+      y += 5.5;
+    });
+    y += 5;
+  });
+
+  docPdf.save(`ativos-patrimoniais-${todayISO()}.pdf`);
 }
 
 function openAtivoPatrimonialModal(existing, prefillPendente){
@@ -13511,6 +13756,15 @@ function attachViewHandlers(){
 
   // Ativos Patrimoniais
   document.getElementById('btnNovoAtivoPatrimonial')?.addEventListener('click', ()=>openAtivoPatrimonialModal());
+  document.getElementById('btnExportarAtivosPDF')?.addEventListener('click', ()=>gerarAtivosPatrimoniaisPDF());
+  document.getElementById('btnAbaAtivosVivos')?.addEventListener('click', ()=>{ ativosPatrimoniaisAba='ativos'; render(); });
+  document.getElementById('btnAbaAtivosBaixados')?.addEventListener('click', ()=>{ ativosPatrimoniaisAba='baixados'; render(); });
+  const ativosBuscaInput = document.getElementById('ativosBuscaInput');
+  if(ativosBuscaInput) ativosBuscaInput.addEventListener('input', ()=>{ ativosPatrimoniaisBusca = ativosBuscaInput.value; atualizarAtivosListaConteudo(); });
+  const ativosCategoriaSelect = document.getElementById('ativosCategoriaSelect');
+  if(ativosCategoriaSelect) ativosCategoriaSelect.addEventListener('change', ()=>{ ativosPatrimoniaisCategoria = ativosCategoriaSelect.value; atualizarAtivosListaConteudo(); });
+  const ativosOrdenacaoSelect = document.getElementById('ativosOrdenacaoSelect');
+  if(ativosOrdenacaoSelect) ativosOrdenacaoSelect.addEventListener('change', ()=>{ ativosPatrimoniaisOrdenacao = ativosOrdenacaoSelect.value; atualizarAtivosListaConteudo(); });
   document.querySelectorAll('[data-action="revisar-compra-pendente"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const pp = (state.comprasProcessosPendentes||[]).find(x=>x.id===btn.dataset.id);
