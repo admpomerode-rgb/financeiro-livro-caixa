@@ -5615,6 +5615,24 @@ function viewRelatorios(){
     { id:'orcamento', icone:'🎯', nome:'Orçado vs. Realizado', desc:'Comparativo entre o planejado e o executado por categoria (abre Orçamento e Planejamento)' },
     { id:'rolling_forecast', icone:'🔁', nome:'Rolling Forecast 12 Meses', desc:'Projeção contínua dos próximos 12 meses, sempre recalculada a partir de hoje, com base no seu histórico recente' },
     { id:'centro_lucro', icone:'🏢', nome:'Centro de Lucro / Unidade de Negócio', desc:'Resultado (receita − despesa) completo por centro de custo, lado a lado' },
+    { id:'yoy', icone:'📅', nome:'Comparativo Ano a Ano', desc:'Mês a mês desse ano lado a lado com o mesmo mês do ano passado, com % de crescimento' },
+    { id:'sazonalidade', icone:'🌦️', nome:'Análise de Sazonalidade', desc:'Meses de pico e de baixa ao longo dos anos, com base no seu próprio histórico' },
+    { id:'calendario_vencimentos', icone:'🗓️', nome:'Calendário de Vencimentos', desc:'Contratos, garantias de ativos, cartões e contas grandes que vencem nos próximos 90 dias, tudo junto' },
+    { id:'carga_tributaria', icone:'🧾', nome:'Carga Tributária', desc:'Impostos pagos no mês e no ano, % sobre a receita e projeção do próximo DAS' },
+    { id:'simulador_preco', icone:'🧮', nome:'Simulador de Preço', desc:'Calculadora — informe custo e margem desejada, calcula o preço de venda' },
+    { id:'formas_pagamento', icone:'💳', nome:'Formas de Pagamento', desc:'Distribuição de entradas e saídas por Pix, cartão, dinheiro, boleto etc.' },
+    { id:'rentabilidade_cliente', icone:'👤', nome:'Rentabilidade por Cliente', desc:'Receita, ticket médio e participação de cada cliente nos últimos 12 meses' },
+    { id:'pe_produto', icone:'⚖️', nome:'Ponto de Equilíbrio por Produto', desc:'Quantas unidades de cada produto são necessárias pra cobrir o custo fixo alocado' },
+    { id:'metas_comerciais', icone:'🎯', nome:'Metas Comerciais', desc:'Progresso de cada vendedor em relação à meta mensal cadastrada' },
+    { id:'fixo_variavel_tempo', icone:'📊', nome:'Custo Fixo vs Variável no Tempo', desc:'Como a proporção entre custo fixo e variável mudou nos últimos 12 meses' },
+    { id:'onde_dinheiro', icone:'🧭', nome:'Onde Meu Dinheiro Está', desc:'Foto única do patrimônio — saldo em contas, investimentos, a receber e ativos' },
+    { id:'health_score', icone:'❤️', nome:'Health Score do Negócio', desc:'Nota única de 0 a 100 combinando margem, fôlego de caixa, atrasos e endividamento' },
+    { id:'eficiencia_cobranca', icone:'⏱️', nome:'Eficiência de Cobrança', desc:'Prazo médio entre vencimento e recebimento de fato, e ranking de quem mais atrasa' },
+    { id:'variacao_preco_insumos', icone:'📈', nome:'Variação de Preço de Insumos', desc:'Como o valor pago pelos insumos mudou ao longo das entradas de estoque já registradas' },
+    { id:'concentracao_clientes', icone:'⚠️', nome:'Concentração de Risco de Clientes', desc:'Quanto % da receita vem do maior cliente, dos 3 e dos 5 maiores' },
+    { id:'volume_margem_produto', icone:'💎', nome:'Ranking Volume x Margem por Produto', desc:'Cruza quantidade vendida com margem — acha quem vende muito com pouco lucro, e o contrário' },
+    { id:'saude_cadastros', icone:'🩺', nome:'Saúde dos Cadastros', desc:'Fornecedores e ativos patrimoniais com informação faltando (CNPJ, telefone, foto, nota fiscal)' },
+    { id:'projecao_comissoes', icone:'🤝', nome:'Projeção de Comissões a Pagar', desc:'Comissões já geradas mas ainda pendentes, por vendedor e por vencimento' },
     { id:'breakeven', icone:'⚖️', nome:'Ponto de Equilíbrio', desc:'Vendas mínimas pra cobrir os custos, em 3 cenários (otimista/realista/pessimista)' },
     { id:'valuation', icone:'💎', nome:'Valuation Estimado', desc:'Estimativa educacional de valor da empresa por múltiplos de EBITDA e faturamento' },
     { id:'aging', icone:'⏳', nome:'Aging — Vencidos por Faixa', desc:'Contas a receber e a pagar por faixa de atraso, com ranking de inadimplentes' },
@@ -5647,7 +5665,7 @@ function viewRelatorios(){
 const RELATORIOS_NOMES = {
   gerencial:'Dashboard Gerencial', executivo:'Dashboard Executivo', dre:'DRE', balanco:'Balanço Patrimonial', mei:'Declaração MEI', indicadores:'Indicadores Financeiros',
   produto:'Rentabilidade por Produto', investimentos:'Relatório de Investimentos', liquidez:'Índices de Liquidez', aging:'Aging — Vencidos por Faixa', dfc:'DFC — Fluxo de Caixa', cartoes:'Cartões de Crédito',
-  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio'
+  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio', yoy:'Comparativo Ano a Ano', sazonalidade:'Análise de Sazonalidade', calendario_vencimentos:'Calendário de Vencimentos', carga_tributaria:'Carga Tributária', simulador_preco:'Simulador de Preço', formas_pagamento:'Formas de Pagamento', rentabilidade_cliente:'Rentabilidade por Cliente', pe_produto:'Ponto de Equilíbrio por Produto', metas_comerciais:'Metas Comerciais', fixo_variavel_tempo:'Custo Fixo vs Variável no Tempo', onde_dinheiro:'Onde Meu Dinheiro Está', health_score:'Health Score do Negócio', eficiencia_cobranca:'Eficiência de Cobrança', variacao_preco_insumos:'Variação de Preço de Insumos', concentracao_clientes:'Concentração de Risco de Clientes', volume_margem_produto:'Ranking Volume x Margem por Produto', saude_cadastros:'Saúde dos Cadastros', projecao_comissoes:'Projeção de Comissões a Pagar'
 };
 
 function viewRelatorioDetalhe(){
@@ -7230,6 +7248,567 @@ function renderCentroLucro(mesRef){
     </div>
     <div class="note">Resultado = Receita − Despesa lançadas com esse centro de custo marcado no período. "(sem centro definido)" agrupa tudo que não foi marcado com nenhum centro — quanto mais você marcar, mais preciso fica esse relatório.</div>
     `}
+  `;
+}
+
+// 1. Comparativo Ano a Ano — mês a mês desse ano vs mesmo mês do ano passado
+function renderComparativoAnoAAno(ano){
+  const meses = Array.from({length:12},(_,i)=>`${ano}-${String(i+1).padStart(2,'0')}`);
+  const hoje = todayISO();
+  const dados = meses.map(m=>{
+    const mAnt = `${ano-1}-${m.slice(5,7)}`;
+    const ateAtual = m<=hoje.slice(0,7) ? (m===hoje.slice(0,7)?hoje:`${m}-31`) : null;
+    const atual = ateAtual ? resultadoOperacionalPeriodo(`${m}-01`, ateAtual).receitaTotal : null;
+    const anterior = resultadoOperacionalPeriodo(`${mAnt}-01`, `${mAnt}-31`).receitaTotal;
+    const variacao = (atual!==null && anterior>0) ? ((atual-anterior)/anterior*100) : null;
+    return { mesRef:m, atual, anterior, variacao };
+  });
+  const max = Math.max(1, ...dados.map(d=>Math.max(d.atual||0, d.anterior||0)));
+  const mesAbrev = m => competenciaLabel(m).split('/')[0].slice(0,3);
+  const totalAtual = dados.reduce((s,d)=>s+(d.atual||0),0);
+  const totalAnterior = dados.reduce((s,d)=>s+d.anterior,0);
+  const anosComDados = [...new Set(state.lancamentos.filter(l=>l.dataPagamento).map(l=>l.dataPagamento.slice(0,4)))].sort().reverse();
+  if(!anosComDados.includes(String(ano))) anosComDados.unshift(String(ano));
+  return `
+    <div class="report-controls"><select id="yoyAnoSelect">${anosComDados.map(a=>`<option value="${a}" ${String(ano)===a?'selected':''}>${a} vs ${Number(a)-1}</option>`).join('')}</select></div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
+      <div class="card saldo"><div class="label">Receita ${ano} (até agora)</div><div class="value mono">${brl(totalAtual)}</div></div>
+      <div class="card"><div class="label">Receita ${ano-1} (mesmo período)</div><div class="value mono">${brl(totalAnterior)}</div></div>
+      <div class="card"><div class="label">Variação</div><div class="value mono" style="color:${totalAtual>=totalAnterior?'var(--success)':'var(--danger)'};">${totalAnterior>0?((totalAtual-totalAnterior)/totalAnterior*100).toFixed(1)+'%':'—'}</div></div>
+    </div>
+    <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+      <div style="display:flex;align-items:flex-end;gap:6px;height:120px;overflow-x:auto;">
+        ${dados.map(d=>`
+          <div style="flex:1;min-width:32px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;">
+            <div style="display:flex;align-items:flex-end;gap:2px;height:95px;">
+              <div style="width:9px;background:var(--text-soft);border-radius:2px 2px 0 0;height:${Math.max(1,Math.round(d.anterior/max*90))}px;" title="${ano-1}: ${brl(d.anterior)}"></div>
+              ${d.atual!==null ? `<div style="width:9px;background:var(--blue-accent);border-radius:2px 2px 0 0;height:${Math.max(1,Math.round(d.atual/max*90))}px;" title="${ano}: ${brl(d.atual)}"></div>` : ''}
+            </div>
+            <span style="font-size:9px;color:var(--text-soft);margin-top:3px;">${mesAbrev(d.mesRef)}</span>
+          </div>
+        `).join('')}
+      </div>
+      <div style="display:flex;gap:14px;margin-top:8px;font-size:11px;color:var(--text-soft);">
+        <span><span style="display:inline-block;width:8px;height:8px;background:var(--text-soft);border-radius:2px;margin-right:4px;"></span>${ano-1}</span>
+        <span><span style="display:inline-block;width:8px;height:8px;background:var(--blue-accent);border-radius:2px;margin-right:4px;"></span>${ano}</span>
+      </div>
+    </div></div>
+    <div class="dash-section-label">Variação mês a mês</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${dados.filter(d=>d.variacao!==null).map(d=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;align-items:center;">
+          <span>${competenciaLabel(d.mesRef)}</span>
+          <span class="mono" style="font-weight:600;color:${d.variacao>=0?'var(--success)':'var(--danger)'};">${d.variacao>=0?'+':''}${d.variacao.toFixed(1)}%</span>
+        </div>
+      `).join('')}
+    </div></div>
+  `;
+}
+
+// 2. Análise de Sazonalidade — média histórica de receita por mês-do-ano, todos os anos disponíveis
+function renderSazonalidade(){
+  const porMesDoAno = Array.from({length:12},()=>({soma:0,qtd:0}));
+  const anos = [...new Set(state.lancamentos.filter(l=>l.dataPagamento).map(l=>l.dataPagamento.slice(0,4)))].sort();
+  const hoje = todayISO();
+  anos.forEach(ano=>{
+    for(let mes=1;mes<=12;mes++){
+      const mRef = `${ano}-${String(mes).padStart(2,'0')}`;
+      if(mRef>hoje.slice(0,7)) return;
+      const ate = mRef===hoje.slice(0,7) ? hoje : `${mRef}-31`;
+      const { receitaTotal } = resultadoOperacionalPeriodo(`${mRef}-01`, ate);
+      if(receitaTotal>0){ porMesDoAno[mes-1].soma += receitaTotal; porMesDoAno[mes-1].qtd += 1; }
+    }
+  });
+  const medias = porMesDoAno.map((d,i)=>({ mes:i+1, media: d.qtd ? d.soma/d.qtd : 0, qtd:d.qtd }));
+  const mediaGeral = medias.reduce((s,d)=>s+d.media,0) / (medias.filter(d=>d.qtd>0).length || 1);
+  const max = Math.max(1, ...medias.map(d=>d.media));
+  const nomesMeses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  const picos = [...medias].filter(d=>d.qtd>0).sort((a,b)=>b.media-a.media).slice(0,3);
+  const baixas = [...medias].filter(d=>d.qtd>0).sort((a,b)=>a.media-b.media).slice(0,3);
+  return `
+    <div class="note" style="margin-top:0;">Média de receita de cada mês, considerando todos os ${anos.length} ano(s) com dado disponível (${anos.join(', ')||'—'}). Quanto mais anos de histórico, mais confiável fica o padrão.</div>
+    ${anos.length<2 ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Ainda não tem histórico de mais de 1 ano — sazonalidade real só fica visível comparando vários anos. Volte aqui quando tiver mais dados.</div></div>` : `
+    <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+      <div style="display:flex;align-items:flex-end;gap:6px;height:120px;overflow-x:auto;">
+        ${medias.map(d=>`
+          <div style="flex:1;min-width:28px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;">
+            <div style="width:16px;background:${d.media>=mediaGeral?'var(--success)':'var(--warn)'};border-radius:2px 2px 0 0;height:${Math.max(1,Math.round(d.media/max*90))}px;" title="${brl(d.media)}"></div>
+            <span style="font-size:9px;color:var(--text-soft);margin-top:3px;">${nomesMeses[d.mes-1]}</span>
+          </div>
+        `).join('')}
+      </div>
+      <div class="note" style="margin-top:10px;">Linha de referência: média geral de todos os meses = ${brl(mediaGeral)}. Verde = mês tipicamente acima da média; amarelo = abaixo.</div>
+    </div></div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;">
+      <div class="panel"><div class="panel-head"><h2>📈 Meses de pico</h2></div><div class="panel-body" style="padding:12px 18px;">
+        ${picos.map(p=>`<div style="display:flex;justify-content:space-between;padding:6px 0;"><span>${nomesMeses[p.mes-1]}</span><span class="mono" style="font-weight:600;color:var(--success);">${brl(p.media)}</span></div>`).join('')}
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>📉 Meses de baixa</h2></div><div class="panel-body" style="padding:12px 18px;">
+        ${baixas.map(p=>`<div style="display:flex;justify-content:space-between;padding:6px 0;"><span>${nomesMeses[p.mes-1]}</span><span class="mono" style="font-weight:600;color:var(--warn);">${brl(p.media)}</span></div>`).join('')}
+      </div></div>
+    </div>`}
+  `;
+}
+
+// 3. Calendário de Vencimentos Consolidado — contratos, garantias de ativos e contas grandes, tudo junto
+function renderCalendarioVencimentos(){
+  const hoje = todayISO();
+  const em90 = new Date(); em90.setDate(em90.getDate()+90);
+  const em90ISO = em90.toISOString().slice(0,10);
+  const itens = [];
+  (state.contratos||[]).forEach(c=>{
+    if(c.vigenciaFim && c.vigenciaFim>=hoje && c.vigenciaFim<=em90ISO){
+      itens.push({ data:c.vigenciaFim, tipo:'📑 Contrato', desc:c.nome||c.contraparte||'Contrato', valor:c.valorMensal||null });
+    }
+  });
+  (state.ativosPatrimoniais||[]).filter(a=>!a.baixa && a.garantiaMeses && a.dataAquisicao).forEach(a=>{
+    const fim = addMonthsComp ? null : null;
+    const d = new Date(a.dataAquisicao); d.setMonth(d.getMonth()+Number(a.garantiaMeses));
+    const fimISO = d.toISOString().slice(0,10);
+    if(fimISO>=hoje && fimISO<=em90ISO) itens.push({ data:fimISO, tipo:'🛡️ Garantia', desc:`${a.nome} — fim da garantia`, valor:null });
+  });
+  (state.cartoes||[]).forEach(c=>{
+    if(c.validade && c.validade>=hoje && c.validade<=em90ISO) itens.push({ data:c.validade, tipo:'💳 Cartão', desc:`${c.nome} — vencimento do cartão físico`, valor:null });
+  });
+  state.lancamentos.filter(l=>l.status==='pendente' && l.tipo==='saida' && l.valor>=1000 && l.dataVencimento>=hoje && l.dataVencimento<=em90ISO && l.origem!=='transferencia').forEach(l=>{
+    itens.push({ data:l.dataVencimento, tipo:'💰 Conta grande', desc:l.descricao, valor:l.valor });
+  });
+  itens.sort((a,b)=>a.data.localeCompare(b.data));
+  return `
+    <div class="note" style="margin-top:0;">Tudo que vence nos próximos 90 dias, juntando contratos, garantia de ativos, validade de cartões e contas a pagar acima de R$1.000 — pra não precisar checar tela por tela.</div>
+    ${itens.length ? `<div class="panel"><div class="panel-body" style="padding:0;">
+      ${itens.map(it=>`
+        <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto;align-items:center;">
+          <span class="mono" style="font-size:12px;color:var(--text-soft);">${fmtDate(it.data)}</span>
+          <div class="desc-cell"><div>${it.tipo} — ${escapeHTML(it.desc)}</div></div>
+          ${it.valor?`<span class="mono">${brl(it.valor)}</span>`:'<span></span>'}
+        </div>
+      `).join('')}
+    </div></div>` : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nada vencendo nos próximos 90 dias.</div></div>`}
+  `;
+}
+
+// 4. Carga Tributária — impostos pagos no período + projeção do próximo DAS (se MEI)
+function renderCargaTributaria(mesRef){
+  mesRef = mesRef || mesGlobalRef;
+  const [anoM, mesM] = mesRef.split('-').map(Number);
+  const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
+  const deAno = `${anoM}-01-01`;
+  const impostosMes = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de && l.dataPagamento<=ate && (l.categoria==='Impostos'||(l.categoria||'').startsWith('Impostos / '))).reduce((s,l)=>s+l.valor,0);
+  const impostosAno = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=deAno && l.dataPagamento<=ate && (l.categoria==='Impostos'||(l.categoria||'').startsWith('Impostos / '))).reduce((s,l)=>s+l.valor,0);
+  const { receitaTotal } = resultadoOperacionalPeriodo(de, ate);
+  const cargaPct = receitaTotal>0 ? (impostosMes/receitaTotal*100) : 0;
+  const dasEstimado = state.balancoManual?.aliquotaEfetiva ? receitaTotal * (state.balancoManual.aliquotaEfetiva/100) : null;
+  return `
+    <div class="report-controls"><input type="month" id="cargaTribMes" value="${mesRef}"></div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
+      <div class="card"><div class="label">Impostos pagos no mês</div><div class="value mono">${brl(impostosMes)}</div></div>
+      <div class="card"><div class="label">Impostos pagos no ano</div><div class="value mono">${brl(impostosAno)}</div></div>
+      <div class="card"><div class="label">% da receita do mês</div><div class="value mono">${cargaPct.toFixed(1)}%</div></div>
+      ${dasEstimado!==null ? `<div class="card"><div class="label">Próximo DAS estimado</div><div class="value mono">${brl(dasEstimado)}</div></div>` : ''}
+    </div>
+    ${dasEstimado===null ? `<div class="note">Pra estimar o próximo DAS automaticamente, preencha a "Alíquota efetiva de impostos" em Relatórios → Índices de Liquidez.</div>` : ''}
+    <div class="note">Considera lançamentos pagos na categoria "Impostos" (e subcategorias). Se você lança impostos numa categoria com outro nome, esse relatório não vai pegar — ajuste a categoria ou me avise que eu incluo outro nome também.</div>
+  `;
+}
+
+// 5. Simulador de Preço (Markup reverso) — não é bem um relatório, é uma calculadora
+function renderSimuladorPreco(){
+  return `
+    <div class="note" style="margin-top:0;">Informe o custo do produto e a margem de lucro que você quer ganhar sobre o preço de venda — calcula o preço sozinho.</div>
+    <div class="panel"><div class="panel-body" style="padding:18px;">
+      <div class="cards" style="grid-template-columns:1fr 1fr;">
+        <div class="field"><label>Custo do produto (R$)</label><input type="text" inputmode="decimal" id="simCusto" placeholder="Ex: 4,50"></div>
+        <div class="field"><label>Margem de lucro desejada (%)</label><input type="text" inputmode="decimal" id="simMargem" placeholder="Ex: 30"></div>
+      </div>
+      <div id="simResultado" style="margin-top:16px;"></div>
+    </div></div>
+    <div class="note">Fórmula: Preço = Custo ÷ (1 − Margem%). Diferente de "aplicar 30% sobre o custo" (markup simples) — aqui a margem é sobre o PREÇO DE VENDA final, que é o jeito certo de calcular quanto sobra de lucro de verdade.</div>
+  `;
+}
+
+// 6. Formas de Pagamento — distribuição de entradas/saídas por forma de pagamento (campo novo, opcional)
+function renderFormasPagamento(mesRef){
+  mesRef = mesRef || mesGlobalRef;
+  const [anoM, mesM] = mesRef.split('-').map(Number);
+  const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
+  const realizados = state.lancamentos.filter(l=>l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
+  const comForma = realizados.filter(l=>l.formaPagamento);
+  const semForma = realizados.length - comForma.length;
+  const porForma = {};
+  comForma.forEach(l=>{ if(!porForma[l.formaPagamento]) porForma[l.formaPagamento] = {entrada:0, saida:0}; porForma[l.formaPagamento][l.tipo] += l.valor; });
+  const max = Math.max(1, ...Object.values(porForma).map(v=>v.entrada+v.saida));
+  return `
+    <div class="report-controls"><input type="month" id="formaPagMes" value="${mesRef}"></div>
+    ${!comForma.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum lançamento desse mês tem a forma de pagamento preenchida ainda. É um campo opcional no formulário de lançamento — preencha daqui pra frente pra esse relatório funcionar.</div></div>` : `
+    <div class="note" style="margin-top:0;">${semForma>0 ? `${semForma} lançamento(s) desse mês sem forma de pagamento preenchida — não entram na conta abaixo.` : 'Todos os lançamentos do mês têm forma de pagamento preenchida.'}</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 18px;">
+      ${Object.entries(porForma).sort((a,b)=>(b[1].entrada+b[1].saida)-(a[1].entrada+a[1].saida)).map(([forma,v])=>`
+        <div style="margin-bottom:12px;">
+          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;"><span style="font-weight:600;">${escapeHTML(forma)}</span><span class="mono">${brl(v.entrada+v.saida)}</span></div>
+          <div style="display:flex;gap:10px;font-size:11px;color:var(--text-soft);margin-bottom:5px;"><span>Entradas: ${brl(v.entrada)}</span><span>Saídas: ${brl(v.saida)}</span></div>
+          <div style="background:var(--bone);border-radius:5px;height:6px;overflow:hidden;"><div style="width:${Math.round((v.entrada+v.saida)/max*100)}%;height:100%;background:var(--blue-accent);"></div></div>
+        </div>
+      `).join('')}
+    </div></div>`}
+  `;
+}
+
+// 7. Rentabilidade por Cliente — receita, ticket médio e participação (sem alocar custo direto — margem de verdade exigiria custo por cliente, que não é rastreado)
+function renderRentabilidadeCliente(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const porCliente = {};
+  state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{
+    const nome = l.fornecedor || 'Sem identificação';
+    if(!porCliente[nome]) porCliente[nome] = { valor:0, qtd:0 };
+    porCliente[nome].valor += l.valor; porCliente[nome].qtd += 1;
+  });
+  const totalGeral = Object.values(porCliente).reduce((s,d)=>s+d.valor,0);
+  const lista = Object.entries(porCliente).map(([nome,d])=>({ nome, valor:d.valor, qtd:d.qtd, ticket:d.valor/d.qtd, pct: totalGeral>0?d.valor/totalGeral*100:0 })).sort((a,b)=>b.valor-a.valor);
+  const max = lista.length ? lista[0].valor : 1;
+  return `
+    <div class="note" style="margin-top:0;">Últimos 12 meses (${fmtDate(de)} a ${fmtDate(ate)}). Mostra receita, ticket médio e participação — não desconta custo direto por cliente (o sistema não rastreia isso separadamente), então não é "margem de lucro" de verdade, é volume e peso de cada cliente no faturamento.</div>
+    ${lista.length ? `<div class="panel"><div class="panel-body" style="padding:14px 18px;">
+      ${lista.slice(0,20).map(c=>`
+        <div style="margin-bottom:12px;">
+          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;"><span style="font-weight:600;">${escapeHTML(c.nome)}</span><span class="mono">${brl(c.valor)}</span></div>
+          <div style="display:flex;gap:10px;font-size:11px;color:var(--text-soft);margin-bottom:5px;"><span>${c.qtd} compra(s)</span><span>Ticket médio: ${brl(c.ticket)}</span><span>${c.pct.toFixed(1)}% da receita</span></div>
+          <div style="background:var(--bone);border-radius:5px;height:6px;overflow:hidden;"><div style="width:${Math.round(c.valor/max*100)}%;height:100%;background:var(--blue-accent);"></div></div>
+        </div>
+      `).join('')}
+    </div></div>` : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhuma receita identificada por cliente nos últimos 12 meses.</div></div>`}
+  `;
+}
+
+// 8. Ponto de Equilíbrio por Produto — unidades mínimas de cada produto pra cobrir o custo fixo alocado
+function renderPontoEquilibrioProduto(mesRef){
+  mesRef = mesRef || mesGlobalRef;
+  const [anoM, mesM] = mesRef.split('-').map(Number);
+  const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
+  const dadosMes = dadosMesGerencial(mesRef, 'todos');
+  const produtos = (state.custosProdutosVK||[]).filter(c=>c.custoUnitario!==null && c.precoVendaVK>0);
+  const receitaMesTotal = dadosMes.receita;
+  const linhas = produtos.map(p=>{
+    const realizadosProduto = state.lancamentos.filter(l=>l.produtoTag===p.nome && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido'));
+    const receitaProduto = realizadosProduto.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+l.valor,0);
+    const participacao = receitaMesTotal>0 ? receitaProduto/receitaMesTotal : 0;
+    const custoFixoAlocado = dadosMes.custoFixo * participacao;
+    const margemUnit = p.precoVendaVK - p.custoUnitario;
+    const peUnidades = margemUnit>0 ? custoFixoAlocado/margemUnit : null;
+    const qtdVendidaEstimada = p.precoVendaVK>0 ? receitaProduto/p.precoVendaVK : 0;
+    return { nome:p.nome, precoVendaVK:p.precoVendaVK, custoUnitario:p.custoUnitario, margemUnit, custoFixoAlocado, peUnidades, qtdVendidaEstimada };
+  }).filter(l=>l.qtdVendidaEstimada>0).sort((a,b)=>b.qtdVendidaEstimada-a.qtdVendidaEstimada);
+  return `
+    <div class="report-controls"><input type="month" id="peProdutoMes" value="${mesRef}"></div>
+    <div class="note" style="margin-top:0;">Custo fixo do mês alocado entre os produtos proporcionalmente à participação de cada um na receita — depois calcula quantas unidades cada um precisa vender pra "pagar sua fatia" do custo fixo. É uma estimativa (o custo fixo real por produto pode variar), mas dá uma noção prática de quais produtos carregam mais peso.</div>
+    ${linhas.length ? `<div class="panel"><div class="panel-body" style="padding:14px 18px;">
+      ${linhas.map(l=>`
+        <div style="margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--line);">
+          <div style="font-weight:600;font-size:13px;margin-bottom:4px;">${escapeHTML(l.nome)}</div>
+          <div style="display:flex;gap:12px;font-size:11.5px;color:var(--text-soft);flex-wrap:wrap;">
+            <span>Vendido no mês: ~${Math.round(l.qtdVendidaEstimada)} un.</span>
+            <span>Ponto de equilíbrio: ${l.peUnidades!==null?Math.ceil(l.peUnidades)+' un.':'—'}</span>
+            <span style="color:${l.peUnidades!==null && l.qtdVendidaEstimada>=l.peUnidades?'var(--success)':'var(--danger)'};font-weight:600;">${l.peUnidades!==null ? (l.qtdVendidaEstimada>=l.peUnidades?'✓ Acima do PE':'✗ Abaixo do PE') : ''}</span>
+          </div>
+        </div>
+      `).join('')}
+    </div></div>` : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum produto com ficha de custo e venda no mês. Cadastre custo e preço em "Custos e Margem de Produtos".</div></div>`}
+  `;
+}
+
+// 9. Metas Comerciais — progresso de cada vendedor em relação à meta mensal cadastrada
+function renderMetasComerciais(mesRef){
+  mesRef = mesRef || mesGlobalRef;
+  const [anoM, mesM] = mesRef.split('-').map(Number);
+  const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
+  const vendedoresComMeta = (state.vendedores||[]).filter(v=>v.metaMensal>0);
+  const linhas = vendedoresComMeta.map(v=>{
+    const vendido = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.vendedorId===v.id && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+    const pct = v.metaMensal>0 ? Math.min(150, vendido/v.metaMensal*100) : 0;
+    return { nome:v.nome, vendido, meta:v.metaMensal, pct };
+  }).sort((a,b)=>b.pct-a.pct);
+  return `
+    <div class="report-controls"><input type="month" id="metasComMes" value="${mesRef}"></div>
+    ${!vendedoresComMeta.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum vendedor com meta mensal cadastrada ainda. Edite o vendedor em Comissões e preencha o campo de meta.</div></div>` : `
+    <div class="panel"><div class="panel-body" style="padding:14px 18px;">
+      ${linhas.map(v=>`
+        <div style="margin-bottom:16px;">
+          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;"><span style="font-weight:600;">${escapeHTML(v.nome)}</span><span class="mono">${brl(v.vendido)} / ${brl(v.meta)}</span></div>
+          <div style="background:var(--bone);border-radius:5px;height:10px;overflow:hidden;"><div style="width:${Math.min(100,v.pct)}%;height:100%;background:${v.pct>=100?'var(--success)':v.pct>=70?'var(--warn)':'var(--danger)'};"></div></div>
+          <div style="font-size:11px;color:var(--text-soft);margin-top:3px;">${v.pct.toFixed(0)}% da meta${v.pct>=100?' — meta batida! 🎉':''}</div>
+        </div>
+      `).join('')}
+    </div></div>`}
+  `;
+}
+
+// 10. Custo Fixo vs Variável ao longo do tempo — últimos 12 meses
+function renderCustoFixoVariavelTempo(){
+  const hoje = new Date();
+  const meses = Array.from({length:12},(_,i)=>{ const d = new Date(hoje.getFullYear(), hoje.getMonth()-11+i, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const dados = meses.map(m=>dadosMesGerencial(m, 'todos'));
+  const max = Math.max(1, ...dados.map(d=>d.custoFixo+d.custoVariavel));
+  const mesAbrev = m => competenciaLabel(m).split('/')[0].slice(0,3);
+  const mediaFixoPct = dados.filter(d=>d.despesaTotal>0).reduce((s,d,_,arr)=>s+(d.custoFixo/d.despesaTotal*100)/arr.length,0);
+  return `
+    <div class="cards"><div class="card saldo"><div class="label">% médio de custo fixo (12 meses)</div><div class="value mono">${mediaFixoPct.toFixed(1)}%</div></div></div>
+    <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+      <div style="display:flex;align-items:flex-end;gap:6px;height:130px;overflow-x:auto;">
+        ${dados.map((d,i)=>`
+          <div style="flex:1;min-width:28px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;">
+            <div style="width:16px;display:flex;flex-direction:column-reverse;height:${Math.max(1,Math.round((d.custoFixo+d.custoVariavel)/max*95))}px;">
+              <div style="background:var(--warn);height:${d.custoFixo+d.custoVariavel>0?Math.round(d.custoFixo/(d.custoFixo+d.custoVariavel)*100):0}%;border-radius:0 0 2px 2px;"></div>
+              <div style="background:var(--blue-accent);height:${d.custoFixo+d.custoVariavel>0?Math.round(d.custoVariavel/(d.custoFixo+d.custoVariavel)*100):0}%;border-radius:2px 2px 0 0;"></div>
+            </div>
+            <span style="font-size:9px;color:var(--text-soft);margin-top:3px;">${mesAbrev(meses[i])}</span>
+          </div>
+        `).join('')}
+      </div>
+      <div style="display:flex;gap:14px;margin-top:8px;font-size:11px;color:var(--text-soft);">
+        <span><span style="display:inline-block;width:8px;height:8px;background:var(--blue-accent);border-radius:2px;margin-right:4px;"></span>Variável</span>
+        <span><span style="display:inline-block;width:8px;height:8px;background:var(--warn);border-radius:2px;margin-right:4px;"></span>Fixo</span>
+      </div>
+    </div></div>
+    <div class="note">Usa a mesma classificação fixo/variável configurada em "Ponto de Equilíbrio" (Categorias → marcar categoria como fixa). Se o % de custo fixo está subindo com o tempo, o negócio está ficando mais "pesado" — menos flexível pra reagir a queda de receita.</div>
+  `;
+}
+
+// 11. Onde Meu Dinheiro Está — foto única do patrimônio: caixa, investimentos, a receber, ativos
+function renderOndeDinheiroEsta(){
+  const hoje = todayISO();
+  const saldoContas = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+  const totalInvestido = (state.ativosInvestimento||[]).filter(a=>!a.resgatado).reduce((s,a)=>s+valorAtivo(a),0);
+  const aReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.origem!=='transferencia').reduce((s,l)=>s+valorEmAberto(l),0);
+  const ativosPatrimoniaisTotal = totalAtivosPatrimoniais();
+  const total = saldoContas + totalInvestido + aReceber + ativosPatrimoniaisTotal;
+  const fatias = [
+    { nome:'Saldo em contas', valor:saldoContas, cor:'var(--blue-accent)' },
+    { nome:'Investimentos', valor:totalInvestido, cor:'var(--success)' },
+    { nome:'A receber de clientes', valor:aReceber, cor:'var(--warn)' },
+    { nome:'Ativos patrimoniais', valor:ativosPatrimoniaisTotal, cor:'#8A5CF6' },
+  ].filter(f=>f.valor>0);
+  return `
+    <div class="cards"><div class="card saldo"><div class="label">Patrimônio total (posição de hoje, ${fmtDate(hoje)})</div><div class="value mono" style="font-size:22px;">${brl(total)}</div></div></div>
+    <div class="panel"><div class="panel-body" style="padding:14px 18px;">
+      ${fatias.map(f=>`
+        <div style="margin-bottom:12px;">
+          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;"><span style="font-weight:600;">${f.nome}</span><span class="mono">${brl(f.valor)} <span style="color:var(--text-soft);font-weight:400;">(${total>0?(f.valor/total*100).toFixed(1):0}%)</span></span></div>
+          <div style="background:var(--bone);border-radius:5px;height:8px;overflow:hidden;"><div style="width:${total>0?f.valor/total*100:0}%;height:100%;background:${f.cor};"></div></div>
+        </div>
+      `).join('')}
+    </div></div>
+    <div class="note">Não inclui dívidas/passivo (contas a pagar) — pra ver o patrimônio líquido de verdade (ativo − passivo), veja o Balanço Patrimonial.</div>
+  `;
+}
+
+// 12. Health Score do Negócio — nota única combinando os principais indicadores
+function renderHealthScore(){
+  const hoje = todayISO();
+  const mesAtual = hoje.slice(0,7);
+  const dadosMes = dadosMesGerencial(mesAtual, 'todos');
+  const margemLiquidaPct = dadosMes.margemLiquidaPct;
+  const saldoContas = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+  const gastoMedioDiario = (()=>{ const de90 = new Date(); de90.setDate(de90.getDate()-90); const de90ISO = de90.toISOString().slice(0,10);
+    const eventos = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90ISO && ev.data<=hoje && !ehMovimentoDeCapital(ev));
+    return eventos.reduce((s,ev)=>s+ev.valor,0)/90; })();
+  const foldegoDias = gastoMedioDiario>0 ? saldoContas/gastoMedioDiario : 0;
+  const aPagarPendenteAtrasado = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.dataVencimento<hoje).length;
+  const aReceberPendenteAtrasado = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.dataVencimento<hoje).length;
+  const passivoTotal = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
+  const endividamento = saldoContas>0 ? Math.min(2, passivoTotal/saldoContas) : (passivoTotal>0?2:0);
+
+  const scoreMargem = Math.max(0, Math.min(25, (margemLiquidaPct/20)*25));
+  const scoreFolego = Math.max(0, Math.min(25, (foldegoDias/60)*25));
+  const scoreAtraso = Math.max(0, 25 - (aPagarPendenteAtrasado+aReceberPendenteAtrasado)*3);
+  const scoreEndividamento = Math.max(0, 25 - endividamento*12.5);
+  const scoreTotal = Math.round(scoreMargem + scoreFolego + scoreAtraso + scoreEndividamento);
+  const corScore = scoreTotal>=70?'var(--success)':scoreTotal>=40?'var(--warn)':'var(--danger)';
+  const nivel = scoreTotal>=70?'Saudável':scoreTotal>=40?'Atenção':'Crítico';
+  return `
+    <div class="panel"><div class="panel-body" style="padding:30px 20px;text-align:center;">
+      <div style="font-size:52px;font-weight:800;color:${corScore};">${scoreTotal}</div>
+      <div style="font-size:15px;font-weight:600;color:${corScore};margin-top:4px;">${nivel}</div>
+      <div style="font-size:11.5px;color:var(--text-soft);margin-top:8px;">de 0 a 100 — combina margem líquida, fôlego de caixa, contas atrasadas e endividamento</div>
+    </div></div>
+    <div class="panel"><div class="panel-body" style="padding:14px 18px;">
+      <div style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;font-size:12.5px;"><span>Margem líquida do mês</span><span class="mono">${Math.round(scoreMargem)}/25</span></div><div style="background:var(--bone);border-radius:5px;height:6px;overflow:hidden;margin-top:3px;"><div style="width:${scoreMargem/25*100}%;height:100%;background:var(--blue-accent);"></div></div></div>
+      <div style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;font-size:12.5px;"><span>Fôlego de caixa</span><span class="mono">${Math.round(scoreFolego)}/25</span></div><div style="background:var(--bone);border-radius:5px;height:6px;overflow:hidden;margin-top:3px;"><div style="width:${scoreFolego/25*100}%;height:100%;background:var(--blue-accent);"></div></div></div>
+      <div style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;font-size:12.5px;"><span>Contas em dia (sem atraso)</span><span class="mono">${Math.round(scoreAtraso)}/25</span></div><div style="background:var(--bone);border-radius:5px;height:6px;overflow:hidden;margin-top:3px;"><div style="width:${scoreAtraso/25*100}%;height:100%;background:var(--blue-accent);"></div></div></div>
+      <div><div style="display:flex;justify-content:space-between;font-size:12.5px;"><span>Endividamento controlado</span><span class="mono">${Math.round(scoreEndividamento)}/25</span></div><div style="background:var(--bone);border-radius:5px;height:6px;overflow:hidden;margin-top:3px;"><div style="width:${scoreEndividamento/25*100}%;height:100%;background:var(--blue-accent);"></div></div></div>
+    </div></div>
+    <div class="note">Cálculo simplificado, pensado como um resumo rápido — não substitui olhar os relatórios detalhados quando algo parecer errado.</div>
+  `;
+}
+
+// 13. Eficiência de Cobrança — prazo médio entre vencimento e recebimento de fato + taxa de sucesso
+function renderEficienciaCobranca(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const recebidos = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate && l.dataVencimento);
+  const atrasos = recebidos.map(l=>{ const dv = new Date(l.dataVencimento), dp = new Date(l.dataPagamento); return Math.round((dp-dv)/86400000); });
+  const mediaDias = atrasos.length ? atrasos.reduce((a,b)=>a+b,0)/atrasos.length : 0;
+  const noPrazoOuAntes = atrasos.filter(a=>a<=0).length;
+  const taxaSucesso = atrasos.length ? (noPrazoOuAntes/atrasos.length*100) : 0;
+  const porCliente = {};
+  recebidos.forEach((l,i)=>{ const nome = l.fornecedor||'Sem identificação'; if(!porCliente[nome]) porCliente[nome] = []; porCliente[nome].push(atrasos[i]); });
+  const rankingPior = Object.entries(porCliente).map(([nome,arr])=>({nome, media: arr.reduce((a,b)=>a+b,0)/arr.length, qtd:arr.length})).filter(c=>c.qtd>=2).sort((a,b)=>b.media-a.media).slice(0,8);
+  return `
+    <div class="note" style="margin-top:0;">Últimos 12 meses (${fmtDate(de)} a ${fmtDate(ate)}) — compara a data que venceu com a data que realmente caiu na conta.</div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
+      <div class="card"><div class="label">Prazo médio de recebimento</div><div class="value mono" style="color:${mediaDias<=0?'var(--success)':'var(--warn)'};">${mediaDias>=0?'+':''}${mediaDias.toFixed(1)} dia(s)</div></div>
+      <div class="card"><div class="label">Recebido em dia ou antes</div><div class="value mono">${taxaSucesso.toFixed(0)}%</div></div>
+    </div>
+    <div class="note" style="margin-top:0;">Prazo médio negativo significa que, no geral, você recebe ANTES do vencimento. Positivo significa atraso médio.</div>
+    ${rankingPior.length ? `
+    <div class="dash-section-label">Clientes que mais atrasam (2+ recebimentos no período)</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 18px;">
+      ${rankingPior.map(c=>`<div style="display:flex;justify-content:space-between;padding:6px 0;"><span>${escapeHTML(c.nome)} <span style="color:var(--text-soft);font-size:11px;">(${c.qtd}x)</span></span><span class="mono" style="color:${c.media>0?'var(--danger)':'var(--success)'};">${c.media>=0?'+':''}${c.media.toFixed(1)}d</span></div>`).join('')}
+    </div></div>` : ''}
+  `;
+}
+
+// 14. Variação de Preço de Insumos — usa as próprias entradas de estoque já lançadas como histórico de preço
+function renderVariacaoPrecoInsumos(){
+  const categoriaEstoque = state.vkConfig?.categoriaEstoque || 'Insumos';
+  const entradas = state.lancamentos.filter(l=>l.origem==='vk-estoque' && l.tipo==='saida' && (l.categoria===categoriaEstoque || (l.categoria||'').startsWith(categoriaEstoque+' / ')));
+  const porInsumo = {};
+  entradas.forEach(l=>{
+    const nome = (l.descricao||'').replace(/\s*\(Entrada de estoque.*\)\s*/i,'').trim() || 'Sem nome';
+    if(!porInsumo[nome]) porInsumo[nome] = [];
+    porInsumo[nome].push({ data: l.dataPagamento||l.dataVencimento, valor: l.valor });
+  });
+  const comparativos = Object.entries(porInsumo).filter(([,hist])=>hist.length>=2).map(([nome,hist])=>{
+    hist.sort((a,b)=>(a.data||'').localeCompare(b.data||''));
+    const primeiro = hist[0].valor, ultimo = hist[hist.length-1].valor;
+    const variacaoPct = primeiro>0 ? ((ultimo-primeiro)/primeiro*100) : 0;
+    return { nome, primeiro, ultimo, variacaoPct, qtd: hist.length };
+  }).sort((a,b)=>b.variacaoPct-a.variacaoPct);
+  return `
+    <div class="note" style="margin-top:0;">Compara o valor da primeira e da última entrada de estoque de cada item (dentro dos itens já registrados aqui) — é uma aproximação por VALOR DA NOTA, não por preço unitário exato (quantidades podem variar de compra pra compra). Só mostra itens com pelo menos 2 entradas registradas.</div>
+    ${comparativos.length ? `<div class="panel"><div class="panel-body" style="padding:0;">
+      ${comparativos.map(c=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;align-items:center;">
+          <div class="desc-cell"><div>${escapeHTML(c.nome)}</div><div class="cat">${c.qtd} entrada(s) · ${brl(c.primeiro)} → ${brl(c.ultimo)}</div></div>
+          <span class="mono" style="font-weight:600;color:${c.variacaoPct>10?'var(--danger)':c.variacaoPct<-10?'var(--success)':'var(--text-soft)'};">${c.variacaoPct>=0?'+':''}${c.variacaoPct.toFixed(1)}%</span>
+        </div>
+      `).join('')}
+    </div></div>` : `<div class="panel"><div class="empty" style="padding:40px 20px;">Ainda não tem itens com 2 ou mais entradas de estoque registradas pra comparar.</div></div>`}
+  `;
+}
+
+// 15. Concentração de Risco de Clientes — quanto % da receita vem do(s) maior(es) cliente(s)
+function renderConcentracaoRiscoClientes(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const porCliente = {};
+  state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{
+    const nome = l.fornecedor || 'Sem identificação';
+    porCliente[nome] = (porCliente[nome]||0) + l.valor;
+  });
+  const totalGeral = Object.values(porCliente).reduce((a,b)=>a+b,0);
+  const ranking = Object.entries(porCliente).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor);
+  const top1 = ranking.slice(0,1).reduce((s,c)=>s+c.valor,0);
+  const top3 = ranking.slice(0,3).reduce((s,c)=>s+c.valor,0);
+  const top5 = ranking.slice(0,5).reduce((s,c)=>s+c.valor,0);
+  const pct = v => totalGeral>0 ? (v/totalGeral*100) : 0;
+  const alerta = pct(top1)>=30;
+  return `
+    <div class="note" style="margin-top:0;">Últimos 12 meses. Quanto maior a concentração num único cliente, maior o risco se ele parar de comprar.</div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
+      <div class="card"><div class="label">Maior cliente sozinho</div><div class="value mono" style="color:${alerta?'var(--danger)':'inherit'};">${pct(top1).toFixed(1)}%</div></div>
+      <div class="card"><div class="label">3 maiores juntos</div><div class="value mono">${pct(top3).toFixed(1)}%</div></div>
+      <div class="card"><div class="label">5 maiores juntos</div><div class="value mono">${pct(top5).toFixed(1)}%</div></div>
+    </div>
+    ${alerta ? `<div class="note" style="border-color:var(--danger);">⚠️ Um único cliente responde por ${pct(top1).toFixed(1)}% da sua receita — se ele parar de comprar, o impacto é grande. Vale a pena diversificar a carteira.</div>` : ''}
+    <div class="dash-section-label">Top 10 clientes</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${ranking.slice(0,10).map(c=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;align-items:center;">
+          <span>${escapeHTML(c.nome)}</span><span class="mono">${brl(c.valor)} <span style="color:var(--text-soft);font-size:11px;">(${pct(c.valor).toFixed(1)}%)</span></span>
+        </div>
+      `).join('')}
+    </div></div>
+  `;
+}
+
+// 16. Ranking Volume x Margem por Produto — cruza quantidade vendida com margem, pra achar os "queridinhos que dão pouco lucro"
+function renderRankingVolumeMargem(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const produtos = (state.custosProdutosVK||[]).filter(c=>c.custoUnitario!==null && c.precoVendaVK>0);
+  const linhas = produtos.map(p=>{
+    const vendas = state.lancamentos.filter(l=>l.produtoTag===p.nome && l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento>=de && l.dataPagamento<=ate);
+    const receita = vendas.reduce((s,l)=>s+l.valor,0);
+    const qtdEstimada = p.precoVendaVK>0 ? receita/p.precoVendaVK : 0;
+    const margemUnitPct = p.precoVendaVK>0 ? ((p.precoVendaVK-p.custoUnitario)/p.precoVendaVK*100) : 0;
+    return { nome:p.nome, qtd:qtdEstimada, receita, margemUnitPct };
+  }).filter(l=>l.qtd>0);
+  const maxQtd = Math.max(1, ...linhas.map(l=>l.qtd));
+  const altoVolBaixaMargem = [...linhas].sort((a,b)=>(b.qtd/maxQtd - b.margemUnitPct/100) - (a.qtd/maxQtd - a.margemUnitPct/100)).slice(0,5);
+  const baixoVolAltaMargem = [...linhas].sort((a,b)=>(b.margemUnitPct/100 - b.qtd/maxQtd) - (a.margemUnitPct/100 - a.qtd/maxQtd)).slice(0,5);
+  return `
+    <div class="note" style="margin-top:0;">Últimos 12 meses. Quantidade estimada a partir da receita ÷ preço de venda cadastrado.</div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;">
+      <div class="panel"><div class="panel-head"><h2>🔥 Vende muito, margem baixa</h2></div><div class="panel-body" style="padding:12px 18px;">
+        ${altoVolBaixaMargem.map(l=>`<div style="padding:6px 0;border-bottom:1px solid var(--line);"><div style="font-weight:600;font-size:12.5px;">${escapeHTML(l.nome)}</div><div style="font-size:11px;color:var(--text-soft);">~${Math.round(l.qtd)} un. · margem ${l.margemUnitPct.toFixed(1)}%</div></div>`).join('') || '<div class="empty">Sem dados suficientes.</div>'}
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>💎 Vende pouco, margem alta</h2></div><div class="panel-body" style="padding:12px 18px;">
+        ${baixoVolAltaMargem.map(l=>`<div style="padding:6px 0;border-bottom:1px solid var(--line);"><div style="font-weight:600;font-size:12.5px;">${escapeHTML(l.nome)}</div><div style="font-size:11px;color:var(--text-soft);">~${Math.round(l.qtd)} un. · margem ${l.margemUnitPct.toFixed(1)}%</div></div>`).join('') || '<div class="empty">Sem dados suficientes.</div>'}
+      </div></div>
+    </div>
+    <div class="note">"Vende muito, margem baixa" pode ser hora de reajustar preço ou repensar o produto. "Vende pouco, margem alta" pode ser oportunidade de dar mais destaque nas vendas.</div>
+  `;
+}
+
+// 18. Saúde dos Cadastros — fornecedores e ativos patrimoniais com informação faltando
+function renderSaudeCadastros(){
+  const fornecedoresSemCnpj = (state.fornecedores||[]).filter(f=>!f.cnpjCpf);
+  const fornecedoresSemTelefone = (state.fornecedores||[]).filter(f=>!f.telefone);
+  const ativosSemFoto = (state.ativosPatrimoniais||[]).filter(a=>!a.baixa && (!a.fotos || !a.fotos.length));
+  const ativosSemNF = (state.ativosPatrimoniais||[]).filter(a=>!a.baixa && !a.notaFiscal);
+  const bloco = (titulo, lista, campo) => lista.length ? `
+    <div class="dash-section-label">${titulo} (${lista.length})</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${lista.slice(0,15).map(item=>`<div class="ledger-row compact" style="grid-template-columns:1fr;"><span>${escapeHTML(item.nome)}</span></div>`).join('')}
+      ${lista.length>15 ? `<div class="note" style="margin:0;border-radius:0;">+ ${lista.length-15} outro(s)</div>` : ''}
+    </div></div>` : '';
+  const totalPendencias = fornecedoresSemCnpj.length + fornecedoresSemTelefone.length + ativosSemFoto.length + ativosSemNF.length;
+  return `
+    <div class="cards"><div class="card"><div class="label">Cadastros incompletos</div><div class="value mono" style="color:${totalPendencias>0?'var(--warn)':'var(--success)'};">${totalPendencias}</div></div></div>
+    ${totalPendencias===0 ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Tudo certo — nenhum cadastro incompleto encontrado. 🎉</div></div>` : `
+    ${bloco('Fornecedores sem CNPJ/CPF', fornecedoresSemCnpj)}
+    ${bloco('Fornecedores sem telefone', fornecedoresSemTelefone)}
+    ${bloco('Ativos sem foto', ativosSemFoto)}
+    ${bloco('Ativos sem nota fiscal', ativosSemNF)}
+    `}
+    <div class="note">Não cobre clientes porque o sistema não tem um cadastro próprio de cliente — o nome vem direto de cada pedido/lançamento do VK Industrial.</div>
+  `;
+}
+
+// 19. Projeção de Comissões a Pagar — comissões já geradas mas ainda pendentes, por vencimento
+function renderProjecaoComissoes(){
+  const pendentes = (state.comissoesPagas||[]).map(c=>{
+    const lanc = state.lancamentos.find(l=>l.id===c.lancamentoDespesaId);
+    return { ...c, lanc };
+  }).filter(c=>c.lanc && c.lanc.status==='pendente');
+  pendentes.sort((a,b)=>(a.lanc.dataVencimento||'').localeCompare(b.lanc.dataVencimento||''));
+  const total = pendentes.reduce((s,c)=>s+(c.valorTotal||0),0);
+  const porVendedor = {};
+  pendentes.forEach(c=>{ const nome = nomeVendedor(c.vendedorId)||'—'; porVendedor[nome] = (porVendedor[nome]||0)+(c.valorTotal||0); });
+  return `
+    <div class="cards"><div class="card saldo"><div class="label">Total de comissões pendentes</div><div class="value mono">${brl(total)}</div></div></div>
+    ${pendentes.length ? `
+    <div class="dash-section-label">Por vendedor</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 18px;">
+      ${Object.entries(porVendedor).sort((a,b)=>b[1]-a[1]).map(([nome,v])=>`<div style="display:flex;justify-content:space-between;padding:6px 0;"><span>${escapeHTML(nome)}</span><span class="mono">${brl(v)}</span></div>`).join('')}
+    </div></div>
+    <div class="dash-section-label">Detalhado</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${pendentes.map(c=>`
+        <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto;align-items:center;">
+          <span class="mono" style="font-size:11.5px;color:var(--text-soft);">${c.lanc.dataVencimento?fmtDate(c.lanc.dataVencimento):'—'}</span>
+          <span>${escapeHTML(nomeVendedor(c.vendedorId)||'—')}</span>
+          <span class="mono">${brl(c.valorTotal||0)}</span>
+        </div>
+      `).join('')}
+    </div></div>` : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhuma comissão pendente no momento.</div></div>`}
   `;
 }
 
@@ -10987,6 +11566,7 @@ function attachViewHandlers(){
   if(reportSelect){
     let meiAnoAtual = new Date().getFullYear();
     let gerencialAnoAtual = new Date().getFullYear();
+    let yoyAnoAtivo = new Date().getFullYear();
     let gerencialCentroAtivo = 'todos';
     let mensalMesRef = mesGlobalRef;
     const paint = ()=>{
@@ -11017,6 +11597,24 @@ function attachViewHandlers(){
         relatorioAtivo==='canal_venda' ? renderRelatorioCanalVenda() :
         relatorioAtivo==='rolling_forecast' ? renderRollingForecast() :
         relatorioAtivo==='centro_lucro' ? renderCentroLucro() :
+        relatorioAtivo==='yoy' ? renderComparativoAnoAAno(yoyAnoAtivo) :
+        relatorioAtivo==='sazonalidade' ? renderSazonalidade() :
+        relatorioAtivo==='calendario_vencimentos' ? renderCalendarioVencimentos() :
+        relatorioAtivo==='carga_tributaria' ? renderCargaTributaria() :
+        relatorioAtivo==='simulador_preco' ? renderSimuladorPreco() :
+        relatorioAtivo==='formas_pagamento' ? renderFormasPagamento() :
+        relatorioAtivo==='rentabilidade_cliente' ? renderRentabilidadeCliente() :
+        relatorioAtivo==='pe_produto' ? renderPontoEquilibrioProduto() :
+        relatorioAtivo==='metas_comerciais' ? renderMetasComerciais() :
+        relatorioAtivo==='fixo_variavel_tempo' ? renderCustoFixoVariavelTempo() :
+        relatorioAtivo==='onde_dinheiro' ? renderOndeDinheiroEsta() :
+        relatorioAtivo==='health_score' ? renderHealthScore() :
+        relatorioAtivo==='eficiencia_cobranca' ? renderEficienciaCobranca() :
+        relatorioAtivo==='variacao_preco_insumos' ? renderVariacaoPrecoInsumos() :
+        relatorioAtivo==='concentracao_clientes' ? renderConcentracaoRiscoClientes() :
+        relatorioAtivo==='volume_margem_produto' ? renderRankingVolumeMargem() :
+        relatorioAtivo==='saude_cadastros' ? renderSaudeCadastros() :
+        relatorioAtivo==='projecao_comissoes' ? renderProjecaoComissoes() :
         relatorioAtivo==='breakeven' ? renderRelatorioBreakEven() :
         relatorioAtivo==='valuation' ? renderRelatorioValuation() :
         relatorioAtivo==='mensal' ? renderSuperRelatorioMensal(mensalMesRef) :
@@ -11063,6 +11661,58 @@ function attachViewHandlers(){
         document.getElementById('reportPanel').innerHTML = renderCentroLucro(centroLucroMes.value);
         bindReportInner();
       });
+      const yoyAnoSelect = document.getElementById('yoyAnoSelect');
+      if(yoyAnoSelect) yoyAnoSelect.addEventListener('change', ()=>{
+        yoyAnoAtivo = Number(yoyAnoSelect.value);
+        document.getElementById('reportPanel').innerHTML = renderComparativoAnoAAno(yoyAnoAtivo);
+        bindReportInner();
+      });
+      const cargaTribMes = document.getElementById('cargaTribMes');
+      if(cargaTribMes) cargaTribMes.addEventListener('change', ()=>{
+        if(!cargaTribMes.value) return;
+        document.getElementById('reportPanel').innerHTML = renderCargaTributaria(cargaTribMes.value);
+        bindReportInner();
+      });
+      const formaPagMes = document.getElementById('formaPagMes');
+      if(formaPagMes) formaPagMes.addEventListener('change', ()=>{
+        if(!formaPagMes.value) return;
+        document.getElementById('reportPanel').innerHTML = renderFormasPagamento(formaPagMes.value);
+        bindReportInner();
+      });
+      const peProdutoMes = document.getElementById('peProdutoMes');
+      if(peProdutoMes) peProdutoMes.addEventListener('change', ()=>{
+        if(!peProdutoMes.value) return;
+        document.getElementById('reportPanel').innerHTML = renderPontoEquilibrioProduto(peProdutoMes.value);
+        bindReportInner();
+      });
+      const metasComMes = document.getElementById('metasComMes');
+      if(metasComMes) metasComMes.addEventListener('change', ()=>{
+        if(!metasComMes.value) return;
+        document.getElementById('reportPanel').innerHTML = renderMetasComerciais(metasComMes.value);
+        bindReportInner();
+      });
+      const simCusto = document.getElementById('simCusto');
+      const simMargem = document.getElementById('simMargem');
+      if(simCusto && simMargem){
+        const calcularSim = ()=>{
+          const custo = numBR(simCusto.value) || 0;
+          const margem = numBR(simMargem.value) || 0;
+          const resultado = document.getElementById('simResultado');
+          if(custo<=0 || margem<=0 || margem>=100){
+            resultado.innerHTML = custo>0 && margem>=100 ? `<div class="note" style="border-color:var(--danger);">Margem precisa ser menor que 100%.</div>` : '';
+            return;
+          }
+          const preco = custo / (1 - margem/100);
+          const lucroUnit = preco - custo;
+          resultado.innerHTML = `
+            <div class="cards" style="grid-template-columns:1fr 1fr;">
+              <div class="card saldo"><div class="label">Preço de venda sugerido</div><div class="value mono">${brl(preco)}</div></div>
+              <div class="card"><div class="label">Lucro por unidade</div><div class="value mono" style="color:var(--success);">${brl(lucroUnit)}</div></div>
+            </div>`;
+        };
+        simCusto.addEventListener('input', calcularSim);
+        simMargem.addEventListener('input', calcularSim);
+      }
       const previsaoDiasSel = document.getElementById('previsaoDias');
       if(previsaoDiasSel) previsaoDiasSel.addEventListener('change', ()=>{
         previsaoDiasAtivo = parseInt(previsaoDiasSel.value);
@@ -12765,6 +13415,13 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
         </select>
         ${isEdit && !existing.contaId ? `<div class="note" style="margin-top:6px;">Esse pedido ainda não tem conta bancária vinculada — normal pra pedidos vindos do VK Industrial ainda não recebidos. Escolha uma conta aqui se quiser definir agora, ou deixe em branco e escolha só na hora de confirmar o recebimento.</div>` : ''}
       </div>
+      <div class="field">
+        <label>Forma de pagamento (opcional)</label>
+        <select id="fFormaPagamento">
+          <option value="" ${!existing?.formaPagamento?'selected':''}>Não informado</option>
+          ${['Pix','Cartão de crédito','Cartão de débito','Dinheiro','Boleto','Transferência (TED/DOC)','Cheque'].map(f=>`<option value="${f}" ${existing?.formaPagamento===f?'selected':''}>${f}</option>`).join('')}
+        </select>
+      </div>
     </div>
     ${tipo==='saida' ? `
     <div class="field">
@@ -13167,6 +13824,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       produtoTag: document.getElementById('fProduto').value.trim(),
       custoProdutoVendido: (tipo==='entrada' && document.getElementById('fCustoCPV')) ? (numBR(document.getElementById('fCustoCPV').value) || null) : (existing?.custoProdutoVendido ?? null),
       proLabore: (tipo==='saida' && document.getElementById('fProLabore')) ? document.getElementById('fProLabore').checked : (existing?.proLabore || false),
+      formaPagamento: document.getElementById('fFormaPagamento')?.value || '',
       descontoConcedido: (tipo==='entrada' && existing?.origem!=='vk' && document.getElementById('fDescontoConcedido')) ? (numBR(document.getElementById('fDescontoConcedido').value) || 0) : (existing?.descontoConcedido || 0),
       centroCusto: (fCentroCusto && fCentroCusto.value!=='__novo__') ? fCentroCusto.value : (existing?.centroCusto||''),
       canalVenda: (fCanalVenda && fCanalVenda.value!=='__novo__') ? fCanalVenda.value : (existing?.canalVenda||''),
