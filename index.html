@@ -936,6 +936,8 @@ function aplicarMigracoes(s){
   if(!s.previsoesGastoFuturo) s.previsoesGastoFuturo = [];
   if(!s.recebimentosDinheiroRep) s.recebimentosDinheiroRep = [];
   if(!s.custosProdutosVK) s.custosProdutosVK = [];
+  if(!s.precosTabelaProdutos) s.precosTabelaProdutos = {};
+  if(!s.emprestimos) s.emprestimos = [];
   if(!s.vendasBonificadas) s.vendasBonificadas = [];
   if(!s.orcamentoAlertaPct) s.orcamentoAlertaPct = {};
   ['saida','entrada'].forEach(tipo=>{
@@ -5656,6 +5658,11 @@ function viewRelatorios(){
     { id:'divergencias', icone:'🔍', nome:'Divergências e Exceções', desc:'Lançamentos fora do padrão — valores muito altos, sem categoria, data futura' },
     { id:'posicao_bancaria', icone:'🏦', nome:'Posição Bancária Consolidada', desc:'Saldo de todas as contas bancárias, lado a lado' },
     { id:'taxas_bancarias', icone:'💸', nome:'Taxas e Tarifas Bancárias', desc:'Quanto foi pago em taxas, tarifas e anuidades no mês' },
+    { id:'amortizacao_emprestimos', icone:'🏦', nome:'Amortização de Empréstimos', desc:'Saldo devedor e parcelas restantes de cada empréstimo/financiamento cadastrado' },
+    { id:'seguros_ativos', icone:'🛡️', nome:'Seguros de Ativos', desc:'Vigência e valor dos seguros cadastrados, com alerta de vencimento próximo' },
+    { id:'preco_tabela_praticado', icone:'🏷️', nome:'Preço de Tabela vs. VK', desc:'Compara seu preço de tabela interno com o preço configurado no VK Industrial' },
+    { id:'limite_credito', icone:'💳', nome:'Limite de Crédito Disponível', desc:'Saldo + limite de cheque especial disponível em cada conta' },
+    { id:'multas_penalidades', icone:'🚨', nome:'Multas e Penalidades', desc:'Total pago em multas nos últimos 12 meses' },
     { id:'breakeven', icone:'⚖️', nome:'Ponto de Equilíbrio', desc:'Vendas mínimas pra cobrir os custos, em 3 cenários (otimista/realista/pessimista)' },
     { id:'valuation', icone:'💎', nome:'Valuation Estimado', desc:'Estimativa educacional de valor da empresa por múltiplos de EBITDA e faturamento' },
     { id:'aging', icone:'⏳', nome:'Aging — Vencidos por Faixa', desc:'Contas a receber e a pagar por faixa de atraso, com ranking de inadimplentes' },
@@ -5688,7 +5695,7 @@ function viewRelatorios(){
 const RELATORIOS_NOMES = {
   gerencial:'Dashboard Gerencial', executivo:'Dashboard Executivo', dre:'DRE', balanco:'Balanço Patrimonial', mei:'Declaração MEI', indicadores:'Indicadores Financeiros',
   produto:'Rentabilidade por Produto', investimentos:'Relatório de Investimentos', liquidez:'Índices de Liquidez', aging:'Aging — Vencidos por Faixa', dfc:'DFC — Fluxo de Caixa', cartoes:'Cartões de Crédito',
-  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio', yoy:'Comparativo Ano a Ano', sazonalidade:'Análise de Sazonalidade', calendario_vencimentos:'Calendário de Vencimentos', carga_tributaria:'Carga Tributária', simulador_preco:'Simulador de Preço', formas_pagamento:'Formas de Pagamento', rentabilidade_cliente:'Rentabilidade por Cliente', pe_produto:'Ponto de Equilíbrio por Produto', metas_comerciais:'Metas Comerciais', fixo_variavel_tempo:'Custo Fixo vs Variável no Tempo', onde_dinheiro:'Onde Meu Dinheiro Está', health_score:'Health Score do Negócio', eficiencia_cobranca:'Eficiência de Cobrança', variacao_preco_insumos:'Variação de Preço de Insumos', concentracao_clientes:'Concentração de Risco de Clientes', volume_margem_produto:'Ranking Volume x Margem por Produto', saude_cadastros:'Saúde dos Cadastros', projecao_comissoes:'Projeção de Comissões a Pagar', fcl:'Fluxo de Caixa Livre', payback:'Payback de Investimento', cvl_multiproduto:'Análise Custo-Volume-Lucro', dmpl:'Mutações do Patrimônio Líquido', provisoes:'Provisões (Férias/13º)', fluxo_centro_custo:'Fluxo de Caixa por Centro de Custo', conciliacao_saldo:'Conciliação de Saldo por Conta', taxa_conversao_funil:'Taxa de Conversão do Funil', novos_vs_recorrentes:'Novos Clientes vs. Recorrentes', taxa_recompra:'Taxa de Recompra', ltv_cac:'LTV e Relação LTV/CAC', abc_estoque:'Curva ABC de Estoque', estoque_abaixo_minimo:'Estoque Abaixo do Mínimo', obsolescencia_estoque:'Obsolescência de Estoque', comparativo_preco_fornecedores:'Comparativo de Preço entre Fornecedores', calendario_obrigacoes:'Calendário de Obrigações Acessórias', manutencao_consolidada:'Manutenção Preventiva Consolidada', vida_util_remanescente:'Vida Útil Remanescente', roi_ativo:'Custo e Valor Atual por Ativo', alocacao_ativos:'Alocação de Ativos', divergencias:'Divergências e Exceções', posicao_bancaria:'Posição Bancária Consolidada', taxas_bancarias:'Taxas e Tarifas Bancárias'
+  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio', yoy:'Comparativo Ano a Ano', sazonalidade:'Análise de Sazonalidade', calendario_vencimentos:'Calendário de Vencimentos', carga_tributaria:'Carga Tributária', simulador_preco:'Simulador de Preço', formas_pagamento:'Formas de Pagamento', rentabilidade_cliente:'Rentabilidade por Cliente', pe_produto:'Ponto de Equilíbrio por Produto', metas_comerciais:'Metas Comerciais', fixo_variavel_tempo:'Custo Fixo vs Variável no Tempo', onde_dinheiro:'Onde Meu Dinheiro Está', health_score:'Health Score do Negócio', eficiencia_cobranca:'Eficiência de Cobrança', variacao_preco_insumos:'Variação de Preço de Insumos', concentracao_clientes:'Concentração de Risco de Clientes', volume_margem_produto:'Ranking Volume x Margem por Produto', saude_cadastros:'Saúde dos Cadastros', projecao_comissoes:'Projeção de Comissões a Pagar', fcl:'Fluxo de Caixa Livre', payback:'Payback de Investimento', cvl_multiproduto:'Análise Custo-Volume-Lucro', dmpl:'Mutações do Patrimônio Líquido', provisoes:'Provisões (Férias/13º)', fluxo_centro_custo:'Fluxo de Caixa por Centro de Custo', conciliacao_saldo:'Conciliação de Saldo por Conta', taxa_conversao_funil:'Taxa de Conversão do Funil', novos_vs_recorrentes:'Novos Clientes vs. Recorrentes', taxa_recompra:'Taxa de Recompra', ltv_cac:'LTV e Relação LTV/CAC', abc_estoque:'Curva ABC de Estoque', estoque_abaixo_minimo:'Estoque Abaixo do Mínimo', obsolescencia_estoque:'Obsolescência de Estoque', comparativo_preco_fornecedores:'Comparativo de Preço entre Fornecedores', calendario_obrigacoes:'Calendário de Obrigações Acessórias', manutencao_consolidada:'Manutenção Preventiva Consolidada', vida_util_remanescente:'Vida Útil Remanescente', roi_ativo:'Custo e Valor Atual por Ativo', alocacao_ativos:'Alocação de Ativos', divergencias:'Divergências e Exceções', posicao_bancaria:'Posição Bancária Consolidada', taxas_bancarias:'Taxas e Tarifas Bancárias', amortizacao_emprestimos:'Amortização de Empréstimos', seguros_ativos:'Seguros de Ativos', preco_tabela_praticado:'Preço de Tabela vs. VK', limite_credito:'Limite de Crédito Disponível', multas_penalidades:'Multas e Penalidades'
 };
 
 function viewRelatorioDetalhe(){
@@ -6873,6 +6880,24 @@ function renderRelatorioLiquidez(){
         </div>
         <div style="font-size:11.5px;color:var(--text-soft);margin-top:3px;line-height:1.45;">Lucro que a operação principal gera já descontando o imposto que incide sobre ela — sem considerar juros de dívidas. Preencha a alíquota efetiva (não a nominal) pra ficar realista; se não souber, deixe 0.</div>
       </div>
+      <div class="field" style="max-width:220px;margin-top:10px;">
+        <label>Custo de capital anual (%, pro EVA)</label>
+        <input type="text" inputmode="decimal" id="liqCustoCapital" value="${state.balancoManual.custoCapitalPct||''}" placeholder="Ex: 15">
+      </div>
+      ${(()=>{
+        const custoCapitalPct = state.balancoManual.custoCapitalPct || 0;
+        const capitalInvestido = patrimonioLiquido;
+        const custoCapitalValor = capitalInvestido * (custoCapitalPct/100);
+        const eva = nopat - custoCapitalValor;
+        return `
+      <div class="report-line" style="display:block;border-bottom:1px solid var(--line);padding:10px 0;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;">
+          <span style="font-weight:600;">EVA — Valor Econômico Agregado <span style="font-weight:400;font-size:11px;color:var(--text-soft);">· NOPAT − (Patrimônio Líquido × Custo de Capital)</span></span>
+          <span class="v mono" style="font-size:16px;font-weight:700;color:${eva>=0?'var(--success)':'var(--danger)'};">${custoCapitalPct>0?brl(eva):'—'}</span>
+        </div>
+        <div style="font-size:11.5px;color:var(--text-soft);margin-top:3px;line-height:1.45;">${custoCapitalPct>0 ? `${eva>=0?'Positivo: o negócio está gerando lucro ACIMA do que custaria captar esse capital em outro lugar.':'Negativo: o lucro operacional não está cobrindo nem o custo de oportunidade do capital investido — mesmo dando lucro contábil, pode estar "destruindo valor" nesse sentido.'} Capital investido considerado: Patrimônio Líquido (${brl(capitalInvestido)}) × ${custoCapitalPct}% ao ano = ${brl(custoCapitalValor)}.` : 'Preencha o "Custo de capital anual" acima pra calcular. Esse número é uma decisão sua — normalmente usa-se a taxa de retorno que você conseguiria aplicando esse dinheiro em outro lugar (CDI, outro investimento, etc.), ou o custo de um empréstimo se precisasse captar.'}</div>
+      </div>`;
+      })()}
       `;
       })()}
 
@@ -7592,6 +7617,160 @@ function renderPosicaoBancaria(){
 }
 
 // 77. Taxas e Tarifas Bancárias Pagas — usa categoria "Despesas Financeiras" e subcategorias com "taxa"/"tarifa" no nome
+function openEmprestimoModal(existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit?'Editar':'Novo'} empréstimo/financiamento</h3>
+    <div class="field"><label>Nome/descrição</label><input type="text" id="empNome" value="${existing?escapeHTML(existing.nome):''}" placeholder="Ex: Financiamento do forno industrial"></div>
+    <div class="field"><label>Instituição</label><input type="text" id="empInstituicao" value="${existing?escapeHTML(existing.instituicao||''):''}" placeholder="Ex: Banco do Brasil"></div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;">
+      <div class="field"><label>Valor total (R$)</label><input type="text" inputmode="decimal" id="empValorTotal" value="${existing?existing.valorTotal:''}"></div>
+      <div class="field"><label>Valor da parcela (R$)</label><input type="text" inputmode="decimal" id="empValorParcela" value="${existing?existing.valorParcela:''}"></div>
+      <div class="field"><label>Número de parcelas</label><input type="text" inputmode="numeric" id="empNumParcelas" value="${existing?existing.numeroParcelas:''}"></div>
+      <div class="field"><label>Parcelas já pagas</label><input type="text" inputmode="numeric" id="empParcelasPagas" value="${existing?existing.parcelasPagas:'0'}"></div>
+      <div class="field"><label>Data de início</label><input type="date" id="empDataInicio" value="${existing?existing.dataInicio:todayISO()}"></div>
+      <div class="field"><label>Taxa de juros (% a.m., opcional)</label><input type="text" inputmode="decimal" id="empTaxaJuros" value="${existing&&existing.taxaJurosMensal?existing.taxaJurosMensal:''}"></div>
+    </div>
+    <div class="modal-actions">
+      ${isEdit?`<button class="btn danger-o" id="btnExcluirEmprestimo">Excluir</button>`:''}
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarEmprestimo">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  if(isEdit) document.getElementById('btnExcluirEmprestimo').addEventListener('click', ()=>{
+    if(!confirm('Excluir esse empréstimo? Isso não mexe em nenhum lançamento já feito.')) return;
+    state.emprestimos = state.emprestimos.filter(e=>e.id!==existing.id);
+    persist(); closeModal(); render();
+  });
+  document.getElementById('btnSalvarEmprestimo').addEventListener('click', ()=>{
+    const nome = document.getElementById('empNome').value.trim();
+    const valorTotal = numBR(document.getElementById('empValorTotal').value);
+    const valorParcela = numBR(document.getElementById('empValorParcela').value);
+    const numeroParcelas = numBR(document.getElementById('empNumParcelas').value);
+    const parcelasPagas = numBR(document.getElementById('empParcelasPagas').value) || 0;
+    if(!nome || isNaN(valorTotal) || isNaN(valorParcela) || isNaN(numeroParcelas)){ showToast('Preencha nome, valor total, valor da parcela e número de parcelas'); return; }
+    const payload = {
+      nome, instituicao: document.getElementById('empInstituicao').value.trim(),
+      valorTotal, valorParcela, numeroParcelas, parcelasPagas,
+      dataInicio: document.getElementById('empDataInicio').value || todayISO(),
+      taxaJurosMensal: numBR(document.getElementById('empTaxaJuros').value) || 0
+    };
+    if(isEdit) Object.assign(existing, payload);
+    else state.emprestimos.push({ id: uid(), ...payload });
+    persist(); closeModal(); render();
+    showToast(isEdit?'Empréstimo atualizado':'Empréstimo cadastrado');
+  });
+}
+
+// 28. Amortização de Empréstimos/Financiamentos — saldo devedor e parcelas restantes
+function renderAmortizacaoEmprestimos(){
+  const lista = state.emprestimos||[];
+  const saldoDevedorTotal = lista.reduce((s,e)=>s+Math.max(0,(e.numeroParcelas-e.parcelasPagas))*e.valorParcela,0);
+  return `
+    <div class="report-controls"><button class="btn ghost sm" id="btnNovoEmprestimo">+ Empréstimo</button></div>
+    <div class="cards"><div class="card saldo"><div class="label">Saldo devedor total</div><div class="value mono">${brl(saldoDevedorTotal)}</div></div></div>
+    ${lista.length ? lista.map(e=>{
+      const restantes = Math.max(0, e.numeroParcelas-e.parcelasPagas);
+      const saldoDevedor = restantes*e.valorParcela;
+      const pctPago = e.numeroParcelas>0 ? (e.parcelasPagas/e.numeroParcelas*100) : 0;
+      return `
+      <div class="panel" data-action="editar-emprestimo" data-id="${e.id}" style="cursor:pointer;">
+        <div class="panel-head"><h2>${escapeHTML(e.nome)}</h2><span style="font-size:12px;color:var(--text-soft);">${escapeHTML(e.instituicao||'')}</span></div>
+        <div class="panel-body" style="padding:14px 18px;">
+          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;">
+            <span>${e.parcelasPagas} de ${e.numeroParcelas} parcelas pagas</span>
+            <span class="mono" style="font-weight:600;">Saldo devedor: ${brl(saldoDevedor)}</span>
+          </div>
+          <div style="background:var(--bone);border-radius:5px;height:8px;overflow:hidden;"><div style="width:${Math.min(100,pctPago)}%;height:100%;background:var(--blue-accent);"></div></div>
+          <div style="font-size:11px;color:var(--text-soft);margin-top:5px;">Parcela: ${brl(e.valorParcela)}/mês · ${restantes} parcela(s) restante(s)</div>
+        </div>
+      </div>`;
+    }).join('') : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum empréstimo cadastrado. Clique em "+ Empréstimo" pra adicionar.</div></div>`}
+    <div class="note">Cadastro informativo — não gera lançamento automático em Contas a Pagar. As parcelas restantes são calculadas por número de parcela pago, não por parcela individual baixada.</div>
+  `;
+}
+
+// 58. Seguros de Ativos — vigência e alerta de vencimento próximo
+function renderSegurosAtivos(){
+  const hoje = todayISO();
+  const em60 = new Date(); em60.setDate(em60.getDate()+60);
+  const em60ISO = em60.toISOString().slice(0,10);
+  const comSeguro = (state.ativosPatrimoniais||[]).filter(a=>!a.baixa && a.seguradora);
+  const totalPremio = comSeguro.reduce((s,a)=>s+(a.seguroPremio||0),0);
+  const vencendo = comSeguro.filter(a=>a.seguroVigenciaFim && a.seguroVigenciaFim<=em60ISO);
+  return `
+    <div class="cards" style="grid-template-columns:1fr 1fr;">
+      <div class="card"><div class="label">Ativos segurados</div><div class="value mono">${comSeguro.length}</div></div>
+      <div class="card"><div class="label">Total em prêmios/ano</div><div class="value mono">${brl(totalPremio)}</div></div>
+    </div>
+    ${vencendo.length ? `<div class="note" style="border-color:var(--warn);">⚠️ ${vencendo.length} seguro(s) vencendo nos próximos 60 dias.</div>` : ''}
+    ${comSeguro.length ? `<div class="panel"><div class="panel-body" style="padding:0;">
+      ${comSeguro.sort((a,b)=>(a.seguroVigenciaFim||'9999').localeCompare(b.seguroVigenciaFim||'9999')).map(a=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;align-items:center;">
+          <div class="desc-cell"><div>${escapeHTML(a.nome)}</div><div class="cat">${escapeHTML(a.seguradora)}${a.apolice?' · Apólice '+escapeHTML(a.apolice):''}</div></div>
+          <span class="mono" style="color:${a.seguroVigenciaFim&&a.seguroVigenciaFim<=em60ISO?'var(--warn)':'var(--text-soft)'};">${a.seguroVigenciaFim?fmtDate(a.seguroVigenciaFim):'sem data'}</span>
+        </div>
+      `).join('')}
+    </div></div>` : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum ativo com seguro cadastrado. Preencha em Ativos Patrimoniais, editando o ativo.</div></div>`}
+  `;
+}
+
+// 38. Preço Praticado (VK) vs. Preço de Tabela — comparação entre duas referências de preço
+function renderPrecoTabelaVsPraticado(){
+  const produtos = (state.custosProdutosVK||[]).filter(c=>c.precoVendaVK>0);
+  return `
+    <div class="note" style="margin-top:0;">Preencha o preço de tabela (sua referência interna) de cada produto pra comparar com o preço atualmente configurado no VK Industrial. Preço de tabela fica salvo aqui, não é sobrescrito pela sincronização.</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${produtos.map(p=>{
+        const tabela = state.precosTabelaProdutos[p.nome] || '';
+        const diff = tabela ? ((p.precoVendaVK-tabela)/tabela*100) : null;
+        return `
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
+          <span>${escapeHTML(p.nome)}</span>
+          <input type="text" inputmode="decimal" class="preco-tabela-input" data-produto="${escapeHTML(p.nome)}" value="${tabela||''}" placeholder="Tabela" style="width:90px;text-align:right;">
+          <span class="mono" style="font-size:12px;color:${diff===null?'var(--text-soft)':Math.abs(diff)<1?'var(--success)':'var(--warn)'};">VK: ${brl(p.precoVendaVK)}${diff!==null?` (${diff>=0?'+':''}${diff.toFixed(1)}%)`:''}</span>
+        </div>`;
+      }).join('')}
+    </div></div>
+  `;
+}
+
+// 78. Limite de Crédito Disponível — saldo + limite de cheque especial por conta
+function renderLimiteCreditoDisponivel(){
+  const contas = state.contas.filter(c=>c.limiteChequeEspecial>0);
+  return `
+    ${contas.length ? `<div class="panel"><div class="panel-body" style="padding:0;">
+      ${contas.map(c=>{
+        const saldo = saldoConta(c.id);
+        const usado = saldo<0 ? Math.min(-saldo, c.limiteChequeEspecial) : 0;
+        const disponivel = c.limiteChequeEspecial - usado;
+        return `
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;align-items:center;">
+          <div class="desc-cell"><div>${escapeHTML(c.nome)}</div><div class="cat">Saldo: ${brl(saldo)} · Limite: ${brl(c.limiteChequeEspecial)}</div></div>
+          <span class="mono" style="font-weight:600;color:${usado>0?'var(--warn)':'var(--success)'};">${brl(disponivel)} livre</span>
+        </div>`;
+      }).join('')}
+    </div></div>` : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhuma conta com limite de cheque especial cadastrado. Preencha ao editar a conta bancária.</div></div>`}
+  `;
+}
+
+// 80. Multas e Penalidades Pagas — usa o campo ehMulta do lançamento
+function renderMultasPenalidades(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const multas = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.ehMulta && l.dataPagamento>=de && l.dataPagamento<=ate);
+  const total = multas.reduce((s,l)=>s+l.valor,0);
+  return `
+    <div class="note" style="margin-top:0;">Últimos 12 meses. Só conta despesas marcadas com o checkbox "É multa/penalidade" no lançamento.</div>
+    <div class="cards"><div class="card saldo"><div class="label">Total pago em multas</div><div class="value mono">${brl(total)}</div></div></div>
+    ${multas.length ? `<div class="panel"><div class="panel-body" style="padding:0;">
+      ${multas.map(l=>`<div class="ledger-row compact" style="grid-template-columns:auto 1fr auto;"><span class="mono" style="font-size:11.5px;color:var(--text-soft);">${fmtDate(l.dataPagamento)}</span><span>${escapeHTML(l.descricao)}</span><span class="mono">${brl(l.valor)}</span></div>`).join('')}
+    </div></div>` : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhuma multa marcada nos últimos 12 meses.</div></div>`}
+  `;
+}
+
 function renderTaxasTarifasBancarias(mesRef){
   mesRef = mesRef || mesGlobalRef;
   const [anoM, mesM] = mesRef.split('-').map(Number);
@@ -9137,6 +9316,13 @@ function openAtivoPatrimonialModal(existing, prefillPendente){
     </div>
     <div class="note" id="apVidaUtilNota" style="margin-top:-6px;"></div>
     <div class="field"><label>Garantia (meses, opcional)</label><input type="text" inputmode="decimal" id="apGarantiaMeses" value="${existing&&existing.garantiaMeses?existing.garantiaMeses:''}" placeholder="Ex: 12"></div>
+    <div class="dash-section-label" style="margin-top:10px;">Seguro (opcional)</div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;">
+      <div class="field"><label>Seguradora</label><input type="text" id="apSeguradora" value="${existing&&existing.seguradora?escapeHTML(existing.seguradora):''}" placeholder="Ex: Porto Seguro"></div>
+      <div class="field"><label>Nº da apólice</label><input type="text" id="apApolice" value="${existing&&existing.apolice?escapeHTML(existing.apolice):''}"></div>
+      <div class="field"><label>Vigência até</label><input type="date" id="apSeguroVigencia" value="${existing&&existing.seguroVigenciaFim?existing.seguroVigenciaFim:''}"></div>
+      <div class="field"><label>Valor do prêmio (R$/ano)</label><input type="text" inputmode="decimal" id="apSeguroPremio" value="${existing&&existing.seguroPremio?existing.seguroPremio:''}" placeholder="0,00"></div>
+    </div>
     ${!isEdit && !pref ? `
     <div class="field" style="margin-top:4px;">
       <label style="display:flex;align-items:center;gap:8px;font-weight:500;"><input type="checkbox" id="apDescontarConta" style="width:auto;"> Descontar o valor de uma conta bancária agora</label>
@@ -9187,14 +9373,19 @@ function openAtivoPatrimonialModal(existing, prefillPendente){
     const valorResidual = valorResidualRaw ? numBR(valorResidualRaw) : 0;
     const garantiaMesesRaw = document.getElementById('apGarantiaMeses').value.trim();
     const garantiaMeses = garantiaMesesRaw ? numBR(garantiaMesesRaw) : null;
+    const seguradora = document.getElementById('apSeguradora').value.trim();
+    const apolice = document.getElementById('apApolice').value.trim();
+    const seguroVigenciaFim = document.getElementById('apSeguroVigencia').value || null;
+    const seguroPremioRaw = document.getElementById('apSeguroPremio').value.trim();
+    const seguroPremio = seguroPremioRaw ? numBR(seguroPremioRaw) : null;
     if(!nome || isNaN(valorAquisicao) || valorAquisicao<=0 || isNaN(vidaUtilAnos) || vidaUtilAnos<=0){ showToast('Preencha nome, valor de aquisição e vida útil'); return; }
     if(isEdit){
-      Object.assign(existing, { nome, categoria, numeroPatrimonio, semAdesivo, fornecedor, notaFiscal, dataAquisicao, valorAquisicao, vidaUtilAnos, valorResidual, garantiaMeses });
+      Object.assign(existing, { nome, categoria, numeroPatrimonio, semAdesivo, fornecedor, notaFiscal, dataAquisicao, valorAquisicao, vidaUtilAnos, valorResidual, garantiaMeses, seguradora, apolice, seguroVigenciaFim, seguroPremio });
     } else {
       const novoId = uid();
       state.ativosPatrimoniais.push({
         id: novoId, nome, categoria, numeroPatrimonio, semAdesivo, fornecedor, notaFiscal, dataAquisicao, valorAquisicao,
-        vidaUtilAnos, valorResidual, garantiaMeses, fotos: [], fichas: [], manutencoes: [], baixa: null,
+        vidaUtilAnos, valorResidual, garantiaMeses, seguradora, apolice, seguroVigenciaFim, seguroPremio, fotos: [], fichas: [], manutencoes: [], baixa: null,
         origemProcessoId: pref ? pref.processoId : null, origemCompraSeq: pref ? pref.compraSeq : null
       });
       if(chkDesconto && chkDesconto.checked){
@@ -12176,6 +12367,11 @@ function attachViewHandlers(){
         relatorioAtivo==='divergencias' ? renderDivergenciasExcecoes() :
         relatorioAtivo==='posicao_bancaria' ? renderPosicaoBancaria() :
         relatorioAtivo==='taxas_bancarias' ? renderTaxasTarifasBancarias() :
+        relatorioAtivo==='amortizacao_emprestimos' ? renderAmortizacaoEmprestimos() :
+        relatorioAtivo==='seguros_ativos' ? renderSegurosAtivos() :
+        relatorioAtivo==='preco_tabela_praticado' ? renderPrecoTabelaVsPraticado() :
+        relatorioAtivo==='limite_credito' ? renderLimiteCreditoDisponivel() :
+        relatorioAtivo==='multas_penalidades' ? renderMultasPenalidades() :
         relatorioAtivo==='breakeven' ? renderRelatorioBreakEven() :
         relatorioAtivo==='valuation' ? renderRelatorioValuation() :
         relatorioAtivo==='mensal' ? renderSuperRelatorioMensal(mensalMesRef) :
@@ -12204,13 +12400,14 @@ function attachViewHandlers(){
           bindReportInner();
         });
       });
-      ['liqEstoques','liqRealizavelLP','liqPassivoLP','liqAliquotaEfetiva'].forEach(idc=>{
+      ['liqEstoques','liqRealizavelLP','liqPassivoLP','liqAliquotaEfetiva','liqCustoCapital'].forEach(idc=>{
         document.getElementById(idc)?.addEventListener('change', ()=>{
           state.balancoManual = state.balancoManual || {};
           state.balancoManual.estoques = numBR(document.getElementById('liqEstoques').value) || 0;
           state.balancoManual.realizavelLP = numBR(document.getElementById('liqRealizavelLP').value) || 0;
           state.balancoManual.passivoNaoCirculante = numBR(document.getElementById('liqPassivoLP').value) || 0;
           state.balancoManual.aliquotaEfetiva = numBR(document.getElementById('liqAliquotaEfetiva')?.value) || 0;
+          state.balancoManual.custoCapitalPct = numBR(document.getElementById('liqCustoCapital')?.value) || 0;
           persist();
           document.getElementById('reportPanel').innerHTML = renderRelatorioLiquidez();
           bindReportInner();
@@ -12324,6 +12521,24 @@ function attachViewHandlers(){
           });
           const div = document.getElementById('conciliacaoDiferencas');
           if(div) div.innerHTML = diferencas.length ? `<div class="note" style="border-color:var(--warn);">${diferencas.map(d=>`${escapeHTML(d.nome)}: diferença de ${brl(d.dif)}`).join('<br>')}</div>` : (document.querySelectorAll('.conciliacao-saldo-real')[0]?.value ? `<div class="note" style="border-color:var(--success);">Sem diferenças encontradas. ✓</div>` : '');
+        });
+      });
+      document.getElementById('btnNovoEmprestimo')?.addEventListener('click', ()=>openEmprestimoModal());
+      document.querySelectorAll('[data-action="editar-emprestimo"]').forEach(el=>{
+        el.addEventListener('click', ()=>{
+          const e = state.emprestimos.find(x=>x.id===el.dataset.id);
+          if(e) openEmprestimoModal(e);
+        });
+      });
+      document.querySelectorAll('.preco-tabela-input').forEach(inp=>{
+        inp.addEventListener('change', ()=>{
+          const valor = numBR(inp.value);
+          if(!state.precosTabelaProdutos) state.precosTabelaProdutos = {};
+          if(isNaN(valor) || inp.value===''){ delete state.precosTabelaProdutos[inp.dataset.produto]; }
+          else { state.precosTabelaProdutos[inp.dataset.produto] = valor; }
+          persist();
+          document.getElementById('reportPanel').innerHTML = renderPrecoTabelaVsPraticado();
+          bindReportInner();
         });
       });
       const previsaoDiasSel = document.getElementById('previsaoDias');
@@ -14044,6 +14259,12 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       </label>
       <div class="note" style="margin-top:6px;">Marca essa despesa como retirada de pró-labore — prepara pra uma transferência futura pro sistema de finanças pessoais (ainda não pronto). Se não marcar, não muda nada.</div>
     </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;">
+        <input type="checkbox" id="fEhMulta" style="width:17px;height:17px;" ${existing?.ehMulta?'checked':''}>
+        🚨 É multa/penalidade
+      </label>
+    </div>
     ` : ''}
     <div class="field-row" id="wrapVencStatus">
       <div class="field">
@@ -14437,6 +14658,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       produtoTag: document.getElementById('fProduto').value.trim(),
       custoProdutoVendido: (tipo==='entrada' && document.getElementById('fCustoCPV')) ? (numBR(document.getElementById('fCustoCPV').value) || null) : (existing?.custoProdutoVendido ?? null),
       proLabore: (tipo==='saida' && document.getElementById('fProLabore')) ? document.getElementById('fProLabore').checked : (existing?.proLabore || false),
+      ehMulta: (tipo==='saida' && document.getElementById('fEhMulta')) ? document.getElementById('fEhMulta').checked : (existing?.ehMulta || false),
       formaPagamento: document.getElementById('fFormaPagamento')?.value || '',
       descontoConcedido: (tipo==='entrada' && existing?.origem!=='vk' && document.getElementById('fDescontoConcedido')) ? (numBR(document.getElementById('fDescontoConcedido').value) || 0) : (existing?.descontoConcedido || 0),
       centroCusto: (fCentroCusto && fCentroCusto.value!=='__novo__') ? fCentroCusto.value : (existing?.centroCusto||''),
@@ -15031,6 +15253,10 @@ function openContaModal(existing){
       <input type="text" inputmode="decimal" id="cSaldo" value="${existing ? existing.saldoInicial : '0'}">
     </div>
     <div class="field">
+      <label>Limite de cheque especial / conta garantida (R$, opcional)</label>
+      <input type="text" inputmode="decimal" id="cLimiteChequeEspecial" value="${existing&&existing.limiteChequeEspecial?existing.limiteChequeEspecial:''}" placeholder="0,00">
+    </div>
+    <div class="field">
       <label>Cor de identificação</label>
       <div class="color-pick" id="cCorPick">
         ${CONTA_CORES.map(c=>`<span style="background:${c}" data-cor="${c}" class="${c===corSelecionada?'sel':''}"></span>`).join('')}
@@ -15079,7 +15305,9 @@ function openContaModal(existing){
     const isOutro = opt.value === 'Outro / não listado';
     const banco = isOutro ? bancoOutro.value.trim() : opt.value;
     const bancoDominio = isOutro ? '' : opt.dataset.dominio;
-    const payload = { nome, banco, bancoDominio, tipo: document.getElementById('cTipo').value, saldoInicial, cor: corAtual };
+    const limiteChequeEspecialRaw = document.getElementById('cLimiteChequeEspecial').value.trim();
+    const limiteChequeEspecial = limiteChequeEspecialRaw ? numBR(limiteChequeEspecialRaw) : 0;
+    const payload = { nome, banco, bancoDominio, tipo: document.getElementById('cTipo').value, saldoInicial, cor: corAtual, limiteChequeEspecial };
     if(isEdit){ Object.assign(existing, payload); }
     else { state.contas.push({ id: uid(), ...payload }); }
     persist(); closeModal(); render();
