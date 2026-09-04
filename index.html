@@ -358,6 +358,14 @@
   /* Contas bancárias */
   .conta-cards{display:grid;grid-template-columns:repeat(auto-fill, minmax(220px,1fr));gap:14px;margin-bottom:22px;}
   .conta-card{background:var(--white);border:1px solid var(--line);border-radius:10px;padding:16px 18px;border-top:3px solid var(--accent-c, var(--blue-accent));position:relative;}
+  .conta-card.conta-principal{box-shadow:0 0 0 2px var(--warn);}
+  .conta-card.conta-negativa{background:#FFF8F7;}
+  .conta-cards-compacto{grid-template-columns:1fr !important;}
+  .conta-cards-compacto .conta-card{display:flex;align-items:center;gap:14px;padding:10px 16px;}
+  .conta-cards-compacto .card-top{flex:1;margin:0;}
+  .conta-cards-compacto .saldo{margin:0;}
+  .conta-cards-compacto .conta-card-footer{margin:0 !important;}
+  .conta-cards-compacto .conta-actions{position:static;display:flex;}
   .conta-card .nome{font-weight:600;font-size:14px;margin-bottom:2px;}
   .conta-card .banco{font-size:12px;color:var(--text-soft);margin-bottom:12px;}
   .conta-card .saldo{font-size:20px;}
@@ -1191,6 +1199,9 @@ if(typeof window!=='undefined'){
   });
 }
 let categoriaTipoAtivo = 'saida';
+let ordenacaoContas = 'manual';
+let modoCompactoContas = false;
+let mostrarContasArquivadas = false;
 let comissaoVendedorSelecionado = '';
 let comissaoDataDeSelecionada = null;
 let comissaoDataAteSelecionada = null;
@@ -1421,6 +1432,33 @@ function saldoConta(contaId){
     if(ev.tipo==='saida') saldo -= ev.valor;
   });
   return saldo;
+}
+// Saldo da conta EM UMA DATA específica (não hoje) — usado pra sparkline e comparativo com mês anterior
+function saldoContaEmData(contaId, dataISO){
+  const conta = state.contas.find(c=>c.id===contaId);
+  if(!conta) return 0;
+  let saldo = conta.saldoInicial || 0;
+  movimentosRealizados().forEach(ev=>{
+    if(ev.contaId!==contaId || ev.data>dataISO) return;
+    if(ev.tipo==='entrada') saldo += ev.valor;
+    if(ev.tipo==='saida') saldo -= ev.valor;
+  });
+  return saldo;
+}
+// Últimos N dias de saldo da conta, pra desenhar a sparkline
+function saldoContaHistorico(contaId, dias){
+  const hoje = new Date();
+  const pontos = [];
+  for(let i=dias-1;i>=0;i--){
+    const d = new Date(hoje); d.setDate(d.getDate()-i);
+    pontos.push(saldoContaEmData(contaId, d.toISOString().slice(0,10)));
+  }
+  return pontos;
+}
+// Última movimentação realizada de uma conta
+function ultimaMovimentacaoConta(contaId){
+  const eventos = movimentosRealizados().filter(ev=>ev.contaId===contaId).sort((a,b)=>(b.data||'').localeCompare(a.data||''));
+  return eventos[0] || null;
 }
 function nomeConta(contaId){ return state.contas.find(c=>c.id===contaId)?.nome || 'Caixa'; }
 function corConta(contaId){ return state.contas.find(c=>c.id===contaId)?.cor || CONTA_CORES[0]; }
@@ -4325,6 +4363,71 @@ function gerarExtratoGeralPDF(dataDe, dataAte){
   showToast('Extrato geral baixado em PDF');
 }
 
+// Extrato consolidado — todas as contas ativas, mês corrente, uma seção por conta no mesmo PDF
+function gerarExtratoConsolidadoPDF(){
+  if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
+  const contasAtivas = state.contas.filter(c=>!c.arquivada);
+  if(!contasAtivas.length){ showToast('Nenhuma conta ativa pra gerar o extrato'); return; }
+  const hoje = todayISO();
+  const de = `${hoje.slice(0,7)}-01`;
+
+  const { jsPDF } = window.jspdf;
+  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+  const M = 18, W = 210 - M*2;
+  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
+  let y = 22;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
+  docPdf.text('Livro Caixa Financeiro VK', M, y);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
+  docPdf.text(`Emitido em ${fmtDate(hoje)}`, M+W, y, { align:'right' });
+  y += 7;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 9;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
+  docPdf.text(`Extrato Consolidado — ${competenciaLabel(hoje.slice(0,7))}`, M, y);
+  y += 9;
+
+  const totalGeral = contasAtivas.reduce((s,c)=>s+saldoConta(c.id),0);
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10.5); docPdf.setTextColor(...INK);
+  docPdf.text('Saldo total de todas as contas', M, y);
+  docPdf.text(brl(totalGeral), M+W, y, { align:'right' });
+  y += 10;
+
+  contasAtivas.forEach(conta=>{
+    if(y > 260){ docPdf.addPage(); y = 20; }
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(11.5); docPdf.setTextColor(...BLUEDEEP);
+    docPdf.text(`${conta.nome} — ${conta.banco||''}`, M, y);
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(10); docPdf.setTextColor(...INK);
+    docPdf.text(brl(saldoConta(conta.id)), M+W, y, { align:'right' });
+    y += 6;
+
+    const lista = state.lancamentos.filter(l=>l.contaId===conta.id && (l.status==='pago'||l.status==='recebido') && l.dataPagamento>=de && l.dataPagamento<=hoje).sort((a,b)=>(a.dataPagamento||'').localeCompare(b.dataPagamento||''));
+    if(!lista.length){
+      docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
+      docPdf.text('Sem movimentação no mês.', M, y);
+      y += 8;
+    } else {
+      lista.forEach(l=>{
+        if(y > 275){ docPdf.addPage(); y = 20; }
+        docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...INK);
+        docPdf.text(fmtDate(l.dataPagamento), M, y);
+        const desc = (l.descricao||'').length>45 ? l.descricao.slice(0,45)+'…' : (l.descricao||'');
+        docPdf.text(desc, M+22, y);
+        docPdf.setTextColor(...(l.tipo==='entrada'?SUCCESS:DANGER));
+        docPdf.text(`${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}`, M+W, y, { align:'right' });
+        y += 5.5;
+      });
+      y += 4;
+    }
+    docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+    y += 8;
+  });
+
+  docPdf.save(`extrato-consolidado-${hoje.slice(0,7)}.pdf`);
+}
+
 function gerarExtratoPDF(contaId, dataDe, dataAte){
   const conta = state.contas.find(c=>c.id===contaId);
   if(!conta) return;
@@ -4407,41 +4510,121 @@ function gerarExtratoPDF(contaId, dataDe, dataAte){
 }
 
 function viewContas(){
-  const total = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
-  return `
-    <div class="topbar">
-      <div><h1>Contas Bancárias</h1></div>
-      <div style="display:flex;gap:10px;align-items:center;">
-        <div class="dash-acao" style="display:flex;gap:8px;align-items:center;">
-          ${dropdownNovoHTML()}
-        </div>
-        <div class="card saldo" style="padding:12px 18px;"><div class="label">Saldo total</div><div class="value mono ${total>=0?'pos':'neg'}" style="font-size:20px;">${brl(total)}</div></div>
-      </div>
-    </div>
-    <div class="conta-cards" id="contaCardsWrap">
-      ${state.contas.map((c,idx)=>`
-        <div class="conta-card" style="--accent-c:${c.cor}" draggable="true" data-conta-drag-id="${c.id}" data-conta-idx="${idx}">
+  const todasContas = state.contas;
+  const ativas = todasContas.filter(c=>!c.arquivada);
+  const arquivadas = todasContas.filter(c=>c.arquivada);
+  const total = ativas.reduce((s,c)=>s+saldoConta(c.id),0);
+  const maxSaldoAbs = Math.max(1, ...ativas.map(c=>Math.abs(saldoConta(c.id))));
+
+  let listaExibida = [...ativas];
+  if(ordenacaoContas==='maior') listaExibida.sort((a,b)=>saldoConta(b.id)-saldoConta(a.id));
+  else if(ordenacaoContas==='menor') listaExibida.sort((a,b)=>saldoConta(a.id)-saldoConta(b.id));
+  // 'manual' mantém a ordem já salva em state.contas (drag-to-reorder)
+
+  // Alerta de contas parecidas (mesmo banco + mesmo tipo) — pode ser cadastro duplicado por engano
+  const chaveDup = c => `${c.banco||''}|${c.tipo}`;
+  const contagem = {};
+  ativas.forEach(c=>{ const k=chaveDup(c); contagem[k]=(contagem[k]||0)+1; });
+  const possivelDuplicada = c => c.banco && contagem[chaveDup(c)]>1;
+
+  const hoje = todayISO();
+  const em90dias = new Date(); em90dias.setDate(em90dias.getDate()-90);
+  const em90ISO = em90dias.toISOString().slice(0,10);
+
+  const cardHTML = (c) => {
+    const saldo = saldoConta(c.id);
+    const sparkline = saldoContaHistorico(c.id, 30);
+    const sparkMin = Math.min(...sparkline), sparkMax = Math.max(...sparkline);
+    const sparkRange = Math.max(1, sparkMax-sparkMin);
+    const ultimaMov = ultimaMovimentacaoConta(c.id);
+    const parada = !ultimaMov || ultimaMov.data<em90ISO;
+    const mesPassadoRef = (()=>{ const [a,m]=hoje.slice(0,7).split('-').map(Number); const d=new Date(a,m-2,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${new Date(d.getFullYear(),d.getMonth()+1,0).getDate()}`; })();
+    const saldoMesPassado = saldoContaEmData(c.id, mesPassadoRef);
+    const variacaoPct = saldoMesPassado!==0 ? ((saldo-saldoMesPassado)/Math.abs(saldoMesPassado)*100) : null;
+    const pctParticipacao = total!==0 ? Math.abs(saldo)/Math.abs(total)*100 : 0;
+    const de = `${hoje.slice(0,7)}-01`;
+    const entradasMes = movimentosRealizados().filter(ev=>ev.contaId===c.id && ev.tipo==='entrada' && ev.data>=de && ev.data<=hoje).reduce((s,ev)=>s+ev.valor,0);
+    const saidasMes = movimentosRealizados().filter(ev=>ev.contaId===c.id && ev.tipo==='saida' && ev.data>=de && ev.data<=hoje).reduce((s,ev)=>s+ev.valor,0);
+    const abaixoDoMinimo = c.saldoMinimoAlerta>0 && saldo<c.saldoMinimoAlerta;
+
+    return `
+        <div class="conta-card ${c.principal?'conta-principal':''} ${saldo<0?'conta-negativa':''}" style="--accent-c:${c.cor}" draggable="true" data-conta-drag-id="${c.id}" data-conta-idx="${todasContas.indexOf(c)}">
           <div class="conta-actions">
             <span class="drag-handle" title="Arrastar para reordenar">⠿⠿</span>
+            <button class="icon-btn" data-action="marcar-conta-principal" data-id="${c.id}" title="${c.principal?'Conta principal':'Marcar como principal'}" style="${c.principal?'color:var(--warn);':''}">${c.principal?'★':'☆'}</button>
             <button class="icon-btn" data-action="editar-conta" data-id="${c.id}" title="Editar">✎</button>
-            ${state.contas.length>1 ? `<button class="icon-btn" data-action="excluir-conta" data-id="${c.id}" title="Excluir">✕</button>` : ''}
+            ${todasContas.length>1 ? `<button class="icon-btn" data-action="arquivar-conta" data-id="${c.id}" title="Arquivar">🗄️</button>` : ''}
+            ${todasContas.length>1 ? `<button class="icon-btn" data-action="excluir-conta" data-id="${c.id}" title="Excluir">✕</button>` : ''}
           </div>
           <div class="card-top">
             ${bankLogoHTML(c, 38)}
             <div class="nome-wrap">
-              <div class="nome">${escapeHTML(c.nome)}</div>
+              <div class="nome">${escapeHTML(c.nome)}${c.principal?' <span style="color:var(--warn);font-size:12px;">★ principal</span>':''}</div>
               <div class="banco">${escapeHTML(c.banco || '—')} · ${c.tipo}</div>
             </div>
           </div>
-          <div class="saldo mono ${saldoConta(c.id)>=0?'pos':'neg'}">${brl(saldoConta(c.id))}</div>
+          <div class="saldo mono ${saldo>=0?'pos':'neg'}">${vm(brl(saldo))}${saldo<0?' <span style="font-size:11px;background:var(--danger);color:#fff;padding:1px 6px;border-radius:8px;">negativo</span>':''}</div>
+          ${variacaoPct!==null ? `<div style="font-size:11px;color:${variacaoPct>=0?'var(--success)':'var(--danger)'};margin-top:2px;">${variacaoPct>=0?'▲':'▼'} ${Math.abs(variacaoPct).toFixed(1)}% vs mês passado</div>` : ''}
+          ${!modoCompactoContas ? `
+          <div style="display:flex;align-items:flex-end;gap:1.5px;height:26px;margin-top:8px;" title="Saldo nos últimos 30 dias">
+            ${sparkline.map(v=>`<div style="flex:1;background:${c.cor};opacity:.55;border-radius:1px;height:${Math.max(2,Math.round((v-sparkMin)/sparkRange*24))}px;"></div>`).join('')}
+          </div>
+          <div style="display:flex;gap:10px;font-size:11px;color:var(--text-soft);margin-top:6px;">
+            <span style="color:var(--success);">▲ ${vm(brl(entradasMes))}</span>
+            <span style="color:var(--danger);">▼ ${vm(brl(saidasMes))}</span>
+          </div>
+          ${ultimaMov ? `<div style="font-size:10.5px;color:var(--text-soft);margin-top:4px;">Última mov.: ${fmtDate(ultimaMov.data)} — ${escapeHTML((ultimaMov.descricao||'').slice(0,40))}</div>` : ''}
+          <div style="background:var(--bone);border-radius:4px;height:4px;overflow:hidden;margin-top:8px;"><div style="width:${pctParticipacao}%;height:100%;background:${c.cor};"></div></div>
+          <div style="font-size:10px;color:var(--text-soft);margin-top:2px;">${pctParticipacao.toFixed(0)}% do saldo total</div>
+          ${c.chavePix ? `<div style="font-size:11px;color:var(--text-soft);margin-top:6px;">🔑 Pix: ${escapeHTML(c.chavePix)}</div>` : ''}
+          ${abaixoDoMinimo ? `<div class="note" style="border-color:var(--warn);margin:8px 0 0;padding:6px 10px;font-size:11px;">⚠️ Abaixo do mínimo configurado (${brl(c.saldoMinimoAlerta)})</div>` : ''}
+          ${parada && ultimaMov ? `<div class="note" style="margin:8px 0 0;padding:6px 10px;font-size:11px;">💤 Sem movimentação há mais de 90 dias</div>` : ''}
+          ${!ultimaMov ? `<div class="note" style="margin:8px 0 0;padding:6px 10px;font-size:11px;">💤 Nenhuma movimentação registrada ainda</div>` : ''}
+          ${possivelDuplicada(c) ? `<div class="note" style="border-color:var(--warn);margin:8px 0 0;padding:6px 10px;font-size:11px;">⚠️ Outra conta com mesmo banco/tipo — confira se não é duplicada</div>` : ''}
+          ` : ''}
           <div class="conta-card-footer" style="display:flex;gap:8px;margin-top:12px;">
             <button class="btn ghost sm" data-action="ver-extrato" data-id="${c.id}" style="flex:1;">Ver extrato</button>
             ${menuAdicionarContaHTML(c.id, true)}
           </div>
+        </div>`;
+  };
+
+  return `
+    <div class="topbar">
+      <div><h1>Contas Bancárias</h1></div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <div class="dash-acao" style="display:flex;gap:8px;align-items:center;">
+          ${dropdownNovoHTML()}
         </div>
-      `).join('')}
+        <button class="btn ghost sm" id="btnExtratoConsolidadoPDF">📄 Extrato consolidado</button>
+        <button class="btn ghost sm" id="btnIrOndeDinheiro">🧭 Onde meu dinheiro está</button>
+        <div class="card saldo" style="padding:12px 18px;"><div class="label">Saldo total</div><div class="value mono ${total>=0?'pos':'neg'}" style="font-size:20px;">${vm(brl(total))}</div></div>
+      </div>
+    </div>
+    <div class="report-controls" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <select id="ordenacaoContasSelect">
+        <option value="manual" ${ordenacaoContas==='manual'?'selected':''}>Ordem manual (arrastar)</option>
+        <option value="maior" ${ordenacaoContas==='maior'?'selected':''}>Maior saldo primeiro</option>
+        <option value="menor" ${ordenacaoContas==='menor'?'selected':''}>Menor saldo primeiro</option>
+      </select>
+      <button class="btn ghost sm" id="btnToggleModoCompacto">${modoCompactoContas?'▤ Ver detalhado':'▦ Ver compacto'}</button>
+      ${arquivadas.length ? `<button class="btn ghost sm" id="btnToggleArquivadas">${mostrarContasArquivadas?'Ocultar':'Mostrar'} arquivadas (${arquivadas.length})</button>` : ''}
+    </div>
+    <div class="conta-cards ${modoCompactoContas?'conta-cards-compacto':''}" id="contaCardsWrap">
+      ${listaExibida.map(cardHTML).join('')}
       <div class="add-conta-card" id="btnNovaConta">+ Adicionar conta</div>
     </div>
+    ${mostrarContasArquivadas && arquivadas.length ? `
+    <div class="dash-section-label">Contas arquivadas</div>
+    <div class="conta-cards">
+      ${arquivadas.map(c=>`
+        <div class="conta-card" style="--accent-c:${c.cor};opacity:.6;">
+          <div class="conta-actions"><button class="icon-btn" data-action="desarquivar-conta" data-id="${c.id}" title="Reativar">↩️</button></div>
+          <div class="card-top">${bankLogoHTML(c,38)}<div class="nome-wrap"><div class="nome">${escapeHTML(c.nome)}</div><div class="banco">${escapeHTML(c.banco||'—')} · ${c.tipo}</div></div></div>
+          <div class="saldo mono">${vm(brl(saldoConta(c.id)))}</div>
+        </div>
+      `).join('')}
+    </div>` : ''}
     <div class="note" style="margin-top:0;">As contas aqui são uma representação simplificada — não há integração bancária automática (open finance). Pra comparar o extrato do banco com os lançamentos, use a Conciliação Bancária em Configurações do Sistema.</div>
   `;
 }
@@ -13434,6 +13617,60 @@ function attachViewHandlers(){
       persist(); render(); showToast('Conta excluída');
     });
   });
+  document.querySelectorAll('[data-action="marcar-conta-principal"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const conta = state.contas.find(c=>c.id===btn.dataset.id);
+      if(!conta) return;
+      const jaEraPrincipal = conta.principal;
+      state.contas.forEach(c=>{ c.principal = false; });
+      conta.principal = !jaEraPrincipal;
+      persist(); render();
+    });
+  });
+  document.querySelectorAll('[data-action="arquivar-conta"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const conta = state.contas.find(c=>c.id===btn.dataset.id);
+      if(!conta) return;
+      const saldo = saldoConta(conta.id);
+      if(Math.abs(saldo)>0.009 && !confirm(`Essa conta ainda tem saldo de ${brl(saldo)}. Arquivar mesmo assim? Os lançamentos continuam nela, só some da lista principal.`)) return;
+      conta.arquivada = true;
+      if(conta.principal) conta.principal = false;
+      persist(); render();
+      showToast('Conta arquivada');
+    });
+  });
+  document.querySelectorAll('[data-action="desarquivar-conta"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const conta = state.contas.find(c=>c.id===btn.dataset.id);
+      if(!conta) return;
+      conta.arquivada = false;
+      persist(); render();
+      showToast('Conta reativada');
+    });
+  });
+  const ordenacaoContasSelect = document.getElementById('ordenacaoContasSelect');
+  if(ordenacaoContasSelect) ordenacaoContasSelect.addEventListener('change', ()=>{
+    ordenacaoContas = ordenacaoContasSelect.value;
+    render();
+  });
+  const btnToggleModoCompacto = document.getElementById('btnToggleModoCompacto');
+  if(btnToggleModoCompacto) btnToggleModoCompacto.addEventListener('click', ()=>{
+    modoCompactoContas = !modoCompactoContas;
+    render();
+  });
+  const btnToggleArquivadas = document.getElementById('btnToggleArquivadas');
+  if(btnToggleArquivadas) btnToggleArquivadas.addEventListener('click', ()=>{
+    mostrarContasArquivadas = !mostrarContasArquivadas;
+    render();
+  });
+  const btnIrOndeDinheiro = document.getElementById('btnIrOndeDinheiro');
+  if(btnIrOndeDinheiro) btnIrOndeDinheiro.addEventListener('click', ()=>{
+    relatorioAtivo = 'onde_dinheiro';
+    currentView = 'relatorio-detalhe';
+    render();
+  });
+  const btnExtratoConsolidadoPDF = document.getElementById('btnExtratoConsolidadoPDF');
+  if(btnExtratoConsolidadoPDF) btnExtratoConsolidadoPDF.addEventListener('click', ()=>gerarExtratoConsolidadoPDF());
   document.querySelectorAll('[data-action="ver-extrato"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       extratoContaId = btn.dataset.id;
@@ -15224,7 +15461,11 @@ function openContratoModal(existing){
 function openContaModal(existing){
   const isEdit = !!existing;
   const modal = document.getElementById('modalContent');
-  const corSelecionada = existing?.cor || CONTA_CORES[state.contas.length % CONTA_CORES.length];
+  const corSelecionada = existing?.cor || (()=>{
+    const usadas = state.contas.filter(c=>!c.arquivada).map(c=>c.cor);
+    const naoUsada = CONTA_CORES.find(c=>!usadas.includes(c));
+    return naoUsada || CONTA_CORES[state.contas.length % CONTA_CORES.length];
+  })();
   modal.innerHTML = `
     <h3>${isEdit ? 'Editar conta' : 'Nova conta bancária'}</h3>
     <div class="field">
@@ -15255,6 +15496,14 @@ function openContaModal(existing){
     <div class="field">
       <label>Limite de cheque especial / conta garantida (R$, opcional)</label>
       <input type="text" inputmode="decimal" id="cLimiteChequeEspecial" value="${existing&&existing.limiteChequeEspecial?existing.limiteChequeEspecial:''}" placeholder="0,00">
+    </div>
+    <div class="field">
+      <label>Chave Pix (opcional)</label>
+      <input type="text" id="cChavePix" value="${existing&&existing.chavePix?escapeHTML(existing.chavePix):''}" placeholder="CPF/CNPJ, e-mail, telefone ou aleatória">
+    </div>
+    <div class="field">
+      <label>Alertar se o saldo cair abaixo de (R$, opcional)</label>
+      <input type="text" inputmode="decimal" id="cSaldoMinimoAlerta" value="${existing&&existing.saldoMinimoAlerta?existing.saldoMinimoAlerta:''}" placeholder="0,00">
     </div>
     <div class="field">
       <label>Cor de identificação</label>
@@ -15307,7 +15556,10 @@ function openContaModal(existing){
     const bancoDominio = isOutro ? '' : opt.dataset.dominio;
     const limiteChequeEspecialRaw = document.getElementById('cLimiteChequeEspecial').value.trim();
     const limiteChequeEspecial = limiteChequeEspecialRaw ? numBR(limiteChequeEspecialRaw) : 0;
-    const payload = { nome, banco, bancoDominio, tipo: document.getElementById('cTipo').value, saldoInicial, cor: corAtual, limiteChequeEspecial };
+    const chavePix = document.getElementById('cChavePix').value.trim();
+    const saldoMinimoAlertaRaw = document.getElementById('cSaldoMinimoAlerta').value.trim();
+    const saldoMinimoAlerta = saldoMinimoAlertaRaw ? numBR(saldoMinimoAlertaRaw) : 0;
+    const payload = { nome, banco, bancoDominio, tipo: document.getElementById('cTipo').value, saldoInicial, cor: corAtual, limiteChequeEspecial, chavePix, saldoMinimoAlerta };
     if(isEdit){ Object.assign(existing, payload); }
     else { state.contas.push({ id: uid(), ...payload }); }
     persist(); closeModal(); render();
