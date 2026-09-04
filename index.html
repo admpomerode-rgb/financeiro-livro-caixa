@@ -496,12 +496,16 @@
   }
   .more-drawer-head{display:flex;justify-content:space-between;align-items:center;font-family:'Space Grotesk';font-weight:600;font-size:15px;margin-bottom:16px;}
   .more-drawer-head button{background:var(--bone);border:none;border-radius:50%;width:30px;height:30px;font-size:14px;color:var(--text-soft);}
-  .more-drawer-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;}
+  .more-drawer-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:18px;}
+  .more-section-label{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-soft);margin:0 0 8px;}
   .more-item{
     display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;
-    padding:16px 8px;border:1px solid var(--line);border-radius:12px;font-size:12.5px;font-weight:600;color:var(--ink);cursor:pointer;
+    padding:18px 8px;border:1px solid var(--line);border-radius:12px;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;position:relative;
   }
-  .more-item .more-icon{font-size:24px;}
+  .more-item .more-icon{font-size:28px;}
+  .more-item .more-star{position:absolute;top:6px;left:8px;font-size:15px;color:var(--text-soft);cursor:pointer;line-height:1;padding:2px;}
+  .more-item .more-badge{position:absolute;top:6px;right:8px;background:var(--danger);color:#fff;font-size:10px;font-weight:700;border-radius:9px;min-width:18px;height:18px;display:flex;align-items:center;justify-content:center;padding:0 4px;}
+  .more-scroll-fade{position:sticky;bottom:0;height:22px;margin:-22px 0 0;background:linear-gradient(to bottom, rgba(255,255,255,0), var(--white));pointer-events:none;}
   .more-drawer-footer{display:flex;gap:10px;margin-top:16px;}
   .more-drawer-footer button{
     flex:1;display:flex;align-items:center;justify-content:center;gap:6px;
@@ -703,25 +707,9 @@
       <span>Mais opções</span>
       <button id="btnFecharMais">✕</button>
     </div>
-    <div class="more-drawer-grid">
-      <div class="more-item" data-view="contas"><span class="more-icon">🏦</span>Contas Bancárias</div>
-      <div class="more-item" data-view="cartoes"><span class="more-icon">💳</span>Cartões de Crédito</div>
-      <div class="more-item" data-view="relatorios"><span class="more-icon">📊</span>Relatórios</div>
-      <div class="more-item" data-view="categorias"><span class="more-icon">🏷️</span>Categorias</div>
-      <div class="more-item" data-view="fornecedores"><span class="more-icon">🚚</span>Fornecedores</div>
-      <div class="more-item" data-view="recorrencias"><span class="more-icon">🔁</span>Recorrentes</div>
-      <div class="more-item" data-view="contratos"><span class="more-icon">📑</span>Contratos</div>
-      <div class="more-item" data-view="metas"><span class="more-icon">🎯</span>Metas de Reserva</div>
-      <div class="more-item" data-view="simulacao"><span class="more-icon">🔮</span>Simulação "E Se"</div>
-      <div class="more-item" data-view="orcamento"><span class="more-icon">🗂️</span>Orçamento e Planejamento</div>
-      <div class="more-item" data-view="comissoes"><span class="more-icon">🤝</span>Comissões</div>
-      <div class="more-item" data-view="funil"><span class="more-icon">🔻</span>Funil de Vendas</div>
-      <div class="more-item" data-view="a-receber-representante"><span class="more-icon">💵</span>A Receber do Representante</div>
-      <div class="more-item" data-view="ativos"><span class="more-icon">📦</span>Ativos Patrimoniais</div>
-      <div class="more-item" data-view="investimentos"><span class="more-icon">📈</span>Investimentos</div>
-      <div class="more-item" data-view="integracoes"><span class="more-icon">🔌</span>Central de Integrações</div>
-      <div class="more-item" data-view="configuracoes"><span class="more-icon">⚙️</span>Configurações</div>
-    </div>
+    <input type="text" id="moreBusca" placeholder="Buscar..." style="margin:0 16px 12px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font-size:14px;">
+    <div class="more-drawer-grid" id="moreDrawerGrid"></div>
+    <div class="more-scroll-fade"></div>
     <div class="more-drawer-footer">
       <button id="btnBackupMobile"><span class="footer-icon">⇅</span> Backup / Restaurar</button>
       <button id="btnSairMobile"><span class="footer-icon">⎋</span> Sair</button>
@@ -943,6 +931,8 @@ function aplicarMigracoes(s){
   if(!s.estoqueInsumos) s.estoqueInsumos = [];
   if(!s.previsoesGastoFuturo) s.previsoesGastoFuturo = [];
   if(!s.recebimentosDinheiroRep) s.recebimentosDinheiroRep = [];
+  if(!s.moreFavoritos) s.moreFavoritos = [];
+  if(!s.moreRecentes) s.moreRecentes = [];
   if(!s.custosProdutosVK) s.custosProdutosVK = [];
   if(!s.precosTabelaProdutos) s.precosTabelaProdutos = {};
   if(!s.emprestimos) s.emprestimos = [];
@@ -1316,19 +1306,109 @@ document.querySelectorAll('#selMenuDrop [data-sel-acao]').forEach(btn=>{
 
 /* Barra de navegação inferior (celular) */
 const moreDrawer = document.getElementById('moreDrawer');
+
+// Definição de todos os itens da gaveta "Mais opções" — usada pra montar a grid dinamicamente
+// (busca, favoritos, recentes, badge de pendência, agrupamento). Grupos batem com os da barra
+// lateral do desktop, pra ficar consistente.
+function moreItensDef(){
+  return [
+    { view:'contas', icone:'🏦', nome:'Contas Bancárias', grupo:'Operacional' },
+    { view:'cartoes', icone:'💳', nome:'Cartões de Crédito', grupo:'Operacional' },
+    { view:'ativos', icone:'📦', nome:'Ativos Patrimoniais', grupo:'Operacional', badge:()=>(state.comprasProcessosPendentes||[]).length },
+    { view:'investimentos', icone:'📈', nome:'Investimentos', grupo:'Operacional', badge:()=>(state.notasPendentes||[]).length },
+    { view:'orcamentos-processos', icone:'📋', nome:'Orçamentos e Compras', grupo:'Operacional', badge:()=>(state.orcamentosProcessos||[]).filter(o=>o.status==='pendente').length },
+    { view:'comissoes', icone:'🤝', nome:'Comissões', grupo:'Operacional' },
+    { view:'funil', icone:'🔻', nome:'Funil de Vendas', grupo:'Operacional' },
+    { view:'a-receber-representante', icone:'💵', nome:'A Receber do Representante', grupo:'Operacional', badge:()=>(state.recebimentosDinheiroRep||[]).filter(r=>!r.conferido).length },
+    { view:'relatorios', icone:'📊', nome:'Relatórios', grupo:'Análise' },
+    { view:'orcamento', icone:'🗂️', nome:'Orçamento e Planejamento', grupo:'Análise' },
+    { view:'simulacao', icone:'🔮', nome:'Simulação "E Se"', grupo:'Análise' },
+    { view:'categorias', icone:'🏷️', nome:'Categorias', grupo:'Cadastros e Configurações' },
+    { view:'fornecedores', icone:'🚚', nome:'Fornecedores', grupo:'Cadastros e Configurações' },
+    { view:'recorrencias', icone:'🔁', nome:'Recorrentes', grupo:'Cadastros e Configurações' },
+    { view:'contratos', icone:'📑', nome:'Contratos', grupo:'Cadastros e Configurações' },
+    { view:'metas', icone:'🎯', nome:'Metas de Reserva', grupo:'Cadastros e Configurações' },
+    { view:'integracoes', icone:'🔌', nome:'Central de Integrações', grupo:'Cadastros e Configurações', badge:()=>(state.vkAprovacoes||[]).length+(state.faturasPendentes||[]).length },
+    { view:'configuracoes', icone:'⚙️', nome:'Configurações', grupo:'Cadastros e Configurações' },
+  ];
+}
+
+function moreItemHTML(item, favoritado){
+  const badgeCount = item.badge ? item.badge() : 0;
+  return `
+    <div class="more-item" data-view="${item.view}">
+      <span class="more-star" data-fav-view="${item.view}" title="${favoritado?'Remover dos favoritos':'Adicionar aos favoritos'}">${favoritado?'★':'☆'}</span>
+      ${badgeCount>0 ? `<span class="more-badge">${badgeCount>9?'9+':badgeCount}</span>` : ''}
+      <span class="more-icon">${item.icone}</span>${escapeHTML(item.nome)}
+    </div>`;
+}
+
+function renderMoreDrawerGrid(filtro){
+  filtro = (filtro||'').trim().toLowerCase();
+  const todos = moreItensDef();
+  const porView = {};
+  todos.forEach(i=>{ porView[i.view] = i; });
+  const filtrados = filtro ? todos.filter(i=>i.nome.toLowerCase().includes(filtro)) : todos;
+
+  if(filtro){
+    document.getElementById('moreDrawerGrid').innerHTML = filtrados.length
+      ? filtrados.map(i=>moreItemHTML(i, (state.moreFavoritos||[]).includes(i.view))).join('')
+      : `<div class="empty" style="grid-column:1/-1;">Nada encontrado pra "${escapeHTML(filtro)}".</div>`;
+    return;
+  }
+
+  const favoritos = (state.moreFavoritos||[]).map(v=>porView[v]).filter(Boolean);
+  const recentesViews = (state.moreRecentes||[]).filter(v=>!(state.moreFavoritos||[]).includes(v)).slice(0,4);
+  const recentes = recentesViews.map(v=>porView[v]).filter(Boolean);
+  const grupos = ['Operacional','Análise','Cadastros e Configurações'];
+
+  let html = '';
+  if(favoritos.length){
+    html += `<div class="more-section-label">⭐ Favoritos</div><div class="more-drawer-grid" style="padding:0;">${favoritos.map(i=>moreItemHTML(i,true)).join('')}</div>`;
+  }
+  if(recentes.length){
+    html += `<div class="more-section-label">🕐 Recentes</div><div class="more-drawer-grid" style="padding:0;">${recentes.map(i=>moreItemHTML(i,false)).join('')}</div>`;
+  }
+  grupos.forEach(g=>{
+    const itensGrupo = todos.filter(i=>i.grupo===g);
+    if(!itensGrupo.length) return;
+    html += `<div class="more-section-label">${g}</div><div class="more-drawer-grid" style="padding:0;">${itensGrupo.map(i=>moreItemHTML(i,(state.moreFavoritos||[]).includes(i.view))).join('')}</div>`;
+  });
+  document.getElementById('moreDrawerGrid').outerHTML = `<div id="moreDrawerGrid">${html}</div>`;
+}
+
 document.getElementById('bottomNav').addEventListener('click', (e)=>{
   const item = e.target.closest('.bottom-nav-item[data-view]');
   if(!item) return;
   currentView = item.dataset.view;
   render();
 });
-document.getElementById('btnAbrirMais').addEventListener('click', ()=>moreDrawer.classList.add('open'));
+document.getElementById('btnAbrirMais').addEventListener('click', ()=>{
+  moreDrawer.classList.add('open');
+  document.getElementById('moreBusca').value = '';
+  renderMoreDrawerGrid('');
+});
 document.getElementById('btnFecharMais').addEventListener('click', ()=>moreDrawer.classList.remove('open'));
 moreDrawer.addEventListener('click', (e)=>{ if(e.target===moreDrawer) moreDrawer.classList.remove('open'); });
-document.querySelector('.more-drawer-grid').addEventListener('click', (e)=>{
+document.getElementById('moreBusca').addEventListener('input', (e)=>renderMoreDrawerGrid(e.target.value));
+document.querySelector('.more-drawer-sheet').addEventListener('click', (e)=>{
+  const star = e.target.closest('.more-star[data-fav-view]');
+  if(star){
+    e.stopPropagation();
+    const v = star.dataset.favView;
+    if(!state.moreFavoritos) state.moreFavoritos = [];
+    if(state.moreFavoritos.includes(v)) state.moreFavoritos = state.moreFavoritos.filter(x=>x!==v);
+    else state.moreFavoritos.push(v);
+    persist();
+    renderMoreDrawerGrid(document.getElementById('moreBusca').value);
+    return;
+  }
   const item = e.target.closest('.more-item[data-view]');
   if(!item) return;
   currentView = item.dataset.view;
+  if(!state.moreRecentes) state.moreRecentes = [];
+  state.moreRecentes = [item.dataset.view, ...state.moreRecentes.filter(v=>v!==item.dataset.view)].slice(0,6);
+  persist();
   moreDrawer.classList.remove('open');
   render();
 });
