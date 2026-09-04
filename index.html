@@ -5633,6 +5633,29 @@ function viewRelatorios(){
     { id:'volume_margem_produto', icone:'💎', nome:'Ranking Volume x Margem por Produto', desc:'Cruza quantidade vendida com margem — acha quem vende muito com pouco lucro, e o contrário' },
     { id:'saude_cadastros', icone:'🩺', nome:'Saúde dos Cadastros', desc:'Fornecedores e ativos patrimoniais com informação faltando (CNPJ, telefone, foto, nota fiscal)' },
     { id:'projecao_comissoes', icone:'🤝', nome:'Projeção de Comissões a Pagar', desc:'Comissões já geradas mas ainda pendentes, por vendedor e por vencimento' },
+    { id:'fcl', icone:'💧', nome:'Fluxo de Caixa Livre', desc:'EBITDA menos investimento em ativos — o que sobrou de verdade depois de operar e reinvestir' },
+    { id:'payback', icone:'⏳', nome:'Payback de Investimento', desc:'Calculadora — em quantos meses um investimento se paga, dado o ganho mensal esperado' },
+    { id:'cvl_multiproduto', icone:'📐', nome:'Análise Custo-Volume-Lucro', desc:'Margem de contribuição de cada produto no mês, e o peso de cada um no resultado' },
+    { id:'dmpl', icone:'📗', nome:'Mutações do Patrimônio Líquido', desc:'Como o Patrimônio Líquido mudou mês a mês nos últimos 12 meses' },
+    { id:'provisoes', icone:'🗂️', nome:'Provisões (Férias/13º)', desc:'Calculadora — estimativa de férias e 13º proporcional a partir da folha informada' },
+    { id:'fluxo_centro_custo', icone:'🏗️', nome:'Fluxo de Caixa por Centro de Custo', desc:'Entradas e saídas realizadas, separadas por centro de custo' },
+    { id:'conciliacao_saldo', icone:'✅', nome:'Conciliação de Saldo por Conta', desc:'Compara o saldo calculado pelo sistema com o saldo real do extrato bancário' },
+    { id:'taxa_conversao_funil', icone:'🔻', nome:'Taxa de Conversão do Funil', desc:'% de oportunidades que viraram pedido, e depois faturamento' },
+    { id:'novos_vs_recorrentes', icone:'🆕', nome:'Novos Clientes vs. Recorrentes', desc:'Quantos clientes compraram pela primeira vez no mês vs já eram conhecidos' },
+    { id:'taxa_recompra', icone:'🔁', nome:'Taxa de Recompra', desc:'% de clientes que compraram mais de uma vez nos últimos 12 meses' },
+    { id:'ltv_cac', icone:'💗', nome:'LTV e Relação LTV/CAC', desc:'Valor estimado do cliente ao longo do tempo, comparado ao custo de aquisição' },
+    { id:'abc_estoque', icone:'📦', nome:'Curva ABC de Estoque', desc:'Insumos que mais pesam no valor total parado em estoque (não no volume de compra)' },
+    { id:'estoque_abaixo_minimo', icone:'🔻', nome:'Estoque Abaixo do Mínimo', desc:'Insumos com quantidade atual abaixo do mínimo configurado' },
+    { id:'obsolescencia_estoque', icone:'🕸️', nome:'Obsolescência de Estoque', desc:'Insumos sem entrada registrada há 90+ dias — possível item parado/esquecido' },
+    { id:'comparativo_preco_fornecedores', icone:'⚖️', nome:'Comparativo de Preço entre Fornecedores', desc:'Mesmo insumo, fornecedores diferentes — quem cobra mais caro' },
+    { id:'calendario_obrigacoes', icone:'📆', nome:'Calendário de Obrigações Acessórias', desc:'Datas de referência do DAS e da declaração anual do MEI' },
+    { id:'manutencao_consolidada', icone:'🔧', nome:'Manutenção Preventiva Consolidada', desc:'Todas as manutenções programadas de todos os ativos, numa lista só' },
+    { id:'vida_util_remanescente', icone:'⏱️', nome:'Vida Útil Remanescente', desc:'Quanto tempo falta pra cada ativo terminar de depreciar' },
+    { id:'roi_ativo', icone:'📐', nome:'Custo e Valor Atual por Ativo', desc:'Custo original vs. valor contábil atual e desgaste acumulado de cada ativo' },
+    { id:'alocacao_ativos', icone:'🥧', nome:'Alocação de Ativos', desc:'% investido em Renda Fixa vs. Renda Variável' },
+    { id:'divergencias', icone:'🔍', nome:'Divergências e Exceções', desc:'Lançamentos fora do padrão — valores muito altos, sem categoria, data futura' },
+    { id:'posicao_bancaria', icone:'🏦', nome:'Posição Bancária Consolidada', desc:'Saldo de todas as contas bancárias, lado a lado' },
+    { id:'taxas_bancarias', icone:'💸', nome:'Taxas e Tarifas Bancárias', desc:'Quanto foi pago em taxas, tarifas e anuidades no mês' },
     { id:'breakeven', icone:'⚖️', nome:'Ponto de Equilíbrio', desc:'Vendas mínimas pra cobrir os custos, em 3 cenários (otimista/realista/pessimista)' },
     { id:'valuation', icone:'💎', nome:'Valuation Estimado', desc:'Estimativa educacional de valor da empresa por múltiplos de EBITDA e faturamento' },
     { id:'aging', icone:'⏳', nome:'Aging — Vencidos por Faixa', desc:'Contas a receber e a pagar por faixa de atraso, com ranking de inadimplentes' },
@@ -5665,7 +5688,7 @@ function viewRelatorios(){
 const RELATORIOS_NOMES = {
   gerencial:'Dashboard Gerencial', executivo:'Dashboard Executivo', dre:'DRE', balanco:'Balanço Patrimonial', mei:'Declaração MEI', indicadores:'Indicadores Financeiros',
   produto:'Rentabilidade por Produto', investimentos:'Relatório de Investimentos', liquidez:'Índices de Liquidez', aging:'Aging — Vencidos por Faixa', dfc:'DFC — Fluxo de Caixa', cartoes:'Cartões de Crédito',
-  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio', yoy:'Comparativo Ano a Ano', sazonalidade:'Análise de Sazonalidade', calendario_vencimentos:'Calendário de Vencimentos', carga_tributaria:'Carga Tributária', simulador_preco:'Simulador de Preço', formas_pagamento:'Formas de Pagamento', rentabilidade_cliente:'Rentabilidade por Cliente', pe_produto:'Ponto de Equilíbrio por Produto', metas_comerciais:'Metas Comerciais', fixo_variavel_tempo:'Custo Fixo vs Variável no Tempo', onde_dinheiro:'Onde Meu Dinheiro Está', health_score:'Health Score do Negócio', eficiencia_cobranca:'Eficiência de Cobrança', variacao_preco_insumos:'Variação de Preço de Insumos', concentracao_clientes:'Concentração de Risco de Clientes', volume_margem_produto:'Ranking Volume x Margem por Produto', saude_cadastros:'Saúde dos Cadastros', projecao_comissoes:'Projeção de Comissões a Pagar'
+  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio', yoy:'Comparativo Ano a Ano', sazonalidade:'Análise de Sazonalidade', calendario_vencimentos:'Calendário de Vencimentos', carga_tributaria:'Carga Tributária', simulador_preco:'Simulador de Preço', formas_pagamento:'Formas de Pagamento', rentabilidade_cliente:'Rentabilidade por Cliente', pe_produto:'Ponto de Equilíbrio por Produto', metas_comerciais:'Metas Comerciais', fixo_variavel_tempo:'Custo Fixo vs Variável no Tempo', onde_dinheiro:'Onde Meu Dinheiro Está', health_score:'Health Score do Negócio', eficiencia_cobranca:'Eficiência de Cobrança', variacao_preco_insumos:'Variação de Preço de Insumos', concentracao_clientes:'Concentração de Risco de Clientes', volume_margem_produto:'Ranking Volume x Margem por Produto', saude_cadastros:'Saúde dos Cadastros', projecao_comissoes:'Projeção de Comissões a Pagar', fcl:'Fluxo de Caixa Livre', payback:'Payback de Investimento', cvl_multiproduto:'Análise Custo-Volume-Lucro', dmpl:'Mutações do Patrimônio Líquido', provisoes:'Provisões (Férias/13º)', fluxo_centro_custo:'Fluxo de Caixa por Centro de Custo', conciliacao_saldo:'Conciliação de Saldo por Conta', taxa_conversao_funil:'Taxa de Conversão do Funil', novos_vs_recorrentes:'Novos Clientes vs. Recorrentes', taxa_recompra:'Taxa de Recompra', ltv_cac:'LTV e Relação LTV/CAC', abc_estoque:'Curva ABC de Estoque', estoque_abaixo_minimo:'Estoque Abaixo do Mínimo', obsolescencia_estoque:'Obsolescência de Estoque', comparativo_preco_fornecedores:'Comparativo de Preço entre Fornecedores', calendario_obrigacoes:'Calendário de Obrigações Acessórias', manutencao_consolidada:'Manutenção Preventiva Consolidada', vida_util_remanescente:'Vida Útil Remanescente', roi_ativo:'Custo e Valor Atual por Ativo', alocacao_ativos:'Alocação de Ativos', divergencias:'Divergências e Exceções', posicao_bancaria:'Posição Bancária Consolidada', taxas_bancarias:'Taxas e Tarifas Bancárias'
 };
 
 function viewRelatorioDetalhe(){
@@ -7413,6 +7436,521 @@ function renderCargaTributaria(mesRef){
 }
 
 // 5. Simulador de Preço (Markup reverso) — não é bem um relatório, é uma calculadora
+// 20. Fluxo de Caixa Livre — geração de caixa operacional menos investimento em ativos/capital de giro
+// 30. Taxa de Conversão do Funil — % de oportunidades que viram pedido, e depois faturamento
+// 56. Calendário de Obrigações Acessórias — datas fixas de referência (DAS, MEI, etc.), sem dado externo, é um lembrete
+function renderCalendarioObrigacoes(){
+  const hoje = new Date();
+  const obrigacoes = [
+    { nome:'DAS (Simples Nacional/MEI)', dia:20, desc:'Vence todo dia 20 do mês' },
+    { nome:'DASN-SIMEI (declaração anual do MEI)', dia:31, mes:5, desc:'Vence 31 de maio, uma vez por ano' },
+  ];
+  const proximos = obrigacoes.map(o=>{
+    let prox = new Date(hoje.getFullYear(), o.mes!==undefined?o.mes-1:hoje.getMonth(), o.dia);
+    if(prox<hoje) prox = new Date(o.mes!==undefined?hoje.getFullYear()+1:hoje.getFullYear(), o.mes!==undefined?o.mes-1:hoje.getMonth()+1, o.dia);
+    return { ...o, proximaData: prox };
+  }).sort((a,b)=>a.proximaData-b.proximaData);
+  return `
+    <div class="note" style="margin-top:0;">Datas de referência gerais do Simples Nacional/MEI — confira sempre no site oficial, pois podem mudar por decreto ou cair em fim de semana/feriado (nesse caso o vencimento passa pro próximo dia útil).</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${proximos.map(o=>`
+        <div class="ledger-row compact" style="grid-template-columns:auto 1fr;align-items:center;">
+          <span class="mono" style="font-size:12px;color:var(--text-soft);">${fmtDate(o.proximaData.toISOString().slice(0,10))}</span>
+          <div class="desc-cell"><div>${o.nome}</div><div class="cat">${o.desc}</div></div>
+        </div>
+      `).join('')}
+    </div></div>
+  `;
+}
+
+// 59. Manutenção Preventiva Consolidada — junta as manutenções programadas de todos os ativos numa visão só
+function renderManutencaoPreventivaConsolidada(){
+  const hoje = todayISO();
+  const itens = [];
+  (state.ativosPatrimoniais||[]).filter(a=>!a.baixa).forEach(a=>{
+    (a.manutencoes||[]).filter(m=>m.proximaData && !m.concluida).forEach(m=>{
+      itens.push({ ativo:a.nome, data:m.proximaData, desc:m.descricao||m.tipo||'Manutenção' });
+    });
+  });
+  itens.sort((a,b)=>(a.data||'').localeCompare(b.data||''));
+  const atrasadas = itens.filter(i=>i.data<hoje);
+  return `
+    <div class="cards" style="grid-template-columns:1fr 1fr;">
+      <div class="card"><div class="label">Manutenções programadas</div><div class="value mono">${itens.length}</div></div>
+      <div class="card"><div class="label">Atrasadas</div><div class="value mono" style="color:${atrasadas.length>0?'var(--danger)':'inherit'};">${atrasadas.length}</div></div>
+    </div>
+    ${itens.length ? `<div class="panel"><div class="panel-body" style="padding:0;">
+      ${itens.map(i=>`
+        <div class="ledger-row compact" style="grid-template-columns:auto 1fr;align-items:center;">
+          <span class="mono" style="font-size:12px;color:${i.data<hoje?'var(--danger)':'var(--text-soft)'};">${fmtDate(i.data)}</span>
+          <div class="desc-cell"><div>${escapeHTML(i.ativo)}</div><div class="cat">${escapeHTML(i.desc)}</div></div>
+        </div>
+      `).join('')}
+    </div></div>` : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhuma manutenção programada cadastrada. Cadastre em cada ativo, na aba de manutenções.</div></div>`}
+  `;
+}
+
+// 60. Vida Útil Remanescente por Ativo
+function renderVidaUtilRemanescente(){
+  const lista = (state.ativosPatrimoniais||[]).filter(a=>!a.baixa && a.dataAquisicao && a.vidaUtilAnos).map(a=>{
+    const dep = calcDepreciacao(a);
+    const anosDecorridos = (new Date()-new Date(a.dataAquisicao))/(365.25*86400000);
+    const anosRestantes = Math.max(0, a.vidaUtilAnos - anosDecorridos);
+    return { nome:a.nome, valorAtual:dep.valorAtual, anosRestantes, vidaUtilAnos:a.vidaUtilAnos };
+  }).sort((a,b)=>a.anosRestantes-b.anosRestantes);
+  return `
+    <div class="note" style="margin-top:0;">Quanto tempo falta pra cada ativo terminar de depreciar, conforme a vida útil configurada.</div>
+    ${lista.length ? `<div class="panel"><div class="panel-body" style="padding:0;">
+      ${lista.map(a=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
+          <span>${escapeHTML(a.nome)}</span>
+          <span class="mono" style="color:${a.anosRestantes<1?'var(--danger)':a.anosRestantes<2?'var(--warn)':'inherit'};">${a.anosRestantes.toFixed(1)} ano(s)</span>
+          <span class="mono">${brl(a.valorAtual)}</span>
+        </div>
+      `).join('')}
+    </div></div>` : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum ativo com data de aquisição e vida útil cadastradas.</div></div>`}
+  `;
+}
+
+// 61. ROI por Ativo — quanto o ativo já "rendeu" (receita atribuída via produtoTag, se aplicável) vs quanto custou
+function renderROIAtivo(){
+  const lista = (state.ativosPatrimoniais||[]).filter(a=>!a.baixa).map(a=>{
+    const dep = calcDepreciacao(a);
+    return { nome:a.nome, custo:a.valorAquisicao, valorAtual:dep.valorAtual, depreciacaoAcumulada:dep.depreciacaoAcumulada };
+  }).sort((a,b)=>b.custo-a.custo);
+  return `
+    <div class="note" style="margin-top:0;">O sistema não vincula receita diretamente a um ativo específico (só a produtos, via ficha de custo) — então "ROI" aqui é limitado a mostrar custo original vs. valor contábil atual e desgaste acumulado. Pra um ROI de verdade (receita gerada vs. investido), você precisaria acompanhar isso manualmente por ativo.</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${lista.map(a=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
+          <span>${escapeHTML(a.nome)}</span>
+          <span class="mono" style="color:var(--text-soft);">Custo: ${brl(a.custo)}</span>
+          <span class="mono">Atual: ${brl(a.valorAtual)}</span>
+        </div>
+      `).join('')}
+    </div></div>
+  `;
+}
+
+// 63. Alocação de Ativos — % investido em Renda Fixa vs Renda Variável
+function renderAlocacaoAtivos(){
+  const ativos = (state.ativosInvestimento||[]).filter(a=>!a.resgatado);
+  const rendaFixa = ativos.filter(a=>a.tipoAtivo==='rendafixa').reduce((s,a)=>s+valorAtivo(a),0);
+  const rendaVariavel = ativos.filter(a=>a.tipoAtivo!=='rendafixa').reduce((s,a)=>s+valorAtivo(a),0);
+  const total = rendaFixa + rendaVariavel;
+  return `
+    <div class="cards"><div class="card saldo"><div class="label">Total investido</div><div class="value mono">${brl(total)}</div></div></div>
+    <div class="panel"><div class="panel-body" style="padding:14px 18px;">
+      <div style="margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;"><span style="font-weight:600;">Renda Fixa</span><span class="mono">${brl(rendaFixa)} (${total>0?(rendaFixa/total*100).toFixed(1):0}%)</span></div>
+        <div style="background:var(--bone);border-radius:5px;height:8px;overflow:hidden;"><div style="width:${total>0?rendaFixa/total*100:0}%;height:100%;background:var(--blue-accent);"></div></div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;"><span style="font-weight:600;">Renda Variável</span><span class="mono">${brl(rendaVariavel)} (${total>0?(rendaVariavel/total*100).toFixed(1):0}%)</span></div>
+        <div style="background:var(--bone);border-radius:5px;height:8px;overflow:hidden;"><div style="width:${total>0?rendaVariavel/total*100:0}%;height:100%;background:var(--warn);"></div></div>
+      </div>
+    </div></div>
+  `;
+}
+
+// 65. Divergências e Exceções — lançamentos fora do padrão (valores muito altos, sem categoria, datas estranhas)
+function renderDivergenciasExcecoes(){
+  const hoje = todayISO();
+  const valores = state.lancamentos.filter(l=>l.status==='pago'||l.status==='recebido').map(l=>l.valor).sort((a,b)=>a-b);
+  const mediana = valores.length ? valores[Math.floor(valores.length/2)] : 0;
+  const limiteAlto = mediana * 8; // mediana é robusta a outlier, diferente de média+desvio padrão (que o próprio outlier distorce)
+  const foraDoPadrao = state.lancamentos.filter(l=>(l.status==='pago'||l.status==='recebido') && l.valor>limiteAlto && limiteAlto>0);
+  const semCategoria = state.lancamentos.filter(l=>!l.categoria);
+  const dataFutura = state.lancamentos.filter(l=>l.status==='pago'||l.status==='recebido').filter(l=>l.dataPagamento>hoje);
+  return `
+    <div class="note" style="margin-top:0;">Lançamentos que fogem do padrão — vale conferir se estão certos.</div>
+    ${foraDoPadrao.length ? `<div class="dash-section-label">Valores muito acima da média (${foraDoPadrao.length})</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">${foraDoPadrao.slice(0,10).map(l=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span>${escapeHTML(l.descricao)}</span><span class="mono">${brl(l.valor)}</span></div>`).join('')}</div></div>` : ''}
+    ${semCategoria.length ? `<div class="dash-section-label">Sem categoria (${semCategoria.length})</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">${semCategoria.slice(0,10).map(l=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span>${escapeHTML(l.descricao)}</span><span class="mono">${brl(l.valor)}</span></div>`).join('')}</div></div>` : ''}
+    ${dataFutura.length ? `<div class="dash-section-label">Pagos/recebidos com data futura (${dataFutura.length})</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">${dataFutura.slice(0,10).map(l=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span>${escapeHTML(l.descricao)}</span><span class="mono">${fmtDate(l.dataPagamento)}</span></div>`).join('')}</div></div>` : ''}
+    ${!foraDoPadrao.length && !semCategoria.length && !dataFutura.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nada fora do padrão encontrado. 🎉</div></div>` : ''}
+  `;
+}
+
+// 76. Posição Bancária Consolidada
+function renderPosicaoBancaria(){
+  const contas = state.contas.map(c=>({ nome:c.nome, banco:c.banco, saldo:saldoConta(c.id) })).sort((a,b)=>b.saldo-a.saldo);
+  const total = contas.reduce((s,c)=>s+c.saldo,0);
+  return `
+    <div class="cards"><div class="card saldo"><div class="label">Total em todas as contas</div><div class="value mono">${brl(total)}</div></div></div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${contas.map(c=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;align-items:center;">
+          <div class="desc-cell"><div>${escapeHTML(c.nome)}</div><div class="cat">${escapeHTML(c.banco||'')}</div></div>
+          <span class="mono" style="font-weight:600;color:${c.saldo>=0?'inherit':'var(--danger)'};">${brl(c.saldo)}</span>
+        </div>
+      `).join('')}
+    </div></div>
+  `;
+}
+
+// 77. Taxas e Tarifas Bancárias Pagas — usa categoria "Despesas Financeiras" e subcategorias com "taxa"/"tarifa" no nome
+function renderTaxasTarifasBancarias(mesRef){
+  mesRef = mesRef || mesGlobalRef;
+  const [anoM, mesM] = mesRef.split('-').map(Number);
+  const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
+  const taxas = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de && l.dataPagamento<=ate && /taxa|tarifa|anuidade|manuten[çc][ãa]o.*conta/i.test(l.descricao+' '+(l.categoria||'')));
+  const total = taxas.reduce((s,l)=>s+l.valor,0);
+  return `
+    <div class="report-controls"><input type="month" id="taxasBancMes" value="${mesRef}"></div>
+    <div class="note" style="margin-top:0;">Identifica pelo texto da descrição/categoria (palavras como "taxa", "tarifa", "anuidade") — pode não pegar 100% se a descrição não tiver essas palavras.</div>
+    <div class="cards"><div class="card saldo"><div class="label">Total em taxas/tarifas no mês</div><div class="value mono">${brl(total)}</div></div></div>
+    ${taxas.length ? `<div class="panel"><div class="panel-body" style="padding:0;">
+      ${taxas.map(l=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span>${escapeHTML(l.descricao)}</span><span class="mono">${brl(l.valor)}</span></div>`).join('')}
+    </div></div>` : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhuma taxa/tarifa identificada no mês.</div></div>`}
+  `;
+}
+
+function renderTaxaConversaoFunil(){
+  const oport = state.oportunidadesVenda || [];
+  const totalOport = oport.length;
+  const viraramPedido = oport.filter(o=>o.etapa==='pedido'||o.etapa==='faturado').length;
+  const viraramFaturamento = oport.filter(o=>o.etapa==='faturado').length;
+  const valorTotal = oport.reduce((s,o)=>s+o.valor,0);
+  const valorFaturado = oport.filter(o=>o.etapa==='faturado').reduce((s,o)=>s+o.valor,0);
+  const taxaPedido = totalOport>0 ? (viraramPedido/totalOport*100) : 0;
+  const taxaFaturamento = totalOport>0 ? (viraramFaturamento/totalOport*100) : 0;
+  return `
+    <div class="note" style="margin-top:0;">Considera todas as oportunidades já lançadas no Funil de Vendas, desde o começo.</div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
+      <div class="card"><div class="label">Oportunidades no funil</div><div class="value mono">${totalOport}</div></div>
+      <div class="card"><div class="label">Viraram pedido</div><div class="value mono">${taxaPedido.toFixed(0)}%</div></div>
+      <div class="card saldo"><div class="label">Viraram faturamento</div><div class="value mono">${taxaFaturamento.toFixed(0)}%</div></div>
+    </div>
+    <div class="note">Valor total em oportunidades: ${brl(valorTotal)} · Valor já faturado: ${brl(valorFaturado)}</div>
+  `;
+}
+
+// 34. Novos Clientes vs. Recorrentes — quantos clientes compraram pela primeira vez no mês vs já eram conhecidos
+function renderNovosVsRecorrentes(mesRef){
+  mesRef = mesRef || mesGlobalRef;
+  const [anoM, mesM] = mesRef.split('-').map(Number);
+  const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
+  const todasReceitas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.fornecedor);
+  const clientesDoMes = [...new Set(todasReceitas.filter(l=>l.dataPagamento>=de && l.dataPagamento<=ate).map(l=>l.fornecedor))];
+  const novos = clientesDoMes.filter(nome => !todasReceitas.some(l=>l.fornecedor===nome && l.dataPagamento<de));
+  const recorrentes = clientesDoMes.filter(nome => !novos.includes(nome));
+  return `
+    <div class="report-controls"><input type="month" id="novosRecMes" value="${mesRef}"></div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;">
+      <div class="card"><div class="label">Clientes novos</div><div class="value mono" style="color:var(--success);">${novos.length}</div></div>
+      <div class="card"><div class="label">Clientes recorrentes</div><div class="value mono">${recorrentes.length}</div></div>
+    </div>
+    <div class="note" style="margin-top:0;">"Novo" = primeira compra identificada em todo o histórico do sistema. Se você começou a usar o sistema recentemente, clientes antigos de antes de você começar podem aparecer como "novos" aqui.</div>
+  `;
+}
+
+// 35. Taxa de Recompra — % de clientes que compraram mais de uma vez, nos últimos 12 meses
+function renderTaxaRecompra(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const porCliente = {};
+  state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{
+    porCliente[l.fornecedor] = (porCliente[l.fornecedor]||0)+1;
+  });
+  const totalClientes = Object.keys(porCliente).length;
+  const compraramMaisDeUma = Object.values(porCliente).filter(qtd=>qtd>1).length;
+  const taxa = totalClientes>0 ? (compraramMaisDeUma/totalClientes*100) : 0;
+  return `
+    <div class="note" style="margin-top:0;">Últimos 12 meses (${fmtDate(de)} a ${fmtDate(ate)}).</div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;">
+      <div class="card"><div class="label">Clientes no período</div><div class="value mono">${totalClientes}</div></div>
+      <div class="card saldo"><div class="label">Taxa de recompra</div><div class="value mono">${taxa.toFixed(1)}%</div></div>
+    </div>
+    <div class="note">${compraramMaisDeUma} de ${totalClientes} clientes compraram mais de uma vez nesse período.</div>
+  `;
+}
+
+// 36+37. LTV do Cliente e relação LTV/CAC
+function renderLTVeCAC(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const receitaTotal12m = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+  const clientesUnicos = new Set(state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate).map(l=>l.fornecedor)).size;
+  const ticketMedioAnual = clientesUnicos>0 ? receitaTotal12m/clientesUnicos : 0;
+  const marketingGasto = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && (l.categoria==='Marketing'||(l.categoria||'').startsWith('Marketing / ')) && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+  const cac = clientesUnicos>0 ? marketingGasto/clientesUnicos : 0;
+  const ltv = ticketMedioAnual * 2; // aproximação: 2 anos de relacionamento médio, sem dado real de churn
+  const relacao = cac>0 ? (ltv/cac) : null;
+  return `
+    <div class="note" style="margin-top:0;">Últimos 12 meses. LTV aqui é uma ESTIMATIVA simples (ticket médio anual × 2 anos de relacionamento) — o sistema não rastreia quando um cliente efetivamente "sai"/para de comprar, então não dá pra calcular o LTV real sem esse dado.</div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
+      <div class="card"><div class="label">Ticket médio anual/cliente</div><div class="value mono">${brl(ticketMedioAnual)}</div></div>
+      <div class="card"><div class="label">LTV estimado (2 anos)</div><div class="value mono">${brl(ltv)}</div></div>
+      <div class="card"><div class="label">CAC (gasto marketing/cliente novo)</div><div class="value mono">${brl(cac)}</div></div>
+      ${relacao!==null ? `<div class="card saldo"><div class="label">Relação LTV/CAC</div><div class="value mono" style="color:${relacao>=3?'var(--success)':'var(--warn)'};">${relacao.toFixed(1)}x</div></div>` : ''}
+    </div>
+    ${relacao!==null ? `<div class="note">Referência de mercado: acima de 3x é considerado saudável — cada real gasto pra trazer um cliente novo retorna ${relacao.toFixed(1)}x em receita estimada ao longo do relacionamento.</div>` : `<div class="note">Sem despesa lançada em "Marketing" no período — não dá pra calcular CAC.</div>`}
+  `;
+}
+
+// 44. Curva ABC de Estoque — insumos que mais pesam no valor total parado (não no volume de compra)
+function renderABCEstoque(){
+  const lista = [...(state.estoqueInsumos||[])].sort((a,b)=>b.valorTotal-a.valorTotal);
+  const totalGeral = lista.reduce((s,i)=>s+i.valorTotal,0);
+  let acumulado = 0;
+  const classificados = lista.map(i=>{
+    acumulado += i.valorTotal;
+    const pctAcum = totalGeral>0 ? (acumulado/totalGeral*100) : 0;
+    const classe = pctAcum<=80 ? 'A' : pctAcum<=95 ? 'B' : 'C';
+    return { ...i, classe, pct: totalGeral>0?(i.valorTotal/totalGeral*100):0 };
+  });
+  const classeA = classificados.filter(i=>i.classe==='A');
+  return `
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
+      <div class="card saldo"><div class="label">Valor total em estoque</div><div class="value mono">${brl(totalGeral)}</div></div>
+      <div class="card"><div class="label">Itens classe A</div><div class="value mono">${classeA.length} <span style="font-size:11px;color:var(--text-soft);">de ${classificados.length}</span></div></div>
+    </div>
+    <div class="note">Classe A: itens que somam até 80% do valor total parado em estoque — são os que mais "prendem" capital de giro, merecem controle mais apertado.</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${classificados.slice(0,25).map(i=>`
+        <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto;align-items:center;">
+          <span class="mono" style="width:20px;text-align:center;font-weight:700;color:${i.classe==='A'?'var(--danger)':i.classe==='B'?'var(--warn)':'var(--text-soft)'};">${i.classe}</span>
+          <span>${escapeHTML(i.nome)}</span>
+          <span class="mono">${brl(i.valorTotal)}</span>
+        </div>
+      `).join('')}
+    </div></div>
+  `;
+}
+
+// 45. Estoque Abaixo do Mínimo — reaproveita estoqueMinimo já sincronizado do VK
+function renderEstoqueAbaixoMinimo(){
+  const lista = (state.estoqueInsumos||[]).filter(i=>i.estoqueMinimo>0 && i.quantidade<i.estoqueMinimo).sort((a,b)=>(a.quantidade/a.estoqueMinimo)-(b.quantidade/b.estoqueMinimo));
+  return `
+    <div class="note" style="margin-top:0;">Insumos com estoque atual abaixo do mínimo configurado no VK Industrial. Não temos "estoque máximo" nem "ponto de pedido" sincronizados — só o mínimo.</div>
+    ${lista.length ? `<div class="panel"><div class="panel-body" style="padding:0;">
+      ${lista.map(i=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;align-items:center;">
+          <div class="desc-cell"><div>${escapeHTML(i.nome)}</div><div class="cat">Mínimo: ${i.estoqueMinimo} ${escapeHTML(i.unidade||'')}</div></div>
+          <span class="mono" style="font-weight:600;color:var(--danger);">${i.quantidade} ${escapeHTML(i.unidade||'')}</span>
+        </div>
+      `).join('')}
+    </div></div>` : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum insumo abaixo do mínimo agora. 🎉</div></div>`}
+  `;
+}
+
+// 46. Obsolescência de Estoque — insumos sem entrada recente registrada (parados há muito tempo)
+function renderObsolescenciaEstoque(){
+  const hoje = todayISO();
+  const categoriaEstoque = state.vkConfig?.categoriaEstoque || 'Insumos';
+  const ultimaEntradaPorInsumo = {};
+  state.lancamentos.filter(l=>l.origem==='vk-estoque' && (l.categoria===categoriaEstoque || (l.categoria||'').startsWith(categoriaEstoque+' / '))).forEach(l=>{
+    const nome = (l.descricao||'').replace(/\s*\(Entrada de estoque.*\)\s*/i,'').trim();
+    if(!ultimaEntradaPorInsumo[nome] || l.dataPagamento>ultimaEntradaPorInsumo[nome]) ultimaEntradaPorInsumo[nome] = l.dataPagamento||l.dataVencimento;
+  });
+  const parados = (state.estoqueInsumos||[]).filter(i=>i.valorTotal>0).map(i=>{
+    const ultima = ultimaEntradaPorInsumo[i.nome];
+    const dias = ultima ? Math.round((new Date(hoje)-new Date(ultima))/86400000) : null;
+    return { ...i, dias };
+  }).filter(i=>i.dias===null || i.dias>=90).sort((a,b)=>(b.dias||9999)-(a.dias||9999));
+  return `
+    <div class="note" style="margin-top:0;">Insumos com valor em estoque, mas sem entrada registrada há 90 dias ou mais (ou nunca teve entrada rastreada aqui) — pode ser item parado/esquecido.</div>
+    ${parados.length ? `<div class="panel"><div class="panel-body" style="padding:0;">
+      ${parados.map(i=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;align-items:center;">
+          <span>${escapeHTML(i.nome)}</span>
+          <span class="mono" style="color:var(--warn);">${i.dias!==null ? i.dias+' dias parado' : 'sem histórico'}</span>
+        </div>
+      `).join('')}
+    </div></div>` : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum insumo parado identificado.</div></div>`}
+  `;
+}
+
+// 48. Comparativo de Preço entre Fornecedores — mesmo insumo, fornecedores diferentes, valores diferentes de nota
+function renderComparativoPrecoFornecedores(){
+  const categoriaEstoque = state.vkConfig?.categoriaEstoque || 'Insumos';
+  const entradas = state.lancamentos.filter(l=>l.origem==='vk-estoque' && (l.categoria===categoriaEstoque || (l.categoria||'').startsWith(categoriaEstoque+' / ')) && l.fornecedor);
+  const porInsumo = {};
+  entradas.forEach(l=>{
+    const nome = (l.descricao||'').replace(/\s*\(Entrada de estoque.*\)\s*/i,'').trim();
+    if(!porInsumo[nome]) porInsumo[nome] = {};
+    if(!porInsumo[nome][l.fornecedor]) porInsumo[nome][l.fornecedor] = [];
+    porInsumo[nome][l.fornecedor].push(l.valor);
+  });
+  const comparaveis = Object.entries(porInsumo).filter(([,forns])=>Object.keys(forns).length>=2);
+  return `
+    <div class="note" style="margin-top:0;">Compara o valor da nota (não preço unitário exato) pago a diferentes fornecedores pelo mesmo insumo. Só mostra itens comprados de 2 ou mais fornecedores diferentes.</div>
+    ${comparaveis.length ? comparaveis.map(([nome,forns])=>`
+      <div class="dash-section-label">${escapeHTML(nome)}</div>
+      <div class="panel"><div class="panel-body" style="padding:12px 18px;">
+        ${Object.entries(forns).map(([forn,valores])=>{
+          const media = valores.reduce((a,b)=>a+b,0)/valores.length;
+          return `<div style="display:flex;justify-content:space-between;padding:5px 0;"><span>${escapeHTML(forn)}</span><span class="mono">${brl(media)} <span style="color:var(--text-soft);font-size:11px;">média de ${valores.length}x</span></span></div>`;
+        }).join('')}
+      </div></div>
+    `).join('') : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum insumo comprado de fornecedores diferentes ainda pra comparar.</div></div>`}
+  `;
+}
+
+function renderFluxoCaixaLivre(mesRef){
+  mesRef = mesRef || mesGlobalRef;
+  const [anoM, mesM] = mesRef.split('-').map(Number);
+  const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
+  const dadosMes = dadosMesGerencial(mesRef, 'todos');
+  const ebitdaMes = ebitdaPeriodo(de, ate, 1);
+  const investimentoAtivos = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.categoria==='Ativos Patrimoniais' && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+  const fcl = ebitdaMes - investimentoAtivos;
+  return `
+    <div class="report-controls"><input type="month" id="fclMes" value="${mesRef}"></div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
+      <div class="card"><div class="label">EBITDA do mês</div><div class="value mono">${brl(ebitdaMes)}</div></div>
+      <div class="card"><div class="label">Investido em ativos</div><div class="value mono">${brl(investimentoAtivos)}</div></div>
+      <div class="card saldo"><div class="label">Fluxo de Caixa Livre</div><div class="value mono" style="color:${fcl>=0?'var(--success)':'var(--danger)'};">${brl(fcl)}</div></div>
+    </div>
+    <div class="note" style="margin-top:0;">FCL = EBITDA do mês − investimento em ativos patrimoniais (compras registradas na categoria "Ativos Patrimoniais"). É o dinheiro que sobrou depois de operar E reinvestir no negócio — disponível pra pagar dívida, distribuir lucro ou guardar de reserva.</div>
+  `;
+}
+
+// 22. Payback de Investimentos — em quantos meses um ativo/investimento se paga, dado o ganho mensal informado
+function renderPayback(){
+  return `
+    <div class="note" style="margin-top:0;">Informe quanto você investiu e o ganho (ou economia) mensal esperado — calcula em quantos meses o investimento se paga.</div>
+    <div class="panel"><div class="panel-body" style="padding:18px;">
+      <div class="cards" style="grid-template-columns:1fr 1fr;">
+        <div class="field"><label>Valor investido (R$)</label><input type="text" inputmode="decimal" id="paybackInvestido" placeholder="Ex: 15.000,00"></div>
+        <div class="field"><label>Ganho/economia mensal (R$)</label><input type="text" inputmode="decimal" id="paybackGanhoMensal" placeholder="Ex: 1.200,00"></div>
+      </div>
+      <div id="paybackResultado" style="margin-top:16px;"></div>
+    </div></div>
+    <div class="note">Payback simples (sem considerar valor do dinheiro no tempo) = Valor investido ÷ Ganho mensal. Útil pra comparar rapidamente duas opções de investimento.</div>
+  `;
+}
+
+// 24. Análise Custo-Volume-Lucro multiproduto — mesma base do Ponto de Equilíbrio por Produto, focado em quanto cada produto contribui pro resultado
+function renderCVLMultiproduto(mesRef){
+  mesRef = mesRef || mesGlobalRef;
+  const [anoM, mesM] = mesRef.split('-').map(Number);
+  const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
+  const produtos = (state.custosProdutosVK||[]).filter(c=>c.custoUnitario!==null && c.precoVendaVK>0);
+  const linhas = produtos.map(p=>{
+    const vendas = state.lancamentos.filter(l=>l.produtoTag===p.nome && l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento>=de && l.dataPagamento<=ate);
+    const receita = vendas.reduce((s,l)=>s+l.valor,0);
+    const qtd = p.precoVendaVK>0 ? receita/p.precoVendaVK : 0;
+    const margemContribUnit = p.precoVendaVK - p.custoUnitario;
+    const margemContribTotal = margemContribUnit * qtd;
+    return { nome:p.nome, qtd, receita, margemContribUnit, margemContribTotal };
+  }).filter(l=>l.qtd>0).sort((a,b)=>b.margemContribTotal-a.margemContribTotal);
+  const totalMC = linhas.reduce((s,l)=>s+l.margemContribTotal,0);
+  return `
+    <div class="report-controls"><input type="month" id="cvlMes" value="${mesRef}"></div>
+    <div class="note" style="margin-top:0;">Margem de contribuição total = quanto cada produto realmente "sobra" pra pagar o custo fixo do negócio e gerar lucro, no mês.</div>
+    ${linhas.length ? `<div class="panel"><div class="panel-body" style="padding:14px 18px;">
+      ${linhas.map(l=>`
+        <div style="margin-bottom:12px;">
+          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;"><span style="font-weight:600;">${escapeHTML(l.nome)}</span><span class="mono">${brl(l.margemContribTotal)}</span></div>
+          <div style="font-size:11px;color:var(--text-soft);margin-bottom:5px;">~${Math.round(l.qtd)} un. · margem unit. ${brl(l.margemContribUnit)} · ${totalMC>0?(l.margemContribTotal/totalMC*100).toFixed(1):0}% do total</div>
+          <div style="background:var(--bone);border-radius:5px;height:6px;overflow:hidden;"><div style="width:${totalMC>0?Math.max(0,l.margemContribTotal/totalMC*100):0}%;height:100%;background:${l.margemContribTotal>=0?'var(--success)':'var(--danger)'};"></div></div>
+        </div>
+      `).join('')}
+    </div></div>` : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum produto com venda no mês.</div></div>`}
+  `;
+}
+
+// 25. Demonstração das Mutações do Patrimônio Líquido — variação do PL mês a mês, últimos 12 meses
+function renderDMPL(){
+  const hoje = new Date();
+  const meses = Array.from({length:12},(_,i)=>{ const d = new Date(hoje.getFullYear(), hoje.getMonth()-11+i, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const dados = meses.map(m=>{
+    const t = totaisPorMesRef(m);
+    const { lucroLiquido } = resultadoOperacionalPeriodo(t.de, t.ateMes<todayISO()?t.ateMes:todayISO());
+    return { mesRef:m, lucro:lucroLiquido };
+  });
+  const bm = state.balancoManual||{};
+  const aPagar = state.lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
+  const cartoesNaoFaturados = state.cartoes.reduce((s,c)=>{ const comp = competenciaAtual(c); return s + (faturaStatus(c.id, comp)==='aberta' ? totalCompetencia(c.id, comp) : 0); }, 0);
+  const totalPassivo = aPagar + cartoesNaoFaturados;
+  const disponivel = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+  const totalAtivo = disponivel + (bm.estoques||0) + (bm.realizavelLP||0) + totalAtivosPatrimoniais() + totalInvestimentos();
+  const plAtual = totalAtivo - totalPassivo;
+  let plAcumulado = plAtual;
+  const linhasReversas = [...dados].reverse().map(d=>{ const linha = { mesRef:d.mesRef, lucro:d.lucro, plFinal:plAcumulado }; plAcumulado -= d.lucro; return linha; });
+  const linhas = linhasReversas.reverse();
+  return `
+    <div class="note" style="margin-top:0;">Como o Patrimônio Líquido mudou mês a mês nos últimos 12 meses, a partir do lucro/prejuízo de cada um. PL final é calculado de trás pra frente a partir da posição patrimonial de hoje — não considera aporte/retirada de capital dos sócios separadamente do lucro.</div>
+    <div class="cards"><div class="card saldo"><div class="label">Patrimônio Líquido atual</div><div class="value mono">${brl(plAtual)}</div></div></div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${linhas.map(l=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
+          <span>${competenciaLabel(l.mesRef)}</span>
+          <span class="mono" style="color:${l.lucro>=0?'var(--success)':'var(--danger)'};">${l.lucro>=0?'+':''}${brl(l.lucro)}</span>
+          <span class="mono" style="font-weight:600;">${brl(l.plFinal)}</span>
+        </div>
+      `).join('')}
+    </div></div>
+  `;
+}
+
+// 26. Provisões — estimativa de férias, 13º e impostos futuros com base em dados informados
+function renderProvisoes(){
+  return `
+    <div class="note" style="margin-top:0;">O sistema não tem folha de pagamento — informe manualmente os valores de referência pra calcular a provisão estimada.</div>
+    <div class="panel"><div class="panel-body" style="padding:18px;">
+      <div class="cards" style="grid-template-columns:1fr 1fr;">
+        <div class="field"><label>Folha mensal total (R$)</label><input type="text" inputmode="decimal" id="provFolha" placeholder="Ex: 8.000,00"></div>
+        <div class="field"><label>Meses até o próximo 13º/férias</label><input type="text" inputmode="numeric" id="provMeses" placeholder="Ex: 4"></div>
+      </div>
+      <div id="provResultado" style="margin-top:16px;"></div>
+    </div></div>
+    <div class="note">13º proporcional = folha ÷ 12 × meses trabalhados no ano. Férias + 1/3 = folha ÷ 12 × meses × 1,333. São estimativas simples pra você já ir separando o dinheiro — não substitui o cálculo exato da contabilidade.</div>
+  `;
+}
+
+// 27. Fluxo de Caixa por Centro de Custo — entradas/saídas realizadas, separado por centro
+function renderFluxoCaixaCentroCusto(mesRef){
+  mesRef = mesRef || mesGlobalRef;
+  const [anoM, mesM] = mesRef.split('-').map(Number);
+  const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
+  const centros = [...(state.centrosCusto||[]), '(sem centro definido)'];
+  const eventos = movimentosRealizados().filter(ev=>ev.data>=de && ev.data<=ate && ev.origem!=='transferencia' && !ehMovimentoDeCapital(ev));
+  const porCentro = centros.map(centro=>{
+    const eh = ev => centro==='(sem centro definido)' ? !ev.centroCusto : ev.centroCusto===centro;
+    const entradas = eventos.filter(ev=>ev.tipo==='entrada' && eh(ev)).reduce((s,ev)=>s+ev.valor,0);
+    const saidas = eventos.filter(ev=>ev.tipo==='saida' && eh(ev)).reduce((s,ev)=>s+ev.valor,0);
+    return { centro, entradas, saidas, saldo: entradas-saidas };
+  }).filter(c=>c.entradas>0||c.saidas>0);
+  const max = Math.max(1, ...porCentro.map(c=>Math.max(c.entradas,c.saidas)));
+  return `
+    <div class="report-controls"><input type="month" id="fccMes" value="${mesRef}"></div>
+    ${porCentro.length ? `<div class="panel"><div class="panel-body" style="padding:14px 18px;">
+      ${porCentro.map(c=>`
+        <div style="margin-bottom:14px;">
+          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;"><span style="font-weight:600;">${escapeHTML(c.centro)}</span><span class="mono" style="color:${c.saldo>=0?'var(--success)':'var(--danger)'};">${brl(c.saldo)}</span></div>
+          <div style="display:flex;gap:2px;height:8px;border-radius:4px;overflow:hidden;">
+            <div style="width:${c.entradas/max*100}%;background:var(--success);"></div>
+          </div>
+          <div style="display:flex;gap:2px;height:8px;border-radius:4px;overflow:hidden;margin-top:2px;">
+            <div style="width:${c.saidas/max*100}%;background:var(--danger);"></div>
+          </div>
+          <div style="font-size:11px;color:var(--text-soft);margin-top:3px;">Entradas: ${brl(c.entradas)} · Saídas: ${brl(c.saidas)}</div>
+        </div>
+      `).join('')}
+    </div></div>` : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum lançamento com centro de custo marcado nesse mês.</div></div>`}
+  `;
+}
+
+// 29. Conciliação de Saldo por Conta — compara o saldo calculado pelo sistema com o saldo real informado pelo extrato do banco
+function renderConciliacaoSaldoContas(){
+  return `
+    <div class="note" style="margin-top:0;">Confira o saldo que o sistema calculou (com base nos lançamentos) contra o saldo real do extrato bancário — ajuda a pegar lançamento esquecido ou duplicado.</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${state.contas.map(c=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
+          <span>${escapeHTML(c.nome)}</span>
+          <span class="mono">${brl(saldoConta(c.id))}</span>
+          <input type="text" inputmode="decimal" class="conciliacao-saldo-real" data-conta="${c.id}" placeholder="Saldo real" style="width:100px;text-align:right;">
+        </div>
+      `).join('')}
+    </div></div>
+    <div id="conciliacaoDiferencas" style="margin-top:12px;"></div>
+  `;
+}
+
 function renderSimuladorPreco(){
   return `
     <div class="note" style="margin-top:0;">Informe o custo do produto e a margem de lucro que você quer ganhar sobre o preço de venda — calcula o preço sozinho.</div>
@@ -11615,6 +12153,29 @@ function attachViewHandlers(){
         relatorioAtivo==='volume_margem_produto' ? renderRankingVolumeMargem() :
         relatorioAtivo==='saude_cadastros' ? renderSaudeCadastros() :
         relatorioAtivo==='projecao_comissoes' ? renderProjecaoComissoes() :
+        relatorioAtivo==='fcl' ? renderFluxoCaixaLivre() :
+        relatorioAtivo==='payback' ? renderPayback() :
+        relatorioAtivo==='cvl_multiproduto' ? renderCVLMultiproduto() :
+        relatorioAtivo==='dmpl' ? renderDMPL() :
+        relatorioAtivo==='provisoes' ? renderProvisoes() :
+        relatorioAtivo==='fluxo_centro_custo' ? renderFluxoCaixaCentroCusto() :
+        relatorioAtivo==='conciliacao_saldo' ? renderConciliacaoSaldoContas() :
+        relatorioAtivo==='taxa_conversao_funil' ? renderTaxaConversaoFunil() :
+        relatorioAtivo==='novos_vs_recorrentes' ? renderNovosVsRecorrentes() :
+        relatorioAtivo==='taxa_recompra' ? renderTaxaRecompra() :
+        relatorioAtivo==='ltv_cac' ? renderLTVeCAC() :
+        relatorioAtivo==='abc_estoque' ? renderABCEstoque() :
+        relatorioAtivo==='estoque_abaixo_minimo' ? renderEstoqueAbaixoMinimo() :
+        relatorioAtivo==='obsolescencia_estoque' ? renderObsolescenciaEstoque() :
+        relatorioAtivo==='comparativo_preco_fornecedores' ? renderComparativoPrecoFornecedores() :
+        relatorioAtivo==='calendario_obrigacoes' ? renderCalendarioObrigacoes() :
+        relatorioAtivo==='manutencao_consolidada' ? renderManutencaoPreventivaConsolidada() :
+        relatorioAtivo==='vida_util_remanescente' ? renderVidaUtilRemanescente() :
+        relatorioAtivo==='roi_ativo' ? renderROIAtivo() :
+        relatorioAtivo==='alocacao_ativos' ? renderAlocacaoAtivos() :
+        relatorioAtivo==='divergencias' ? renderDivergenciasExcecoes() :
+        relatorioAtivo==='posicao_bancaria' ? renderPosicaoBancaria() :
+        relatorioAtivo==='taxas_bancarias' ? renderTaxasTarifasBancarias() :
         relatorioAtivo==='breakeven' ? renderRelatorioBreakEven() :
         relatorioAtivo==='valuation' ? renderRelatorioValuation() :
         relatorioAtivo==='mensal' ? renderSuperRelatorioMensal(mensalMesRef) :
@@ -11713,6 +12274,58 @@ function attachViewHandlers(){
         simCusto.addEventListener('input', calcularSim);
         simMargem.addEventListener('input', calcularSim);
       }
+      [['fclMes','renderFluxoCaixaLivre'],['cvlMes','renderCVLMultiproduto'],['fccMes','renderFluxoCaixaCentroCusto'],['novosRecMes','renderNovosVsRecorrentes'],['taxasBancMes','renderTaxasTarifasBancarias']].forEach(([idc,fn])=>{
+        const el = document.getElementById(idc);
+        if(el) el.addEventListener('change', ()=>{
+          if(!el.value) return;
+          document.getElementById('reportPanel').innerHTML = window[fn](el.value);
+          bindReportInner();
+        });
+      });
+      const paybackInvestido = document.getElementById('paybackInvestido');
+      const paybackGanhoMensal = document.getElementById('paybackGanhoMensal');
+      if(paybackInvestido && paybackGanhoMensal){
+        const calcularPayback = ()=>{
+          const investido = numBR(paybackInvestido.value) || 0;
+          const ganho = numBR(paybackGanhoMensal.value) || 0;
+          const resultado = document.getElementById('paybackResultado');
+          if(investido<=0 || ganho<=0){ resultado.innerHTML = ''; return; }
+          const meses = investido/ganho;
+          resultado.innerHTML = `<div class="cards"><div class="card saldo"><div class="label">Payback estimado</div><div class="value mono">${meses.toFixed(1)} mês(es)</div></div></div>`;
+        };
+        paybackInvestido.addEventListener('input', calcularPayback);
+        paybackGanhoMensal.addEventListener('input', calcularPayback);
+      }
+      const provFolha = document.getElementById('provFolha');
+      const provMeses = document.getElementById('provMeses');
+      if(provFolha && provMeses){
+        const calcularProv = ()=>{
+          const folha = numBR(provFolha.value) || 0;
+          const meses = numBR(provMeses.value) || 0;
+          const resultado = document.getElementById('provResultado');
+          if(folha<=0 || meses<=0){ resultado.innerHTML = ''; return; }
+          const decimoTerceiro = (folha/12)*meses;
+          const ferias = (folha/12)*meses*1.333;
+          resultado.innerHTML = `<div class="cards" style="grid-template-columns:1fr 1fr;"><div class="card"><div class="label">13º proporcional estimado</div><div class="value mono">${brl(decimoTerceiro)}</div></div><div class="card"><div class="label">Férias + 1/3 estimado</div><div class="value mono">${brl(ferias)}</div></div></div>`;
+        };
+        provFolha.addEventListener('input', calcularProv);
+        provMeses.addEventListener('input', calcularProv);
+      }
+      document.querySelectorAll('.conciliacao-saldo-real').forEach(inp=>{
+        inp.addEventListener('input', ()=>{
+          const diferencas = [];
+          document.querySelectorAll('.conciliacao-saldo-real').forEach(i2=>{
+            const real = numBR(i2.value);
+            if(isNaN(real) || i2.value==='') return;
+            const calculado = saldoConta(i2.dataset.conta);
+            const conta = state.contas.find(c=>c.id===i2.dataset.conta);
+            const dif = real - calculado;
+            if(Math.abs(dif)>0.009) diferencas.push({ nome: conta?.nome||'?', dif });
+          });
+          const div = document.getElementById('conciliacaoDiferencas');
+          if(div) div.innerHTML = diferencas.length ? `<div class="note" style="border-color:var(--warn);">${diferencas.map(d=>`${escapeHTML(d.nome)}: diferença de ${brl(d.dif)}`).join('<br>')}</div>` : (document.querySelectorAll('.conciliacao-saldo-real')[0]?.value ? `<div class="note" style="border-color:var(--success);">Sem diferenças encontradas. ✓</div>` : '');
+        });
+      });
       const previsaoDiasSel = document.getElementById('previsaoDias');
       if(previsaoDiasSel) previsaoDiasSel.addEventListener('change', ()=>{
         previsaoDiasAtivo = parseInt(previsaoDiasSel.value);
