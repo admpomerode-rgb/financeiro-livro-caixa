@@ -665,6 +665,7 @@
         <div class="nav-item" data-view="busca-global" title="Busca Global"><span class="nav-dot"></span><span class="nav-abbr">BG</span><span class="nav-label">Busca Global</span></div>
         <div class="nav-item" data-view="central-decisao" title="Central de Decisão"><span class="nav-dot"></span><span class="nav-abbr">CD</span><span class="nav-label">Central de Decisão</span></div>
         <div class="nav-item" data-view="assistente" title="Perguntar ao Livro Caixa"><span class="nav-dot"></span><span class="nav-abbr">PA</span><span class="nav-label">Perguntar ao Livro Caixa</span></div>
+        <div class="nav-item" data-view="navegacao-objetivo" title="O Que Você Quer Fazer?"><span class="nav-dot"></span><span class="nav-abbr">OB</span><span class="nav-label">O Que Você Quer Fazer?</span></div>
         <div class="nav-item" data-view="orcamento" title="Orçamento e Planejamento"><span class="nav-dot"></span><span class="nav-abbr">OR</span><span class="nav-label">Orçamento e Planejamento</span></div>
         <div class="nav-item" data-view="simulacao" title="Simulação &quot;E Se&quot;"><span class="nav-dot"></span><span class="nav-abbr">SE</span><span class="nav-label">Simulação "E Se"</span></div>
       </div>
@@ -956,6 +957,11 @@ function aplicarMigracoes(s){
     { nome:'Investimentos', pct:10 }, { nome:'Distribuição aos Sócios', pct:10 },
   ];
   if(!s.automacoes) s.automacoes = [];
+  if(!s.cenariosLaboratorio) s.cenariosLaboratorio = [];
+  if(!s.marcosLinhaTempo) s.marcosLinhaTempo = [];
+  if(!s.fotosFinanceiras) s.fotosFinanceiras = [];
+  if(!s.conquistasDesbloqueadas) s.conquistasDesbloqueadas = [];
+  if(!s.modoVisualizacao) s.modoVisualizacao = 'completo';
   if(!s.vendasBonificadas) s.vendasBonificadas = [];
   if(!s.orcamentoAlertaPct) s.orcamentoAlertaPct = {};
   ['saida','entrada'].forEach(tipo=>{
@@ -1042,6 +1048,35 @@ function showToast(msg){
   t.textContent = msg;
   t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 2200);
+}
+
+// Desfazer Financeiro — versão conservadora: só a ÚLTIMA criação/edição de lançamento, guardada
+// numa variável de módulo (não persistida — se recarregar a página, a chance de desfazer some).
+// Um sistema de múltiplos níveis de desfazer seria bem mais arriscado de manter correto num
+// arquivo desse tamanho, então preferiu-se essa versão simples e confiável.
+let ultimaAcaoDesfazer = null;
+function mostrarToastComDesfazer(mensagemBase){
+  const t = document.getElementById('toast');
+  t.innerHTML = `${escapeHTML(mensagemBase)} <button id="btnDesfazerToast" style="margin-left:10px;background:none;border:1px solid currentColor;border-radius:4px;padding:2px 8px;color:inherit;cursor:pointer;font-size:12px;">DESFAZER</button>`;
+  t.classList.add('show');
+  const esconder = setTimeout(()=>{ t.classList.remove('show'); ultimaAcaoDesfazer = null; }, 6000);
+  document.getElementById('btnDesfazerToast').addEventListener('click', ()=>{
+    clearTimeout(esconder);
+    t.classList.remove('show');
+    executarDesfazer();
+  });
+}
+function executarDesfazer(){
+  if(!ultimaAcaoDesfazer) return;
+  if(ultimaAcaoDesfazer.tipo==='criar'){
+    state.lancamentos = state.lancamentos.filter(l=>l.id!==ultimaAcaoDesfazer.lancamentoId);
+  } else if(ultimaAcaoDesfazer.tipo==='editar'){
+    const idx = state.lancamentos.findIndex(l=>l.id===ultimaAcaoDesfazer.lancamentoId);
+    if(idx>=0) state.lancamentos[idx] = ultimaAcaoDesfazer.snapshotAntes;
+  }
+  ultimaAcaoDesfazer = null;
+  persist(); render();
+  showToast('Ação desfeita');
 }
 
 /* ---------------- Navegação ---------------- */
@@ -1355,6 +1390,7 @@ function moreItensDef(){
     { view:'busca-global', icone:'🔍', nome:'Busca Global', grupo:'Análise' },
     { view:'central-decisao', icone:'🧭', nome:'Central de Decisão', grupo:'Análise' },
     { view:'assistente', icone:'💬', nome:'Perguntar ao Livro Caixa', grupo:'Análise' },
+    { view:'navegacao-objetivo', icone:'🧭', nome:'O Que Você Quer Fazer?', grupo:'Análise' },
     { view:'orcamento', icone:'🗂️', nome:'Orçamento e Planejamento', grupo:'Análise' },
     { view:'simulacao', icone:'🔮', nome:'Simulação "E Se"', grupo:'Análise' },
     { view:'categorias', icone:'🏷️', nome:'Categorias', grupo:'Cadastros e Configurações' },
@@ -1520,6 +1556,7 @@ function render(){
   else if(currentView==='busca-global') main.innerHTML = viewBuscaGlobal();
   else if(currentView==='central-decisao') main.innerHTML = viewCentralDecisao();
   else if(currentView==='assistente') main.innerHTML = viewAssistente();
+  else if(currentView==='navegacao-objetivo') main.innerHTML = viewNavegacaoObjetivo();
   attachViewHandlers();
   atualizarBadgesBottomNav();
   if(__viewAnterior!==currentView && typeof window!=='undefined'){
@@ -3320,7 +3357,10 @@ function painelHojeHTML(){
   const risco = insights.find(i=>i.tipo==='risco');
   const oportunidade = insights.find(i=>i.tipo==='oportunidade');
   return `
-    <div class="dash-section-label">Hoje — ${fmtDate(hoje)}</div>
+    <div class="dash-section-label" style="display:flex;justify-content:space-between;align-items:center;">
+      <span>Hoje — ${fmtDate(hoje)}</span>
+      <button id="btnOuvirResumo" style="background:none;border:1px solid var(--line);border-radius:6px;padding:3px 8px;font-size:11px;cursor:pointer;color:var(--blue-accent);">▶ Ouvir resumo</button>
+    </div>
     <div class="panel"><div class="panel-body" style="padding:14px 18px;font-size:13px;line-height:2;">
       <div>💰 Tenho: <strong class="mono">${vm(brl(saldoContasHoje))}</strong></div>
       <div>📥 Entrou hoje: <strong class="mono" style="color:var(--success);">${vm(brl(entraHoje))}</strong></div>
@@ -3366,6 +3406,33 @@ function cardCentralDecisaoCompactoHTML(){
         <span style="color:var(--text-soft);font-size:18px;">›</span>
       </div>
     </div>`;
+}
+
+// Resumo Falado — usa a síntese de voz nativa do navegador (window.speechSynthesis), sem
+// precisar de nenhum serviço externo. Monta o texto a partir do Painel Hoje + insights.
+function montarTextoResumoFalado(){
+  const hoje = todayISO();
+  const dm = dadosMesGerencial(mesGlobalRef, 'todos');
+  const insights = gerarInsightsFinanceiros();
+  const risco = insights.find(i=>i.tipo==='risco');
+  const oportunidade = insights.find(i=>i.tipo==='oportunidade');
+  const em7 = new Date(); em7.setDate(em7.getDate()+7);
+  const vencendo7dias = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento>=hoje && l.dataVencimento<=em7.toISOString().slice(0,10)).length;
+  const partes = [];
+  partes.push(`Hoje o caixa está ${dm.margemLiquidaPct>=0?'saudável':'em atenção'}.`);
+  if(vencendo7dias>0) partes.push(`Existem ${vencendo7dias} conta${vencendo7dias>1?'s':''} importante${vencendo7dias>1?'s':''} nos próximos sete dias.`);
+  partes.push(`A margem líquida do mês está em ${dm.margemLiquidaPct.toFixed(0)} por cento.`);
+  if(risco) partes.push(`Atenção: ${risco.titulo}.`);
+  if(oportunidade) partes.push(`Existe uma oportunidade: ${oportunidade.titulo}.`);
+  return partes.join(' ');
+}
+function ouvirResumoFalado(){
+  if(!('speechSynthesis' in window)){ showToast('Seu navegador não suporta leitura em voz alta'); return; }
+  const texto = montarTextoResumoFalado();
+  const utterance = new SpeechSynthesisUtterance(texto);
+  utterance.lang = 'pt-BR';
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(utterance);
 }
 
 function cardCentroComandoCompactoHTML(){
@@ -3427,6 +3494,7 @@ function centroComandoHTML(){
 }
 
 function viewDashboard(){
+  const modoSimples = state.modoVisualizacao==='simples';
   const t = totaisPorMesRef(mesGlobalRef);
   const pend = pendentesResumo();
   const venc = contasVencendoResumo();
@@ -3440,6 +3508,7 @@ function viewDashboard(){
   return `
     <div class="topbar dash-topbar">
       <div class="dash-titulo"><h1>Dashboard</h1><p>Visão geral da saúde financeira da empresa</p></div>
+      <button id="btnToggleModoVisualizacao" class="btn ghost sm" style="flex-shrink:0;">${state.modoVisualizacao==='simples'?'📊 Ver tudo':'⚡ Modo simples'}</button>
     </div>
     ${painelOQueMudouHTML()}
     ${cardCentroComandoCompactoHTML()}
@@ -3484,7 +3553,7 @@ function viewDashboard(){
     ${ponteCaixaHTML(t)}
     ${cardQualidadeDadosHTML()}
 
-    ${(()=>{
+    ${modoSimples ? '' : (()=>{
       const hoje = todayISO();
       const ateReal = mesGlobalRef===hoje.slice(0,7) ? hoje : t.ateMes;
       const { receitaTotal, lucroLiquido } = resultadoOperacionalPeriodo(t.de, ateReal);
@@ -3507,6 +3576,13 @@ function viewDashboard(){
     </div>`;
     })()}
 
+    ${modoSimples ? `
+    <div class="dash-section-label">Atalhos rápidos</div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;">
+      <div class="panel" data-ir-relatorio="central_alertas" style="cursor:pointer;"><div class="panel-body" style="padding:14px 18px;text-align:center;"><div style="font-size:20px;">🔔</div><div style="font-size:12px;font-weight:600;margin-top:4px;">Alertas</div></div></div>
+      <div class="panel" data-goto="metas" style="cursor:pointer;"><div class="panel-body" style="padding:14px 18px;text-align:center;"><div style="font-size:20px;">🎯</div><div style="font-size:12px;font-weight:600;margin-top:4px;">Metas</div></div></div>
+    </div>
+    ` : `
     <div class="dash-economia-avisos-row">
       <div class="dash-economia-col">
         ${economiaMensalHTML(mesGlobalRef)}
@@ -3621,6 +3697,7 @@ function viewDashboard(){
         <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="rolling_forecast"><span>🔁 Rolling Forecast — próximos 12 meses</span><span style="color:var(--blue-accent);">→</span></div>
       </div>
     </div>
+    `}
 
     <div class="dash-section-label">Ver todos os relatórios</div>
     <div class="panel" data-goto="relatorios" style="cursor:pointer;">
@@ -6796,6 +6873,11 @@ function viewRelatorios(){
     { id:'cofres_virtuais', icone:'🧩', nome:'Cofres Virtuais', desc:'Organiza o saldo total em potes nomeados (impostos, emergência, investimentos...), sem mover dinheiro de verdade' },
     { id:'dna_financeiro', icone:'🧬', nome:'DNA Financeiro da Empresa', desc:'Perfil resumido combinando liquidez, estabilidade, dependência de clientes e mais' },
     { id:'automacoes_inteligentes', icone:'🤖', nome:'Automações Inteligentes', desc:'Regras que detectam condições e sugerem ações — o sistema não move dinheiro sozinho' },
+    { id:'central_negociacao', icone:'🤝', nome:'Central de Negociação', desc:'Compara à vista, 30, 60 e 90 dias, considerando desconto e valor do dinheiro no tempo' },
+    { id:'laboratorio_financeiro', icone:'🧪', nome:'Laboratório Financeiro', desc:'Salve cenários nomeados (Conservador/Normal/Crescimento) da Simulação "E Se" pra comparar' },
+    { id:'linha_tempo_manual', icone:'📌', nome:'Linha do Tempo da Empresa', desc:'Registre marcos importantes (investimento, contratação, novo fornecedor) e veja a evolução' },
+    { id:'foto_financeira', icone:'📸', nome:'Foto Financeira', desc:'Registre a situação atual e compare com outro momento no tempo' },
+    { id:'maquina_tempo_passado', icone:'⏳', nome:'Máquina do Tempo Financeira', desc:'Veja como estava a situação financeira numa data passada' },
     { id:'breakeven', icone:'⚖️', nome:'Ponto de Equilíbrio', desc:'Vendas mínimas pra cobrir os custos, em 3 cenários (otimista/realista/pessimista)' },
     { id:'valuation', icone:'💎', nome:'Valuation Estimado', desc:'Estimativa educacional de valor da empresa por múltiplos de EBITDA e faturamento' },
     { id:'aging', icone:'⏳', nome:'Aging — Vencidos por Faixa', desc:'Contas a receber e a pagar por faixa de atraso, com ranking de inadimplentes' },
@@ -6828,7 +6910,7 @@ function viewRelatorios(){
 const RELATORIOS_NOMES = {
   gerencial:'Dashboard Gerencial', executivo:'Dashboard Executivo', dre:'DRE', balanco:'Balanço Patrimonial', mei:'Declaração MEI', indicadores:'Indicadores Financeiros',
   produto:'Rentabilidade por Produto', investimentos:'Relatório de Investimentos', liquidez:'Índices de Liquidez', aging:'Aging — Vencidos por Faixa', dfc:'DFC — Fluxo de Caixa', cartoes:'Cartões de Crédito',
-  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio', yoy:'Comparativo Ano a Ano', sazonalidade:'Análise de Sazonalidade', calendario_vencimentos:'Calendário de Vencimentos', carga_tributaria:'Carga Tributária', simulador_preco:'Simulador de Preço', formas_pagamento:'Formas de Pagamento', rentabilidade_cliente:'Rentabilidade por Cliente', pe_produto:'Ponto de Equilíbrio por Produto', metas_comerciais:'Metas Comerciais', fixo_variavel_tempo:'Custo Fixo vs Variável no Tempo', onde_dinheiro:'Onde Meu Dinheiro Está', health_score:'Saúde da Empresa', eficiencia_cobranca:'Eficiência de Cobrança', variacao_preco_insumos:'Variação de Preço de Insumos', concentracao_clientes:'Concentração de Risco de Clientes', volume_margem_produto:'Ranking Volume x Margem por Produto', saude_cadastros:'Saúde dos Cadastros', projecao_comissoes:'Projeção de Comissões a Pagar', fcl:'Fluxo de Caixa Livre', payback:'Payback de Investimento', cvl_multiproduto:'Análise Custo-Volume-Lucro', dmpl:'Mutações do Patrimônio Líquido', provisoes:'Provisões (Férias/13º)', fluxo_centro_custo:'Fluxo de Caixa por Centro de Custo', conciliacao_saldo:'Conciliação de Saldo por Conta', taxa_conversao_funil:'Taxa de Conversão do Funil', novos_vs_recorrentes:'Novos Clientes vs. Recorrentes', taxa_recompra:'Taxa de Recompra', ltv_cac:'LTV e Relação LTV/CAC', abc_estoque:'Curva ABC de Estoque', estoque_abaixo_minimo:'Estoque Abaixo do Mínimo', obsolescencia_estoque:'Obsolescência de Estoque', comparativo_preco_fornecedores:'Comparativo de Preço entre Fornecedores', calendario_obrigacoes:'Calendário de Obrigações Acessórias', manutencao_consolidada:'Manutenção Preventiva Consolidada', vida_util_remanescente:'Vida Útil Remanescente', roi_ativo:'Custo e Valor Atual por Ativo', alocacao_ativos:'Alocação de Ativos', divergencias:'Divergências e Exceções', posicao_bancaria:'Posição Bancária Consolidada', taxas_bancarias:'Taxas e Tarifas Bancárias', amortizacao_emprestimos:'Amortização de Empréstimos', seguros_ativos:'Seguros de Ativos', preco_tabela_praticado:'Preço de Tabela vs. VK', limite_credito:'Limite de Crédito Disponível', multas_penalidades:'Multas e Penalidades', central_inteligencia:'Central de Inteligência Financeira', central_alertas:'Central de Alertas', calendario_financeiro:'Calendário Financeiro', central_cliente:'Central do Cliente', centro_comando:'Centro de Comando', fluxo_caixa_diario:'Fluxo de Caixa Diário', receitas_categoria:'Receitas por Categoria', margem_mensal:'Margem Mensal', ticket_medio_evolutivo:'Ticket Médio Evolutivo', vendas_canceladas:'Vendas Canceladas', comprometimento_futuro:'Comprometimento Futuro', parcelamentos:'Parcelamentos', receita_cliente_tempo:'Receita por Cliente ao Longo do Tempo', clientes_perdidos_risco:'Clientes Perdidos e em Risco', compras_periodo:'Compras por Período', evolucao_custos:'Evolução dos Custos', inflacao_interna:'Inflação Interna da Empresa', lucro_cliente:'Lucro por Cliente', capital_giro:'Capital de Giro', endividamento_vencimento:'Endividamento por Vencimento', super_relatorio_anual:'Super Relatório Anual', despesas_centro_custo:'Despesas por Centro de Custo', crescimento_clientes:'Crescimento de Clientes', dependencia_financeira:'Dependência Financeira', lucro_canal:'Lucro por Canal', obrigacoes_futuras:'Obrigações Futuras', evolucao_patrimonial:'Evolução Patrimonial', giro_caixa:'Giro de Caixa', dependencia_capital_terceiros:'Dependência de Capital de Terceiros', ncg:'Necessidade de Capital de Giro (NCG)', caixa_minimo:'Caixa Mínimo Recomendado', custo_financeiro_vendas:'Custo Financeiro das Vendas', vendas_parceladas:'Vendas Parceladas', prazo_recebimento_vendas:'Prazo de Recebimento das Vendas', desembolso_financeiro:'Desembolso Financeiro', compromissos_semana:'Compromissos por Semana', risco_caixa_data:'Risco de Caixa por Data', rentabilidade_forma_pagamento:'Rentabilidade por Forma de Pagamento', custo_real_parcelamento:'Custo Real do Parcelamento', evolucao_poder_compra:'Evolução do Poder de Compra', vazamentos_financeiros:'Vazamentos Financeiros', custo_por_mil_receita:'Custo por R$1.000 de Receita', dependencia_poucas_operacoes:'Dependência de Poucas Operações', decisoes_financeiras:'Decisões Financeiras', diagnostico_automatico:'Diagnóstico Automático do Mês', para_onde_foi_dinheiro:'Para Onde Foi o Dinheiro?', causas_variacao_lucro:'Causas da Variação do Lucro', eficiencia_dinheiro:'Eficiência do Dinheiro', movimentacoes_sem_classificacao:'Movimentações Sem Classificação', dados_inconsistentes:'Dados Inconsistentes', suspeitos_duplicidade:'Lançamentos Suspeitos de Duplicidade', custo_efetivo_conta:'Custo Efetivo por Conta Bancária', rentabilidade_saldo_parado:'Rentabilidade do Saldo Parado', dinheiro_transitorio:'Dinheiro Transitório', simulador_decisao_compra:'Simulador de Decisão de Compra', simulador_antecipacao:'Simulador de Antecipação', reversoes_financeiras:'Reversões Financeiras', oque_faria_se_fosse_dono:'O Que Eu Faria Se Fosse o Dono?', linha_tempo_financeira:'Linha do Tempo Financeira', efeito_domino_financeiro:'Efeito Dominó Financeiro', resultado_sem_maiores_clientes:'Resultado sem os 10 Maiores Clientes', resultado_sem_maior_despesa:'Resultado sem a Maior Despesa', lucro_de_verdade:'Lucro de Verdade', caixa_parece_livre:'Caixa que Parece Livre', tempo_recuperar_prejuizo:'Quanto Tempo pra Recuperar um Prejuízo?', custo_inadimplencia_lucro:'Custo da Inadimplência no Lucro', risco_aumento_fornecedor:'Risco de Aumento de Fornecedor', custo_oculto_fornecedores:'Custo Oculto dos Fornecedores', cliente_trabalho_pouco_resultado:'Cliente que Dá Trabalho e Pouco Resultado', cliente_mais_valioso:'Cliente Mais Valioso', despesas_crescem_mais_receita:'Despesas que Crescem Mais que a Receita', simulador_crescimento:'Simulador de Crescimento', limite_crescimento_seguro:'Limite de Crescimento Seguro', crescimento_da_prejuizo:'Crescimento que Dá Prejuízo', qual_crescimento_vale_pena:'Qual Crescimento Vale a Pena?', simulador_custos_subirem:'E se meus custos subirem?', indice_previsibilidade:'Índice de Previsibilidade Financeira', qualidade_receita:'Qualidade da Receita', mapa_margem_perdida:'Mapa de Margem Perdida', preco_minimo_seguro:'Preço Mínimo Seguro', distancia_prejuizo:'Distância até o Prejuízo', distancia_caixa_critico:'Distância até o Caixa Crítico', meta_caixa_reverso:'Meta de Caixa Reverso', retorno_sobre_crescimento:'Retorno sobre Crescimento', eficiencia_receita_incremental:'Eficiência da Receita Incremental', diluicao_margem:'Análise de Diluição de Margem', alavancagem_operacional:'Análise de Alavancagem Operacional', mapa_decisoes_pendentes:'Mapa de Decisões Pendentes', detector_tendencia:'Detector de Tendência', saude_por_area:'Saúde por Área', margem_ponto_seguranca:'Margem e Ponto de Segurança', indice_geral_gestao:'Índice Geral de Gestão Financeira', cofres_virtuais:'Cofres Virtuais', dna_financeiro:'DNA Financeiro da Empresa', automacoes_inteligentes:'Automações Inteligentes'
+  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio', yoy:'Comparativo Ano a Ano', sazonalidade:'Análise de Sazonalidade', calendario_vencimentos:'Calendário de Vencimentos', carga_tributaria:'Carga Tributária', simulador_preco:'Simulador de Preço', formas_pagamento:'Formas de Pagamento', rentabilidade_cliente:'Rentabilidade por Cliente', pe_produto:'Ponto de Equilíbrio por Produto', metas_comerciais:'Metas Comerciais', fixo_variavel_tempo:'Custo Fixo vs Variável no Tempo', onde_dinheiro:'Onde Meu Dinheiro Está', health_score:'Saúde da Empresa', eficiencia_cobranca:'Eficiência de Cobrança', variacao_preco_insumos:'Variação de Preço de Insumos', concentracao_clientes:'Concentração de Risco de Clientes', volume_margem_produto:'Ranking Volume x Margem por Produto', saude_cadastros:'Saúde dos Cadastros', projecao_comissoes:'Projeção de Comissões a Pagar', fcl:'Fluxo de Caixa Livre', payback:'Payback de Investimento', cvl_multiproduto:'Análise Custo-Volume-Lucro', dmpl:'Mutações do Patrimônio Líquido', provisoes:'Provisões (Férias/13º)', fluxo_centro_custo:'Fluxo de Caixa por Centro de Custo', conciliacao_saldo:'Conciliação de Saldo por Conta', taxa_conversao_funil:'Taxa de Conversão do Funil', novos_vs_recorrentes:'Novos Clientes vs. Recorrentes', taxa_recompra:'Taxa de Recompra', ltv_cac:'LTV e Relação LTV/CAC', abc_estoque:'Curva ABC de Estoque', estoque_abaixo_minimo:'Estoque Abaixo do Mínimo', obsolescencia_estoque:'Obsolescência de Estoque', comparativo_preco_fornecedores:'Comparativo de Preço entre Fornecedores', calendario_obrigacoes:'Calendário de Obrigações Acessórias', manutencao_consolidada:'Manutenção Preventiva Consolidada', vida_util_remanescente:'Vida Útil Remanescente', roi_ativo:'Custo e Valor Atual por Ativo', alocacao_ativos:'Alocação de Ativos', divergencias:'Divergências e Exceções', posicao_bancaria:'Posição Bancária Consolidada', taxas_bancarias:'Taxas e Tarifas Bancárias', amortizacao_emprestimos:'Amortização de Empréstimos', seguros_ativos:'Seguros de Ativos', preco_tabela_praticado:'Preço de Tabela vs. VK', limite_credito:'Limite de Crédito Disponível', multas_penalidades:'Multas e Penalidades', central_inteligencia:'Central de Inteligência Financeira', central_alertas:'Central de Alertas', calendario_financeiro:'Calendário Financeiro', central_cliente:'Central do Cliente', centro_comando:'Centro de Comando', fluxo_caixa_diario:'Fluxo de Caixa Diário', receitas_categoria:'Receitas por Categoria', margem_mensal:'Margem Mensal', ticket_medio_evolutivo:'Ticket Médio Evolutivo', vendas_canceladas:'Vendas Canceladas', comprometimento_futuro:'Comprometimento Futuro', parcelamentos:'Parcelamentos', receita_cliente_tempo:'Receita por Cliente ao Longo do Tempo', clientes_perdidos_risco:'Clientes Perdidos e em Risco', compras_periodo:'Compras por Período', evolucao_custos:'Evolução dos Custos', inflacao_interna:'Inflação Interna da Empresa', lucro_cliente:'Lucro por Cliente', capital_giro:'Capital de Giro', endividamento_vencimento:'Endividamento por Vencimento', super_relatorio_anual:'Super Relatório Anual', despesas_centro_custo:'Despesas por Centro de Custo', crescimento_clientes:'Crescimento de Clientes', dependencia_financeira:'Dependência Financeira', lucro_canal:'Lucro por Canal', obrigacoes_futuras:'Obrigações Futuras', evolucao_patrimonial:'Evolução Patrimonial', giro_caixa:'Giro de Caixa', dependencia_capital_terceiros:'Dependência de Capital de Terceiros', ncg:'Necessidade de Capital de Giro (NCG)', caixa_minimo:'Caixa Mínimo Recomendado', custo_financeiro_vendas:'Custo Financeiro das Vendas', vendas_parceladas:'Vendas Parceladas', prazo_recebimento_vendas:'Prazo de Recebimento das Vendas', desembolso_financeiro:'Desembolso Financeiro', compromissos_semana:'Compromissos por Semana', risco_caixa_data:'Risco de Caixa por Data', rentabilidade_forma_pagamento:'Rentabilidade por Forma de Pagamento', custo_real_parcelamento:'Custo Real do Parcelamento', evolucao_poder_compra:'Evolução do Poder de Compra', vazamentos_financeiros:'Vazamentos Financeiros', custo_por_mil_receita:'Custo por R$1.000 de Receita', dependencia_poucas_operacoes:'Dependência de Poucas Operações', decisoes_financeiras:'Decisões Financeiras', diagnostico_automatico:'Diagnóstico Automático do Mês', para_onde_foi_dinheiro:'Para Onde Foi o Dinheiro?', causas_variacao_lucro:'Causas da Variação do Lucro', eficiencia_dinheiro:'Eficiência do Dinheiro', movimentacoes_sem_classificacao:'Movimentações Sem Classificação', dados_inconsistentes:'Dados Inconsistentes', suspeitos_duplicidade:'Lançamentos Suspeitos de Duplicidade', custo_efetivo_conta:'Custo Efetivo por Conta Bancária', rentabilidade_saldo_parado:'Rentabilidade do Saldo Parado', dinheiro_transitorio:'Dinheiro Transitório', simulador_decisao_compra:'Simulador de Decisão de Compra', simulador_antecipacao:'Simulador de Antecipação', reversoes_financeiras:'Reversões Financeiras', oque_faria_se_fosse_dono:'O Que Eu Faria Se Fosse o Dono?', linha_tempo_financeira:'Linha do Tempo Financeira', efeito_domino_financeiro:'Efeito Dominó Financeiro', resultado_sem_maiores_clientes:'Resultado sem os 10 Maiores Clientes', resultado_sem_maior_despesa:'Resultado sem a Maior Despesa', lucro_de_verdade:'Lucro de Verdade', caixa_parece_livre:'Caixa que Parece Livre', tempo_recuperar_prejuizo:'Quanto Tempo pra Recuperar um Prejuízo?', custo_inadimplencia_lucro:'Custo da Inadimplência no Lucro', risco_aumento_fornecedor:'Risco de Aumento de Fornecedor', custo_oculto_fornecedores:'Custo Oculto dos Fornecedores', cliente_trabalho_pouco_resultado:'Cliente que Dá Trabalho e Pouco Resultado', cliente_mais_valioso:'Cliente Mais Valioso', despesas_crescem_mais_receita:'Despesas que Crescem Mais que a Receita', simulador_crescimento:'Simulador de Crescimento', limite_crescimento_seguro:'Limite de Crescimento Seguro', crescimento_da_prejuizo:'Crescimento que Dá Prejuízo', qual_crescimento_vale_pena:'Qual Crescimento Vale a Pena?', simulador_custos_subirem:'E se meus custos subirem?', indice_previsibilidade:'Índice de Previsibilidade Financeira', qualidade_receita:'Qualidade da Receita', mapa_margem_perdida:'Mapa de Margem Perdida', preco_minimo_seguro:'Preço Mínimo Seguro', distancia_prejuizo:'Distância até o Prejuízo', distancia_caixa_critico:'Distância até o Caixa Crítico', meta_caixa_reverso:'Meta de Caixa Reverso', retorno_sobre_crescimento:'Retorno sobre Crescimento', eficiencia_receita_incremental:'Eficiência da Receita Incremental', diluicao_margem:'Análise de Diluição de Margem', alavancagem_operacional:'Análise de Alavancagem Operacional', mapa_decisoes_pendentes:'Mapa de Decisões Pendentes', detector_tendencia:'Detector de Tendência', saude_por_area:'Saúde por Área', margem_ponto_seguranca:'Margem e Ponto de Segurança', indice_geral_gestao:'Índice Geral de Gestão Financeira', cofres_virtuais:'Cofres Virtuais', dna_financeiro:'DNA Financeiro da Empresa', automacoes_inteligentes:'Automações Inteligentes', central_negociacao:'Central de Negociação', laboratorio_financeiro:'Laboratório Financeiro', linha_tempo_manual:'Linha do Tempo da Empresa', foto_financeira:'Foto Financeira', maquina_tempo_passado:'Máquina do Tempo Financeira'
 };
 
 function viewRelatorioDetalhe(){
@@ -12058,6 +12140,31 @@ function verificarAutomacoes(){
         const varPct = (gastoAtual-gastoAnterior)/gastoAnterior*100;
         if(varPct>=regra.percentualLimite) sugestoes.push({ regraId:regra.id, texto:`"${regra.categoria}" subiu ${varPct.toFixed(0)}% em relação ao mês passado (${brl(gastoAnterior)} → ${brl(gastoAtual)}).` });
       }
+    } else if(regra.tipo==='avisar_caixa_abaixo'){
+      const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+      if(saldoContasHoje<regra.valorLimite) sugestoes.push({ regraId:regra.id, texto:`⚠️ Caixa (${brl(saldoContasHoje)}) ficou abaixo do limite configurado de ${brl(regra.valorLimite)}.` });
+    } else if(regra.tipo==='avisar_cliente_atrasou'){
+      const clientesAtrasados = {};
+      state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.origem!=='transferencia' && l.fornecedor && l.dataVencimento<hoje).forEach(l=>{
+        const dias = Math.round((new Date(hoje)-new Date(l.dataVencimento))/86400000);
+        if(dias>=regra.diasLimite){
+          if(!clientesAtrasados[l.fornecedor]) clientesAtrasados[l.fornecedor] = { valor:0, maiorAtraso:0 };
+          clientesAtrasados[l.fornecedor].valor += valorEmAberto(l);
+          clientesAtrasados[l.fornecedor].maiorAtraso = Math.max(clientesAtrasados[l.fornecedor].maiorAtraso, dias);
+        }
+      });
+      Object.entries(clientesAtrasados).forEach(([nome,d])=>{
+        sugestoes.push({ regraId:regra.id, texto:`⏰ "${nome}" está com ${d.maiorAtraso} dia(s) de atraso, total ${brl(d.valor)} em aberto.` });
+      });
+    } else if(regra.tipo==='avisar_receita_caiu'){
+      const [a,m] = hoje.slice(0,7).split('-').map(Number);
+      const mesAntRec = m===1?`${a-1}-12`:`${a}-${String(m-1).padStart(2,'0')}`;
+      const dmAtualRec = dadosMesGerencial(hoje.slice(0,7), 'todos');
+      const dmAntRec = dadosMesGerencial(mesAntRec, 'todos');
+      if(dmAntRec.receita>0){
+        const quedaPct = (dmAntRec.receita-dmAtualRec.receita)/dmAntRec.receita*100;
+        if(quedaPct>=regra.percentualLimite) sugestoes.push({ regraId:regra.id, texto:`📉 Receita caiu ${quedaPct.toFixed(0)}% em relação ao mês passado (${brl(dmAntRec.receita)} → ${brl(dmAtualRec.receita)}).` });
+      }
     }
   });
   return sugestoes;
@@ -12066,7 +12173,15 @@ function verificarAutomacoes(){
 function renderAutomacoesInteligentes(){
   const regras = state.automacoes||[];
   const sugestoes = verificarAutomacoes();
-  const nomeRegra = r => r.tipo==='separar_percentual_receita' ? `Separar ${r.percentual}% da receita → "${r.nomeSeparacao}"` : r.tipo==='avisar_caixa_acima' ? `Avisar quando caixa passar de ${brl(r.valorLimite)}` : `Avisar se "${r.categoria}" subir mais de ${r.percentualLimite}%`;
+  const nomeRegra = r => {
+    if(r.tipo==='separar_percentual_receita') return `Separar ${r.percentual}% da receita → "${r.nomeSeparacao}"`;
+    if(r.tipo==='avisar_caixa_acima') return `Avisar quando caixa passar de ${brl(r.valorLimite)}`;
+    if(r.tipo==='avisar_caixa_abaixo') return `Avisar quando caixa ficar abaixo de ${brl(r.valorLimite)}`;
+    if(r.tipo==='avisar_despesa_aumentou') return `Avisar se "${r.categoria}" subir mais de ${r.percentualLimite}%`;
+    if(r.tipo==='avisar_cliente_atrasou') return `Avisar quando um cliente atrasar mais de ${r.diasLimite} dia(s)`;
+    if(r.tipo==='avisar_receita_caiu') return `Avisar quando a receita cair mais de ${r.percentualLimite}%`;
+    return 'Regra desconhecida';
+  };
   return `
     <div class="note" style="margin-top:0;">O sistema não movimenta dinheiro sozinho — ele detecta a condição e sugere a ação. Você decide se aplica ou não.</div>
     ${sugestoes.length ? `<div class="dash-section-label">💡 Sugestões ativas agora</div><div class="panel"><div class="panel-body" style="padding:0;">${sugestoes.map(s=>`<div class="ledger-row compact" style="grid-template-columns:1fr;">${escapeHTML(s.texto)}</div>`).join('')}</div></div>` : ''}
@@ -12081,6 +12196,135 @@ function renderAutomacoesInteligentes(){
       `).join('') : `<div class="empty">Nenhuma automação configurada.</div>`}
     </div></div>
     <button class="btn ghost sm" id="btnNovaAutomacao" style="margin-top:10px;">+ Nova automação</button>
+  `;
+}
+
+// Central de Negociação — compara à vista/30/60/90 dias, considerando custo financeiro e caixa
+function renderCentralNegociacao(){
+  return `
+    <div class="note" style="margin-top:0;">Compare as opções de prazo de pagamento com um fornecedor, considerando desconto à vista e impacto no caixa.</div>
+    <div class="panel"><div class="panel-body" style="padding:18px;">
+      <div class="field"><label>Valor da compra (R$)</label><input type="text" inputmode="decimal" id="negValor" placeholder="0,00"></div>
+      <div class="field"><label>Desconto à vista (%)</label><input type="text" inputmode="decimal" id="negDescontoVista" placeholder="Ex: 5" value="0"></div>
+      <div id="negResultado" style="margin-top:14px;"></div>
+    </div></div>
+  `;
+}
+
+// Laboratório Financeiro — salva o conjunto atual de itens da Simulação "E Se" como um cenário
+// nomeado (Conservador/Normal/Crescimento), pra comparar vários de uma vez. Não mexe nos dados
+// reais — cada cenário é só uma cópia congelada dos itens hipotéticos e o resultado calculado.
+function renderLaboratorioFinanceiro(){
+  const cenarios = state.cenariosLaboratorio||[];
+  return `
+    <div class="note" style="margin-top:0;">Salve diferentes combinações de itens hipotéticos (montados na Simulação "E Se") como cenários nomeados, pra comparar lado a lado. Nada aqui altera os dados reais.</div>
+    <div class="report-controls"><button class="btn ghost sm" id="btnSalvarCenarioLab">+ Salvar simulação atual como cenário</button></div>
+    ${!cenarios.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum cenário salvo ainda. Monte itens na Simulação "E Se" e depois clique em "Salvar simulação atual como cenário".</div></div>` : `
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">
+      ${cenarios.map(c=>{
+        const proj = calcularProjecaoSimulacao(6, c.itens);
+        const saldoFinal = proj[proj.length-1]?.saldoSim ?? 0;
+        return `
+        <div class="panel">
+          <div class="panel-head"><h2>${escapeHTML(c.nome)}</h2><button class="icon-btn" data-action="excluir-cenario-lab" data-id="${c.id}">✕</button></div>
+          <div class="panel-body" style="padding:14px 18px;">
+            <div style="font-size:11px;color:var(--text-soft);">${c.itens.length} item(ns) hipotético(s)</div>
+            <div style="font-size:20px;font-weight:800;margin-top:6px;color:${saldoFinal>=0?'var(--success)':'var(--danger)'};">${brl(saldoFinal)}</div>
+            <div style="font-size:11px;color:var(--text-soft);">saldo projetado em 6 meses</div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`}
+  `;
+}
+
+// Linha do Tempo da Empresa — marcos que o USUÁRIO registra (investimento, contratação, novo
+// fornecedor...), diferente da "Linha do Tempo Financeira" (essa é automática, olhando números).
+function renderLinhaTempoManual(){
+  const marcos = state.marcosLinhaTempo||[];
+  return `
+    <div class="report-controls"><button class="btn ghost sm" id="btnNovoMarcoLinhaTempo">+ Registrar marco</button></div>
+    ${!marcos.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum marco registrado ainda. Adicione acontecimentos importantes (novo investimento, contratação, novo fornecedor) pra ver a evolução da empresa ao longo do tempo.</div></div>` : `
+    <div class="panel"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">${svgTimelineMarcos(marcos.map(m=>({ data:m.data, label:m.descricao })))}</div></div>`}
+  `;
+}
+
+// Foto Financeira — registra um retrato dos números-chave num momento, permite comparar duas fotos
+function renderFotoFinanceira(){
+  const fotos = (state.fotosFinanceiras||[]).slice().sort((a,b)=>b.data.localeCompare(a.data));
+  return `
+    <div class="note" style="margin-top:0;">Registra os números-chave de hoje. Depois, escolha duas fotos pra comparar como a empresa evoluiu entre os dois momentos.</div>
+    <div class="report-controls"><button class="btn ghost sm" id="btnRegistrarFoto">📸 Registrar situação atual</button></div>
+    ${fotos.length<2 ? `<div class="panel"><div class="empty" style="padding:40px 20px;">${fotos.length===0?'Nenhuma foto registrada ainda.':'Registre pelo menos mais uma foto pra poder comparar.'}</div></div>` : `
+    <div class="panel"><div class="panel-body" style="padding:18px;">
+      <div class="field-row">
+        <div class="field"><label>Foto 1 (antes)</label><select id="fotoSelect1">${fotos.map(f=>`<option value="${f.id}">${fmtDate(f.data)}</option>`).join('')}</select></div>
+        <div class="field"><label>Foto 2 (depois)</label><select id="fotoSelect2">${fotos.map((f,i)=>`<option value="${f.id}" ${i===0?'selected':''}>${fmtDate(f.data)}</option>`).join('')}</select></div>
+      </div>
+      <div id="fotoComparacaoResultado" style="margin-top:14px;"></div>
+    </div></div>`}
+    <div class="dash-section-label">Fotos registradas</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${fotos.map(f=>`<div class="ledger-row compact" style="grid-template-columns:auto 1fr auto;"><span class="mono">${fmtDate(f.data)}</span><span>Caixa: ${brl(f.saldoContas)} · Patrimônio: ${brl(f.patrimonio)}</span><button class="icon-btn" data-action="excluir-foto-financeira" data-id="${f.id}">✕</button></div>`).join('') || '<div class="empty">Nenhuma foto ainda.</div>'}
+    </div></div>
+  `;
+}
+
+// Conquistas — gamificação discreta, sem infantilizar. Verifica condições e marca as já
+// desbloqueadas em state.conquistasDesbloqueadas, pra não sumir depois que a condição deixar de
+// valer (ex: reserva foi usada) — uma conquista, uma vez alcançada, fica registrada.
+function verificarConquistas(){
+  const jaDesbloqueadas = new Set((state.conquistasDesbloqueadas||[]).map(c=>c.id));
+  const novasDesbloqueadas = [];
+
+  const metasBatidas = (state.metasReserva||[]).some(m=>{
+    const atual = m.contaId ? saldoConta(m.contaId) : (m.valorAtualManual||0);
+    return m.valorAlvo>0 && atual>=m.valorAlvo;
+  });
+  if(metasBatidas && !jaDesbloqueadas.has('reserva_atingida')) novasDesbloqueadas.push({ id:'reserva_atingida', titulo:'Reserva de emergência atingida', icone:'🏆' });
+
+  const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+  const hoje = todayISO();
+  const de90 = new Date(); de90.setDate(de90.getDate()-90);
+  const gastoMedioDiario = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90.toISOString().slice(0,10) && ev.data<=hoje && !ehMovimentoDeCapital(ev)).reduce((s,ev)=>s+ev.valor,0)/90;
+  const caixaMinimo = gastoMedioDiario*60;
+  if(saldoContasHoje>=caixaMinimo && caixaMinimo>0 && !jaDesbloqueadas.has('caixa_minimo_atingido')) novasDesbloqueadas.push({ id:'caixa_minimo_atingido', titulo:'Caixa mínimo recomendado atingido', icone:'🏆' });
+
+  const hojeD = new Date();
+  const meses3 = Array.from({length:3},(_,i)=>{ const d = new Date(hojeD.getFullYear(), hojeD.getMonth()-i, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const margens3m = meses3.map(m=>dadosMesGerencial(m,'todos').margemLiquidaPct);
+  if(margens3m.every(m=>m>=10) && !jaDesbloqueadas.has('margem_saudavel_3m')) novasDesbloqueadas.push({ id:'margem_saudavel_3m', titulo:'Margem saudável mantida por 3 meses seguidos', icone:'🏆' });
+
+  if(novasDesbloqueadas.length){
+    if(!state.conquistasDesbloqueadas) state.conquistasDesbloqueadas = [];
+    novasDesbloqueadas.forEach(c=>state.conquistasDesbloqueadas.push({ ...c, data: hoje }));
+    persist();
+  }
+  return state.conquistasDesbloqueadas||[];
+}
+
+// Máquina do Tempo Financeira — reconstrói uma APROXIMAÇÃO da situação numa data passada,
+// reaproveitando os mesmos helpers já usados em DMPL/Evolução Patrimonial/Saúde da Empresa
+// histórica. Não é uma reconstrução perfeita (ativos/investimentos usam valor atual, não o
+// valor de mercado que tinham na época) — isso é dito claramente na tela.
+function renderMaquinaDoTempoPassado(dataEscolhida){
+  const hoje = todayISO();
+  dataEscolhida = dataEscolhida || hoje;
+  const mesRefEscolhido = dataEscolhida.slice(0,7);
+  const saldoNaData = state.contas.reduce((s,c)=>s+saldoContaEmData(c.id, dataEscolhida),0);
+  const dm = dadosMesGerencial(mesRefEscolhido, 'todos');
+  const scoreNaData = calcularHealthScoreEm(dataEscolhida, mesRefEscolhido).scoreTotal;
+  const patrimonioAproximado = saldoNaData + totalAtivosPatrimoniais() + totalInvestimentos();
+  const saldoHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+  return `
+    <div class="report-controls"><input type="date" id="maquinaTempoData" value="${dataEscolhida}" max="${hoje}"></div>
+    <div class="note" style="margin-top:0;">Reconstrução aproximada — usa o saldo de caixa reconstituído pra data escolhida, mas ativos patrimoniais e investimentos usam o valor ATUAL (o sistema não guarda o valor de mercado histórico deles). Quanto mais distante a data, menos precisa a aproximação.</div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
+      <div class="card saldo"><div class="label">Saldo em caixa em ${fmtDate(dataEscolhida)}</div><div class="value mono">${brl(saldoNaData)}</div></div>
+      <div class="card"><div class="label">Patrimônio aproximado</div><div class="value mono">${brl(patrimonioAproximado)}</div></div>
+      <div class="card"><div class="label">Saúde da empresa (na época)</div><div class="value mono">${scoreNaData}/100</div></div>
+    </div>
+    ${dataEscolhida!==hoje ? `<div class="note">Hoje o saldo em caixa é ${brl(saldoHoje)} — ${saldoHoje>=saldoNaData?'cresceu':'caiu'} ${brl(Math.abs(saldoHoje-saldoNaData))} desde ${fmtDate(dataEscolhida)}.</div>` : ''}
   `;
 }
 
@@ -16886,6 +17130,11 @@ function attachViewHandlers(){
     persist();
     document.getElementById('painelOQueMudou')?.remove();
   });
+  document.getElementById('btnOuvirResumo')?.addEventListener('click', ()=>ouvirResumoFalado());
+  document.getElementById('btnToggleModoVisualizacao')?.addEventListener('click', ()=>{
+    state.modoVisualizacao = state.modoVisualizacao==='simples' ? 'completo' : 'simples';
+    persist(); render();
+  });
   document.querySelector('[data-action="ir-centro-comando"]')?.addEventListener('click', ()=>{
     relatorioAtivo = 'centro_comando';
     currentView = 'relatorio-detalhe';
@@ -16907,13 +17156,7 @@ function attachViewHandlers(){
     mesGlobalRef = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     render();
   });
-  document.getElementById('btnFecharMes')?.addEventListener('click', ()=>{
-    if(!confirm(`Marcar ${mesGlobalRef} como fechado/conferido? Isso é só um lembrete visual, não trava nem impede novos lançamentos nesse mês.`)) return;
-    if(!state.mesesFechados) state.mesesFechados = [];
-    state.mesesFechados.push({ mes: mesGlobalRef, fechadoEm: new Date().toISOString() });
-    persist(); render();
-    showToast('Mês marcado como fechado');
-  });
+  document.getElementById('btnFecharMes')?.addEventListener('click', ()=>openChecklistFechamentoModal(mesGlobalRef));
 
   document.getElementById('btnToggleSaldos')?.addEventListener('click', (e)=>{
     saldosOcultos = !saldosOcultos;
@@ -17085,6 +17328,7 @@ function attachViewHandlers(){
     let meiAnoAtual = new Date().getFullYear();
     let gerencialAnoAtual = new Date().getFullYear();
     let yoyAnoAtivo = new Date().getFullYear();
+    let maquinaTempoDataAtiva = todayISO();
     let superAnualAnoAtivo = new Date().getFullYear();
     let gerencialCentroAtivo = 'todos';
     let mensalMesRef = mesGlobalRef;
@@ -17257,6 +17501,11 @@ function attachViewHandlers(){
         relatorioAtivo==='cofres_virtuais' ? renderCofresVirtuais() :
         relatorioAtivo==='dna_financeiro' ? renderDNAFinanceiro() :
         relatorioAtivo==='automacoes_inteligentes' ? renderAutomacoesInteligentes() :
+        relatorioAtivo==='central_negociacao' ? renderCentralNegociacao() :
+        relatorioAtivo==='laboratorio_financeiro' ? renderLaboratorioFinanceiro() :
+        relatorioAtivo==='linha_tempo_manual' ? renderLinhaTempoManual() :
+        relatorioAtivo==='foto_financeira' ? renderFotoFinanceira() :
+        relatorioAtivo==='maquina_tempo_passado' ? renderMaquinaDoTempoPassado(maquinaTempoDataAtiva) :
         relatorioAtivo==='breakeven' ? renderRelatorioBreakEven() :
         relatorioAtivo==='valuation' ? renderRelatorioValuation() :
         relatorioAtivo==='mensal' ? renderSuperRelatorioMensal(mensalMesRef) :
@@ -17535,6 +17784,13 @@ function attachViewHandlers(){
           bindReportInner();
         });
       });
+      const maquinaTempoDataInput = document.getElementById('maquinaTempoData');
+      if(maquinaTempoDataInput) maquinaTempoDataInput.addEventListener('change', ()=>{
+        if(!maquinaTempoDataInput.value) return;
+        maquinaTempoDataAtiva = maquinaTempoDataInput.value;
+        document.getElementById('reportPanel').innerHTML = renderMaquinaDoTempoPassado(maquinaTempoDataAtiva);
+        bindReportInner();
+      });
       const paybackInvestido = document.getElementById('paybackInvestido');
       const paybackGanhoMensal = document.getElementById('paybackGanhoMensal');
       if(paybackInvestido && paybackGanhoMensal){
@@ -17635,6 +17891,38 @@ function attachViewHandlers(){
         };
         [mtVendasSlider, mtDespesasSlider, mtInvestimento, mtRetirada].forEach(el=>el?.addEventListener('input', calcularMaquinaDoTempo));
         calcularMaquinaDoTempo();
+      }
+      const negValor = document.getElementById('negValor');
+      const negDescontoVista = document.getElementById('negDescontoVista');
+      if(negValor){
+        const calcularNegociacao = ()=>{
+          const valor = numBR(negValor.value);
+          const descPct = numBR(negDescontoVista.value) || 0;
+          const resultado = document.getElementById('negResultado');
+          if(isNaN(valor) || valor<=0){ resultado.innerHTML=''; return; }
+          const taxaMensalRef = 0.01; // referência de custo de oportunidade, ~12% a.a.
+          const valorVista = valor*(1-descPct/100);
+          const opcoes = [
+            { label:'À vista (com desconto)', dias:0, valorNominal:valorVista },
+            { label:'30 dias', dias:30, valorNominal:valor },
+            { label:'60 dias', dias:60, valorNominal:valor },
+            { label:'90 dias', dias:90, valorNominal:valor },
+          ].map(o=>({ ...o, valorPresente: o.valorNominal/Math.pow(1+taxaMensalRef, o.dias/30) }));
+          const melhor = [...opcoes].sort((a,b)=>a.valorPresente-b.valorPresente)[0];
+          resultado.innerHTML = `
+            <div class="panel"><div class="panel-body" style="padding:0;">
+              ${opcoes.map(o=>`
+                <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;${o===melhor?'background:rgba(30,158,107,0.08);':''}">
+                  <span>${o.label}${o===melhor?' ✓':''}</span>
+                  <span class="mono">${brl(o.valorNominal)}</span>
+                  <span class="mono" style="color:var(--text-soft);font-size:11px;">valor presente: ${brl(o.valorPresente)}</span>
+                </div>
+              `).join('')}
+            </div></div>
+            <div class="note" style="margin-top:10px;">"Valor presente" desconta o valor pelo custo de oportunidade do dinheiro no tempo (~1% ao mês de referência) — quanto menor, mais vantajoso. ${melhor.label!=='À vista (com desconto)' && descPct>0 ? 'Nesse caso, o desconto à vista não compensa esperar menos tempo.' : ''}</div>`;
+        };
+        negValor.addEventListener('input', calcularNegociacao);
+        negDescontoVista.addEventListener('input', calcularNegociacao);
       }
       document.getElementById('btnNovaPrevisaoGasto')?.addEventListener('click', ()=>openPrevisaoGastoModal());
       const btnSincronizarRecomendacoesVK = document.getElementById('btnSincronizarRecomendacoesVK');
@@ -18021,6 +18309,50 @@ function attachViewHandlers(){
     bindReportInner();
   });
   document.getElementById('btnNovaAutomacao')?.addEventListener('click', ()=>openNovaAutomacaoModal());
+  document.getElementById('btnSalvarCenarioLab')?.addEventListener('click', ()=>openSalvarCenarioLabModal());
+  document.querySelectorAll('[data-action="excluir-cenario-lab"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      state.cenariosLaboratorio = state.cenariosLaboratorio.filter(c=>c.id!==btn.dataset.id);
+      persist(); render();
+    });
+  });
+  document.getElementById('btnNovoMarcoLinhaTempo')?.addEventListener('click', ()=>openNovoMarcoModal());
+  document.getElementById('btnRegistrarFoto')?.addEventListener('click', ()=>registrarFotoFinanceiraAgora());
+  document.querySelectorAll('[data-action="excluir-foto-financeira"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      state.fotosFinanceiras = state.fotosFinanceiras.filter(f=>f.id!==btn.dataset.id);
+      persist(); render();
+    });
+  });
+  const fotoSelect1 = document.getElementById('fotoSelect1');
+  const fotoSelect2 = document.getElementById('fotoSelect2');
+  if(fotoSelect1 && fotoSelect2){
+    const compararFotos = ()=>{
+      const f1 = state.fotosFinanceiras.find(f=>f.id===fotoSelect1.value);
+      const f2 = state.fotosFinanceiras.find(f=>f.id===fotoSelect2.value);
+      const el = document.getElementById('fotoComparacaoResultado');
+      if(!f1 || !f2){ el.innerHTML=''; return; }
+      const linha = (label, v1, v2) => {
+        const delta = v2-v1;
+        return `<div class="ledger-row compact" style="grid-template-columns:1fr auto auto auto;">
+          <span>${label}</span><span class="mono" style="color:var(--text-soft);">${brl(v1)}</span><span class="mono" style="color:var(--text-soft);">${brl(v2)}</span>
+          <span class="mono" style="font-weight:600;color:${delta>=0?'var(--success)':'var(--danger)'};">${delta>=0?'+':''}${brl(delta)}</span>
+        </div>`;
+      };
+      el.innerHTML = `
+        <div class="ledger-row head" style="grid-template-columns:1fr auto auto auto;"><span></span><span>${fmtDate(f1.data)}</span><span>${fmtDate(f2.data)}</span><span>Diferença</span></div>
+        <div class="panel"><div class="panel-body" style="padding:0;">
+          ${linha('Saldo em caixa', f1.saldoContas, f2.saldoContas)}
+          ${linha('Patrimônio', f1.patrimonio, f2.patrimonio)}
+          ${linha('Receita do mês', f1.receita, f2.receita)}
+          ${linha('Despesa do mês', f1.despesa, f2.despesa)}
+          ${linha('Lucro do mês', f1.lucro, f2.lucro)}
+        </div></div>`;
+    };
+    fotoSelect1.addEventListener('change', compararFotos);
+    fotoSelect2.addEventListener('change', compararFotos);
+    compararFotos();
+  }
   document.querySelectorAll('.automacao-ativo-check').forEach(chk=>{
     chk.addEventListener('change', ()=>{
       state.automacoes[chk.dataset.idx].ativo = chk.checked;
@@ -18145,6 +18477,24 @@ function attachViewHandlers(){
       const limiteNovaParcela = Math.max(0, capacidadeMensalLivre*0.5 - jaComprometidoParcelasFixas);
       decLimiteEl.innerHTML = `<div style="font-size:22px;font-weight:800;">${brl(limiteNovaParcela)}/mês</div><div class="note" style="margin-top:8px;">Considera até 50% do lucro médio mensal livre (${brl(capacidadeMensalLivre)}) disponível pra NOVAS parcelas — o resto fica de margem de segurança. Já desconta ${brl(jaComprometidoParcelasFixas)}/mês de empréstimos já em andamento.</div>`;
     }
+
+    const decRetirarValorEspecifico = document.getElementById('decRetirarValorEspecifico');
+    if(decRetirarValorEspecifico) decRetirarValorEspecifico.addEventListener('input', ()=>{
+      const valorRetirada = numBR(decRetirarValorEspecifico.value);
+      const el = document.getElementById('decRetirarEspecificoResultado');
+      if(isNaN(valorRetirada) || valorRetirada<=0){ el.innerHTML=''; return; }
+      const sobraDepois = saldoContasHoje - valorRetirada;
+      const limiteSeguro = Math.min(sobraAcimaDaReserva, Math.max(0,lucroMedioMensal));
+      let cor, texto;
+      if(valorRetirada<=limiteSeguro){
+        cor='🟢'; texto=`Pode retirar — dentro do valor considerado seguro (${brl(limiteSeguro)}).`;
+      } else if(sobraDepois>=reservaMinima60d){
+        cor='🟡'; texto=`Pode retirar, mas reduz a margem de segurança — acima do valor seguro recomendado (${brl(limiteSeguro)}), embora ainda fique acima da reserva mínima.`;
+      } else {
+        cor='🔴'; texto=`Não recomendado — depois dessa retirada, o saldo (${brl(sobraDepois)}) ficaria abaixo da reserva mínima (${brl(reservaMinima60d)}).`;
+      }
+      el.innerHTML = `<div class="note" style="margin-top:0;">${cor} ${texto}</div>`;
+    });
   }
   document.querySelectorAll('[data-action="registrar-realizado-decisao"]').forEach(btn=>{
     btn.addEventListener('click', ()=>openRegistrarRealizadoDecisaoModal(btn.dataset.id));
@@ -20061,6 +20411,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     if(isEdit){
       registrarLog('Lançamento editado', `${tipo==='entrada'?'Receita':'Despesa'} "${payload.descricao}" — ${brl(payload.valor)}`);
       registrarReversaoSePreciso(existing, existing.status, payload.status);
+      ultimaAcaoDesfazer = { tipo:'editar', lancamentoId:existing.id, snapshotAntes:JSON.parse(JSON.stringify(existing)) };
       Object.assign(existing, payload);
     } else {
       if(tipo==='saida' && payload.status==='pago' && !ehMovimentoDeCapital(payload)){
@@ -20074,12 +20425,14 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
         }
       }
       registrarLog('Lançamento criado', `${tipo==='entrada'?'Receita':'Despesa'} "${payload.descricao}" — ${brl(payload.valor)}${payload.aprovacao==='pendente'?' (aguardando aprovação)':''}`);
-      state.lancamentos.push({ id: uid(), tipo, origem:'manual', criadoEm: new Date().toISOString(), ...payload });
+      const novoId = uid();
+      state.lancamentos.push({ id: novoId, tipo, origem:'manual', criadoEm: new Date().toISOString(), ...payload });
+      ultimaAcaoDesfazer = { tipo:'criar', lancamentoId:novoId };
     }
     persist();
     closeModal();
     render();
-    showToast(isEdit ? 'Lançamento atualizado' : 'Lançamento criado');
+    mostrarToastComDesfazer(isEdit ? 'Lançamento atualizado' : 'Lançamento criado');
   });
 }
 function totalGastoFornecedor(nome){
@@ -20144,7 +20497,75 @@ function responderPerguntaAssistente(pergunta){
     if(!risco) return { texto: 'Nada de especial preocupando agora — os indicadores estão dentro do esperado. 🎉' };
     return { texto: `${risco.tipo==='risco'?'🔴':'🟡'} ${risco.titulo}. ${risco.texto}` };
   }
+  if(/quanto (preciso|tenho que) fatura/.test(p) && /sobr|lucr/.test(p)){
+    const valorDesejado = extrairValorDaPergunta(p);
+    if(valorDesejado===null) return { texto: 'Não consegui identificar o valor. Tente algo como "quanto preciso faturar pra sobrar R$ 20 mil?"' };
+    const dm = dadosMesGerencial(mesGlobalRef, 'todos');
+    if(dm.margemLiquidaPct<=0) return { texto: `Sua margem líquida atual está em ${dm.margemLiquidaPct.toFixed(1)}% — nesse ritmo, não tem faturamento que baste sem antes melhorar a margem.` };
+    const faturamentoNecessario = valorDesejado/(dm.margemLiquidaPct/100);
+    return { texto: `Pra sobrar ${brl(valorDesejado)}, mantendo a margem atual de ${dm.margemLiquidaPct.toFixed(1)}%, você precisaria faturar aproximadamente ${brl(faturamentoNecessario)}.` };
+  }
+  if(/quanto (preciso|tenho que) guardar/.test(p)){
+    const valorAlvo = extrairValorDaPergunta(p);
+    if(valorAlvo===null) return { texto: 'Não consegui identificar o valor. Tente algo como "quanto preciso guardar por mês pra ter R$ 100 mil?"' };
+    const mesesMatch = p.match(/(\d+)\s*(mes|mês|meses)/);
+    const meses = mesesMatch ? parseInt(mesesMatch[1],10) : 12;
+    const saldoAtual = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+    const falta = Math.max(0, valorAlvo-saldoAtual);
+    const porMes = falta/meses;
+    return { texto: falta<=0 ? `Você já tem ${brl(saldoAtual)} — já dá pra chegar em ${brl(valorAlvo)}.` : `Faltam ${brl(falta)} pra chegar em ${brl(valorAlvo)}. Em ${meses} mês(es), seria preciso guardar aproximadamente ${brl(porMes)}/mês.` };
+  }
+  if(/parcel/.test(p) && /custa|custo/.test(p)){
+    return { texto: 'Pra simular o custo de um parcelamento com precisão (valor, número de parcelas e juros), use o "Simulador de Decisão de Compra" na Central de Relatórios — ele compara à vista, parcelado e financiado lado a lado.' };
+  }
   return { texto: 'Não entendi essa pergunta — tente uma das sugestões abaixo. Esse assistente reconhece um conjunto fixo de perguntas, não é uma IA que entende qualquer frase.' };
+}
+
+// Navegação por Objetivo — organiza os recursos já existentes por objetivo, em vez de exigir que
+// o usuário saiba em qual menu procurar. Não cria nada novo, só reorganiza os atalhos.
+function viewNavegacaoObjetivo(){
+  const objetivos = [
+    { nome:'Quero aumentar meu caixa', icone:'💰', itens:[
+      { rel:'giro_caixa', nome:'Giro de Caixa' }, { rel:'rentabilidade_saldo_parado', nome:'Rentabilidade do Saldo Parado' },
+      { rel:'vazamentos_financeiros', nome:'Vazamentos Financeiros' }, { view:'central-decisao', nome:'Central de Decisão' },
+    ]},
+    { nome:'Quero reduzir despesas', icone:'✂️', itens:[
+      { rel:'evolucao_custos', nome:'Evolução dos Custos' }, { rel:'despesas_crescem_mais_receita', nome:'Despesas que Crescem Mais que a Receita' },
+      { rel:'mapa_margem_perdida', nome:'Mapa de Margem Perdida' }, { rel:'vazamentos_financeiros', nome:'Vazamentos Financeiros' },
+    ]},
+    { nome:'Quero aumentar meu lucro', icone:'📈', itens:[
+      { rel:'causas_variacao_lucro', nome:'Causas da Variação do Lucro' }, { rel:'preco_minimo_seguro', nome:'Preço Mínimo Seguro' },
+      { rel:'lucro_cliente', nome:'Lucro por Cliente' }, { rel:'qual_crescimento_vale_pena', nome:'Qual Crescimento Vale a Pena?' },
+    ]},
+    { nome:'Quero diminuir riscos', icone:'🛡️', itens:[
+      { rel:'central_inteligencia', nome:'Central de Inteligência Financeira' }, { rel:'dependencia_financeira', nome:'Dependência Financeira' },
+      { rel:'distancia_prejuizo', nome:'Distância até o Prejuízo' }, { rel:'risco_caixa_data', nome:'Risco de Caixa por Data' },
+    ]},
+    { nome:'Quero investir', icone:'💹', itens:[
+      { view:'investimentos', nome:'Investimentos' }, { rel:'caixa_parece_livre', nome:'Caixa que Parece Livre' },
+      { view:'central-decisao', nome:'Central de Decisão' },
+    ]},
+    { nome:'Quero retirar dinheiro', icone:'🏠', itens:[
+      { view:'central-decisao', nome:'Central de Decisão' }, { rel:'margem_ponto_seguranca', nome:'Margem e Ponto de Segurança' },
+    ]},
+    { nome:'Quero crescer', icone:'🌱', itens:[
+      { rel:'simulador_crescimento', nome:'Simulador de Crescimento' }, { rel:'limite_crescimento_seguro', nome:'Limite de Crescimento Seguro' },
+      { rel:'crescimento_da_prejuizo', nome:'Crescimento que Dá Prejuízo' }, { rel:'custo_por_mil_receita', nome:'Custo por R$1.000 de Receita' },
+    ]},
+    { nome:'Quero organizar minhas contas', icone:'📋', itens:[
+      { view:'pagar', nome:'Contas a Pagar' }, { view:'receber', nome:'Contas a Receber' },
+      { rel:'movimentacoes_sem_classificacao', nome:'Movimentações Sem Classificação' }, { rel:'compromissos_semana', nome:'Compromissos por Semana' },
+    ]},
+  ];
+  return `
+    <div class="topbar"><div><h1>O Que Você Quer Fazer?</h1><p>Escolha o objetivo e veja as ferramentas relacionadas — em vez de procurar no menu.</p></div></div>
+    ${objetivos.map(o=>`
+      <div class="dash-section-label">${o.icone} ${o.nome}</div>
+      <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+        ${o.itens.map(it=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" ${it.rel?`data-ir-relatorio="${it.rel}"`:`data-goto="${it.view}"`}><span>${escapeHTML(it.nome)}</span><span style="color:var(--blue-accent);">→</span></div>`).join('')}
+      </div></div>
+    `).join('')}
+  `;
 }
 
 function viewAssistente(){
@@ -20154,6 +20575,8 @@ function viewAssistente(){
     'Quanto entrou essa semana?',
     'O que vence amanhã?',
     'O que está preocupando o financeiro?',
+    'Quanto preciso faturar pra sobrar R$ 20 mil?',
+    'Quanto preciso guardar por mês pra ter R$ 100 mil?',
   ];
   return `
     <div class="topbar"><div><h1>Perguntar ao Livro Caixa</h1><p>Reconhece um conjunto fixo de perguntas — não é uma IA que entende qualquer frase, é um assistente com respostas prontas usando os dados do sistema.</p></div></div>
@@ -20250,6 +20673,14 @@ function viewCentralDecisao(){
     <div class="panel" style="margin-bottom:14px;">
       <div class="panel-head"><h2>📋 Qual o meu limite de comprometimento?</h2></div>
       <div class="panel-body" style="padding:14px 18px;" id="decLimiteComprometimentoResultado"></div>
+    </div>
+
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="panel-head"><h2>💰 Quero retirar um valor específico</h2></div>
+      <div class="panel-body" style="padding:14px 18px;">
+        <div class="field"><label>Quanto quer retirar (R$)</label><input type="text" inputmode="decimal" id="decRetirarValorEspecifico" placeholder="0,00"></div>
+        <div id="decRetirarEspecificoResultado" style="margin-top:10px;"></div>
+      </div>
     </div>
   `;
 }
@@ -20612,6 +21043,13 @@ function viewMetasReserva(){
       <div><h1>Metas Financeiras</h1><p>Metas do mês (faturamento, lucro, despesa) e metas de reserva/poupança</p></div>
       <button class="btn" id="btnNovaMeta">+ Meta de Reserva</button>
     </div>
+    ${(()=>{
+      const conquistas = verificarConquistas();
+      if(!conquistas.length) return '';
+      return `<div class="panel" style="margin-bottom:16px;"><div class="panel-body" style="padding:12px 18px;display:flex;gap:16px;flex-wrap:wrap;">
+        ${conquistas.map(c=>`<span style="font-size:12.5px;font-weight:600;">${c.icone} ${escapeHTML(c.titulo)}</span>`).join('')}
+      </div></div>`;
+    })()}
     ${mf.faturamento>0 ? (()=>{
       const diasNoMes = new Date(anoM, mesM, 0).getDate();
       const diaAtual = Number(hoje.slice(8,10));
@@ -20761,6 +21199,130 @@ function openMovProvisaoModal(provisao, tipo){
   });
 }
 
+function openSalvarCenarioLabModal(){
+  const itensAtuais = state.simulacaoAtual||[];
+  if(!itensAtuais.length){ showToast('Monte itens hipotéticos na Simulação "E Se" primeiro'); return; }
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Salvar cenário</h3>
+    <div class="note" style="margin-top:0;">Salva os ${itensAtuais.length} item(ns) hipotético(s) atuais da Simulação "E Se" como um cenário nomeado.</div>
+    <div class="field"><label>Nome do cenário</label><input type="text" id="cenarioLabNome" placeholder="Ex: Conservador, Normal, Crescimento"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarSalvarCenarioLab">Salvar</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnConfirmarSalvarCenarioLab').addEventListener('click', ()=>{
+    const nome = document.getElementById('cenarioLabNome').value.trim();
+    if(!nome){ showToast('Dê um nome ao cenário'); return; }
+    if(!state.cenariosLaboratorio) state.cenariosLaboratorio = [];
+    state.cenariosLaboratorio.push({ id:uid(), nome, itens: JSON.parse(JSON.stringify(itensAtuais)), criadoEm: new Date().toISOString() });
+    persist(); closeModal(); render();
+    showToast('Cenário salvo');
+  });
+}
+
+// Calcula o quanto o mês está "pronto" pra fechar — reaproveita os mesmos critérios já usados em
+// Movimentações Sem Classificação / Dados Inconsistentes / Suspeitos de Duplicidade, mas filtrando
+// só pro mês em questão. É só um checklist informativo — não bloqueia nada.
+function calcularProntidaoFechamento(mesRef){
+  const [anoM,mesM] = mesRef.split('-').map(Number);
+  const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
+  const lancamentosDoMes = state.lancamentos.filter(l=>l.origem!=='transferencia' && ((l.dataVencimento>=de && l.dataVencimento<=ate) || (l.dataPagamento>=de && l.dataPagamento<=ate)));
+  const itens = [];
+
+  const semCategoria = lancamentosDoMes.filter(l=>!l.categoria);
+  itens.push({ nome:'Lançamentos sem categoria', ok:semCategoria.length===0, detalhe: semCategoria.length>0 ? `${semCategoria.length} lançamento(s)` : null });
+
+  const hoje = todayISO();
+  const pendentesVencidas = lancamentosDoMes.filter(l=>l.status==='pendente' && l.dataVencimento<=(ate<hoje?ate:hoje));
+  itens.push({ nome:'Contas pendentes já vencidas dentro do mês', ok:pendentesVencidas.length===0, detalhe: pendentesVencidas.length>0 ? `${pendentesVencidas.length} conta(s)` : null });
+
+  const valoresInvalidos = lancamentosDoMes.filter(l=>l.valor<=0 || ((l.status==='pago'||l.status==='recebido') && !l.dataPagamento));
+  itens.push({ nome:'Sem valores inconsistentes', ok:valoresInvalidos.length===0, detalhe: valoresInvalidos.length>0 ? `${valoresInvalidos.length} lançamento(s)` : null });
+
+  const grupos = []; const usados = new Set();
+  for(let i=0;i<lancamentosDoMes.length;i++){
+    if(usados.has(lancamentosDoMes[i].id)) continue;
+    const l1 = lancamentosDoMes[i]; const parecidos=[l1];
+    for(let j=i+1;j<lancamentosDoMes.length;j++){
+      const l2 = lancamentosDoMes[j]; if(usados.has(l2.id)) continue;
+      if(l1.tipo===l2.tipo && Math.abs(l1.valor-l2.valor)<0.01 && l1.dataVencimento===l2.dataVencimento && (l1.fornecedor||'')===(l2.fornecedor||'')){ parecidos.push(l2); usados.add(l2.id); }
+    }
+    if(parecidos.length>1){ grupos.push(parecidos); usados.add(l1.id); }
+  }
+  itens.push({ nome:'Sem possíveis duplicidades', ok:grupos.length===0, detalhe: grupos.length>0 ? `${grupos.length} grupo(s) parecido(s)` : null });
+
+  const recorrenciasAtivas = (state.recorrencias||[]).filter(r=>r.ativo);
+  const recorrenciasNaoGeradas = recorrenciasAtivas.filter(r=>!state.lancamentos.some(l=>l.recorrenciaId===r.id && l.dataVencimento>=de && l.dataVencimento<=ate));
+  itens.push({ nome:'Lançamentos recorrentes já gerados', ok:recorrenciasNaoGeradas.length===0, detalhe: recorrenciasNaoGeradas.length>0 ? `${recorrenciasNaoGeradas.length} recorrência(s) sem lançamento` : null });
+
+  const pctPronto = Math.round(itens.filter(i=>i.ok).length/itens.length*100);
+  return { itens, pctPronto };
+}
+
+function openChecklistFechamentoModal(mesRef){
+  const { itens, pctPronto } = calcularProntidaoFechamento(mesRef);
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Fechar ${competenciaLabel(mesRef)}</h3>
+    <div style="text-align:center;margin:14px 0;">
+      <div style="font-size:32px;font-weight:800;color:${pctPronto===100?'var(--success)':pctPronto>=70?'var(--warn)':'var(--danger)'};">${pctPronto}%</div>
+      <div style="font-size:12px;color:var(--text-soft);">pronto para fechamento</div>
+    </div>
+    <div style="margin-bottom:16px;">
+      ${itens.map(i=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px;"><span>${i.ok?'✅':'⚠️'} ${i.nome}</span>${i.detalhe?`<span style="color:var(--text-soft);font-size:11px;">${i.detalhe}</span>`:''}</div>`).join('')}
+    </div>
+    <div class="note" style="margin-top:0;">Fechar o mês é só um lembrete visual — não bloqueia nem impede novos lançamentos ou edições nesse mês depois.</div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarFecharMes">✅ Fechar mesmo assim</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnConfirmarFecharMes').addEventListener('click', ()=>{
+    if(!state.mesesFechados) state.mesesFechados = [];
+    state.mesesFechados.push({ mes: mesRef, fechadoEm: new Date().toISOString(), pctProntoNoFechamento: pctPronto });
+    persist(); closeModal(); render();
+    showToast('Mês marcado como fechado');
+  });
+}
+
+function openNovoMarcoModal(){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Registrar marco</h3>
+    <div class="field"><label>Data</label><input type="date" id="marcoData" value="${todayISO()}"></div>
+    <div class="field"><label>Descrição</label><input type="text" id="marcoDescricao" placeholder="Ex: Novo investimento em equipamento"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarMarco">Registrar</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnConfirmarMarco').addEventListener('click', ()=>{
+    const data = document.getElementById('marcoData').value;
+    const descricao = document.getElementById('marcoDescricao').value.trim();
+    if(!data || !descricao){ showToast('Preencha a data e a descrição'); return; }
+    if(!state.marcosLinhaTempo) state.marcosLinhaTempo = [];
+    state.marcosLinhaTempo.push({ id:uid(), data, descricao });
+    persist(); closeModal(); render();
+    showToast('Marco registrado');
+  });
+}
+
+function registrarFotoFinanceiraAgora(){
+  const hoje = todayISO();
+  const saldoContas = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+  const dm = dadosMesGerencial(mesGlobalRef, 'todos');
+  const patrimonio = saldoContas + totalAtivosPatrimoniais() + totalInvestimentos();
+  if(!state.fotosFinanceiras) state.fotosFinanceiras = [];
+  state.fotosFinanceiras.push({ id:uid(), data:hoje, saldoContas, receita:dm.receita, despesa:dm.despesaTotal, lucro:dm.lucro, patrimonio });
+  persist(); render();
+  showToast('Foto financeira registrada');
+}
+
 function openNovaAutomacaoModal(){
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
@@ -20768,7 +21330,10 @@ function openNovaAutomacaoModal(){
     <div class="field"><label>Tipo</label><select id="autoTipo">
       <option value="separar_percentual_receita">Separar % da receita quando entrar</option>
       <option value="avisar_caixa_acima">Avisar quando o caixa passar de um valor</option>
+      <option value="avisar_caixa_abaixo">Avisar quando o caixa ficar abaixo de um valor</option>
       <option value="avisar_despesa_aumentou">Avisar se uma categoria de despesa subir muito</option>
+      <option value="avisar_cliente_atrasou">Avisar quando um cliente atrasar mais de X dias</option>
+      <option value="avisar_receita_caiu">Avisar quando a receita cair mais de X%</option>
     </select></div>
     <div id="autoCamposEspecificos"></div>
     <div class="modal-actions">
@@ -20784,12 +21349,16 @@ function openNovaAutomacaoModal(){
       campos.innerHTML = `
         <div class="field"><label>Percentual da receita (%)</label><input type="text" inputmode="decimal" id="autoPercentual" placeholder="Ex: 10"></div>
         <div class="field"><label>Nome do destino (ex: Impostos)</label><input type="text" id="autoNomeDestino" placeholder="Ex: Impostos"></div>`;
-    } else if(tipo==='avisar_caixa_acima'){
+    } else if(tipo==='avisar_caixa_acima' || tipo==='avisar_caixa_abaixo'){
       campos.innerHTML = `<div class="field"><label>Valor limite (R$)</label><input type="text" inputmode="decimal" id="autoValorLimite" placeholder="0,00"></div>`;
-    } else {
+    } else if(tipo==='avisar_despesa_aumentou'){
       campos.innerHTML = `
         <div class="field"><label>Categoria</label><select id="autoCategoria">${opcoesCategoriaHTML('saida','')}</select></div>
         <div class="field"><label>Aumento a partir de quantos % avisa</label><input type="text" inputmode="decimal" id="autoPercentualLimite" placeholder="Ex: 15"></div>`;
+    } else if(tipo==='avisar_cliente_atrasou'){
+      campos.innerHTML = `<div class="field"><label>Avisar a partir de quantos dias de atraso</label><input type="text" inputmode="numeric" id="autoDiasLimite" placeholder="Ex: 10"></div>`;
+    } else if(tipo==='avisar_receita_caiu'){
+      campos.innerHTML = `<div class="field"><label>Avisar se a receita cair mais de quantos %</label><input type="text" inputmode="decimal" id="autoPercentualLimite" placeholder="Ex: 15"></div>`;
     }
   };
   document.getElementById('autoTipo').addEventListener('change', renderCampos);
@@ -20802,15 +21371,23 @@ function openNovaAutomacaoModal(){
       const nome = document.getElementById('autoNomeDestino').value.trim();
       if(isNaN(pct) || pct<=0 || !nome){ showToast('Preencha o percentual e o nome do destino'); return; }
       regra.percentual = pct; regra.nomeSeparacao = nome;
-    } else if(tipo==='avisar_caixa_acima'){
+    } else if(tipo==='avisar_caixa_acima' || tipo==='avisar_caixa_abaixo'){
       const valor = numBR(document.getElementById('autoValorLimite').value);
       if(isNaN(valor) || valor<=0){ showToast('Preencha o valor limite'); return; }
       regra.valorLimite = valor;
-    } else {
-      const categoria = document.getElementById('autoCategoria').value;
+    } else if(tipo==='avisar_despesa_aumentou' || tipo==='avisar_receita_caiu'){
       const pctLimite = numBR(document.getElementById('autoPercentualLimite').value);
-      if(!categoria || isNaN(pctLimite) || pctLimite<=0){ showToast('Preencha a categoria e o percentual'); return; }
-      regra.categoria = categoria; regra.percentualLimite = pctLimite;
+      if(isNaN(pctLimite) || pctLimite<=0){ showToast('Preencha o percentual'); return; }
+      regra.percentualLimite = pctLimite;
+      if(tipo==='avisar_despesa_aumentou'){
+        const categoria = document.getElementById('autoCategoria').value;
+        if(!categoria){ showToast('Escolha a categoria'); return; }
+        regra.categoria = categoria;
+      }
+    } else if(tipo==='avisar_cliente_atrasou'){
+      const dias = numBR(document.getElementById('autoDiasLimite').value);
+      if(isNaN(dias) || dias<=0){ showToast('Preencha os dias de atraso'); return; }
+      regra.diasLimite = dias;
     }
     if(!state.automacoes) state.automacoes = [];
     state.automacoes.push(regra);
