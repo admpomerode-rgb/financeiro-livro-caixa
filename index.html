@@ -3271,6 +3271,29 @@ function painelOQueMudouHTML(){
     </div>`;
 }
 
+function cardCentroComandoCompactoHTML(){
+  const hoje = todayISO();
+  const insights = gerarInsightsFinanceiros();
+  const riscos = insights.filter(i=>i.tipo==='risco').length;
+  const atencoes = insights.filter(i=>i.tipo==='atencao').length;
+  const scoreAtual = calcularHealthScoreEm(hoje, mesGlobalRef).scoreTotal;
+  const cor = scoreAtual>=70?'var(--success)':scoreAtual>=40?'var(--warn)':'var(--danger)';
+  const totalPendencias = riscos+atencoes;
+  return `
+    <div class="panel" data-action="ir-centro-comando" style="cursor:pointer;">
+      <div class="panel-body" style="padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <span style="font-size:22px;">🎛️</span>
+          <div>
+            <div style="font-weight:600;font-size:13.5px;">Centro de Comando</div>
+            <div style="font-size:11.5px;color:var(--text-soft);">Saúde: <span style="color:${cor};font-weight:600;">${scoreAtual}/100</span>${totalPendencias>0 ? ` · ${totalPendencias} situação(ões) pra olhar` : ' · tudo tranquilo 🎉'}</div>
+          </div>
+        </div>
+        <span style="color:var(--text-soft);font-size:18px;">›</span>
+      </div>
+    </div>`;
+}
+
 function centroComandoHTML(){
   const hoje = todayISO();
   const insights = gerarInsightsFinanceiros();
@@ -3322,7 +3345,7 @@ function viewDashboard(){
       <div class="dash-titulo"><h1>Dashboard</h1><p>Visão geral da saúde financeira da empresa</p></div>
     </div>
     ${painelOQueMudouHTML()}
-    ${centroComandoHTML()}
+    ${cardCentroComandoCompactoHTML()}
     ${mesNavHTML()}
 
     <div class="dash-hero-row">
@@ -6523,6 +6546,7 @@ function viewRelatorios(){
     { id:'central_alertas', icone:'🔔', nome:'Central de Alertas', desc:'Todos os avisos do sistema — contas vencidas, limites, orçamentos, vencimentos — num lugar só' },
     { id:'calendario_financeiro', icone:'📅', nome:'Calendário Financeiro', desc:'Visão em calendário (não lista) de entradas, saídas e vencimentos do mês' },
     { id:'central_cliente', icone:'👥', nome:'Central do Cliente', desc:'Faturamento, prazo de pagamento, inadimplência e limite de crédito, consolidado por cliente' },
+    { id:'centro_comando', icone:'🎛️', nome:'Centro de Comando', desc:'O que está acontecendo, o que precisa de atenção, o que vai acontecer e o que fazer — tudo num só lugar' },
     { id:'breakeven', icone:'⚖️', nome:'Ponto de Equilíbrio', desc:'Vendas mínimas pra cobrir os custos, em 3 cenários (otimista/realista/pessimista)' },
     { id:'valuation', icone:'💎', nome:'Valuation Estimado', desc:'Estimativa educacional de valor da empresa por múltiplos de EBITDA e faturamento' },
     { id:'aging', icone:'⏳', nome:'Aging — Vencidos por Faixa', desc:'Contas a receber e a pagar por faixa de atraso, com ranking de inadimplentes' },
@@ -6555,7 +6579,7 @@ function viewRelatorios(){
 const RELATORIOS_NOMES = {
   gerencial:'Dashboard Gerencial', executivo:'Dashboard Executivo', dre:'DRE', balanco:'Balanço Patrimonial', mei:'Declaração MEI', indicadores:'Indicadores Financeiros',
   produto:'Rentabilidade por Produto', investimentos:'Relatório de Investimentos', liquidez:'Índices de Liquidez', aging:'Aging — Vencidos por Faixa', dfc:'DFC — Fluxo de Caixa', cartoes:'Cartões de Crédito',
-  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio', yoy:'Comparativo Ano a Ano', sazonalidade:'Análise de Sazonalidade', calendario_vencimentos:'Calendário de Vencimentos', carga_tributaria:'Carga Tributária', simulador_preco:'Simulador de Preço', formas_pagamento:'Formas de Pagamento', rentabilidade_cliente:'Rentabilidade por Cliente', pe_produto:'Ponto de Equilíbrio por Produto', metas_comerciais:'Metas Comerciais', fixo_variavel_tempo:'Custo Fixo vs Variável no Tempo', onde_dinheiro:'Onde Meu Dinheiro Está', health_score:'Saúde da Empresa', eficiencia_cobranca:'Eficiência de Cobrança', variacao_preco_insumos:'Variação de Preço de Insumos', concentracao_clientes:'Concentração de Risco de Clientes', volume_margem_produto:'Ranking Volume x Margem por Produto', saude_cadastros:'Saúde dos Cadastros', projecao_comissoes:'Projeção de Comissões a Pagar', fcl:'Fluxo de Caixa Livre', payback:'Payback de Investimento', cvl_multiproduto:'Análise Custo-Volume-Lucro', dmpl:'Mutações do Patrimônio Líquido', provisoes:'Provisões (Férias/13º)', fluxo_centro_custo:'Fluxo de Caixa por Centro de Custo', conciliacao_saldo:'Conciliação de Saldo por Conta', taxa_conversao_funil:'Taxa de Conversão do Funil', novos_vs_recorrentes:'Novos Clientes vs. Recorrentes', taxa_recompra:'Taxa de Recompra', ltv_cac:'LTV e Relação LTV/CAC', abc_estoque:'Curva ABC de Estoque', estoque_abaixo_minimo:'Estoque Abaixo do Mínimo', obsolescencia_estoque:'Obsolescência de Estoque', comparativo_preco_fornecedores:'Comparativo de Preço entre Fornecedores', calendario_obrigacoes:'Calendário de Obrigações Acessórias', manutencao_consolidada:'Manutenção Preventiva Consolidada', vida_util_remanescente:'Vida Útil Remanescente', roi_ativo:'Custo e Valor Atual por Ativo', alocacao_ativos:'Alocação de Ativos', divergencias:'Divergências e Exceções', posicao_bancaria:'Posição Bancária Consolidada', taxas_bancarias:'Taxas e Tarifas Bancárias', amortizacao_emprestimos:'Amortização de Empréstimos', seguros_ativos:'Seguros de Ativos', preco_tabela_praticado:'Preço de Tabela vs. VK', limite_credito:'Limite de Crédito Disponível', multas_penalidades:'Multas e Penalidades', central_inteligencia:'Central de Inteligência Financeira', central_alertas:'Central de Alertas', calendario_financeiro:'Calendário Financeiro', central_cliente:'Central do Cliente'
+  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio', yoy:'Comparativo Ano a Ano', sazonalidade:'Análise de Sazonalidade', calendario_vencimentos:'Calendário de Vencimentos', carga_tributaria:'Carga Tributária', simulador_preco:'Simulador de Preço', formas_pagamento:'Formas de Pagamento', rentabilidade_cliente:'Rentabilidade por Cliente', pe_produto:'Ponto de Equilíbrio por Produto', metas_comerciais:'Metas Comerciais', fixo_variavel_tempo:'Custo Fixo vs Variável no Tempo', onde_dinheiro:'Onde Meu Dinheiro Está', health_score:'Saúde da Empresa', eficiencia_cobranca:'Eficiência de Cobrança', variacao_preco_insumos:'Variação de Preço de Insumos', concentracao_clientes:'Concentração de Risco de Clientes', volume_margem_produto:'Ranking Volume x Margem por Produto', saude_cadastros:'Saúde dos Cadastros', projecao_comissoes:'Projeção de Comissões a Pagar', fcl:'Fluxo de Caixa Livre', payback:'Payback de Investimento', cvl_multiproduto:'Análise Custo-Volume-Lucro', dmpl:'Mutações do Patrimônio Líquido', provisoes:'Provisões (Férias/13º)', fluxo_centro_custo:'Fluxo de Caixa por Centro de Custo', conciliacao_saldo:'Conciliação de Saldo por Conta', taxa_conversao_funil:'Taxa de Conversão do Funil', novos_vs_recorrentes:'Novos Clientes vs. Recorrentes', taxa_recompra:'Taxa de Recompra', ltv_cac:'LTV e Relação LTV/CAC', abc_estoque:'Curva ABC de Estoque', estoque_abaixo_minimo:'Estoque Abaixo do Mínimo', obsolescencia_estoque:'Obsolescência de Estoque', comparativo_preco_fornecedores:'Comparativo de Preço entre Fornecedores', calendario_obrigacoes:'Calendário de Obrigações Acessórias', manutencao_consolidada:'Manutenção Preventiva Consolidada', vida_util_remanescente:'Vida Útil Remanescente', roi_ativo:'Custo e Valor Atual por Ativo', alocacao_ativos:'Alocação de Ativos', divergencias:'Divergências e Exceções', posicao_bancaria:'Posição Bancária Consolidada', taxas_bancarias:'Taxas e Tarifas Bancárias', amortizacao_emprestimos:'Amortização de Empréstimos', seguros_ativos:'Seguros de Ativos', preco_tabela_praticado:'Preço de Tabela vs. VK', limite_credito:'Limite de Crédito Disponível', multas_penalidades:'Multas e Penalidades', central_inteligencia:'Central de Inteligência Financeira', central_alertas:'Central de Alertas', calendario_financeiro:'Calendário Financeiro', central_cliente:'Central do Cliente', centro_comando:'Centro de Comando'
 };
 
 function viewRelatorioDetalhe(){
@@ -14222,6 +14246,11 @@ function attachViewHandlers(){
     persist();
     document.getElementById('painelOQueMudou')?.remove();
   });
+  document.querySelector('[data-action="ir-centro-comando"]')?.addEventListener('click', ()=>{
+    relatorioAtivo = 'centro_comando';
+    currentView = 'relatorio-detalhe';
+    render();
+  });
   document.getElementById('btnMesAnterior')?.addEventListener('click', ()=>{
     const [ano, mes] = mesGlobalRef.split('-').map(Number);
     const d = new Date(ano, mes-2, 1);
@@ -14492,6 +14521,7 @@ function attachViewHandlers(){
         relatorioAtivo==='central_alertas' ? renderCentralAlertas() :
         relatorioAtivo==='calendario_financeiro' ? renderCalendarioFinanceiro() :
         relatorioAtivo==='central_cliente' ? renderCentralCliente() :
+        relatorioAtivo==='centro_comando' ? centroComandoHTML() :
         relatorioAtivo==='breakeven' ? renderRelatorioBreakEven() :
         relatorioAtivo==='valuation' ? renderRelatorioValuation() :
         relatorioAtivo==='mensal' ? renderSuperRelatorioMensal(mensalMesRef) :
