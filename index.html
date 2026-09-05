@@ -3275,6 +3275,27 @@ function painelOQueMudouHTML(){
     </div>`;
 }
 
+function cardCentralDecisaoCompactoHTML(){
+  const hoje = todayISO();
+  const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+  const de90 = new Date(); de90.setDate(de90.getDate()-90);
+  const gastoMedioDiario = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90.toISOString().slice(0,10) && ev.data<=hoje && !ehMovimentoDeCapital(ev)).reduce((s,ev)=>s+ev.valor,0)/90;
+  const sobraAcimaDaReserva = Math.max(0, saldoContasHoje - gastoMedioDiario*60);
+  return `
+    <div class="panel" data-action="ir-central-decisao" style="cursor:pointer;">
+      <div class="panel-body" style="padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <span style="font-size:22px;">🧭</span>
+          <div>
+            <div style="font-weight:600;font-size:13.5px;">Central de Decisão</div>
+            <div style="font-size:11.5px;color:var(--text-soft);">Posso retirar/investir/gastar quanto agora? · Disponível estimado: <span style="color:var(--blue-accent);font-weight:600;">${vm(brl(sobraAcimaDaReserva))}</span></div>
+          </div>
+        </div>
+        <span style="color:var(--text-soft);font-size:18px;">›</span>
+      </div>
+    </div>`;
+}
+
 function cardCentroComandoCompactoHTML(){
   const hoje = todayISO();
   const insights = gerarInsightsFinanceiros();
@@ -3350,6 +3371,7 @@ function viewDashboard(){
     </div>
     ${painelOQueMudouHTML()}
     ${cardCentroComandoCompactoHTML()}
+    ${cardCentralDecisaoCompactoHTML()}
     ${mesNavHTML()}
 
     <div class="dash-hero-row">
@@ -3465,13 +3487,68 @@ function viewDashboard(){
 
     ${orcadoRealizadoHTML(mesGlobalRef)}
 
-    <div class="dash-section-label">Explorar</div>
+    <div class="dash-section-label">Explorar — Visão Geral</div>
     <div class="panel">
       <div class="panel-body" style="padding:6px 0;">
         <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="gerencial"><span>📊 Dashboard Gerencial — visão anual completa</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="health_score"><span>❤️ Saúde da Empresa — tendência 12 meses</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="central_inteligencia"><span>🧠 Central de Inteligência Financeira</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="central_alertas"><span>🔔 Central de Alertas</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="calendario_financeiro"><span>📅 Calendário Financeiro</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="super_relatorio_anual"><span>🏆 Super Relatório Anual</span><span style="color:var(--blue-accent);">→</span></div>
+      </div>
+    </div>
+
+    <div class="dash-section-label">Explorar — Caixa e Liquidez</div>
+    <div class="panel">
+      <div class="panel-body" style="padding:6px 0;">
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="previsao"><span>🔮 Previsão de Saldo Futuro — até 365 dias</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="giro_caixa"><span>🔄 Giro de Caixa</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="caixa_minimo"><span>🛟 Caixa Mínimo Recomendado</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="capital_giro"><span>⚙️ Capital de Giro</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="compromissos_semana"><span>📆 Compromissos por Semana</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="risco_caixa_data"><span>🚨 Risco de Caixa por Data</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="indicadores"><span>📈 Ciclo Financeiro e Giro de Estoque</span><span style="color:var(--blue-accent);">→</span></div>
+      </div>
+    </div>
+
+    <div class="dash-section-label">Explorar — Vendas e Clientes</div>
+    <div class="panel">
+      <div class="panel-body" style="padding:6px 0;">
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="central_cliente"><span>👥 Central do Cliente</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="clientes_perdidos_risco"><span>⚠️ Clientes Perdidos e em Risco</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="lucro_cliente"><span>💎 Lucro por Cliente</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="ticket_medio_evolutivo"><span>🎫 Ticket Médio Evolutivo</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="dependencia_financeira"><span>⚖️ Dependência Financeira</span><span style="color:var(--blue-accent);">→</span></div>
+      </div>
+    </div>
+
+    <div class="dash-section-label">Explorar — Custos e Despesas</div>
+    <div class="panel">
+      <div class="panel-body" style="padding:6px 0;">
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="evolucao_custos"><span>📊 Evolução dos Custos</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="vazamentos_financeiros"><span>🕳️ Vazamentos Financeiros</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="abc_despesas"><span>📉 Curva ABC de Despesas</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="custo_por_mil_receita"><span>📏 Custo por R$1.000 de Receita</span><span style="color:var(--blue-accent);">→</span></div>
+      </div>
+    </div>
+
+    <div class="dash-section-label">Explorar — Patrimônio e Investimentos</div>
+    <div class="panel">
+      <div class="panel-body" style="padding:6px 0;">
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="onde_dinheiro"><span>🧭 Onde Meu Dinheiro Está</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="evolucao_patrimonial"><span>🏛️ Evolução Patrimonial</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="endividamento_vencimento"><span>📉 Endividamento por Vencimento</span><span style="color:var(--blue-accent);">→</span></div>
         <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="centro_lucro"><span>🏢 Centro de Lucro / Unidade de Negócio</span><span style="color:var(--blue-accent);">→</span></div>
         <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="rolling_forecast"><span>🔁 Rolling Forecast — próximos 12 meses</span><span style="color:var(--blue-accent);">→</span></div>
-        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="indicadores"><span>📈 Ciclo Financeiro e Giro de Estoque</span><span style="color:var(--blue-accent);">→</span></div>
+      </div>
+    </div>
+
+    <div class="dash-section-label">Ver todos os relatórios</div>
+    <div class="panel" data-goto="relatorios" style="cursor:pointer;">
+      <div class="panel-body" style="padding:14px 18px;display:flex;align-items:center;justify-content:space-between;">
+        <span style="font-size:13px;font-weight:600;">📊 Central de Relatórios completa</span>
+        <span style="color:var(--blue-accent);font-size:18px;">›</span>
       </div>
     </div>
   `;
@@ -15315,6 +15392,10 @@ function attachViewHandlers(){
   document.querySelector('[data-action="ir-centro-comando"]')?.addEventListener('click', ()=>{
     relatorioAtivo = 'centro_comando';
     currentView = 'relatorio-detalhe';
+    render();
+  });
+  document.querySelector('[data-action="ir-central-decisao"]')?.addEventListener('click', ()=>{
+    currentView = 'central-decisao';
     render();
   });
   document.getElementById('btnMesAnterior')?.addEventListener('click', ()=>{
