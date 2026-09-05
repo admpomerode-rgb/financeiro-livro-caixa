@@ -3783,6 +3783,11 @@ function viewFluxo(categoriaFiltro){
       </div>
     </div></div>
 
+    <div class="dash-section-label">Calendário de movimentação (quanto se moveu por dia)</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">
+      ${svgCalendarioCalor(eventosMes.map(ev=>({ data:ev.data, valor: Math.abs(ev.valor) })), deMes, ateMes)}
+    </div></div>
+
     <div class="panel">
       <div class="panel-head"><h2>Realizado no mês</h2><span style="font-size:12px;color:var(--text-soft);">Início: <span class="mono">${vm(brl(saldoInicioMes))}</span> · Fim: <span class="mono">${vm(brl(saldoFimMes))}</span></span></div>
       ${categoriasNoMes.length ? `
@@ -6540,6 +6545,16 @@ function renderDRE(periodo){
   const variacaoHTML = (atual, anterior, atualYoy)=> mostraVertical ? pctVerticalBase(atual) : mostraYoy ? variacaoHTMLBase(atual, atualYoy, 'mesmo período ano passado') : variacaoHTMLBase(atual, anterior, 'período anterior');
 
   return `
+    <div class="dash-section-label">De onde saiu o resultado (visão em cascata)</div>
+    <div class="panel"><div class="panel-body" style="padding:12px 8px;overflow-x:auto;">
+      ${svgCascata([
+        { label:'Receita Bruta', valor: totalReceitas + totalDescontos },
+        ...(totalDescontos>0 ? [{ label:'Descontos', valor: -totalDescontos }] : []),
+        ...(totalCancelados>0 ? [{ label:'Cancelados', valor: -totalCancelados }] : []),
+        { label:'Despesas', valor: -totalDespesas },
+      ])}
+    </div></div>
+    <div class="note" style="margin-top:0;">A última barra mostra onde o resultado chegou: ${brl(resultado)}. Cada barra anterior mostra o que foi somado ou tirado no caminho.</div>
     <div class="report-controls">
       <select id="drePeriodo">
         <option value="mes" ${periodo==='mes'?'selected':''}>Mês selecionado</option>
@@ -6969,6 +6984,11 @@ function renderPrevisaoSaldoFuturo(){
         <canvas id="chartPrevisao" height="190"></canvas>
       </div>
     </div>
+    <div class="dash-section-label">Faixa de cenários (otimista/pessimista)</div>
+    <div class="panel"><div class="panel-body" style="padding:16px 8px;overflow-x:auto;">
+      ${svgFaixaProjecao(proj.pontos.map(p=>({ label:p.label, valorCentral:p.saldo, min:p.saldo-Math.abs(p.saldo)*0.15, max:p.saldo+Math.abs(p.saldo)*0.15 })))}
+    </div></div>
+    <div class="note" style="margin-top:0;">A faixa sombreada representa uma margem de sensibilidade de ±15% sobre a projeção central — não é uma simulação de dois cenários reais separados (isso já existe em "Cenário de Stress"), é só uma noção visual de o quanto a projeção pode variar se as coisas saírem um pouco melhor ou pior do que o esperado.</div>
 
     <div class="panel" style="margin-top:16px;">
       <div class="panel-head"><h2>Previsões de gasto futuro</h2>
@@ -7266,6 +7286,17 @@ function renderRelatorioLiquidez(){
 
   return `
     <div class="report-controls"><span style="font-size:12.5px;color:var(--text-soft);">Índices de Liquidez e Endividamento — posição de hoje (${fmtDate(todayISO())})</span></div>
+    <div class="dash-section-label">Radar dos indicadores</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 8px;">
+      ${svgRadar([
+        { label:'Liq. Corrente', valor: liqCorrente===null?0:Math.min(100, liqCorrente/2*100) },
+        { label:'Liq. Seca', valor: liqSeca===null?0:Math.min(100, liqSeca/1.5*100) },
+        { label:'Liq. Geral', valor: liqGeral===null?0:Math.min(100, liqGeral/1.5*100) },
+        { label:'Solvência', valor: solvencia===null?100:Math.min(100, solvencia/2*100) },
+        { label:'Baixo Endividamento', valor: endividamentoGeral===null?100:Math.max(0,100-endividamentoGeral*100) },
+      ])}
+    </div></div>
+    <div class="note" style="margin-top:0;">Quanto mais o polígono preenche a teia (perto de 100 em cada ponta), mais saudável está aquele indicador. Cada eixo tem uma referência diferente por trás (ex: liquidez corrente 2,0 já conta como 100%).</div>
     <div class="report-block">
       <div class="report-title">Base de cálculo</div>
       <div class="report-line sub"><span>Disponível (caixa e bancos)</span><span class="v">${brl(disponivel)}</span></div>
@@ -7800,6 +7831,10 @@ function renderComparativoAnoAAno(ano){
         <span><span style="display:inline-block;width:8px;height:8px;background:var(--blue-accent);border-radius:2px;margin-right:4px;"></span>${ano}</span>
       </div>
     </div></div>
+    <div class="dash-section-label">Receita do ano atual x variação % (combinado)</div>
+    <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+      ${svgComboBarraLinha(dados.map(d=>d.atual||0), dados.map(d=>d.variacao||0), dados.map(d=>mesAbrev(d.mesRef)), 'Variação %')}
+    </div></div>
     <div class="dash-section-label">Variação mês a mês</div>
     <div class="panel"><div class="panel-body" style="padding:0;">
       ${dados.filter(d=>d.variacao!==null).map(d=>`
@@ -7832,8 +7867,19 @@ function renderSazonalidade(){
   const nomesMeses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
   const picos = [...medias].filter(d=>d.qtd>0).sort((a,b)=>b.media-a.media).slice(0,3);
   const baixas = [...medias].filter(d=>d.qtd>0).sort((a,b)=>a.media-b.media).slice(0,3);
+  const matrizAnoMes = {};
+  anos.forEach(ano=>{
+    matrizAnoMes[ano] = Array.from({length:12},(_,i)=>{
+      const mRef = `${ano}-${String(i+1).padStart(2,'0')}`;
+      if(mRef>hoje.slice(0,7)) return null;
+      const ate = mRef===hoje.slice(0,7) ? hoje : `${mRef}-31`;
+      const { receitaTotal } = resultadoOperacionalPeriodo(`${mRef}-01`, ate);
+      return receitaTotal;
+    });
+  });
   return `
     <div class="note" style="margin-top:0;">Média de receita de cada mês, considerando todos os ${anos.length} ano(s) com dado disponível (${anos.join(', ')||'—'}). Quanto mais anos de histórico, mais confiável fica o padrão.</div>
+    ${anos.length>=2 ? `<div class="dash-section-label">Mapa de calor — receita por mês e ano</div><div class="panel"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">${svgHeatmapAnoMes(matrizAnoMes)}</div></div>` : ''}
     ${anos.length<2 ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Ainda não tem histórico de mais de 1 ano — sazonalidade real só fica visível comparando vários anos. Volte aqui quando tiver mais dados.</div></div>` : `
     <div class="panel"><div class="panel-body" style="padding:16px 18px;">
       <div style="display:flex;align-items:flex-end;gap:6px;height:120px;overflow-x:auto;">
@@ -7883,7 +7929,11 @@ function renderCalendarioVencimentos(){
   itens.sort((a,b)=>a.data.localeCompare(b.data));
   return `
     <div class="note" style="margin-top:0;">Tudo que vence nos próximos 90 dias, juntando contratos, garantia de ativos, validade de cartões e contas a pagar acima de R$1.000 — pra não precisar checar tela por tela.</div>
-    ${itens.length ? `<div class="panel"><div class="panel-body" style="padding:0;">
+    ${itens.length ? `<div class="dash-section-label">Linha do tempo</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">
+      ${svgTimelineMarcos(itens.map(it=>({ data:it.data, label:`${it.tipo} — ${it.desc}${it.valor?' ('+brl(it.valor)+')':''}` })))}
+    </div></div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
       ${itens.map(it=>`
         <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto;align-items:center;">
           <span class="mono" style="font-size:12px;color:var(--text-soft);">${fmtDate(it.data)}</span>
@@ -8060,10 +8110,16 @@ function renderDivergenciasExcecoes(){
 
 // 76. Posição Bancária Consolidada
 function renderPosicaoBancaria(){
-  const contas = state.contas.map(c=>({ nome:c.nome, banco:c.banco, saldo:saldoConta(c.id) })).sort((a,b)=>b.saldo-a.saldo);
+  const contasAtivas = state.contas.filter(c=>!c.arquivada);
+  const contas = contasAtivas.map(c=>({ nome:c.nome, banco:c.banco, saldo:saldoConta(c.id) })).sort((a,b)=>b.saldo-a.saldo);
   const total = contas.reduce((s,c)=>s+c.saldo,0);
+  const labels30d = Array.from({length:30},(_,i)=>{ const d=new Date(); d.setDate(d.getDate()-(29-i)); return String(d.getDate()); });
   return `
     <div class="cards"><div class="card saldo"><div class="label">Total em todas as contas</div><div class="value mono">${brl(total)}</div></div></div>
+    <div class="dash-section-label">Evolução do saldo — últimos 30 dias</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">
+      ${svgLinhasMultiplas(contasAtivas.map((c,i)=>({ nome:c.nome, cor:c.cor||CORES_GRAFICO[i%CORES_GRAFICO.length], valores:saldoContaHistorico(c.id,30) })), labels30d)}
+    </div></div>
     <div class="panel"><div class="panel-body" style="padding:0;">
       ${contas.map(c=>`
         <div class="ledger-row compact" style="grid-template-columns:1fr auto;align-items:center;">
@@ -8230,6 +8286,478 @@ function renderMultasPenalidades(){
   `;
 }
 
+/* ===================== BIBLIOTECA DE GRÁFICOS SVG REAPROVEITÁVEIS ===================== */
+// Cada função recebe dados simples (arrays/objetos) e devolve uma string de SVG pronta pra
+// inserir no HTML. Usam as mesmas variáveis de cor do resto do app, pra ficar visualmente
+// consistente. Pensadas pra caber dentro de um <div style="width:100%;overflow-x:auto;">.
+
+const CORES_GRAFICO = ['#1E49E2','#2FA36B','#E0A62B','#C74A3D','#7B5CD6','#2FA3A3','#D6689C','#8A9099'];
+
+// 1. Pizza / 2-anel(rosca) — dados: [{label, valor}]
+function svgPizza(dados, rosca){
+  const total = dados.reduce((s,d)=>s+d.valor,0);
+  if(total<=0) return '<div class="empty">Sem dados suficientes.</div>';
+  const cx=100, cy=100, r=80, rInterno = rosca ? 46 : 0;
+  let anguloAtual = -90;
+  const fatias = dados.map((d,i)=>{
+    const frac = d.valor/total;
+    const anguloFim = anguloAtual + frac*360;
+    const x1 = cx + r*Math.cos(anguloAtual*Math.PI/180), y1 = cy + r*Math.sin(anguloAtual*Math.PI/180);
+    const x2 = cx + r*Math.cos(anguloFim*Math.PI/180), y2 = cy + r*Math.sin(anguloFim*Math.PI/180);
+    const largeArc = (anguloFim-anguloAtual)>180 ? 1 : 0;
+    let path;
+    if(rInterno>0){
+      const ix1 = cx + rInterno*Math.cos(anguloAtual*Math.PI/180), iy1 = cy + rInterno*Math.sin(anguloAtual*Math.PI/180);
+      const ix2 = cx + rInterno*Math.cos(anguloFim*Math.PI/180), iy2 = cy + rInterno*Math.sin(anguloFim*Math.PI/180);
+      path = `M${x1},${y1} A${r},${r} 0 ${largeArc} 1 ${x2},${y2} L${ix2},${iy2} A${rInterno},${rInterno} 0 ${largeArc} 0 ${ix1},${iy1} Z`;
+    } else {
+      path = `M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${largeArc} 1 ${x2},${y2} Z`;
+    }
+    anguloAtual = anguloFim;
+    return `<path d="${path}" fill="${CORES_GRAFICO[i%CORES_GRAFICO.length]}" stroke="var(--white)" stroke-width="1.5"><title>${escapeHTML(d.label)}: ${brl(d.valor)} (${(frac*100).toFixed(1)}%)</title></path>`;
+  }).join('');
+  const legenda = dados.map((d,i)=>`<div style="display:flex;align-items:center;gap:6px;font-size:11.5px;margin-bottom:4px;"><span style="width:9px;height:9px;border-radius:2px;background:${CORES_GRAFICO[i%CORES_GRAFICO.length]};display:inline-block;"></span>${escapeHTML(d.label)} <span class="mono" style="color:var(--text-soft);">${brl(d.valor)} (${(d.valor/total*100).toFixed(1)}%)</span></div>`).join('');
+  return `<div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap;"><svg viewBox="0 0 200 200" style="width:170px;height:170px;flex-shrink:0;">${fatias}</svg><div style="flex:1;min-width:140px;">${legenda}</div></div>`;
+}
+
+// 3. Área empilhada — series: [{nome, cor, valores:[...]}], labels: [...]
+function svgAreaEmpilhada(series, labels){
+  const W=680, H=200, padL=6, padB=20, padT=10;
+  const n = labels.length;
+  const totais = labels.map((_,i)=>series.reduce((s,se)=>s+se.valores[i],0));
+  const max = Math.max(1, ...totais);
+  const xAt = i => padL + (i/(n-1||1))*(W-padL-20);
+  const yAt = v => H-padB - (v/max)*(H-padB-padT);
+  let acumulado = new Array(n).fill(0);
+  const camadas = series.map((se,si)=>{
+    const baseAnterior = [...acumulado];
+    acumulado = acumulado.map((v,i)=>v+se.valores[i]);
+    const pontosTopo = acumulado.map((v,i)=>`${xAt(i)},${yAt(v)}`).join(' ');
+    const pontosBase = [...baseAnterior].reverse().map((v,i)=>`${xAt(n-1-i)},${yAt(v)}`).join(' ');
+    return `<polygon points="${pontosTopo} ${pontosBase}" fill="${se.cor||CORES_GRAFICO[si%CORES_GRAFICO.length]}" opacity="0.82"/>`;
+  }).join('');
+  const eixoX = labels.map((l,i)=>`<text x="${xAt(i)}" y="${H-4}" font-size="8" fill="var(--text-soft)" text-anchor="middle">${escapeHTML(l)}</text>`).join('');
+  const legenda = series.map((se,i)=>`<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;margin-right:12px;"><span style="width:8px;height:8px;background:${se.cor||CORES_GRAFICO[i%CORES_GRAFICO.length]};border-radius:2px;display:inline-block;"></span>${escapeHTML(se.nome)}</span>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;">${camadas}${eixoX}</svg><div style="margin-top:6px;">${legenda}</div>`;
+}
+
+// 5. Cascata (waterfall) — passos: [{label, valor}] (valor negativo = redução)
+function svgCascata(passos){
+  const W=680, H=220, padB=30, padT=16, barW = Math.min(70, (W-40)/passos.length-8);
+  let acumulado = 0;
+  const pontos = passos.map(p=>{ const ini=acumulado; acumulado+=p.valor; return {...p, ini, fim:acumulado}; });
+  const maxAbs = Math.max(...pontos.map(p=>Math.max(p.ini,p.fim)), 1);
+  const yAt = v => H-padB - (v/maxAbs)*(H-padB-padT);
+  const xAt = i => 20 + i*((W-40)/passos.length);
+  const barras = pontos.map((p,i)=>{
+    const x = xAt(i);
+    const y1 = yAt(Math.max(p.ini,p.fim)), y2 = yAt(Math.min(p.ini,p.fim));
+    const cor = p.valor>=0 ? 'var(--success)' : 'var(--danger)';
+    const corFinal = i===pontos.length-1 ? 'var(--blue-accent)' : cor;
+    return `
+      <rect x="${x}" y="${y1}" width="${barW}" height="${Math.max(2,y2-y1)}" fill="${corFinal}" rx="2"/>
+      <text x="${x+barW/2}" y="${y1-5}" font-size="9" fill="var(--ink)" text-anchor="middle" font-weight="600">${brl(p.valor).replace('R$ ','')}</text>
+      <text x="${x+barW/2}" y="${H-10}" font-size="8.5" fill="var(--text-soft)" text-anchor="middle">${escapeHTML(p.label)}</text>
+    `;
+  }).join('');
+  const linhas = pontos.slice(0,-1).map((p,i)=>{
+    const x1 = xAt(i)+barW, x2 = xAt(i+1);
+    const y = yAt(p.fim);
+    return `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="var(--line)" stroke-dasharray="3,2"/>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;">${linhas}${barras}</svg>`;
+}
+
+// 6. Sankey simplificado (2 níveis: origem única → N destinos) — nodos: [{label, valor}]
+function svgSankeySimples(origemLabel, totalOrigem, destinos){
+  const W=680, H=Math.max(160, destinos.length*34+30), padT=15;
+  const total = destinos.reduce((s,d)=>s+d.valor,0) || 1;
+  let yAtual = padT;
+  const faixas = destinos.map((d,i)=>{
+    const alturaFaixa = Math.max(6,(d.valor/total)*(H-padT*2));
+    const cor = CORES_GRAFICO[i%CORES_GRAFICO.length];
+    const path = `M40,${padT+ (H-padT*2)/2 - 2} C 200,${yAtual+alturaFaixa/2} 320,${yAtual+alturaFaixa/2} 460,${yAtual+alturaFaixa/2}`;
+    const faixaHTML = `<path d="${path}" stroke="${cor}" stroke-width="${alturaFaixa}" fill="none" opacity="0.55"><title>${escapeHTML(d.label)}: ${brl(d.valor)}</title></path>
+      <text x="466" y="${yAtual+alturaFaixa/2+3}" font-size="9.5" fill="var(--ink)">${escapeHTML(d.label)} — ${brl(d.valor)}</text>`;
+    yAtual += alturaFaixa;
+    return faixaHTML;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;">
+    <rect x="10" y="${H/2-25}" width="30" height="50" fill="var(--blue-accent)" rx="3"/>
+    <text x="25" y="${H/2-32}" font-size="9.5" text-anchor="middle" fill="var(--ink)" font-weight="600">${escapeHTML(origemLabel)}</text>
+    ${faixas}
+  </svg>`;
+}
+
+// 7. Funil — etapas: [{label, valor}]  (ordem decrescente esperada)
+function svgFunil(etapas){
+  const W=400, H=etapas.length*54, max = etapas[0]?.valor || 1;
+  const barras = etapas.map((e,i)=>{
+    const pct = max>0 ? e.valor/max : 0;
+    const largura = Math.max(20, pct*(W-40));
+    const x = (W-largura)/2;
+    const y = i*54+8;
+    const taxaAnterior = i>0 && etapas[i-1].valor>0 ? (e.valor/etapas[i-1].valor*100) : 100;
+    return `
+      <rect x="${x}" y="${y}" width="${largura}" height="36" fill="${CORES_GRAFICO[i%CORES_GRAFICO.length]}" rx="6" opacity="0.88"/>
+      <text x="${W/2}" y="${y+22}" font-size="11" fill="#fff" text-anchor="middle" font-weight="700">${escapeHTML(e.label)} — ${e.valor}</text>
+      ${i>0?`<text x="${W/2}" y="${y-2}" font-size="9" fill="var(--text-soft)" text-anchor="middle">${taxaAnterior.toFixed(0)}% da etapa anterior</text>`:''}
+    `;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H+10}" style="width:100%;max-width:420px;height:${H+10}px;margin:0 auto;display:block;">${barras}</svg>`;
+}
+
+// 9. Radar — eixos: [{label, valor0a100}]
+function svgRadar(eixos){
+  const W=260,H=260,cx=130,cy=130,r=95;
+  const n = eixos.length;
+  const pontoEm = (i,valor)=>{
+    const ang = -90 + i*(360/n);
+    const raio = r*(valor/100);
+    return [cx+raio*Math.cos(ang*Math.PI/180), cy+raio*Math.sin(ang*Math.PI/180)];
+  };
+  const poligono = eixos.map((e,i)=>pontoEm(i,e.valor).join(',')).join(' ');
+  const grades = [25,50,75,100].map(nivel=>{
+    const pts = eixos.map((_,i)=>pontoEm(i,nivel).join(',')).join(' ');
+    return `<polygon points="${pts}" fill="none" stroke="var(--line)" stroke-width="1"/>`;
+  }).join('');
+  const eixosLinhas = eixos.map((e,i)=>{
+    const [x,y] = pontoEm(i,100);
+    const ang = -90 + i*(360/n);
+    const [lx,ly] = [cx+(r+18)*Math.cos(ang*Math.PI/180), cy+(r+18)*Math.sin(ang*Math.PI/180)];
+    return `<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="var(--line)"/><text x="${lx}" y="${ly}" font-size="9" fill="var(--ink)" text-anchor="middle">${escapeHTML(e.label)}</text>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:280px;height:260px;margin:0 auto;display:block;">${grades}${eixosLinhas}<polygon points="${poligono}" fill="var(--blue-accent)" fill-opacity="0.28" stroke="var(--blue-accent)" stroke-width="2"/></svg>`;
+}
+
+// 10. Bolhas — pontos: [{label, x, y, tamanho}]
+function svgBolhas(pontos, xLabel, yLabel){
+  const W=680,H=280,padL=44,padB=28,padT=10,padR=10;
+  const maxX = Math.max(...pontos.map(p=>p.x),1), maxY = Math.max(...pontos.map(p=>p.y),1);
+  const maxT = Math.max(...pontos.map(p=>p.tamanho),1);
+  const xAt = v => padL + (v/maxX)*(W-padL-padR);
+  const yAt = v => H-padB - (v/maxY)*(H-padB-padT);
+  const bolhas = pontos.map((p,i)=>{
+    const raio = 6 + (p.tamanho/maxT)*22;
+    return `<circle cx="${xAt(p.x)}" cy="${yAt(p.y)}" r="${raio}" fill="${CORES_GRAFICO[i%CORES_GRAFICO.length]}" opacity="0.65" stroke="${CORES_GRAFICO[i%CORES_GRAFICO.length]}"><title>${escapeHTML(p.label)}</title></circle>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;">
+    <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H-padB}" stroke="var(--line)"/>
+    <line x1="${padL}" y1="${H-padB}" x2="${W-padR}" y2="${H-padB}" stroke="var(--line)"/>
+    <text x="${W/2}" y="${H-6}" font-size="9.5" fill="var(--text-soft)" text-anchor="middle">${escapeHTML(xLabel)}</text>
+    <text x="12" y="${H/2}" font-size="9.5" fill="var(--text-soft)" text-anchor="middle" transform="rotate(-90,12,${H/2})">${escapeHTML(yLabel)}</text>
+    ${bolhas}
+  </svg>`;
+}
+
+// 11. Dispersão (scatter) — pontos: [{x,y}]
+function svgDispersao(pontos, xLabel, yLabel){
+  const W=680,H=260,padL=44,padB=28,padT=10,padR=10;
+  const xs = pontos.map(p=>p.x), ys = pontos.map(p=>p.y);
+  const maxX=Math.max(...xs,1), minX=Math.min(...xs,0), maxY=Math.max(...ys,1), minY=Math.min(...ys,0);
+  const xAt = v => padL + ((v-minX)/((maxX-minX)||1))*(W-padL-padR);
+  const yAt = v => H-padB - ((v-minY)/((maxY-minY)||1))*(H-padB-padT);
+  const bolinhas = pontos.map(p=>`<circle cx="${xAt(p.x)}" cy="${yAt(p.y)}" r="3.5" fill="var(--blue-accent)" opacity="0.6"/>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;">
+    <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H-padB}" stroke="var(--line)"/>
+    <line x1="${padL}" y1="${H-padB}" x2="${W-padR}" y2="${H-padB}" stroke="var(--line)"/>
+    <text x="${W/2}" y="${H-6}" font-size="9.5" fill="var(--text-soft)" text-anchor="middle">${escapeHTML(xLabel)}</text>
+    <text x="12" y="${H/2}" font-size="9.5" fill="var(--text-soft)" text-anchor="middle" transform="rotate(-90,12,${H/2})">${escapeHTML(yLabel)}</text>
+    ${bolinhas}
+  </svg>`;
+}
+
+// 13. Pareto — itens JÁ ORDENADOS decrescente: [{label, valor}]
+function svgPareto(itens){
+  const W=680,H=240,padL=44,padB=40,padT=14,padR=44;
+  const total = itens.reduce((s,i)=>s+i.valor,0)||1;
+  const max = Math.max(...itens.map(i=>i.valor),1);
+  const barW = (W-padL-padR)/itens.length*0.7;
+  const gap = (W-padL-padR)/itens.length;
+  let acumulado = 0;
+  const barras = itens.map((it,i)=>{
+    acumulado += it.valor;
+    const pctAcum = acumulado/total*100;
+    const x = padL + i*gap + (gap-barW)/2;
+    const alturaB = (it.valor/max)*(H-padB-padT);
+    const yB = H-padB-alturaB;
+    const yLinha = H-padB - (pctAcum/100)*(H-padB-padT);
+    return { rect:`<rect x="${x}" y="${yB}" width="${barW}" height="${alturaB}" fill="${pctAcum<=80?'var(--blue-accent)':'var(--bone)'}" stroke="var(--line)"/><text x="${x+barW/2}" y="${H-padB+11}" font-size="7.5" fill="var(--text-soft)" text-anchor="middle">${escapeHTML((it.label||'').slice(0,10))}</text>`, ponto:[padL+i*gap+gap/2, yLinha], pctAcum };
+  });
+  const linha = barras.map(b=>b.ponto.join(',')).join(' ');
+  const marcador80 = H-padB - 0.8*(H-padB-padT);
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;">
+    <line x1="${padL}" y1="${marcador80}" x2="${W-padR}" y2="${marcador80}" stroke="var(--warn)" stroke-dasharray="4,3"/>
+    <text x="${W-padR+2}" y="${marcador80+3}" font-size="8" fill="var(--warn)">80%</text>
+    ${barras.map(b=>b.rect).join('')}
+    <polyline points="${linha}" fill="none" stroke="var(--danger)" stroke-width="2"/>
+    ${barras.map(b=>`<circle cx="${b.ponto[0]}" cy="${b.ponto[1]}" r="2.5" fill="var(--danger)"><title>${b.pctAcum.toFixed(1)}% acumulado</title></circle>`).join('')}
+  </svg>`;
+}
+
+// 14. Bullet chart — linhas: [{label, valor, meta}]
+function svgBullet(linhas){
+  const max = Math.max(...linhas.map(l=>Math.max(l.valor,l.meta)),1)*1.1;
+  return linhas.map(l=>`
+    <div style="margin-bottom:14px;">
+      <div style="font-size:12px;font-weight:600;margin-bottom:3px;">${escapeHTML(l.label)}</div>
+      <svg viewBox="0 0 300 22" style="width:100%;height:22px;display:block;">
+        <rect x="0" y="4" width="300" height="14" fill="var(--bone)" rx="2"/>
+        <rect x="0" y="4" width="${Math.min(300,l.valor/max*300)}" height="14" fill="${l.valor>=l.meta?'var(--success)':'var(--blue-accent)'}" rx="2"/>
+        <line x1="${Math.min(300,l.meta/max*300)}" y1="0" x2="${Math.min(300,l.meta/max*300)}" y2="22" stroke="var(--ink)" stroke-width="2.5"/>
+      </svg>
+      <div style="font-size:10.5px;color:var(--text-soft);margin-top:2px;">${brl(l.valor)} de ${brl(l.meta)}</div>
+    </div>
+  `).join('');
+}
+
+// 15. Gauge (velocímetro) — valor 0-100
+function svgGauge(valor, label){
+  const cx=100,cy=100,r=80;
+  const ang = -180 + Math.min(100,Math.max(0,valor))/100*180;
+  const px = cx + r*Math.cos(ang*Math.PI/180), py = cy + r*Math.sin(ang*Math.PI/180);
+  const cor = valor>=70?'var(--success)':valor>=40?'var(--warn)':'var(--danger)';
+  const arcoFundo = `M${cx-r},${cy} A${r},${r} 0 0 1 ${cx+r},${cy}`;
+  const largeArc = valor>50?1:0;
+  const arcoValor = `M${cx-r},${cy} A${r},${r} 0 ${largeArc} 1 ${px},${py}`;
+  return `<svg viewBox="0 0 200 115" style="width:220px;height:130px;margin:0 auto;display:block;">
+    <path d="${arcoFundo}" fill="none" stroke="var(--bone)" stroke-width="16" stroke-linecap="round"/>
+    <path d="${arcoValor}" fill="none" stroke="${cor}" stroke-width="16" stroke-linecap="round"/>
+    <text x="100" y="95" font-size="30" font-weight="800" fill="${cor}" text-anchor="middle">${Math.round(valor)}</text>
+    ${label?`<text x="100" y="112" font-size="10" fill="var(--text-soft)" text-anchor="middle">${escapeHTML(label)}</text>`:''}
+  </svg>`;
+}
+
+// 16. Mapa de calor ano x mês — matriz: {ano: [jan..dez]}
+function svgHeatmapAnoMes(matriz){
+  const anos = Object.keys(matriz).sort();
+  const nomesMeses = ['J','F','M','A','M','J','J','A','S','O','N','D'];
+  const todos = anos.flatMap(a=>matriz[a]).filter(v=>v!==null && v!==undefined);
+  const max = Math.max(...todos, 1);
+  const cel = 30, padL = 34, padT = 18;
+  const linhas = anos.map((ano,li)=>{
+    const celulas = matriz[ano].map((v,ci)=>{
+      const intensidade = v===null||v===undefined ? 0 : Math.min(1, v/max);
+      const cor = v===null||v===undefined ? 'var(--bone)' : `rgba(30,73,226,${0.12+intensidade*0.75})`;
+      return `<rect x="${padL+ci*cel}" y="${padT+li*cel}" width="${cel-2}" height="${cel-2}" rx="3" fill="${cor}"><title>${ano}-${String(ci+1).padStart(2,'0')}: ${v!==null&&v!==undefined?brl(v):'sem dado'}</title></rect>`;
+    }).join('');
+    return `<text x="${padL-6}" y="${padT+li*cel+18}" font-size="9" fill="var(--text-soft)" text-anchor="end">${ano}</text>${celulas}`;
+  }).join('');
+  const cabecalho = nomesMeses.map((m,i)=>`<text x="${padL+i*cel+cel/2}" y="${padT-5}" font-size="8.5" fill="var(--text-soft)" text-anchor="middle">${m}</text>`).join('');
+  const W = padL+12*cel+10, H = padT+anos.length*cel+10;
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:${H}px;">${cabecalho}${linhas}</svg>`;
+}
+
+// 17. Calendário de calor estilo GitHub — dados: [{data:'AAAA-MM-DD', valor}]
+function svgCalendarioCalor(dados, deISO, ateISO){
+  const porData = {}; dados.forEach(d=>{ porData[d.data] = (porData[d.data]||0)+d.valor; });
+  const max = Math.max(...Object.values(porData), 1);
+  const de = new Date(deISO), ate = new Date(ateISO);
+  const inicioSemana = new Date(de); inicioSemana.setDate(inicioSemana.getDate()-inicioSemana.getDay());
+  const cel = 11, gap=2;
+  let semanas = [];
+  let cursor = new Date(inicioSemana);
+  while(cursor<=ate){
+    const semana = [];
+    for(let d=0;d<7;d++){ semana.push(new Date(cursor)); cursor.setDate(cursor.getDate()+1); }
+    semanas.push(semana);
+  }
+  const celulas = semanas.map((semana,si)=>semana.map((dia,di)=>{
+    const iso = dia.toISOString().slice(0,10);
+    if(dia<de || dia>ate) return '';
+    const v = porData[iso]||0;
+    const intensidade = v>0 ? Math.min(1,v/max) : 0;
+    const cor = v>0 ? `rgba(47,163,107,${0.15+intensidade*0.8})` : 'var(--bone)';
+    return `<rect x="${si*(cel+gap)}" y="${di*(cel+gap)}" width="${cel}" height="${cel}" rx="2" fill="${cor}"><title>${fmtDate(iso)}: ${brl(v)}</title></rect>`;
+  }).join('')).join('');
+  const W = semanas.length*(cel+gap)+4, H = 7*(cel+gap)+4;
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:${H}px;">${celulas}</svg>`;
+}
+
+// 18. Faixa de projeção — pontos: [{x, valorCentral, min, max}]
+function svgFaixaProjecao(pontos){
+  const W=680,H=220,padL=50,padB=24,padT=10,padR=10;
+  const todos = pontos.flatMap(p=>[p.min,p.max,p.valorCentral]);
+  const maxV = Math.max(...todos), minV = Math.min(...todos,0);
+  const xAt = i => padL + (i/(pontos.length-1||1))*(W-padL-padR);
+  const yAt = v => H-padB - ((v-minV)/((maxV-minV)||1))*(H-padB-padT);
+  const faixaTopo = pontos.map((p,i)=>`${xAt(i)},${yAt(p.max)}`).join(' ');
+  const faixaBase = [...pontos].reverse().map((p,i)=>`${xAt(pontos.length-1-i)},${yAt(p.min)}`).join(' ');
+  const linhaCentral = pontos.map((p,i)=>`${xAt(i)},${yAt(p.valorCentral)}`).join(' ');
+  const eixoX = pontos.map((p,i)=>`<text x="${xAt(i)}" y="${H-6}" font-size="8" fill="var(--text-soft)" text-anchor="middle">${escapeHTML(p.label||'')}</text>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;">
+    <polygon points="${faixaTopo} ${faixaBase}" fill="var(--blue-accent)" opacity="0.15"/>
+    <polyline points="${linhaCentral}" fill="none" stroke="var(--blue-accent)" stroke-width="2.5"/>
+    ${eixoX}
+  </svg>`;
+}
+
+// 19. Linha do tempo de marcos — eventos: [{data, label, cor}]
+function svgTimelineMarcos(eventos){
+  eventos = [...eventos].sort((a,b)=>a.data.localeCompare(b.data));
+  const H = eventos.length*38+20;
+  const linhas = eventos.map((ev,i)=>{
+    const y = 20+i*38;
+    return `
+      <line x1="60" y1="10" x2="60" y2="${H-10}" stroke="var(--line)"/>
+      <circle cx="60" cy="${y}" r="5" fill="${ev.cor||'var(--blue-accent)'}"/>
+      <text x="46" y="${y+3}" font-size="8.5" fill="var(--text-soft)" text-anchor="end">${fmtDate(ev.data)}</text>
+      <text x="74" y="${y+4}" font-size="10.5" fill="var(--ink)">${escapeHTML(ev.label)}</text>
+    `;
+  }).join('');
+  return `<svg viewBox="0 0 400 ${H}" style="width:100%;max-width:420px;height:${H}px;">${linhas}</svg>`;
+}
+
+// 20. Histograma — valores brutos + nº de faixas
+function svgHistograma(valores, nFaixas){
+  nFaixas = nFaixas || 8;
+  const max = Math.max(...valores), min = Math.min(...valores);
+  const largura = (max-min)/nFaixas || 1;
+  const faixas = new Array(nFaixas).fill(0);
+  valores.forEach(v=>{ const idx = Math.min(nFaixas-1, Math.floor((v-min)/largura)); faixas[idx]++; });
+  const maxContagem = Math.max(...faixas,1);
+  const W=680,H=200,padB=28,padT=10;
+  const barW = (W-20)/nFaixas*0.82;
+  const gap = (W-20)/nFaixas;
+  const barras = faixas.map((c,i)=>{
+    const alt = (c/maxContagem)*(H-padB-padT);
+    const x = 10+i*gap+(gap-barW)/2;
+    const rotuloFaixa = brl(min+i*largura).replace('R$ ','');
+    return `<rect x="${x}" y="${H-padB-alt}" width="${barW}" height="${alt}" fill="var(--blue-accent)" opacity="0.8"/><text x="${x+barW/2}" y="${H-padB+10}" font-size="7" fill="var(--text-soft)" text-anchor="middle">${rotuloFaixa}</text><text x="${x+barW/2}" y="${H-padB-alt-4}" font-size="8" fill="var(--ink)" text-anchor="middle">${c}</text>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;">${barras}</svg>`;
+}
+
+// 21. Box plot — grupos: [{label, valores:[...]}]
+// 12. Linhas múltiplas — series: [{nome, cor, valores:[...]}], labels: [...]
+function svgLinhasMultiplas(series, labels){
+  const W=680,H=200,padL=8,padB=20,padT=10,padR=8;
+  const n = labels.length;
+  const todos = series.flatMap(s=>s.valores);
+  const max = Math.max(...todos,1), min = Math.min(...todos,0);
+  const xAt = i => padL + (i/(n-1||1))*(W-padL-padR);
+  const yAt = v => H-padB - ((v-min)/((max-min)||1))*(H-padB-padT);
+  const linhas = series.map((se,si)=>{
+    const pontos = se.valores.map((v,i)=>`${xAt(i)},${yAt(v)}`).join(' ');
+    return `<polyline points="${pontos}" fill="none" stroke="${se.cor||CORES_GRAFICO[si%CORES_GRAFICO.length]}" stroke-width="2"/>`;
+  }).join('');
+  const eixoX = labels.map((l,i)=> i%Math.ceil(n/10||1)===0 ? `<text x="${xAt(i)}" y="${H-4}" font-size="8" fill="var(--text-soft)" text-anchor="middle">${escapeHTML(l)}</text>` : '').join('');
+  const legenda = series.map((se,i)=>`<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;margin-right:12px;"><span style="width:14px;height:2px;background:${se.cor||CORES_GRAFICO[i%CORES_GRAFICO.length]};display:inline-block;"></span>${escapeHTML(se.nome)}</span>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;">${linhas}${eixoX}</svg><div style="margin-top:6px;">${legenda}</div>`;
+}
+
+// 8. Combinado barra + linha — barras: [...], linha: [...] (mesma escala de labels), rótuloLinha pra legenda
+function svgComboBarraLinha(barras, linha, labels, rotuloLinha){
+  const W=680,H=210,padL=8,padB=20,padT=10,padR=8;
+  const n = labels.length;
+  const maxBarra = Math.max(...barras,1);
+  const maxLinha = Math.max(...linha.map(Math.abs),1);
+  const gap = (W-padL-padR)/n;
+  const barW = gap*0.55;
+  const yBarra = v => H-padB - (v/maxBarra)*(H-padB-padT);
+  const yLinha = v => H-padB - ((v+maxLinha)/(maxLinha*2||1))*(H-padB-padT);
+  const barrasHTML = barras.map((v,i)=>{
+    const x = padL+i*gap+(gap-barW)/2;
+    return `<rect x="${x}" y="${yBarra(v)}" width="${barW}" height="${H-padB-yBarra(v)}" fill="var(--blue-accent)" opacity="0.75" rx="2"/>`;
+  }).join('');
+  const pontosLinha = linha.map((v,i)=>`${padL+i*gap+gap/2},${yLinha(v)}`).join(' ');
+  const eixoX = labels.map((l,i)=>`<text x="${padL+i*gap+gap/2}" y="${H-4}" font-size="8" fill="var(--text-soft)" text-anchor="middle">${escapeHTML(l)}</text>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;">${barrasHTML}<polyline points="${pontosLinha}" fill="none" stroke="var(--danger)" stroke-width="2.5"/>${linha.map((v,i)=>`<circle cx="${padL+i*gap+gap/2}" cy="${yLinha(v)}" r="2.5" fill="var(--danger)"><title>${rotuloLinha}: ${v.toFixed(1)}</title></circle>`).join('')}${eixoX}</svg>
+  <div style="display:flex;gap:14px;margin-top:4px;font-size:11px;color:var(--text-soft);"><span><span style="width:8px;height:8px;background:var(--blue-accent);display:inline-block;border-radius:2px;margin-right:4px;"></span>Valor</span><span><span style="width:14px;height:2px;background:var(--danger);display:inline-block;margin-right:4px;"></span>${escapeHTML(rotuloLinha)}</span></div>`;
+}
+
+// 2. Treemap simples — dados: [{label, valor}] — algoritmo "linha por linha" (squarify simplificado)
+function svgTreemap(dados){
+  const W=680,H=280;
+  const total = dados.reduce((s,d)=>s+d.valor,0)||1;
+  const ordenado = [...dados].sort((a,b)=>b.valor-a.valor);
+  // Divide em linhas horizontais, cada linha com altura proporcional à soma dos itens dela
+  const nLinhas = Math.max(1, Math.round(Math.sqrt(ordenado.length)));
+  const porLinha = Math.ceil(ordenado.length/nLinhas);
+  const linhas = [];
+  for(let i=0;i<ordenado.length;i+=porLinha) linhas.push(ordenado.slice(i,i+porLinha));
+  let yAtual = 0;
+  const blocos = linhas.map((linha,li)=>{
+    const somaLinha = linha.reduce((s,d)=>s+d.valor,0);
+    const alturaLinha = (somaLinha/total)*H;
+    let xAtual = 0;
+    const itens = linha.map((d,ii)=>{
+      const largura = (d.valor/somaLinha)*W;
+      const html = `<rect x="${xAtual}" y="${yAtual}" width="${Math.max(0,largura-2)}" height="${Math.max(0,alturaLinha-2)}" fill="${CORES_GRAFICO[(li*porLinha+ii)%CORES_GRAFICO.length]}" opacity="0.85"><title>${escapeHTML(d.label)}: ${brl(d.valor)} (${(d.valor/total*100).toFixed(1)}%)</title></rect>
+        ${largura>55 && alturaLinha>22 ? `<text x="${xAtual+6}" y="${yAtual+16}" font-size="9.5" fill="#fff" font-weight="600">${escapeHTML((d.label||'').slice(0,largura>110?22:12))}</text><text x="${xAtual+6}" y="${yAtual+28}" font-size="8.5" fill="#fff" opacity="0.9">${brl(d.valor)}</text>` : ''}`;
+      xAtual += largura;
+      return html;
+    }).join('');
+    yAtual += alturaLinha;
+    return itens;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;">${blocos}</svg>`;
+}
+
+// 4. Anel em camadas — categorias: [{label, valor, itens:[{label,valor}]}] — anel interno = categoria, externo = itens
+function svgAnelCamadas(categorias){
+  const total = categorias.reduce((s,c)=>s+c.valor,0)||1;
+  const cx=110,cy=110;
+  const rInternoMin=40, rInternoMax=72, rExternoMin=76, rExternoMax=108;
+  let anguloAtual=-90;
+  const anelInterno = categorias.map((c,i)=>{
+    const anguloFim = anguloAtual + (c.valor/total)*360;
+    const path = arcoPath(cx,cy,rInternoMin,rInternoMax,anguloAtual,anguloFim);
+    const html = `<path d="${path}" fill="${CORES_GRAFICO[i%CORES_GRAFICO.length]}" stroke="var(--white)" stroke-width="1"><title>${escapeHTML(c.label)}: ${brl(c.valor)}</title></path>`;
+    anguloAtual = anguloFim;
+    return html;
+  }).join('');
+  anguloAtual=-90;
+  const anelExterno = categorias.map((c,ci)=>{
+    const anguloBase = anguloAtual;
+    const anguloFimCategoria = anguloAtual + (c.valor/total)*360;
+    const totalItens = c.itens.reduce((s,it)=>s+it.valor,0)||1;
+    let anguloItemAtual = anguloBase;
+    const itensHTML = c.itens.map((it,ii)=>{
+      const anguloItemFim = anguloItemAtual + (it.valor/totalItens)*(anguloFimCategoria-anguloBase);
+      const path = arcoPath(cx,cy,rExternoMin,rExternoMax,anguloItemAtual,anguloItemFim);
+      const html = `<path d="${path}" fill="${CORES_GRAFICO[ci%CORES_GRAFICO.length]}" opacity="${0.5+ii*0.12}" stroke="var(--white)" stroke-width="0.5"><title>${escapeHTML(it.label)}: ${brl(it.valor)}</title></path>`;
+      anguloItemAtual = anguloItemFim;
+      return html;
+    }).join('');
+    anguloAtual = anguloFimCategoria;
+    return itensHTML;
+  }).join('');
+  const legenda = categorias.map((c,i)=>`<div style="display:flex;align-items:center;gap:6px;font-size:11.5px;margin-bottom:4px;"><span style="width:9px;height:9px;border-radius:2px;background:${CORES_GRAFICO[i%CORES_GRAFICO.length]};display:inline-block;"></span>${escapeHTML(c.label)} <span class="mono" style="color:var(--text-soft);">${brl(c.valor)}</span></div>`).join('');
+  return `<div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap;"><svg viewBox="0 0 220 220" style="width:190px;height:190px;flex-shrink:0;">${anelExterno}${anelInterno}</svg><div style="flex:1;min-width:140px;">${legenda}</div></div>`;
+}
+function arcoPath(cx,cy,rIn,rOut,anguloIni,anguloFim){
+  const largeArc = (anguloFim-anguloIni)>180 ? 1 : 0;
+  const p = (r,ang) => [cx+r*Math.cos(ang*Math.PI/180), cy+r*Math.sin(ang*Math.PI/180)];
+  const [x1,y1]=p(rOut,anguloIni), [x2,y2]=p(rOut,anguloFim), [x3,y3]=p(rIn,anguloFim), [x4,y4]=p(rIn,anguloIni);
+  return `M${x1},${y1} A${rOut},${rOut} 0 ${largeArc} 1 ${x2},${y2} L${x3},${y3} A${rIn},${rIn} 0 ${largeArc} 0 ${x4},${y4} Z`;
+}
+
+function svgBoxPlot(grupos){
+  function quartis(vals){
+    const s = [...vals].sort((a,b)=>a-b);
+    const q = p => { const idx=(s.length-1)*p; const lo=Math.floor(idx),hi=Math.ceil(idx); return s[lo]+(s[hi]-s[lo])*(idx-lo); };
+    return { min:s[0], q1:q(0.25), mediana:q(0.5), q3:q(0.75), max:s[s.length-1] };
+  }
+  const dados = grupos.map(g=>({ label:g.label, ...quartis(g.valores) }));
+  const maxV = Math.max(...dados.map(d=>d.max),1), minV = Math.min(...dados.map(d=>d.min),0);
+  const W=680,H=220,padB=26,padT=10;
+  const gap = (W-40)/grupos.length;
+  const yAt = v => H-padB - ((v-minV)/((maxV-minV)||1))*(H-padB-padT);
+  const caixas = dados.map((d,i)=>{
+    const x = 20+i*gap+gap*0.25, largura = gap*0.5;
+    return `
+      <line x1="${x+largura/2}" y1="${yAt(d.min)}" x2="${x+largura/2}" y2="${yAt(d.q1)}" stroke="var(--ink)"/>
+      <line x1="${x+largura/2}" y1="${yAt(d.q3)}" x2="${x+largura/2}" y2="${yAt(d.max)}" stroke="var(--ink)"/>
+      <rect x="${x}" y="${yAt(d.q3)}" width="${largura}" height="${Math.max(1,yAt(d.q1)-yAt(d.q3))}" fill="var(--blue-accent)" opacity="0.35" stroke="var(--blue-accent)"/>
+      <line x1="${x}" y1="${yAt(d.mediana)}" x2="${x+largura}" y2="${yAt(d.mediana)}" stroke="var(--blue-accent)" stroke-width="2"/>
+      <text x="${x+largura/2}" y="${H-8}" font-size="8" fill="var(--text-soft)" text-anchor="middle">${escapeHTML(d.label)}</text>
+    `;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;">${caixas}</svg>`;
+}
+/* ================= FIM DA BIBLIOTECA DE GRÁFICOS ================= */
+
 function renderTaxasTarifasBancarias(mesRef){
   mesRef = mesRef || mesGlobalRef;
   const [anoM, mesM] = mesRef.split('-').map(Number);
@@ -8257,6 +8785,13 @@ function renderTaxaConversaoFunil(){
   const taxaFaturamento = totalOport>0 ? (viraramFaturamento/totalOport*100) : 0;
   return `
     <div class="note" style="margin-top:0;">Considera todas as oportunidades já lançadas no Funil de Vendas, desde o começo.</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 8px;">
+      ${svgFunil([
+        { label:'Orçamento', valor: totalOport },
+        { label:'Pedido', valor: viraramPedido },
+        { label:'Faturado', valor: viraramFaturamento },
+      ])}
+    </div></div>
     <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
       <div class="card"><div class="label">Oportunidades no funil</div><div class="value mono">${totalOport}</div></div>
       <div class="card"><div class="label">Viraram pedido</div><div class="value mono">${taxaPedido.toFixed(0)}%</div></div>
@@ -8339,11 +8874,16 @@ function renderABCEstoque(){
     return { ...i, classe, pct: totalGeral>0?(i.valorTotal/totalGeral*100):0 };
   });
   const classeA = classificados.filter(i=>i.classe==='A');
+  const porCategoriaEstoque = {};
+  lista.forEach(i=>{ const c = i.categoria||'Sem categoria'; if(!porCategoriaEstoque[c]) porCategoriaEstoque[c] = []; porCategoriaEstoque[c].push({label:i.nome, valor:i.valorTotal}); });
+  const categoriasAnel = Object.entries(porCategoriaEstoque).map(([label,itens])=>({ label, valor: itens.reduce((s,it)=>s+it.valor,0), itens: itens.sort((a,b)=>b.valor-a.valor).slice(0,8) })).sort((a,b)=>b.valor-a.valor).slice(0,8);
   return `
     <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
       <div class="card saldo"><div class="label">Valor total em estoque</div><div class="value mono">${brl(totalGeral)}</div></div>
       <div class="card"><div class="label">Itens classe A</div><div class="value mono">${classeA.length} <span style="font-size:11px;color:var(--text-soft);">de ${classificados.length}</span></div></div>
     </div>
+    ${categoriasAnel.length>1 ? `<div class="dash-section-label">Categoria (anel interno) e itens (anel externo)</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 18px;">${svgAnelCamadas(categoriasAnel)}</div></div>` : ''}
     <div class="note">Classe A: itens que somam até 80% do valor total parado em estoque — são os que mais "prendem" capital de giro, merecem controle mais apertado.</div>
     <div class="panel"><div class="panel-body" style="padding:0;">
       ${classificados.slice(0,25).map(i=>`
@@ -8633,8 +9173,9 @@ function renderFormasPagamento(mesRef){
 // 7. Rentabilidade por Cliente — receita, ticket médio e participação (sem alocar custo direto — margem de verdade exigiria custo por cliente, que não é rastreado)
 function renderRentabilidadeCliente(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const vendasPeriodo = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=de && l.dataPagamento<=ate);
   const porCliente = {};
-  state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{
+  vendasPeriodo.forEach(l=>{
     const nome = l.fornecedor || 'Sem identificação';
     if(!porCliente[nome]) porCliente[nome] = { valor:0, qtd:0 };
     porCliente[nome].valor += l.valor; porCliente[nome].qtd += 1;
@@ -8644,6 +9185,9 @@ function renderRentabilidadeCliente(){
   const max = lista.length ? lista[0].valor : 1;
   return `
     <div class="note" style="margin-top:0;">Últimos 12 meses (${fmtDate(de)} a ${fmtDate(ate)}). Mostra receita, ticket médio e participação — não desconta custo direto por cliente (o sistema não rastreia isso separadamente), então não é "margem de lucro" de verdade, é volume e peso de cada cliente no faturamento.</div>
+    ${vendasPeriodo.length>=5 ? `<div class="dash-section-label">Distribuição do valor das vendas</div>
+    <div class="panel"><div class="panel-body" style="padding:12px 8px;overflow-x:auto;">${svgHistograma(vendasPeriodo.map(l=>l.valor))}</div></div>
+    <div class="note" style="margin-top:0;">Cada barra mostra quantas vendas caíram naquela faixa de valor — ajuda a ver se seu negócio vive de muitas vendas pequenas, poucas grandes, ou um pouco de cada.</div>` : ''}
     ${lista.length ? `<div class="panel"><div class="panel-body" style="padding:14px 18px;">
       ${lista.slice(0,20).map(c=>`
         <div style="margin-bottom:12px;">
@@ -8699,22 +9243,21 @@ function renderMetasComerciais(mesRef){
   const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
   const vendedoresComMeta = (state.vendedores||[]).filter(v=>v.metaMensal>0);
   const linhas = vendedoresComMeta.map(v=>{
-    const vendido = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.vendedorId===v.id && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+    const vendas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.vendedorId===v.id && l.dataPagamento>=de && l.dataPagamento<=ate);
+    const vendido = vendas.reduce((s,l)=>s+l.valor,0);
     const pct = v.metaMensal>0 ? Math.min(150, vendido/v.metaMensal*100) : 0;
-    return { nome:v.nome, vendido, meta:v.metaMensal, pct };
+    return { nome:v.nome, vendido, meta:v.metaMensal, pct, valoresVenda: vendas.map(l=>l.valor) };
   }).sort((a,b)=>b.pct-a.pct);
+  const comVariasVendas = linhas.filter(v=>v.valoresVenda.length>=3);
   return `
     <div class="report-controls"><input type="month" id="metasComMes" value="${mesRef}"></div>
     ${!vendedoresComMeta.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum vendedor com meta mensal cadastrada ainda. Edite o vendedor em Comissões e preencha o campo de meta.</div></div>` : `
     <div class="panel"><div class="panel-body" style="padding:14px 18px;">
-      ${linhas.map(v=>`
-        <div style="margin-bottom:16px;">
-          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;"><span style="font-weight:600;">${escapeHTML(v.nome)}</span><span class="mono">${brl(v.vendido)} / ${brl(v.meta)}</span></div>
-          <div style="background:var(--bone);border-radius:5px;height:10px;overflow:hidden;"><div style="width:${Math.min(100,v.pct)}%;height:100%;background:${v.pct>=100?'var(--success)':v.pct>=70?'var(--warn)':'var(--danger)'};"></div></div>
-          <div style="font-size:11px;color:var(--text-soft);margin-top:3px;">${v.pct.toFixed(0)}% da meta${v.pct>=100?' — meta batida! 🎉':''}</div>
-        </div>
-      `).join('')}
-    </div></div>`}
+      ${svgBullet(linhas.map(v=>({label:v.nome, valor:v.vendido, meta:v.meta})))}
+    </div></div>
+    ${comVariasVendas.length>=2 ? `<div class="dash-section-label">Distribuição do valor das vendas por vendedor</div>
+    <div class="panel"><div class="panel-body" style="padding:12px 8px;overflow-x:auto;">${svgBoxPlot(comVariasVendas.map(v=>({label:v.nome, valores:v.valoresVenda})))}</div></div>
+    <div class="note" style="margin-top:0;">Cada caixa mostra a faixa típica de valor de venda daquele vendedor (a linha no meio é a mediana) — ajuda a ver quem vende de forma mais consistente vs. quem tem vendas bem variadas.</div>` : ''}`}
   `;
 }
 
@@ -8728,6 +9271,13 @@ function renderCustoFixoVariavelTempo(){
   const mediaFixoPct = dados.filter(d=>d.despesaTotal>0).reduce((s,d,_,arr)=>s+(d.custoFixo/d.despesaTotal*100)/arr.length,0);
   return `
     <div class="cards"><div class="card saldo"><div class="label">% médio de custo fixo (12 meses)</div><div class="value mono">${mediaFixoPct.toFixed(1)}%</div></div></div>
+    <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+      ${svgAreaEmpilhada([
+        { nome:'Variável', cor:'var(--blue-accent)', valores: dados.map(d=>d.custoVariavel) },
+        { nome:'Fixo', cor:'var(--warn)', valores: dados.map(d=>d.custoFixo) },
+      ], meses.map(mesAbrev))}
+    </div></div>
+    <div class="dash-section-label">Por mês (barras)</div>
     <div class="panel"><div class="panel-body" style="padding:16px 18px;">
       <div style="display:flex;align-items:flex-end;gap:6px;height:130px;overflow-x:auto;">
         ${dados.map((d,i)=>`
@@ -8765,6 +9315,10 @@ function renderOndeDinheiroEsta(){
   ].filter(f=>f.valor>0);
   return `
     <div class="cards"><div class="card saldo"><div class="label">Patrimônio total (posição de hoje, ${fmtDate(hoje)})</div><div class="value mono" style="font-size:22px;">${brl(total)}</div></div></div>
+    <div class="dash-section-label">Composição (pizza)</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 18px;">${svgPizza(fatias.map(f=>({label:f.nome, valor:f.valor})))}</div></div>
+    <div class="dash-section-label">Fluxo do patrimônio (Sankey)</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">${svgSankeySimples('Patrimônio', total, fatias.map(f=>({label:f.nome, valor:f.valor})))}</div></div>
     <div class="panel"><div class="panel-body" style="padding:14px 18px;">
       ${fatias.map(f=>`
         <div style="margin-bottom:12px;">
@@ -8837,9 +9391,8 @@ function renderHealthScore(){
   const cairam = variacoes.filter(p=>p.delta<0);
 
   return `
-    <div class="panel"><div class="panel-body" style="padding:26px 20px;text-align:center;">
-      <div style="font-size:52px;font-weight:800;color:${corScore};">${atual.scoreTotal}</div>
-      <div style="font-size:15px;font-weight:600;color:${corScore};margin-top:4px;">${nivel}</div>
+    <div class="panel"><div class="panel-body" style="padding:20px 20px 10px;text-align:center;">
+      ${svgGauge(atual.scoreTotal, nivel)}
       ${anterior ? `<div style="font-size:12px;margin-top:6px;color:${atual.scoreTotal>=anterior.scoreTotal?'var(--success)':'var(--danger)'};">${atual.scoreTotal>=anterior.scoreTotal?'▲':'▼'} ${Math.abs(atual.scoreTotal-anterior.scoreTotal)} ponto(s) vs mês passado</div>` : ''}
       <div style="font-size:11.5px;color:var(--text-soft);margin-top:8px;">de 0 a 100 — combina margem líquida, fôlego de caixa, contas atrasadas e endividamento</div>
     </div></div>
@@ -8897,6 +9450,9 @@ function renderEficienciaCobranca(){
       <div class="card"><div class="label">Recebido em dia ou antes</div><div class="value mono">${taxaSucesso.toFixed(0)}%</div></div>
     </div>
     <div class="note" style="margin-top:0;">Prazo médio negativo significa que, no geral, você recebe ANTES do vencimento. Positivo significa atraso médio.</div>
+    <div class="dash-section-label">Valor do pedido x dias de atraso (cada ponto é 1 recebimento)</div>
+    <div class="panel"><div class="panel-body" style="padding:12px 8px;overflow-x:auto;">${svgDispersao(recebidos.map((l,i)=>({x:l.valor, y:atrasos[i]})), 'Valor do pedido (R$)', 'Dias de atraso')}</div></div>
+    <div class="note">Se os pontos maiores (valor alto) ficarem mais pra cima (mais atraso), pode ser sinal de que pedidos grandes demoram mais pra pagar — vale considerar prazos diferentes por porte de pedido.</div>
     ${rankingPior.length ? `
     <div class="dash-section-label">Clientes que mais atrasam (2+ recebimentos no período)</div>
     <div class="panel"><div class="panel-body" style="padding:14px 18px;">
@@ -8984,6 +9540,8 @@ function renderRankingVolumeMargem(){
   const baixoVolAltaMargem = [...linhas].sort((a,b)=>(b.margemUnitPct/100 - b.qtd/maxQtd) - (a.margemUnitPct/100 - a.qtd/maxQtd)).slice(0,5);
   return `
     <div class="note" style="margin-top:0;">Últimos 12 meses. Quantidade estimada a partir da receita ÷ preço de venda cadastrado.</div>
+    <div class="dash-section-label">Volume × Margem × Receita (tamanho da bolha)</div>
+    <div class="panel"><div class="panel-body" style="padding:12px 8px;overflow-x:auto;">${svgBolhas(linhas.map(l=>({label:l.nome, x:l.qtd, y:l.margemUnitPct, tamanho:l.receita})), 'Quantidade vendida', 'Margem unitária (%)')}</div></div>
     <div class="cards" style="grid-template-columns:1fr 1fr;">
       <div class="panel"><div class="panel-head"><h2>🔥 Vende muito, margem baixa</h2></div><div class="panel-body" style="padding:12px 18px;">
         ${altoVolBaixaMargem.map(l=>`<div style="padding:6px 0;border-bottom:1px solid var(--line);"><div style="font-weight:600;font-size:12.5px;">${escapeHTML(l.nome)}</div><div style="font-size:11px;color:var(--text-soft);">~${Math.round(l.qtd)} un. · margem ${l.margemUnitPct.toFixed(1)}%</div></div>`).join('') || '<div class="empty">Sem dados suficientes.</div>'}
@@ -9401,6 +9959,8 @@ function renderRelatorioABCDespesas(){
       </div>
       <div class="note">As categorias classe A concentram até 80% de tudo que sai do caixa — são as que mais valem negociar preço, buscar fornecedor alternativo ou cortar desperdício.</div>
     </div>
+    <div class="dash-section-label">Gráfico de Pareto (80/20)</div>
+    <div class="panel"><div class="panel-body" style="padding:12px 8px;overflow-x:auto;">${svgPareto(lista.slice(0,15).map(i=>({label:i.nome, valor:i.valor})))}</div></div>
     <div class="panel"><div class="panel-body">${lista.length ? renderTabelaABC(lista, 'Categoria') : `<div class="empty">Nenhuma despesa paga nesse período.</div>`}</div></div>
   `;
 }
@@ -9432,6 +9992,8 @@ function renderRelatorioABCFornecedores(){
       </div>
       <div class="note">PMP = Prazo Médio de Pagamento (dias entre o vencimento combinado e a data em que você realmente pagou); positivo significa que você pagou depois do combinado, negativo significa que pagou antes.</div>
     </div>
+    <div class="dash-section-label">Treemap (tamanho = valor comprado)</div>
+    <div class="panel"><div class="panel-body" style="padding:8px;">${svgTreemap(lista.slice(0,20).map(i=>({label:i.nome, valor:i.valor})))}</div></div>
     <div class="panel">
       <div class="panel-body">
         <div class="ledger-row head" style="grid-template-columns:24px 1fr 90px 60px 70px;">
