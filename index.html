@@ -5896,7 +5896,7 @@ function viewRelatorios(){
     { id:'metas_comerciais', icone:'🎯', nome:'Metas Comerciais', desc:'Progresso de cada vendedor em relação à meta mensal cadastrada' },
     { id:'fixo_variavel_tempo', icone:'📊', nome:'Custo Fixo vs Variável no Tempo', desc:'Como a proporção entre custo fixo e variável mudou nos últimos 12 meses' },
     { id:'onde_dinheiro', icone:'🧭', nome:'Onde Meu Dinheiro Está', desc:'Foto única do patrimônio — saldo em contas, investimentos, a receber e ativos' },
-    { id:'health_score', icone:'❤️', nome:'Health Score do Negócio', desc:'Nota única de 0 a 100 combinando margem, fôlego de caixa, atrasos e endividamento' },
+    { id:'health_score', icone:'❤️', nome:'Saúde da Empresa', desc:'Gráfico de tendência dos últimos 12 meses (0 a 100), mostrando o que está puxando o resultado pra cima ou pra baixo' },
     { id:'eficiencia_cobranca', icone:'⏱️', nome:'Eficiência de Cobrança', desc:'Prazo médio entre vencimento e recebimento de fato, e ranking de quem mais atrasa' },
     { id:'variacao_preco_insumos', icone:'📈', nome:'Variação de Preço de Insumos', desc:'Como o valor pago pelos insumos mudou ao longo das entradas de estoque já registradas' },
     { id:'concentracao_clientes', icone:'⚠️', nome:'Concentração de Risco de Clientes', desc:'Quanto % da receita vem do maior cliente, dos 3 e dos 5 maiores' },
@@ -5963,7 +5963,7 @@ function viewRelatorios(){
 const RELATORIOS_NOMES = {
   gerencial:'Dashboard Gerencial', executivo:'Dashboard Executivo', dre:'DRE', balanco:'Balanço Patrimonial', mei:'Declaração MEI', indicadores:'Indicadores Financeiros',
   produto:'Rentabilidade por Produto', investimentos:'Relatório de Investimentos', liquidez:'Índices de Liquidez', aging:'Aging — Vencidos por Faixa', dfc:'DFC — Fluxo de Caixa', cartoes:'Cartões de Crédito',
-  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio', yoy:'Comparativo Ano a Ano', sazonalidade:'Análise de Sazonalidade', calendario_vencimentos:'Calendário de Vencimentos', carga_tributaria:'Carga Tributária', simulador_preco:'Simulador de Preço', formas_pagamento:'Formas de Pagamento', rentabilidade_cliente:'Rentabilidade por Cliente', pe_produto:'Ponto de Equilíbrio por Produto', metas_comerciais:'Metas Comerciais', fixo_variavel_tempo:'Custo Fixo vs Variável no Tempo', onde_dinheiro:'Onde Meu Dinheiro Está', health_score:'Health Score do Negócio', eficiencia_cobranca:'Eficiência de Cobrança', variacao_preco_insumos:'Variação de Preço de Insumos', concentracao_clientes:'Concentração de Risco de Clientes', volume_margem_produto:'Ranking Volume x Margem por Produto', saude_cadastros:'Saúde dos Cadastros', projecao_comissoes:'Projeção de Comissões a Pagar', fcl:'Fluxo de Caixa Livre', payback:'Payback de Investimento', cvl_multiproduto:'Análise Custo-Volume-Lucro', dmpl:'Mutações do Patrimônio Líquido', provisoes:'Provisões (Férias/13º)', fluxo_centro_custo:'Fluxo de Caixa por Centro de Custo', conciliacao_saldo:'Conciliação de Saldo por Conta', taxa_conversao_funil:'Taxa de Conversão do Funil', novos_vs_recorrentes:'Novos Clientes vs. Recorrentes', taxa_recompra:'Taxa de Recompra', ltv_cac:'LTV e Relação LTV/CAC', abc_estoque:'Curva ABC de Estoque', estoque_abaixo_minimo:'Estoque Abaixo do Mínimo', obsolescencia_estoque:'Obsolescência de Estoque', comparativo_preco_fornecedores:'Comparativo de Preço entre Fornecedores', calendario_obrigacoes:'Calendário de Obrigações Acessórias', manutencao_consolidada:'Manutenção Preventiva Consolidada', vida_util_remanescente:'Vida Útil Remanescente', roi_ativo:'Custo e Valor Atual por Ativo', alocacao_ativos:'Alocação de Ativos', divergencias:'Divergências e Exceções', posicao_bancaria:'Posição Bancária Consolidada', taxas_bancarias:'Taxas e Tarifas Bancárias', amortizacao_emprestimos:'Amortização de Empréstimos', seguros_ativos:'Seguros de Ativos', preco_tabela_praticado:'Preço de Tabela vs. VK', limite_credito:'Limite de Crédito Disponível', multas_penalidades:'Multas e Penalidades'
+  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio', yoy:'Comparativo Ano a Ano', sazonalidade:'Análise de Sazonalidade', calendario_vencimentos:'Calendário de Vencimentos', carga_tributaria:'Carga Tributária', simulador_preco:'Simulador de Preço', formas_pagamento:'Formas de Pagamento', rentabilidade_cliente:'Rentabilidade por Cliente', pe_produto:'Ponto de Equilíbrio por Produto', metas_comerciais:'Metas Comerciais', fixo_variavel_tempo:'Custo Fixo vs Variável no Tempo', onde_dinheiro:'Onde Meu Dinheiro Está', health_score:'Saúde da Empresa', eficiencia_cobranca:'Eficiência de Cobrança', variacao_preco_insumos:'Variação de Preço de Insumos', concentracao_clientes:'Concentração de Risco de Clientes', volume_margem_produto:'Ranking Volume x Margem por Produto', saude_cadastros:'Saúde dos Cadastros', projecao_comissoes:'Projeção de Comissões a Pagar', fcl:'Fluxo de Caixa Livre', payback:'Payback de Investimento', cvl_multiproduto:'Análise Custo-Volume-Lucro', dmpl:'Mutações do Patrimônio Líquido', provisoes:'Provisões (Férias/13º)', fluxo_centro_custo:'Fluxo de Caixa por Centro de Custo', conciliacao_saldo:'Conciliação de Saldo por Conta', taxa_conversao_funil:'Taxa de Conversão do Funil', novos_vs_recorrentes:'Novos Clientes vs. Recorrentes', taxa_recompra:'Taxa de Recompra', ltv_cac:'LTV e Relação LTV/CAC', abc_estoque:'Curva ABC de Estoque', estoque_abaixo_minimo:'Estoque Abaixo do Mínimo', obsolescencia_estoque:'Obsolescência de Estoque', comparativo_preco_fornecedores:'Comparativo de Preço entre Fornecedores', calendario_obrigacoes:'Calendário de Obrigações Acessórias', manutencao_consolidada:'Manutenção Preventiva Consolidada', vida_util_remanescente:'Vida Útil Remanescente', roi_ativo:'Custo e Valor Atual por Ativo', alocacao_ativos:'Alocação de Ativos', divergencias:'Divergências e Exceções', posicao_bancaria:'Posição Bancária Consolidada', taxas_bancarias:'Taxas e Tarifas Bancárias', amortizacao_emprestimos:'Amortização de Empréstimos', seguros_ativos:'Seguros de Ativos', preco_tabela_praticado:'Preço de Tabela vs. VK', limite_credito:'Limite de Crédito Disponível', multas_penalidades:'Multas e Penalidades'
 };
 
 function viewRelatorioDetalhe(){
@@ -8587,41 +8587,104 @@ function renderOndeDinheiroEsta(){
 }
 
 // 12. Health Score do Negócio — nota única combinando os principais indicadores
-function renderHealthScore(){
-  const hoje = todayISO();
-  const mesAtual = hoje.slice(0,7);
-  const dadosMes = dadosMesGerencial(mesAtual, 'todos');
+// Calcula os 4 sub-scores e o total do Health Score numa data de referência qualquer (fim de um
+// mês passado, ou hoje). Reaproveitado tanto pro gráfico histórico quanto pro card do mês atual.
+function calcularHealthScoreEm(dataRefISO, mesRef){
+  const dadosMes = dadosMesGerencial(mesRef, 'todos');
   const margemLiquidaPct = dadosMes.margemLiquidaPct;
-  const saldoContas = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
-  const gastoMedioDiario = (()=>{ const de90 = new Date(); de90.setDate(de90.getDate()-90); const de90ISO = de90.toISOString().slice(0,10);
-    const eventos = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90ISO && ev.data<=hoje && !ehMovimentoDeCapital(ev));
-    return eventos.reduce((s,ev)=>s+ev.valor,0)/90; })();
+  const saldoContas = state.contas.reduce((s,c)=>s+saldoContaEmData(c.id, dataRefISO),0);
+  const de90 = new Date(dataRefISO); de90.setDate(de90.getDate()-90);
+  const de90ISO = de90.toISOString().slice(0,10);
+  const gastoMedioDiario = (()=>{
+    const eventos = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90ISO && ev.data<=dataRefISO && !ehMovimentoDeCapital(ev));
+    return eventos.reduce((s,ev)=>s+ev.valor,0)/90;
+  })();
   const foldegoDias = gastoMedioDiario>0 ? saldoContas/gastoMedioDiario : 0;
-  const aPagarPendenteAtrasado = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.dataVencimento<hoje).length;
-  const aReceberPendenteAtrasado = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.dataVencimento<hoje).length;
-  const passivoTotal = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
+  // "Estava atrasado/pendente naquela data" é uma aproximação: como não guardamos histórico de
+  // status, consideramos pendente-na-época quem venceu antes da data de referência e só foi pago
+  // depois dela (ou continua pendente até hoje).
+  const estavaPendenteEm = (l) => l.dataVencimento<dataRefISO && (l.status==='pendente' || (l.dataPagamento && l.dataPagamento>dataRefISO));
+  const aPagarAtrasado = state.lancamentos.filter(l=>l.tipo==='saida' && estavaPendenteEm(l)).length;
+  const aReceberAtrasado = state.lancamentos.filter(l=>l.tipo==='entrada' && estavaPendenteEm(l)).length;
+  const passivoTotal = state.lancamentos.filter(l=>l.tipo==='saida' && (l.status==='pendente' || (l.dataPagamento && l.dataPagamento>dataRefISO))).reduce((s,l)=>{
+    const pagoAteData = (l.historicoRecebimentos||[]).filter(p=>p.data<=dataRefISO).reduce((a,p)=>a+p.valor,0) || (l.dataPagamento && l.dataPagamento<=dataRefISO ? (l.valorRecebido||0) : 0);
+    return s + Math.max(0, l.valor - pagoAteData);
+  },0);
   const endividamento = saldoContas>0 ? Math.min(2, passivoTotal/saldoContas) : (passivoTotal>0?2:0);
 
   const scoreMargem = Math.max(0, Math.min(25, (margemLiquidaPct/20)*25));
   const scoreFolego = Math.max(0, Math.min(25, (foldegoDias/60)*25));
-  const scoreAtraso = Math.max(0, 25 - (aPagarPendenteAtrasado+aReceberPendenteAtrasado)*3);
+  const scoreAtraso = Math.max(0, 25 - (aPagarAtrasado+aReceberAtrasado)*3);
   const scoreEndividamento = Math.max(0, 25 - endividamento*12.5);
   const scoreTotal = Math.round(scoreMargem + scoreFolego + scoreAtraso + scoreEndividamento);
-  const corScore = scoreTotal>=70?'var(--success)':scoreTotal>=40?'var(--warn)':'var(--danger)';
-  const nivel = scoreTotal>=70?'Saudável':scoreTotal>=40?'Atenção':'Crítico';
+  return { scoreTotal, scoreMargem, scoreFolego, scoreAtraso, scoreEndividamento, margemLiquidaPct, foldegoDias, atrasos: aPagarAtrasado+aReceberAtrasado, endividamento };
+}
+
+function renderHealthScore(){
+  const hoje = todayISO();
+  const meses = Array.from({length:12},(_,i)=>{ const d = new Date(); d.setMonth(d.getMonth()-11+i); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const historico = meses.map(m=>{
+    const [a,mm] = m.split('-').map(Number);
+    const ultimoDiaMes = new Date(a,mm,0).getDate();
+    const dataRef = m===hoje.slice(0,7) ? hoje : `${m}-${String(ultimoDiaMes).padStart(2,'0')}`;
+    return { mesRef:m, ...calcularHealthScoreEm(dataRef, m) };
+  });
+  const atual = historico[historico.length-1];
+  const anterior = historico[historico.length-2];
+  const corScore = atual.scoreTotal>=70?'var(--success)':atual.scoreTotal>=40?'var(--warn)':'var(--danger)';
+  const nivel = atual.scoreTotal>=70?'Saudável':atual.scoreTotal>=40?'Atenção':'Crítico';
+  const mesAbrev = m => competenciaLabel(m).split('/')[0].slice(0,3);
+
+  const PILARES = [
+    { key:'scoreMargem', nome:'Margem líquida do mês', icone:'💰', explicaSubiu:'A margem líquida melhorou — sobrou mais lucro proporcional à receita.', explicaCaiu:'A margem líquida piorou — receita e despesa estão mais apertadas. Veja a DRE pra entender se foi queda de venda ou alta de custo.' },
+    { key:'scoreFolego', nome:'Fôlego de caixa', icone:'🫁', explicaSubiu:'O caixa aguenta mais dias de operação sem entrar dinheiro novo.', explicaCaiu:'O caixa aguenta menos tempo sem entrar dinheiro novo — saldo caiu ou o gasto médio diário subiu. Veja o Fôlego de Caixa no Fluxo.' },
+    { key:'scoreAtraso', nome:'Contas em dia', icone:'⏰', explicaSubiu:'Menos contas a pagar/receber atrasadas que no mês passado.', explicaCaiu:'Mais contas a pagar/receber ficaram atrasadas. Veja Contas a Pagar e a Receber pra colocar em dia.' },
+    { key:'scoreEndividamento', nome:'Endividamento controlado', icone:'⚖️', explicaSubiu:'A dívida pendente ficou menor em relação ao saldo em caixa.', explicaCaiu:'A dívida pendente cresceu em relação ao saldo em caixa. Veja Contas a Pagar e considere priorizar quitar o que está parado.' },
+  ];
+  const variacoes = anterior ? PILARES.map(p=>({ ...p, delta: atual[p.key]-anterior[p.key] })).filter(p=>Math.abs(p.delta)>=1).sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta)) : [];
+  const subiram = variacoes.filter(p=>p.delta>0);
+  const cairam = variacoes.filter(p=>p.delta<0);
+
   return `
-    <div class="panel"><div class="panel-body" style="padding:30px 20px;text-align:center;">
-      <div style="font-size:52px;font-weight:800;color:${corScore};">${scoreTotal}</div>
+    <div class="panel"><div class="panel-body" style="padding:26px 20px;text-align:center;">
+      <div style="font-size:52px;font-weight:800;color:${corScore};">${atual.scoreTotal}</div>
       <div style="font-size:15px;font-weight:600;color:${corScore};margin-top:4px;">${nivel}</div>
+      ${anterior ? `<div style="font-size:12px;margin-top:6px;color:${atual.scoreTotal>=anterior.scoreTotal?'var(--success)':'var(--danger)'};">${atual.scoreTotal>=anterior.scoreTotal?'▲':'▼'} ${Math.abs(atual.scoreTotal-anterior.scoreTotal)} ponto(s) vs mês passado</div>` : ''}
       <div style="font-size:11.5px;color:var(--text-soft);margin-top:8px;">de 0 a 100 — combina margem líquida, fôlego de caixa, contas atrasadas e endividamento</div>
     </div></div>
-    <div class="panel"><div class="panel-body" style="padding:14px 18px;">
-      <div style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;font-size:12.5px;"><span>Margem líquida do mês</span><span class="mono">${Math.round(scoreMargem)}/25</span></div><div style="background:var(--bone);border-radius:5px;height:6px;overflow:hidden;margin-top:3px;"><div style="width:${scoreMargem/25*100}%;height:100%;background:var(--blue-accent);"></div></div></div>
-      <div style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;font-size:12.5px;"><span>Fôlego de caixa</span><span class="mono">${Math.round(scoreFolego)}/25</span></div><div style="background:var(--bone);border-radius:5px;height:6px;overflow:hidden;margin-top:3px;"><div style="width:${scoreFolego/25*100}%;height:100%;background:var(--blue-accent);"></div></div></div>
-      <div style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;font-size:12.5px;"><span>Contas em dia (sem atraso)</span><span class="mono">${Math.round(scoreAtraso)}/25</span></div><div style="background:var(--bone);border-radius:5px;height:6px;overflow:hidden;margin-top:3px;"><div style="width:${scoreAtraso/25*100}%;height:100%;background:var(--blue-accent);"></div></div></div>
-      <div><div style="display:flex;justify-content:space-between;font-size:12.5px;"><span>Endividamento controlado</span><span class="mono">${Math.round(scoreEndividamento)}/25</span></div><div style="background:var(--bone);border-radius:5px;height:6px;overflow:hidden;margin-top:3px;"><div style="width:${scoreEndividamento/25*100}%;height:100%;background:var(--blue-accent);"></div></div></div>
+
+    <div class="dash-section-label">Evolução nos últimos 12 meses</div>
+    <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+      <div style="display:flex;align-items:flex-end;gap:6px;height:110px;overflow-x:auto;">
+        ${historico.map(h=>`
+          <div style="flex:1;min-width:26px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;">
+            <div style="width:16px;border-radius:2px 2px 0 0;height:${Math.max(2,Math.round(h.scoreTotal/100*90))}px;background:${h.scoreTotal>=70?'var(--success)':h.scoreTotal>=40?'var(--warn)':'var(--danger)'};" title="${competenciaLabel(h.mesRef)}: ${h.scoreTotal}"></div>
+            <span style="font-size:9px;color:var(--text-soft);margin-top:3px;">${mesAbrev(h.mesRef)}</span>
+          </div>
+        `).join('')}
+      </div>
+      <div class="note" style="margin-top:12px;">Se a tendência das barras é subir, a empresa está melhorando; se está caindo, é hora de olhar o que puxou pra baixo abaixo.</div>
     </div></div>
-    <div class="note">Cálculo simplificado, pensado como um resumo rápido — não substitui olhar os relatórios detalhados quando algo parecer errado.</div>
+
+    ${anterior ? `
+    <div class="dash-section-label">O que mudou vs. mês passado</div>
+    ${!variacoes.length ? `<div class="panel"><div class="empty" style="padding:24px 20px;">Nenhuma mudança relevante nos 4 fatores em relação ao mês passado.</div></div>` : `
+    <div class="cards" style="grid-template-columns:1fr 1fr;">
+      <div class="panel"><div class="panel-head"><h2>📈 Puxando pra cima</h2></div><div class="panel-body" style="padding:12px 18px;">
+        ${subiram.length ? subiram.map(p=>`<div style="padding:8px 0;border-bottom:1px solid var(--line);"><div style="font-weight:600;font-size:12.5px;">${p.icone} ${p.nome} <span class="mono" style="color:var(--success);">+${Math.round(p.delta)}</span></div><div style="font-size:11px;color:var(--text-soft);margin-top:2px;">${p.explicaSubiu}</div></div>`).join('') : `<div class="empty" style="padding:10px 0;">Nada puxando pra cima nesse mês.</div>`}
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>📉 Puxando pra baixo</h2></div><div class="panel-body" style="padding:12px 18px;">
+        ${cairam.length ? cairam.map(p=>`<div style="padding:8px 0;border-bottom:1px solid var(--line);"><div style="font-weight:600;font-size:12.5px;">${p.icone} ${p.nome} <span class="mono" style="color:var(--danger);">${Math.round(p.delta)}</span></div><div style="font-size:11px;color:var(--text-soft);margin-top:2px;">${p.explicaCaiu}</div></div>`).join('') : `<div class="empty" style="padding:10px 0;">Nada puxando pra baixo nesse mês. 🎉</div>`}
+      </div></div>
+    </div>`}` : ''}
+
+    <div class="dash-section-label">Os 4 fatores agora</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 18px;">
+      ${PILARES.map(p=>`
+        <div style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;font-size:12.5px;"><span>${p.icone} ${p.nome}</span><span class="mono">${Math.round(atual[p.key])}/25</span></div><div style="background:var(--bone);border-radius:5px;height:6px;overflow:hidden;margin-top:3px;"><div style="width:${atual[p.key]/25*100}%;height:100%;background:var(--blue-accent);"></div></div></div>
+      `).join('')}
+    </div></div>
+    <div class="note">Cálculo simplificado, pensado como um resumo rápido — não substitui olhar os relatórios detalhados quando algo parecer errado. Meses históricos usam uma aproximação pras contas atrasadas (não guardamos o status exato de cada dia no passado).</div>
   `;
 }
 
