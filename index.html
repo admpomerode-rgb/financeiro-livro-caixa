@@ -6547,6 +6547,28 @@ function viewRelatorios(){
     { id:'calendario_financeiro', icone:'📅', nome:'Calendário Financeiro', desc:'Visão em calendário (não lista) de entradas, saídas e vencimentos do mês' },
     { id:'central_cliente', icone:'👥', nome:'Central do Cliente', desc:'Faturamento, prazo de pagamento, inadimplência e limite de crédito, consolidado por cliente' },
     { id:'centro_comando', icone:'🎛️', nome:'Centro de Comando', desc:'O que está acontecendo, o que precisa de atenção, o que vai acontecer e o que fazer — tudo num só lugar' },
+    { id:'fluxo_caixa_diario', icone:'📆', nome:'Fluxo de Caixa Diário', desc:'Saldo inicial, entradas, saídas e saldo final de cada dia do mês' },
+    { id:'receitas_categoria', icone:'💹', nome:'Receitas por Categoria', desc:'Origem do faturamento e participação de cada categoria' },
+    { id:'margem_mensal', icone:'📐', nome:'Margem Mensal', desc:'Evolução da margem bruta e líquida ao longo dos últimos 12 meses' },
+    { id:'ticket_medio_evolutivo', icone:'🎫', nome:'Ticket Médio Evolutivo', desc:'Evolução do ticket médio de venda mês a mês' },
+    { id:'vendas_canceladas', icone:'❌', nome:'Vendas Canceladas', desc:'Quantidade, valor, clientes e produtos dos pedidos cancelados' },
+    { id:'comprometimento_futuro', icone:'🔒', nome:'Comprometimento Futuro', desc:'Quanto do dinheiro futuro já está comprometido com obrigações' },
+    { id:'parcelamentos', icone:'💳', nome:'Parcelamentos', desc:'Compras parceladas no cartão, parcelas já vencidas e futuras' },
+    { id:'receita_cliente_tempo', icone:'📈', nome:'Receita por Cliente ao Longo do Tempo', desc:'Evolução individual da receita dos principais clientes' },
+    { id:'clientes_perdidos_risco', icone:'⚠️', nome:'Clientes Perdidos e em Risco', desc:'Clientes que pararam de comprar ou tiveram queda relevante' },
+    { id:'compras_periodo', icone:'🛒', nome:'Compras por Período', desc:'Compras de insumo por mês, fornecedor e categoria' },
+    { id:'evolucao_custos', icone:'📊', nome:'Evolução dos Custos', desc:'Quais categorias de despesa mais cresceram recentemente' },
+    { id:'inflacao_interna', icone:'🌡️', nome:'Inflação Interna da Empresa', desc:'Índice de evolução do custo médio de compra de insumos' },
+    { id:'lucro_cliente', icone:'💎', nome:'Lucro por Cliente', desc:'Quanto cada cliente realmente contribui pro lucro (com custo do produto)' },
+    { id:'capital_giro', icone:'⚙️', nome:'Capital de Giro', desc:'Quanto dinheiro de curto prazo a operação precisa pra funcionar' },
+    { id:'endividamento_vencimento', icone:'📉', nome:'Endividamento por Vencimento', desc:'Dívidas separadas por curto, médio e longo prazo' },
+    { id:'super_relatorio_anual', icone:'🏆', nome:'Super Relatório Anual', desc:'Visão consolidada dos 12 meses — melhor/pior mês, clientes, despesas' },
+    { id:'despesas_centro_custo', icone:'🏗️', nome:'Despesas por Centro de Custo', desc:'Detalhamento e comparação das despesas por centro de custo' },
+    { id:'crescimento_clientes', icone:'👥', nome:'Crescimento de Clientes', desc:'Novos, ativos, recuperados e clientes que ficaram inativos no mês' },
+    { id:'dependencia_financeira', icone:'⚖️', nome:'Dependência Financeira', desc:'Concentração em cliente, fornecedor e canal de venda' },
+    { id:'lucro_canal', icone:'🛍️', nome:'Lucro por Canal', desc:'Comparação da rentabilidade entre canais de venda' },
+    { id:'obrigacoes_futuras', icone:'📋', nome:'Obrigações Futuras', desc:'Contas, impostos, cartões, parcelas e contratos vencendo, tudo junto' },
+    { id:'evolucao_patrimonial', icone:'🏛️', nome:'Evolução Patrimonial', desc:'Ativo, passivo e patrimônio líquido evoluindo mês a mês' },
     { id:'breakeven', icone:'⚖️', nome:'Ponto de Equilíbrio', desc:'Vendas mínimas pra cobrir os custos, em 3 cenários (otimista/realista/pessimista)' },
     { id:'valuation', icone:'💎', nome:'Valuation Estimado', desc:'Estimativa educacional de valor da empresa por múltiplos de EBITDA e faturamento' },
     { id:'aging', icone:'⏳', nome:'Aging — Vencidos por Faixa', desc:'Contas a receber e a pagar por faixa de atraso, com ranking de inadimplentes' },
@@ -6579,7 +6601,7 @@ function viewRelatorios(){
 const RELATORIOS_NOMES = {
   gerencial:'Dashboard Gerencial', executivo:'Dashboard Executivo', dre:'DRE', balanco:'Balanço Patrimonial', mei:'Declaração MEI', indicadores:'Indicadores Financeiros',
   produto:'Rentabilidade por Produto', investimentos:'Relatório de Investimentos', liquidez:'Índices de Liquidez', aging:'Aging — Vencidos por Faixa', dfc:'DFC — Fluxo de Caixa', cartoes:'Cartões de Crédito',
-  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio', yoy:'Comparativo Ano a Ano', sazonalidade:'Análise de Sazonalidade', calendario_vencimentos:'Calendário de Vencimentos', carga_tributaria:'Carga Tributária', simulador_preco:'Simulador de Preço', formas_pagamento:'Formas de Pagamento', rentabilidade_cliente:'Rentabilidade por Cliente', pe_produto:'Ponto de Equilíbrio por Produto', metas_comerciais:'Metas Comerciais', fixo_variavel_tempo:'Custo Fixo vs Variável no Tempo', onde_dinheiro:'Onde Meu Dinheiro Está', health_score:'Saúde da Empresa', eficiencia_cobranca:'Eficiência de Cobrança', variacao_preco_insumos:'Variação de Preço de Insumos', concentracao_clientes:'Concentração de Risco de Clientes', volume_margem_produto:'Ranking Volume x Margem por Produto', saude_cadastros:'Saúde dos Cadastros', projecao_comissoes:'Projeção de Comissões a Pagar', fcl:'Fluxo de Caixa Livre', payback:'Payback de Investimento', cvl_multiproduto:'Análise Custo-Volume-Lucro', dmpl:'Mutações do Patrimônio Líquido', provisoes:'Provisões (Férias/13º)', fluxo_centro_custo:'Fluxo de Caixa por Centro de Custo', conciliacao_saldo:'Conciliação de Saldo por Conta', taxa_conversao_funil:'Taxa de Conversão do Funil', novos_vs_recorrentes:'Novos Clientes vs. Recorrentes', taxa_recompra:'Taxa de Recompra', ltv_cac:'LTV e Relação LTV/CAC', abc_estoque:'Curva ABC de Estoque', estoque_abaixo_minimo:'Estoque Abaixo do Mínimo', obsolescencia_estoque:'Obsolescência de Estoque', comparativo_preco_fornecedores:'Comparativo de Preço entre Fornecedores', calendario_obrigacoes:'Calendário de Obrigações Acessórias', manutencao_consolidada:'Manutenção Preventiva Consolidada', vida_util_remanescente:'Vida Útil Remanescente', roi_ativo:'Custo e Valor Atual por Ativo', alocacao_ativos:'Alocação de Ativos', divergencias:'Divergências e Exceções', posicao_bancaria:'Posição Bancária Consolidada', taxas_bancarias:'Taxas e Tarifas Bancárias', amortizacao_emprestimos:'Amortização de Empréstimos', seguros_ativos:'Seguros de Ativos', preco_tabela_praticado:'Preço de Tabela vs. VK', limite_credito:'Limite de Crédito Disponível', multas_penalidades:'Multas e Penalidades', central_inteligencia:'Central de Inteligência Financeira', central_alertas:'Central de Alertas', calendario_financeiro:'Calendário Financeiro', central_cliente:'Central do Cliente', centro_comando:'Centro de Comando'
+  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio', yoy:'Comparativo Ano a Ano', sazonalidade:'Análise de Sazonalidade', calendario_vencimentos:'Calendário de Vencimentos', carga_tributaria:'Carga Tributária', simulador_preco:'Simulador de Preço', formas_pagamento:'Formas de Pagamento', rentabilidade_cliente:'Rentabilidade por Cliente', pe_produto:'Ponto de Equilíbrio por Produto', metas_comerciais:'Metas Comerciais', fixo_variavel_tempo:'Custo Fixo vs Variável no Tempo', onde_dinheiro:'Onde Meu Dinheiro Está', health_score:'Saúde da Empresa', eficiencia_cobranca:'Eficiência de Cobrança', variacao_preco_insumos:'Variação de Preço de Insumos', concentracao_clientes:'Concentração de Risco de Clientes', volume_margem_produto:'Ranking Volume x Margem por Produto', saude_cadastros:'Saúde dos Cadastros', projecao_comissoes:'Projeção de Comissões a Pagar', fcl:'Fluxo de Caixa Livre', payback:'Payback de Investimento', cvl_multiproduto:'Análise Custo-Volume-Lucro', dmpl:'Mutações do Patrimônio Líquido', provisoes:'Provisões (Férias/13º)', fluxo_centro_custo:'Fluxo de Caixa por Centro de Custo', conciliacao_saldo:'Conciliação de Saldo por Conta', taxa_conversao_funil:'Taxa de Conversão do Funil', novos_vs_recorrentes:'Novos Clientes vs. Recorrentes', taxa_recompra:'Taxa de Recompra', ltv_cac:'LTV e Relação LTV/CAC', abc_estoque:'Curva ABC de Estoque', estoque_abaixo_minimo:'Estoque Abaixo do Mínimo', obsolescencia_estoque:'Obsolescência de Estoque', comparativo_preco_fornecedores:'Comparativo de Preço entre Fornecedores', calendario_obrigacoes:'Calendário de Obrigações Acessórias', manutencao_consolidada:'Manutenção Preventiva Consolidada', vida_util_remanescente:'Vida Útil Remanescente', roi_ativo:'Custo e Valor Atual por Ativo', alocacao_ativos:'Alocação de Ativos', divergencias:'Divergências e Exceções', posicao_bancaria:'Posição Bancária Consolidada', taxas_bancarias:'Taxas e Tarifas Bancárias', amortizacao_emprestimos:'Amortização de Empréstimos', seguros_ativos:'Seguros de Ativos', preco_tabela_praticado:'Preço de Tabela vs. VK', limite_credito:'Limite de Crédito Disponível', multas_penalidades:'Multas e Penalidades', central_inteligencia:'Central de Inteligência Financeira', central_alertas:'Central de Alertas', calendario_financeiro:'Calendário Financeiro', central_cliente:'Central do Cliente', centro_comando:'Centro de Comando', fluxo_caixa_diario:'Fluxo de Caixa Diário', receitas_categoria:'Receitas por Categoria', margem_mensal:'Margem Mensal', ticket_medio_evolutivo:'Ticket Médio Evolutivo', vendas_canceladas:'Vendas Canceladas', comprometimento_futuro:'Comprometimento Futuro', parcelamentos:'Parcelamentos', receita_cliente_tempo:'Receita por Cliente ao Longo do Tempo', clientes_perdidos_risco:'Clientes Perdidos e em Risco', compras_periodo:'Compras por Período', evolucao_custos:'Evolução dos Custos', inflacao_interna:'Inflação Interna da Empresa', lucro_cliente:'Lucro por Cliente', capital_giro:'Capital de Giro', endividamento_vencimento:'Endividamento por Vencimento', super_relatorio_anual:'Super Relatório Anual', despesas_centro_custo:'Despesas por Centro de Custo', crescimento_clientes:'Crescimento de Clientes', dependencia_financeira:'Dependência Financeira', lucro_canal:'Lucro por Canal', obrigacoes_futuras:'Obrigações Futuras', evolucao_patrimonial:'Evolução Patrimonial'
 };
 
 function viewRelatorioDetalhe(){
@@ -9443,6 +9465,661 @@ function svgBoxPlot(grupos){
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;">${caixas}</svg>`;
 }
 /* ================= FIM DA BIBLIOTECA DE GRÁFICOS ================= */
+
+// 1. Fluxo de Caixa Diário — tabela dia a dia (saldo inicial, entradas, saídas, saldo final)
+function renderFluxoCaixaDiario(mesRef){
+  mesRef = mesRef || mesGlobalRef;
+  const [anoM, mesM] = mesRef.split('-').map(Number);
+  const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
+  const saldoInicial = state.contas.reduce((s,c)=>s+c.saldoInicial,0) + movimentosRealizados().filter(ev=>ev.data<de && ev.origem!=='transferencia').reduce((s,ev)=>s+(ev.tipo==='entrada'?ev.valor:-ev.valor),0);
+  const eventosMes = movimentosRealizados().filter(ev=>ev.data>=de && ev.data<=ate && ev.origem!=='transferencia');
+  const dias = [];
+  let saldoAcum = saldoInicial;
+  for(let d=1; d<=new Date(anoM,mesM,0).getDate(); d++){
+    const dataISO = `${mesRef}-${String(d).padStart(2,'0')}`;
+    if(dataISO>todayISO()) break;
+    const doDia = eventosMes.filter(ev=>ev.data===dataISO);
+    const entradas = doDia.filter(ev=>ev.tipo==='entrada').reduce((s,ev)=>s+ev.valor,0);
+    const saidas = doDia.filter(ev=>ev.tipo==='saida').reduce((s,ev)=>s+ev.valor,0);
+    if(entradas===0 && saidas===0) continue;
+    const saldoDiaInicial = saldoAcum;
+    saldoAcum += entradas - saidas;
+    dias.push({ dataISO, saldoDiaInicial, entradas, saidas, saldoFinal:saldoAcum });
+  }
+  return `
+    <div class="report-controls"><input type="month" id="fluxoDiarioMes" value="${mesRef}"></div>
+    ${!dias.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhuma movimentação nesse mês.</div></div>` : `
+    <div class="ledger-row head" style="grid-template-columns:auto 1fr 1fr 1fr 1fr;">
+      <span>Dia</span><span>Saldo inicial</span><span>Entradas</span><span>Saídas</span><span>Saldo final</span>
+    </div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${dias.map(d=>`
+        <div class="ledger-row compact" style="grid-template-columns:auto 1fr 1fr 1fr 1fr;">
+          <span class="mono">${fmtDate(d.dataISO)}</span>
+          <span class="mono" style="color:var(--text-soft);">${brl(d.saldoDiaInicial)}</span>
+          <span class="mono" style="color:var(--success);">+${brl(d.entradas)}</span>
+          <span class="mono" style="color:var(--danger);">-${brl(d.saidas)}</span>
+          <span class="mono" style="font-weight:600;color:${d.saldoFinal>=0?'inherit':'var(--danger)'};">${brl(d.saldoFinal)}</span>
+        </div>
+      `).join('')}
+    </div></div>`}
+  `;
+}
+
+// 2. Receitas por Categoria — origem do faturamento e participação de cada categoria
+function renderReceitasPorCategoria(mesRef){
+  mesRef = mesRef || mesGlobalRef;
+  const dadosMes = dadosMesGerencial(mesRef, 'todos');
+  const lista = Object.entries(dadosMes.entradasPorCategoria).sort((a,b)=>b[1]-a[1]);
+  const total = dadosMes.receita;
+  const max = lista.length ? lista[0][1] : 1;
+  return `
+    <div class="report-controls"><input type="month" id="receitasCategoriaMes" value="${mesRef}"></div>
+    <div class="cards"><div class="card saldo"><div class="label">Receita total do mês</div><div class="value mono">${brl(total)}</div></div></div>
+    <div class="dash-section-label">Composição</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 18px;">${lista.length ? svgPizza(lista.map(([label,valor])=>({label,valor}))) : `<div class="empty">Nenhuma receita categorizada nesse mês.</div>`}</div></div>
+    ${lista.length ? `<div class="panel"><div class="panel-body" style="padding:14px 18px;">
+      ${lista.map(([cat,valor])=>`
+        <div style="margin-bottom:10px;">
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px;"><span>${escapeHTML(cat)}</span><span class="mono">${brl(valor)} (${total>0?(valor/total*100).toFixed(1):0}%)</span></div>
+          <div style="background:var(--bone);border-radius:5px;height:7px;overflow:hidden;"><div style="width:${Math.max(2,valor/max*100)}%;height:100%;background:var(--success);"></div></div>
+        </div>
+      `).join('')}
+    </div></div>` : ''}
+  `;
+}
+
+// 5. Margem Mensal — evolução da margem bruta, operacional e líquida, últimos 12 meses
+function renderMargemMensal(){
+  const hoje = new Date();
+  const meses = Array.from({length:12},(_,i)=>{ const d = new Date(hoje.getFullYear(), hoje.getMonth()-11+i, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const dados = meses.map(m=>{
+    const dm = dadosMesGerencial(m, 'todos');
+    const margemBrutaPct = dm.receita>0 ? ((dm.receita-dm.custoVariavel)/dm.receita*100) : 0;
+    return { mesRef:m, margemBrutaPct, margemLiquidaPct: dm.margemLiquidaPct };
+  });
+  const mesAbrev = m => competenciaLabel(m).split('/')[0].slice(0,3);
+  return `
+    <div class="dash-section-label">Evolução da margem — últimos 12 meses</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">
+      ${svgLinhasMultiplas([
+        { nome:'Margem bruta', cor:'var(--blue-accent)', valores: dados.map(d=>d.margemBrutaPct) },
+        { nome:'Margem líquida', cor:'var(--success)', valores: dados.map(d=>d.margemLiquidaPct) },
+      ], meses.map(mesAbrev))}
+    </div></div>
+    <div class="note" style="margin-top:0;">Margem bruta = (receita − custo variável) ÷ receita. Margem líquida = lucro do mês ÷ receita. "Margem operacional" separada não existe hoje porque o sistema não distingue despesa operacional de não-operacional — pra esse nível de detalhe, veja a DRE.</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${dados.map(d=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
+          <span>${competenciaLabel(d.mesRef)}</span>
+          <span class="mono">${d.margemBrutaPct.toFixed(1)}%</span>
+          <span class="mono" style="color:${d.margemLiquidaPct>=0?'var(--success)':'var(--danger)'};font-weight:600;">${d.margemLiquidaPct.toFixed(1)}%</span>
+        </div>
+      `).join('')}
+    </div></div>
+  `;
+}
+
+// 13. Ticket Médio Evolutivo — evolução do ticket médio ao longo dos meses
+function renderTicketMedioEvolutivo(){
+  const hoje = new Date();
+  const meses = Array.from({length:12},(_,i)=>{ const d = new Date(hoje.getFullYear(), hoje.getMonth()-11+i, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const dados = meses.map(m=>{
+    const [a,mm] = m.split('-').map(Number);
+    const de = `${m}-01`, ate = `${m}-${String(new Date(a,mm,0).getDate()).padStart(2,'0')}`;
+    const vendas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=de && l.dataPagamento<=ate);
+    const total = vendas.reduce((s,l)=>s+l.valor,0);
+    return { mesRef:m, ticket: vendas.length ? total/vendas.length : 0, qtd:vendas.length };
+  });
+  const max = Math.max(1, ...dados.map(d=>d.ticket));
+  const mesAbrev = m => competenciaLabel(m).split('/')[0].slice(0,3);
+  return `
+    <div class="dash-section-label">Ticket médio — últimos 12 meses</div>
+    <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+      <div style="display:flex;align-items:flex-end;gap:6px;height:120px;overflow-x:auto;">
+        ${dados.map(d=>`
+          <div style="flex:1;min-width:28px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;">
+            <div style="width:16px;background:var(--blue-accent);border-radius:2px 2px 0 0;height:${Math.max(1,Math.round(d.ticket/max*95))}px;" title="${brl(d.ticket)}"></div>
+            <span style="font-size:9px;color:var(--text-soft);margin-top:3px;">${mesAbrev(d.mesRef)}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div></div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${dados.map(d=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto auto;"><span>${competenciaLabel(d.mesRef)}</span><span class="mono" style="color:var(--text-soft);">${d.qtd} venda(s)</span><span class="mono" style="font-weight:600;">${brl(d.ticket)}</span></div>`).join('')}
+    </div></div>
+  `;
+}
+
+// 11. Vendas Canceladas — quantidade, valor, clientes, produtos e impacto
+function renderVendasCanceladas(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const canceladas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='cancelado' && l.dataVencimento>=de && l.dataVencimento<=ate);
+  const totalCancelado = canceladas.reduce((s,l)=>s+l.valor,0);
+  const totalRecebido = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+  const pctImpacto = (totalRecebido+totalCancelado)>0 ? (totalCancelado/(totalRecebido+totalCancelado)*100) : 0;
+  const porCliente = {};
+  canceladas.forEach(l=>{ const n=l.fornecedor||'Sem identificação'; porCliente[n]=(porCliente[n]||0)+l.valor; });
+  const porProduto = {};
+  canceladas.filter(l=>l.produtoTag).forEach(l=>{ porProduto[l.produtoTag]=(porProduto[l.produtoTag]||0)+l.valor; });
+  return `
+    <div class="note" style="margin-top:0;">Últimos 12 meses (${fmtDate(de)} a ${fmtDate(ate)}).</div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
+      <div class="card"><div class="label">Pedidos cancelados</div><div class="value mono">${canceladas.length}</div></div>
+      <div class="card"><div class="label">Valor cancelado</div><div class="value mono" style="color:var(--danger);">${brl(totalCancelado)}</div></div>
+      <div class="card"><div class="label">% da receita potencial</div><div class="value mono">${pctImpacto.toFixed(1)}%</div></div>
+    </div>
+    ${Object.keys(porCliente).length ? `<div class="dash-section-label">Por cliente</div><div class="panel"><div class="panel-body" style="padding:0;">${Object.entries(porCliente).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([n,v])=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span>${escapeHTML(n)}</span><span class="mono">${brl(v)}</span></div>`).join('')}</div></div>` : ''}
+    ${Object.keys(porProduto).length ? `<div class="dash-section-label">Por produto</div><div class="panel"><div class="panel-body" style="padding:0;">${Object.entries(porProduto).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([n,v])=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span>${escapeHTML(n)}</span><span class="mono">${brl(v)}</span></div>`).join('')}</div></div>` : ''}
+    ${!canceladas.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhuma venda cancelada nos últimos 12 meses.</div></div>` : ''}
+  `;
+}
+
+// 8. Comprometimento Futuro — quanto do dinheiro futuro já está comprometido com obrigações
+function renderComprometimentoFuturo(){
+  const hoje = todayISO();
+  const em30 = new Date(); em30.setDate(em30.getDate()+30);
+  const em90 = new Date(); em90.setDate(em90.getDate()+90);
+  const em30ISO = em30.toISOString().slice(0,10), em90ISO = em90.toISOString().slice(0,10);
+  const aPagarPendente = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia');
+  const total30 = aPagarPendente.filter(l=>l.dataVencimento<=em30ISO).reduce((s,l)=>s+valorEmAberto(l),0);
+  const total90 = aPagarPendente.filter(l=>l.dataVencimento<=em90ISO).reduce((s,l)=>s+valorEmAberto(l),0);
+  const aReceberPendente = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.origem!=='transferencia');
+  const receber30 = aReceberPendente.filter(l=>l.dataVencimento<=em30ISO).reduce((s,l)=>s+valorEmAberto(l),0);
+  const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+  const cobertura30 = total30>0 ? ((saldoContasHoje+receber30)/total30*100) : null;
+  return `
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
+      <div class="card"><div class="label">Comprometido em 30 dias</div><div class="value mono" style="color:var(--danger);">${brl(total30)}</div></div>
+      <div class="card"><div class="label">Comprometido em 90 dias</div><div class="value mono" style="color:var(--danger);">${brl(total90)}</div></div>
+      <div class="card saldo"><div class="label">Saldo em caixa hoje</div><div class="value mono">${brl(saldoContasHoje)}</div></div>
+    </div>
+    ${cobertura30!==null ? `<div class="note" style="margin-top:0;${cobertura30<100?'border-color:var(--danger);':''}">${cobertura30>=100 ? `✓ Seu caixa + o que vai receber em 30 dias cobre ${cobertura30.toFixed(0)}% do que está comprometido nesse período.` : `⚠️ Seu caixa + o que vai receber em 30 dias cobre só ${cobertura30.toFixed(0)}% do que está comprometido — pode faltar dinheiro se nada mudar.`}</div>` : ''}
+    <div class="dash-section-label">Detalhado — próximos 90 dias</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${aPagarPendente.filter(l=>l.dataVencimento<=em90ISO).sort((a,b)=>a.dataVencimento.localeCompare(b.dataVencimento)).map(l=>`
+        <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto;">
+          <span class="mono" style="font-size:11px;color:${l.dataVencimento<hoje?'var(--danger)':'var(--text-soft)'};">${fmtDate(l.dataVencimento)}</span>
+          <span>${escapeHTML(l.descricao)}</span>
+          <span class="mono">${brl(valorEmAberto(l))}</span>
+        </div>
+      `).join('') || `<div class="empty">Nada comprometido nos próximos 90 dias.</div>`}
+    </div></div>
+  `;
+}
+
+// 9. Parcelamentos — compras parceladas no cartão, parcelas já vencidas (presumivelmente pagas) vs futuras
+function renderParcelamentos(){
+  const parceladas = state.comprasCartao.filter(p=>p.totalParcelas>1);
+  const porGrupo = {};
+  parceladas.forEach(p=>{
+    const chave = `${p.cartaoId}|${p.descricao}|${p.totalParcelas}|${p.valor}`;
+    if(!porGrupo[chave]) porGrupo[chave] = [];
+    porGrupo[chave].push(p);
+  });
+  const grupos = Object.values(porGrupo).filter(itens=>itens.length>=1).map(itens=>{
+    itens.sort((a,b)=>a.parcela-b.parcela);
+    const cartao = state.cartoes.find(c=>c.id===itens[0].cartaoId);
+    const compAtual = cartao ? competenciaFromDate(cartao, todayISO()) : todayISO().slice(0,7);
+    const jaVencidas = itens.filter(p=>p.competencia<compAtual).length;
+    const totalCompra = itens[0].valor * itens[0].totalParcelas;
+    return { descricao:itens[0].descricao, cartaoNome: cartao?.nome||'Cartão', totalParcelas:itens[0].totalParcelas, parcelasLancadas:itens.length, jaVencidas, valorParcela:itens[0].valor, totalCompra };
+  }).sort((a,b)=>b.totalCompra-a.totalCompra);
+  return `
+    <div class="note" style="margin-top:0;">Compras parceladas no cartão de crédito — "vencidas" aqui significa que a competência já passou (presumivelmente já entrou em alguma fatura paga), não que foi conferido parcela a parcela.</div>
+    ${!grupos.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhuma compra parcelada (2x ou mais) encontrada nos cartões.</div></div>` : grupos.map(g=>`
+      <div class="panel" style="margin-bottom:12px;">
+        <div class="panel-head"><h2>💳 ${escapeHTML(g.descricao)}</h2><span style="font-size:12px;color:var(--text-soft);">${escapeHTML(g.cartaoNome)}</span></div>
+        <div class="panel-body" style="padding:12px 18px;">
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px;"><span>${g.jaVencidas} de ${g.totalParcelas} parcela(s) já vencida(s)</span><span class="mono">${brl(g.valorParcela)}/parcela</span></div>
+          <div style="background:var(--bone);border-radius:5px;height:8px;overflow:hidden;"><div style="width:${g.totalParcelas?g.jaVencidas/g.totalParcelas*100:0}%;height:100%;background:var(--blue-accent);"></div></div>
+          <div style="font-size:11px;color:var(--text-soft);margin-top:5px;">Total da compra: ${brl(g.totalCompra)}</div>
+        </div>
+      </div>
+    `).join('')}
+  `;
+}
+
+// 14. Receita por Cliente ao Longo do Tempo — evolução individual, últimos 12 meses, top 5 clientes
+function renderReceitaClienteAoLongoTempo(){
+  const hoje = new Date();
+  const meses = Array.from({length:12},(_,i)=>{ const d = new Date(hoje.getFullYear(), hoje.getMonth()-11+i, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const porClienteMes = {};
+  state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.fornecedor).forEach(l=>{
+    const mRef = l.dataPagamento.slice(0,7);
+    if(!meses.includes(mRef)) return;
+    if(!porClienteMes[l.fornecedor]) porClienteMes[l.fornecedor] = {};
+    porClienteMes[l.fornecedor][mRef] = (porClienteMes[l.fornecedor][mRef]||0)+l.valor;
+  });
+  const totalPorCliente = Object.entries(porClienteMes).map(([nome,porMes])=>({ nome, total: Object.values(porMes).reduce((a,b)=>a+b,0) })).sort((a,b)=>b.total-a.total).slice(0,5);
+  const mesAbrev = m => competenciaLabel(m).split('/')[0].slice(0,3);
+  return `
+    <div class="note" style="margin-top:0;">Top 5 clientes por receita total, com a evolução mês a mês de cada um.</div>
+    ${!totalPorCliente.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhuma receita identificada por cliente.</div></div>` : `
+    <div class="panel"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">
+      ${svgLinhasMultiplas(totalPorCliente.map((c,i)=>({ nome:c.nome, cor:CORES_GRAFICO[i%CORES_GRAFICO.length], valores: meses.map(m=>(porClienteMes[c.nome]||{})[m]||0) })), meses.map(mesAbrev))}
+    </div></div>`}
+  `;
+}
+
+// 15+16. Clientes Perdidos e Clientes em Risco — compara últimos 3 meses com os 3 meses anteriores
+function renderClientesPerdidosRisco(){
+  const hoje = new Date();
+  const de1 = new Date(hoje.getFullYear(), hoje.getMonth()-3, 1).toISOString().slice(0,10);
+  const ate1 = new Date(hoje.getFullYear(), hoje.getMonth(), 0).toISOString().slice(0,10);
+  const de2 = new Date(hoje.getFullYear(), hoje.getMonth()-6, 1).toISOString().slice(0,10);
+  const ate2 = new Date(hoje.getFullYear(), hoje.getMonth()-3, 0).toISOString().slice(0,10);
+  const receitaPorCliente = (de,ate) => {
+    const porCliente = {};
+    state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{
+      porCliente[l.fornecedor] = (porCliente[l.fornecedor]||0)+l.valor;
+    });
+    return porCliente;
+  };
+  const periodoRecente = receitaPorCliente(de1, ate1);
+  const periodoAnterior = receitaPorCliente(de2, ate2);
+  const perdidos = Object.keys(periodoAnterior).filter(nome=>!periodoRecente[nome]).map(nome=>({ nome, valorAnterior: periodoAnterior[nome] })).sort((a,b)=>b.valorAnterior-a.valorAnterior);
+  const emRisco = Object.keys(periodoAnterior).filter(nome=>periodoRecente[nome] && periodoRecente[nome]<periodoAnterior[nome]*0.5).map(nome=>({ nome, valorAnterior:periodoAnterior[nome], valorRecente:periodoRecente[nome], quedaPct:(1-periodoRecente[nome]/periodoAnterior[nome])*100 })).sort((a,b)=>b.quedaPct-a.quedaPct);
+  return `
+    <div class="note" style="margin-top:0;">Compara os últimos 3 meses (${fmtDate(de1)} a ${fmtDate(ate1)}) com os 3 meses anteriores (${fmtDate(de2)} a ${fmtDate(ate2)}).</div>
+    <div class="dash-section-label">🔴 Clientes perdidos (compravam, pararam)</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${perdidos.length ? perdidos.map(c=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span>${escapeHTML(c.nome)}</span><span class="mono" style="color:var(--text-soft);">antes: ${brl(c.valorAnterior)}</span></div>`).join('') : `<div class="empty">Nenhum cliente perdido identificado.</div>`}
+    </div></div>
+    <div class="dash-section-label">🟡 Clientes em risco (queda de 50%+)</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${emRisco.length ? emRisco.map(c=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span>${escapeHTML(c.nome)}</span><span class="mono" style="color:var(--warn);">-${c.quedaPct.toFixed(0)}%</span></div>`).join('') : `<div class="empty">Nenhum cliente com queda relevante.</div>`}
+    </div></div>
+  `;
+}
+
+// 19. Compras por Período — compras de insumo por mês, fornecedor, categoria
+function renderComprasPorPeriodo(mesRef){
+  mesRef = mesRef || mesGlobalRef;
+  const [anoM, mesM] = mesRef.split('-').map(Number);
+  const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
+  const categoriaEstoque = state.vkConfig?.categoriaEstoque || 'Insumos';
+  const compras = state.lancamentos.filter(l=>l.origem==='vk-estoque' && l.dataPagamento>=de && l.dataPagamento<=ate);
+  const total = compras.reduce((s,l)=>s+l.valor,0);
+  const porFornecedor = {}; compras.forEach(l=>{ const n=l.fornecedor||'Sem fornecedor'; porFornecedor[n]=(porFornecedor[n]||0)+l.valor; });
+  const porCategoria = {}; compras.forEach(l=>{ porCategoria[l.categoria]=(porCategoria[l.categoria]||0)+l.valor; });
+  return `
+    <div class="report-controls"><input type="month" id="comprasPeriodoMes" value="${mesRef}"></div>
+    <div class="cards"><div class="card saldo"><div class="label">Total comprado no mês</div><div class="value mono">${brl(total)}</div></div></div>
+    <div class="dash-section-label">Por fornecedor</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">${Object.keys(porFornecedor).length ? Object.entries(porFornecedor).sort((a,b)=>b[1]-a[1]).map(([n,v])=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span>${escapeHTML(n)}</span><span class="mono">${brl(v)}</span></div>`).join('') : `<div class="empty">Nenhuma compra nesse mês.</div>`}</div></div>
+    ${Object.keys(porCategoria).length ? `<div class="dash-section-label">Por categoria</div><div class="panel"><div class="panel-body" style="padding:0;">${Object.entries(porCategoria).sort((a,b)=>b[1]-a[1]).map(([n,v])=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span>${escapeHTML(n)}</span><span class="mono">${brl(v)}</span></div>`).join('')}</div></div>` : ''}
+  `;
+}
+
+// 20. Evolução dos Custos — quais categorias de despesa mais cresceram (últimos 3 meses vs 3 anteriores)
+function renderEvolucaoCustos(){
+  const hoje = new Date();
+  const de1 = new Date(hoje.getFullYear(), hoje.getMonth()-3, 1).toISOString().slice(0,10);
+  const ate1 = new Date(hoje.getFullYear(), hoje.getMonth(), 0).toISOString().slice(0,10);
+  const de2 = new Date(hoje.getFullYear(), hoje.getMonth()-6, 1).toISOString().slice(0,10);
+  const ate2 = new Date(hoje.getFullYear(), hoje.getMonth()-3, 0).toISOString().slice(0,10);
+  const despesaPorCategoria = (de,ate) => {
+    const porCat = {};
+    state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{
+      porCat[l.categoria] = (porCat[l.categoria]||0)+l.valor;
+    });
+    return porCat;
+  };
+  const recente = despesaPorCategoria(de1,ate1), anterior = despesaPorCategoria(de2,ate2);
+  const categorias = [...new Set([...Object.keys(recente), ...Object.keys(anterior)])];
+  const comparativo = categorias.map(cat=>{
+    const r = recente[cat]||0, a = anterior[cat]||0;
+    const deltaPct = a>0 ? ((r-a)/a*100) : (r>0?100:0);
+    return { cat, recente:r, anterior:a, deltaPct };
+  }).filter(c=>c.recente>0||c.anterior>0).sort((a,b)=>b.deltaPct-a.deltaPct);
+  return `
+    <div class="note" style="margin-top:0;">Compara os últimos 3 meses com os 3 meses anteriores, por categoria de despesa.</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${comparativo.map(c=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
+          <span>${escapeHTML(c.cat)}</span>
+          <span class="mono" style="color:var(--text-soft);">${brl(c.recente)}</span>
+          <span class="mono" style="font-weight:600;color:${c.deltaPct>0?'var(--danger)':'var(--success)'};">${c.deltaPct>=0?'+':''}${c.deltaPct.toFixed(0)}%</span>
+        </div>
+      `).join('') || `<div class="empty">Sem dados suficientes.</div>`}
+    </div></div>
+  `;
+}
+
+// 21. Inflação Interna da Empresa — índice do custo médio de compra de insumos, mês a mês (base 100 no mês mais antigo)
+function renderInflacaoInterna(){
+  const hoje = new Date();
+  const meses = Array.from({length:12},(_,i)=>{ const d = new Date(hoje.getFullYear(), hoje.getMonth()-11+i, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const dados = meses.map(m=>{
+    const [a,mm] = m.split('-').map(Number);
+    const de = `${m}-01`, ate = `${m}-${String(new Date(a,mm,0).getDate()).padStart(2,'0')}`;
+    const compras = state.lancamentos.filter(l=>l.origem==='vk-estoque' && l.dataPagamento>=de && l.dataPagamento<=ate);
+    return { mesRef:m, custoMedio: compras.length ? compras.reduce((s,l)=>s+l.valor,0)/compras.length : null };
+  });
+  const primeiraComDado = dados.find(d=>d.custoMedio!==null);
+  const base = primeiraComDado ? primeiraComDado.custoMedio : null;
+  const indices = dados.map(d=>({ ...d, indice: (base && d.custoMedio!==null) ? (d.custoMedio/base*100) : null }));
+  const mesAbrev = m => competenciaLabel(m).split('/')[0].slice(0,3);
+  return `
+    <div class="note" style="margin-top:0;">Índice baseado no valor médio das compras de insumo mês a mês (100 = ${primeiraComDado?competenciaLabel(primeiraComDado.mesRef):'—'}). Não é comparável ao IPCA oficial — mostra só se os SEUS custos de compra estão subindo mais rápido que antes.</div>
+    ${!base ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Sem compras de insumo registradas nos últimos 12 meses.</div></div>` : `
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${indices.filter(d=>d.indice!==null).map(d=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;">
+          <span>${competenciaLabel(d.mesRef)}</span>
+          <span class="mono" style="font-weight:600;color:${d.indice>100?'var(--danger)':'var(--success)'};">${d.indice.toFixed(1)}</span>
+        </div>
+      `).join('')}
+    </div></div>`}
+  `;
+}
+
+// 22. Lucro por Cliente — usa custoProdutoVendido já lançado, quando disponível
+function renderLucroPorCliente(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const vendas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate);
+  const comCusto = vendas.filter(l=>l.custoProdutoVendido!=null);
+  const porCliente = {};
+  comCusto.forEach(l=>{
+    if(!porCliente[l.fornecedor]) porCliente[l.fornecedor] = { receita:0, custo:0 };
+    porCliente[l.fornecedor].receita += l.valor;
+    porCliente[l.fornecedor].custo += l.custoProdutoVendido;
+  });
+  const lista = Object.entries(porCliente).map(([nome,d])=>({ nome, receita:d.receita, custo:d.custo, lucro:d.receita-d.custo, margemPct: d.receita>0?(d.receita-d.custo)/d.receita*100:0 })).sort((a,b)=>b.lucro-a.lucro);
+  const semCusto = vendas.length - comCusto.length;
+  return `
+    <div class="note" style="margin-top:0;">Últimos 12 meses. Só considera vendas onde o "custo do produto vendido" foi preenchido no lançamento — ${semCusto>0 ? `${semCusto} venda(s) sem esse campo preenchido ficaram de fora.` : 'todas as vendas do período tinham esse campo preenchido.'}</div>
+    ${!lista.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhuma venda com custo do produto preenchido nos últimos 12 meses.</div></div>` : `
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${lista.map(c=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
+          <span>${escapeHTML(c.nome)}</span>
+          <span class="mono" style="color:var(--text-soft);">${c.margemPct.toFixed(0)}%</span>
+          <span class="mono" style="font-weight:600;color:${c.lucro>=0?'var(--success)':'var(--danger)'};">${brl(c.lucro)}</span>
+        </div>
+      `).join('')}
+    </div></div>`}
+  `;
+}
+
+// 24. Capital de Giro — Ativo Circulante - Passivo Circulante (mesma base de cálculo do Balanço)
+function renderCapitalDeGiro(){
+  const caixaBancos = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+  const aReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.origem!=='transferencia').reduce((s,l)=>s+valorEmAberto(l),0);
+  const estoqueInsumos = totalEstoqueInsumos();
+  const bm = state.balancoManual||{};
+  const ativoCirculante = caixaBancos + aReceber + estoqueInsumos + (bm.estoques||0);
+  const aPagar = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia').reduce((s,l)=>s+valorEmAberto(l),0);
+  const cartoesNaoFaturados = state.cartoes.reduce((s,c)=>{ const comp = competenciaAtual(c); return s + (faturaStatus(c.id, comp)==='aberta' ? totalCompetencia(c.id, comp) : 0); }, 0);
+  const passivoCirculante = aPagar + cartoesNaoFaturados;
+  const capitalGiro = ativoCirculante - passivoCirculante;
+  const liquidezCorrente = passivoCirculante>0 ? ativoCirculante/passivoCirculante : null;
+  return `
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
+      <div class="card"><div class="label">Ativo Circulante</div><div class="value mono">${brl(ativoCirculante)}</div></div>
+      <div class="card"><div class="label">Passivo Circulante</div><div class="value mono">${brl(passivoCirculante)}</div></div>
+      <div class="card saldo"><div class="label">Capital de Giro</div><div class="value mono" style="color:${capitalGiro>=0?'var(--success)':'var(--danger)'};">${brl(capitalGiro)}</div></div>
+    </div>
+    <div class="note" style="margin-top:0;">Capital de Giro = Ativo Circulante − Passivo Circulante. Positivo significa que sobra dinheiro de curto prazo pra operar; negativo significa que a operação depende de entrar dinheiro novo rápido pra cobrir o que já está comprometido.${liquidezCorrente!==null?` Liquidez corrente equivalente: ${liquidezCorrente.toFixed(2)}.`:''}</div>
+  `;
+}
+
+// 26. Endividamento por Vencimento — dívidas separadas por curto (30d), médio (30-180d) e longo prazo (180d+)
+function renderEndividamentoPorVencimento(){
+  const hoje = todayISO();
+  const em30 = new Date(); em30.setDate(em30.getDate()+30);
+  const em180 = new Date(); em180.setDate(em180.getDate()+180);
+  const em30ISO = em30.toISOString().slice(0,10), em180ISO = em180.toISOString().slice(0,10);
+  const pendentes = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia');
+  const curtoPrazo = pendentes.filter(l=>l.dataVencimento<=em30ISO).reduce((s,l)=>s+valorEmAberto(l),0);
+  const medioPrazo = pendentes.filter(l=>l.dataVencimento>em30ISO && l.dataVencimento<=em180ISO).reduce((s,l)=>s+valorEmAberto(l),0);
+  const longoPrazo = pendentes.filter(l=>l.dataVencimento>em180ISO).reduce((s,l)=>s+valorEmAberto(l),0);
+  const emprestimosSaldo = (state.emprestimos||[]).reduce((s,e)=>s+Math.max(0,(e.numeroParcelas-e.parcelasPagas))*e.valorParcela,0);
+  const total = curtoPrazo+medioPrazo+longoPrazo+emprestimosSaldo;
+  return `
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
+      <div class="card"><div class="label">Curto prazo (até 30d)</div><div class="value mono" style="color:var(--danger);">${brl(curtoPrazo)}</div></div>
+      <div class="card"><div class="label">Médio prazo (30-180d)</div><div class="value mono" style="color:var(--warn);">${brl(medioPrazo)}</div></div>
+      <div class="card"><div class="label">Longo prazo (180d+)</div><div class="value mono">${brl(longoPrazo)}</div></div>
+      <div class="card saldo"><div class="label">Total (+ empréstimos)</div><div class="value mono">${brl(total)}</div></div>
+    </div>
+    ${emprestimosSaldo>0 ? `<div class="note" style="margin-top:0;">Inclui ${brl(emprestimosSaldo)} de saldo devedor de empréstimos/financiamentos cadastrados (não tem data de vencimento por parcela, contado à parte).</div>` : ''}
+    <div class="panel"><div class="panel-body" style="padding:14px 18px;">
+      ${['curtoPrazo','medioPrazo','longoPrazo'].map((k,i)=>{
+        const valor = [curtoPrazo,medioPrazo,longoPrazo][i];
+        const label = ['Curto prazo','Médio prazo','Longo prazo'][i];
+        return `<div style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px;"><span>${label}</span><span class="mono">${brl(valor)} (${total>0?(valor/total*100).toFixed(0):0}%)</span></div><div style="background:var(--bone);border-radius:5px;height:7px;overflow:hidden;"><div style="width:${total>0?valor/total*100:0}%;height:100%;background:var(--blue-accent);"></div></div></div>`;
+      }).join('')}
+    </div></div>
+  `;
+}
+
+// 32. Super Relatório Anual — visão consolidada dos 12 meses
+function renderSuperRelatorioAnual(ano){
+  ano = ano || new Date().getFullYear();
+  const hoje = todayISO();
+  const meses = Array.from({length:12},(_,i)=>`${ano}-${String(i+1).padStart(2,'0')}`);
+  const dados = meses.filter(m=>m<=hoje.slice(0,7)).map(m=>{
+    const dm = dadosMesGerencial(m, 'todos');
+    return { mesRef:m, ...dm };
+  });
+  const totalReceita = dados.reduce((s,d)=>s+d.receita,0);
+  const totalDespesa = dados.reduce((s,d)=>s+d.despesaTotal,0);
+  const lucroAno = totalReceita - totalDespesa;
+  const melhorMes = [...dados].sort((a,b)=>b.lucro-a.lucro)[0];
+  const piorMes = [...dados].sort((a,b)=>a.lucro-b.lucro)[0];
+  const { de:deAno, ate:ateAno } = { de:`${ano}-01-01`, ate: ano.toString()===hoje.slice(0,4) ? hoje : `${ano}-12-31` };
+  const clientesAno = new Set(state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=deAno && l.dataPagamento<=ateAno).map(l=>l.fornecedor)).size;
+  const fornecedoresAno = new Set(state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.fornecedor && l.dataPagamento>=deAno && l.dataPagamento<=ateAno).map(l=>l.fornecedor)).size;
+  const porCategoriaAno = {};
+  dados.forEach(d=>Object.entries(d.despesasPorCategoria).forEach(([c,v])=>{ porCategoriaAno[c]=(porCategoriaAno[c]||0)+v; }));
+  const topDespesa = Object.entries(porCategoriaAno).sort((a,b)=>b[1]-a[1])[0];
+  const mesAbrev = m => competenciaLabel(m).split('/')[0].slice(0,3);
+  const anosDisponiveis = [...new Set(state.lancamentos.filter(l=>l.dataPagamento).map(l=>l.dataPagamento.slice(0,4)))].sort().reverse();
+  if(!anosDisponiveis.includes(String(ano))) anosDisponiveis.unshift(String(ano));
+
+  return `
+    <div class="report-controls"><select id="superAnualAnoSelect">${anosDisponiveis.map(a=>`<option value="${a}" ${String(ano)===a?'selected':''}>${a}</option>`).join('')}</select></div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
+      <div class="card"><div class="label">Receita do ano</div><div class="value mono">${brl(totalReceita)}</div></div>
+      <div class="card"><div class="label">Despesa do ano</div><div class="value mono">${brl(totalDespesa)}</div></div>
+      <div class="card saldo"><div class="label">Lucro do ano</div><div class="value mono" style="color:${lucroAno>=0?'var(--success)':'var(--danger)'};">${brl(lucroAno)}</div></div>
+    </div>
+    <div class="dash-section-label">Evolução mês a mês</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">
+      ${svgComboBarraLinha(dados.map(d=>d.receita), dados.map(d=>d.margemLiquidaPct), dados.map(d=>mesAbrev(d.mesRef)), 'Margem %')}
+    </div></div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;">
+      <div class="panel"><div class="panel-head"><h2>📈 Melhor mês</h2></div><div class="panel-body" style="padding:12px 18px;">${melhorMes ? `${competenciaLabel(melhorMes.mesRef)} — lucro de ${brl(melhorMes.lucro)}` : '—'}</div></div>
+      <div class="panel"><div class="panel-head"><h2>📉 Pior mês</h2></div><div class="panel-body" style="padding:12px 18px;">${piorMes ? `${competenciaLabel(piorMes.mesRef)} — lucro de ${brl(piorMes.lucro)}` : '—'}</div></div>
+    </div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
+      <div class="card"><div class="label">Clientes atendidos</div><div class="value mono">${clientesAno}</div></div>
+      <div class="card"><div class="label">Fornecedores pagos</div><div class="value mono">${fornecedoresAno}</div></div>
+      <div class="card"><div class="label">Maior categoria de gasto</div><div class="value mono" style="font-size:14px;">${topDespesa?escapeHTML(topDespesa[0]):'—'}</div></div>
+    </div>
+  `;
+}
+
+// 3. Despesas por Centro de Custo — detalhamento e comparação (diferente do Fluxo por Centro de Custo, que mistura entrada/saída)
+function renderDespesasPorCentroCusto(mesRef){
+  mesRef = mesRef || mesGlobalRef;
+  const centros = [...(state.centrosCusto||[]), '(sem centro definido)'];
+  const dadosPorCentro = centros.map(centro=>{
+    const dm = dadosMesGerencial(mesRef, centro==='(sem centro definido)' ? null : centro);
+    return { centro, despesaTotal: dm.despesaTotal, porCategoria: dm.despesasPorCategoria };
+  }).filter(d=>d.despesaTotal>0);
+  const totalGeral = dadosPorCentro.reduce((s,d)=>s+d.despesaTotal,0);
+  const max = Math.max(1, ...dadosPorCentro.map(d=>d.despesaTotal));
+  return `
+    <div class="report-controls"><input type="month" id="despesasCentroCustoMes" value="${mesRef}"></div>
+    ${!dadosPorCentro.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhuma despesa com centro de custo marcado nesse mês.</div></div>` : dadosPorCentro.sort((a,b)=>b.despesaTotal-a.despesaTotal).map(d=>`
+      <div class="panel" style="margin-bottom:12px;">
+        <div class="panel-head"><h2>${escapeHTML(d.centro)}</h2><span class="mono" style="font-weight:600;">${brl(d.despesaTotal)}</span></div>
+        <div class="panel-body" style="padding:12px 18px;">
+          <div style="background:var(--bone);border-radius:5px;height:7px;overflow:hidden;margin-bottom:10px;"><div style="width:${d.despesaTotal/max*100}%;height:100%;background:var(--danger);"></div></div>
+          ${Object.entries(d.porCategoria).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([c,v])=>`<div style="display:flex;justify-content:space-between;font-size:11.5px;padding:3px 0;color:var(--text-soft);"><span>${escapeHTML(c)}</span><span class="mono">${brl(v)}</span></div>`).join('')}
+        </div>
+      </div>
+    `).join('')}
+  `;
+}
+
+// 17. Crescimento de Clientes — novos, ativos, inativos, recuperados no mês
+function renderCrescimentoClientes(mesRef){
+  mesRef = mesRef || mesGlobalRef;
+  const [anoM,mesM] = mesRef.split('-').map(Number);
+  const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
+  const mesPassadoRef = (()=>{ const d=new Date(anoM,mesM-2,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; })();
+  const dePassado = `${mesPassadoRef}-01`, atePassado = `${mesPassadoRef}-31`;
+  const clientesQueCompraram = (deP,ateP) => new Set(state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=deP && l.dataPagamento<=ateP).map(l=>l.fornecedor));
+  const clientesMes = clientesQueCompraram(de, ate);
+  const clientesMesPassado = clientesQueCompraram(dePassado, atePassado);
+  const clientesAntesDoMes = new Set(state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento<de).map(l=>l.fornecedor));
+  const novos = [...clientesMes].filter(c=>!clientesAntesDoMes.has(c));
+  const recuperados = [...clientesMes].filter(c=>clientesAntesDoMes.has(c) && !clientesMesPassado.has(c));
+  const ativosContinuos = [...clientesMes].filter(c=>clientesMesPassado.has(c));
+  const inativos = [...clientesMesPassado].filter(c=>!clientesMes.has(c));
+  return `
+    <div class="report-controls"><input type="month" id="crescimentoClientesMes" value="${mesRef}"></div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));">
+      <div class="card"><div class="label">🆕 Novos</div><div class="value mono" style="color:var(--success);">${novos.length}</div></div>
+      <div class="card"><div class="label">🔄 Recuperados</div><div class="value mono" style="color:var(--blue-accent);">${recuperados.length}</div></div>
+      <div class="card"><div class="label">✓ Ativos contínuos</div><div class="value mono">${ativosContinuos.length}</div></div>
+      <div class="card"><div class="label">💤 Ficaram inativos</div><div class="value mono" style="color:var(--warn);">${inativos.length}</div></div>
+    </div>
+    <div class="note" style="margin-top:0;">Compara quem comprou nesse mês com quem comprou no mês passado e antes disso. "Recuperado" = já tinha comprado antes, sumiu no mês passado, voltou agora.</div>
+  `;
+}
+
+// 18. Dependência Financeira — concentração em cliente, fornecedor e canal de venda
+function renderDependenciaFinanceira(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const concentracaoDe = (lista, chave) => {
+    const porChave = {};
+    lista.forEach(l=>{ const k=l[chave]||'Sem identificação'; porChave[k]=(porChave[k]||0)+l.valor; });
+    const total = Object.values(porChave).reduce((a,b)=>a+b,0);
+    const ranking = Object.entries(porChave).sort((a,b)=>b[1]-a[1]);
+    const top1 = ranking[0] ? ranking[0][1]/total*100 : 0;
+    const top3 = ranking.slice(0,3).reduce((s,r)=>s+r[1],0)/((total)||1)*100;
+    return { ranking, top1, top3, total };
+  };
+  const vendas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=de && l.dataPagamento<=ate);
+  const compras = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate);
+  const depCliente = concentracaoDe(vendas.filter(l=>l.fornecedor), 'fornecedor');
+  const depFornecedor = concentracaoDe(compras, 'fornecedor');
+  const depCanal = concentracaoDe(vendas.filter(l=>l.canalVenda), 'canalVenda');
+  const bloco = (titulo, dep) => !dep.ranking.length ? '' : `
+    <div class="dash-section-label">${titulo}</div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;">
+      <div class="card"><div class="label">Maior sozinho</div><div class="value mono" style="color:${dep.top1>=30?'var(--danger)':'inherit'};">${dep.top1.toFixed(0)}%</div></div>
+      <div class="card"><div class="label">3 maiores juntos</div><div class="value mono">${dep.top3.toFixed(0)}%</div></div>
+    </div>`;
+  return `
+    <div class="note" style="margin-top:0;">Últimos 12 meses. Quanto maior a concentração, maior o risco se aquele cliente/fornecedor/canal específico parar de negociar com você.</div>
+    ${bloco('👤 Dependência de cliente', depCliente)}
+    ${bloco('🚚 Dependência de fornecedor', depFornecedor)}
+    ${bloco('🛒 Dependência de canal de venda', depCanal)}
+    ${!depCliente.ranking.length && !depFornecedor.ranking.length && !depCanal.ranking.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Sem dados suficientes nos últimos 12 meses.</div></div>` : ''}
+  `;
+}
+
+// 23. Lucro por Canal — usa custoProdutoVendido agrupado por canal de venda
+function renderLucroPorCanal(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const vendas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.canalVenda && l.dataPagamento>=de && l.dataPagamento<=ate);
+  const porCanal = {};
+  vendas.forEach(l=>{
+    if(!porCanal[l.canalVenda]) porCanal[l.canalVenda] = { receita:0, custo:0, temCusto:0, qtd:0 };
+    porCanal[l.canalVenda].receita += l.valor;
+    porCanal[l.canalVenda].qtd += 1;
+    if(l.custoProdutoVendido!=null){ porCanal[l.canalVenda].custo += l.custoProdutoVendido; porCanal[l.canalVenda].temCusto += 1; }
+  });
+  const lista = Object.entries(porCanal).map(([canal,d])=>({ canal, receita:d.receita, lucro: d.temCusto>0 ? d.receita-d.custo : null, margemPct: (d.temCusto>0 && d.receita>0) ? (d.receita-d.custo)/d.receita*100 : null, qtd:d.qtd, coberturaCusto: d.qtd?d.temCusto/d.qtd*100:0 })).sort((a,b)=>b.receita-a.receita);
+  return `
+    <div class="note" style="margin-top:0;">Últimos 12 meses. O lucro só aparece pros canais onde o "custo do produto vendido" foi preenchido na maioria dos lançamentos — senão mostra só a receita.</div>
+    ${!lista.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhuma venda com canal identificado nos últimos 12 meses.</div></div>` : `
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${lista.map(c=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
+          <span>${escapeHTML(c.canal)}</span>
+          <span class="mono" style="color:var(--text-soft);">${brl(c.receita)}</span>
+          <span class="mono" style="font-weight:600;color:${c.lucro===null?'var(--text-soft)':c.lucro>=0?'var(--success)':'var(--danger)'};">${c.lucro!==null?brl(c.lucro)+' ('+c.margemPct.toFixed(0)+'%)':'sem custo'}</span>
+        </div>
+      `).join('')}
+    </div></div>`}
+  `;
+}
+
+// 27. Obrigações Futuras — consolida TUDO que vence: contas, impostos, cartões, parcelas, contratos
+function renderObrigacoesFuturas(){
+  const hoje = todayISO();
+  const em90 = new Date(); em90.setDate(em90.getDate()+90);
+  const em90ISO = em90.toISOString().slice(0,10);
+  const itens = [];
+  state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento && l.dataVencimento<=em90ISO).forEach(l=>{
+    itens.push({ data:l.dataVencimento, tipo: l.categoria==='Impostos'?'🧾 Imposto':'💰 Conta', desc:l.descricao, valor:valorEmAberto(l) });
+  });
+  state.cartoes.forEach(c=>{
+    const comp = competenciaAtual(c);
+    if(faturaStatus(c.id, comp)==='aberta'){
+      const total = totalCompetencia(c.id, comp);
+      if(total>0) itens.push({ data: dataVencimentoFatura(c, comp), tipo:'💳 Cartão', desc:`Fatura ${c.nome}`, valor:total });
+    }
+  });
+  (state.contratos||[]).filter(ct=>ct.vigenciaFim && ct.vigenciaFim>=hoje && ct.vigenciaFim<=em90ISO).forEach(ct=>{
+    itens.push({ data:ct.vigenciaFim, tipo:'📑 Contrato', desc:`${ct.nome||ct.contraparte} — fim de vigência`, valor:null });
+  });
+  (state.emprestimos||[]).filter(e=>e.numeroParcelas>e.parcelasPagas).forEach(e=>{
+    itens.push({ data:null, tipo:'🏦 Empréstimo', desc:`${e.nome} — próxima parcela`, valor:e.valorParcela });
+  });
+  itens.sort((a,b)=>(a.data||'9999').localeCompare(b.data||'9999'));
+  const total = itens.reduce((s,it)=>s+(it.valor||0),0);
+  return `
+    <div class="cards"><div class="card saldo"><div class="label">Total de obrigações nos próximos 90 dias</div><div class="value mono">${brl(total)}</div></div></div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${itens.length ? itens.map(it=>`
+        <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto;">
+          <span class="mono" style="font-size:11px;color:var(--text-soft);">${it.data?fmtDate(it.data):'—'}</span>
+          <div class="desc-cell"><div>${it.tipo} — ${escapeHTML(it.desc)}</div></div>
+          ${it.valor?`<span class="mono">${brl(it.valor)}</span>`:'<span></span>'}
+        </div>
+      `).join('') : `<div class="empty">Nenhuma obrigação identificada.</div>`}
+    </div></div>
+  `;
+}
+
+// 29. Evolução Patrimonial — Ativo, Passivo e Patrimônio Líquido evoluindo mês a mês
+function renderEvolucaoPatrimonial(){
+  const hoje = new Date();
+  const meses = Array.from({length:12},(_,i)=>{ const d = new Date(hoje.getFullYear(), hoje.getMonth()-11+i, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const dados = meses.map(m=>{
+    const [a,mm] = m.split('-').map(Number);
+    const ultimoDia = new Date(a,mm,0).getDate();
+    const dataRef = m===todayISO().slice(0,7) ? todayISO() : `${m}-${String(ultimoDia).padStart(2,'0')}`;
+    const ativoAprox = state.contas.reduce((s,c)=>s+saldoContaEmData(c.id,dataRef),0) + totalAtivosPatrimoniais() + totalInvestimentos();
+    const passivoAprox = state.lancamentos.filter(l=>l.tipo==='saida' && (l.status==='pendente' || (l.dataPagamento && l.dataPagamento>dataRef))).reduce((s,l)=>{
+      const pagoAteData = (l.historicoRecebimentos||[]).filter(p=>p.data<=dataRef).reduce((a,p)=>a+p.valor,0);
+      return s + Math.max(0, l.valor-pagoAteData);
+    },0);
+    return { mesRef:m, ativo:ativoAprox, passivo:passivoAprox, pl:ativoAprox-passivoAprox };
+  });
+  const mesAbrev = m => competenciaLabel(m).split('/')[0].slice(0,3);
+  return `
+    <div class="note" style="margin-top:0;">Aproximação mês a mês (saldo em conta na data + ativos + investimentos, menos passivo pendente na época). Ativos patrimoniais e investimentos usam o valor ATUAL em todos os meses — não reconstrói o valor de mercado histórico deles.</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">
+      ${svgLinhasMultiplas([
+        { nome:'Ativo', cor:'var(--success)', valores: dados.map(d=>d.ativo) },
+        { nome:'Passivo', cor:'var(--danger)', valores: dados.map(d=>d.passivo) },
+        { nome:'Patrimônio Líquido', cor:'var(--blue-accent)', valores: dados.map(d=>d.pl) },
+      ], meses.map(mesAbrev))}
+    </div></div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${dados.map(d=>`<div class="ledger-row compact" style="grid-template-columns:1fr 1fr 1fr 1fr;"><span>${competenciaLabel(d.mesRef)}</span><span class="mono" style="color:var(--success);">${brl(d.ativo)}</span><span class="mono" style="color:var(--danger);">${brl(d.passivo)}</span><span class="mono" style="font-weight:600;">${brl(d.pl)}</span></div>`).join('')}
+    </div></div>
+  `;
+}
 
 function renderTaxasTarifasBancarias(mesRef){
   mesRef = mesRef || mesGlobalRef;
@@ -14441,6 +15118,7 @@ function attachViewHandlers(){
     let meiAnoAtual = new Date().getFullYear();
     let gerencialAnoAtual = new Date().getFullYear();
     let yoyAnoAtivo = new Date().getFullYear();
+    let superAnualAnoAtivo = new Date().getFullYear();
     let gerencialCentroAtivo = 'todos';
     let mensalMesRef = mesGlobalRef;
     const paint = ()=>{
@@ -14522,6 +15200,28 @@ function attachViewHandlers(){
         relatorioAtivo==='calendario_financeiro' ? renderCalendarioFinanceiro() :
         relatorioAtivo==='central_cliente' ? renderCentralCliente() :
         relatorioAtivo==='centro_comando' ? centroComandoHTML() :
+        relatorioAtivo==='fluxo_caixa_diario' ? renderFluxoCaixaDiario() :
+        relatorioAtivo==='receitas_categoria' ? renderReceitasPorCategoria() :
+        relatorioAtivo==='margem_mensal' ? renderMargemMensal() :
+        relatorioAtivo==='ticket_medio_evolutivo' ? renderTicketMedioEvolutivo() :
+        relatorioAtivo==='vendas_canceladas' ? renderVendasCanceladas() :
+        relatorioAtivo==='comprometimento_futuro' ? renderComprometimentoFuturo() :
+        relatorioAtivo==='parcelamentos' ? renderParcelamentos() :
+        relatorioAtivo==='receita_cliente_tempo' ? renderReceitaClienteAoLongoTempo() :
+        relatorioAtivo==='clientes_perdidos_risco' ? renderClientesPerdidosRisco() :
+        relatorioAtivo==='compras_periodo' ? renderComprasPorPeriodo() :
+        relatorioAtivo==='evolucao_custos' ? renderEvolucaoCustos() :
+        relatorioAtivo==='inflacao_interna' ? renderInflacaoInterna() :
+        relatorioAtivo==='lucro_cliente' ? renderLucroPorCliente() :
+        relatorioAtivo==='capital_giro' ? renderCapitalDeGiro() :
+        relatorioAtivo==='endividamento_vencimento' ? renderEndividamentoPorVencimento() :
+        relatorioAtivo==='super_relatorio_anual' ? renderSuperRelatorioAnual(superAnualAnoAtivo) :
+        relatorioAtivo==='despesas_centro_custo' ? renderDespesasPorCentroCusto() :
+        relatorioAtivo==='crescimento_clientes' ? renderCrescimentoClientes() :
+        relatorioAtivo==='dependencia_financeira' ? renderDependenciaFinanceira() :
+        relatorioAtivo==='lucro_canal' ? renderLucroPorCanal() :
+        relatorioAtivo==='obrigacoes_futuras' ? renderObrigacoesFuturas() :
+        relatorioAtivo==='evolucao_patrimonial' ? renderEvolucaoPatrimonial() :
         relatorioAtivo==='breakeven' ? renderRelatorioBreakEven() :
         relatorioAtivo==='valuation' ? renderRelatorioValuation() :
         relatorioAtivo==='mensal' ? renderSuperRelatorioMensal(mensalMesRef) :
@@ -14575,6 +15275,12 @@ function attachViewHandlers(){
         document.getElementById('reportPanel').innerHTML = renderComparativoAnoAAno(yoyAnoAtivo);
         bindReportInner();
       });
+      const superAnualAnoSelect = document.getElementById('superAnualAnoSelect');
+      if(superAnualAnoSelect) superAnualAnoSelect.addEventListener('change', ()=>{
+        superAnualAnoAtivo = Number(superAnualAnoSelect.value);
+        document.getElementById('reportPanel').innerHTML = renderSuperRelatorioAnual(superAnualAnoAtivo);
+        bindReportInner();
+      });
       const cargaTribMes = document.getElementById('cargaTribMes');
       if(cargaTribMes) cargaTribMes.addEventListener('change', ()=>{
         if(!cargaTribMes.value) return;
@@ -14621,7 +15327,7 @@ function attachViewHandlers(){
         simCusto.addEventListener('input', calcularSim);
         simMargem.addEventListener('input', calcularSim);
       }
-      [['fclMes','renderFluxoCaixaLivre'],['cvlMes','renderCVLMultiproduto'],['fccMes','renderFluxoCaixaCentroCusto'],['novosRecMes','renderNovosVsRecorrentes'],['taxasBancMes','renderTaxasTarifasBancarias']].forEach(([idc,fn])=>{
+      [['fclMes','renderFluxoCaixaLivre'],['cvlMes','renderCVLMultiproduto'],['fccMes','renderFluxoCaixaCentroCusto'],['novosRecMes','renderNovosVsRecorrentes'],['taxasBancMes','renderTaxasTarifasBancarias'],['fluxoDiarioMes','renderFluxoCaixaDiario'],['receitasCategoriaMes','renderReceitasPorCategoria'],['comprasPeriodoMes','renderComprasPorPeriodo'],['despesasCentroCustoMes','renderDespesasPorCentroCusto'],['crescimentoClientesMes','renderCrescimentoClientes']].forEach(([idc,fn])=>{
         const el = document.getElementById(idc);
         if(el) el.addEventListener('change', ()=>{
           if(!el.value) return;
