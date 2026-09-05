@@ -271,8 +271,11 @@
   .status-chip.pago{background:#E6F6EE;color:var(--success);}
   .status-chip.recebido{background:#E6F6EE;color:var(--success);}
   .status-chip.pendente{background:#FDF3E5;color:var(--warn);}
-  .status-chip.atrasado{background:#FDEEED;color:var(--danger);}
+  .status-chip.atrasado{background:#FDEEED;color:var(--danger);font-weight:700;}
+  .status-chip.vence-hoje{background:#FFF4D6;color:#8A6100;font-weight:700;}
   .status-chip.cancelado{background:#E8ECF3;color:var(--text-soft);text-decoration:line-through;}
+  .ledger-row.linha-atrasada{border-left:3px solid var(--danger);}
+  .ledger-row.linha-vence-hoje{border-left:3px solid var(--warn);}
   .row-actions{display:flex;gap:6px;justify-content:flex-end;}
   .icon-btn{
     width:26px;height:26px;border-radius:6px;border:1px solid var(--line);background:var(--white);
@@ -483,6 +486,7 @@
     color:#7B8492;font-size:10.5px;font-weight:600;cursor:pointer;padding:4px 2px;
   }
   .bottom-nav-item .bn-icon{font-size:19px;line-height:1;color:#7B8492;}
+  .bottom-nav-item .bn-badge{position:absolute;top:-6px;right:-9px;background:var(--danger);color:#fff;font-size:9px;font-weight:700;border-radius:8px;min-width:15px;height:15px;display:flex;align-items:center;justify-content:center;padding:0 3px;}
   .bottom-nav-item.active{color:var(--blue-accent);}
   .bottom-nav-item.active .bn-icon{color:var(--blue-accent);}
 
@@ -696,8 +700,8 @@
 
 <nav class="bottom-nav" id="bottomNav">
   <div class="bottom-nav-item active" data-view="dashboard"><span class="bn-icon">⌂</span><span class="bn-label">Início</span></div>
-  <div class="bottom-nav-item" data-view="pagar"><span class="bn-icon">↑</span><span class="bn-label">Pagar</span></div>
-  <div class="bottom-nav-item" data-view="receber"><span class="bn-icon">↓</span><span class="bn-label">Receber</span></div>
+  <div class="bottom-nav-item" data-view="pagar"><span class="bn-icon" style="position:relative;">↑<span class="bn-badge" id="bnBadgePagar" style="display:none;"></span></span><span class="bn-label">Pagar</span></div>
+  <div class="bottom-nav-item" data-view="receber"><span class="bn-icon" style="position:relative;">↓<span class="bn-badge" id="bnBadgeReceber" style="display:none;"></span></span><span class="bn-label">Receber</span></div>
   <div class="bottom-nav-item" data-view="fluxo"><span class="bn-icon">≋</span><span class="bn-label">Fluxo</span></div>
   <div class="bottom-nav-item" id="btnAbrirMais"><span class="bn-icon">⋯</span><span class="bn-label">Mais</span></div>
 </nav>
@@ -730,6 +734,8 @@
   <div class="sel-menu-wrap" style="position:relative;">
     <button id="selMenuBtn" title="Mais opções" style="font-weight:700;padding:8px 14px;">⋮</button>
     <div class="dropdown-menu" id="selMenuDrop">
+      <button type="button" data-sel-acao="marcar-pago">✅ Marcar como pago/recebido</button>
+      <button type="button" data-sel-acao="duplicar">⧉ Duplicar p/ mês seguinte</button>
       <button type="button" data-sel-acao="descricao">✎ Alterar descrição</button>
       <button type="button" data-sel-acao="categoria">🏷️ Alterar categoria</button>
       <button type="button" data-sel-acao="apagar" style="color:var(--danger);">🗑️ Apagar selecionados</button>
@@ -1197,6 +1203,10 @@ let ativosPatrimoniaisBusca = '';
 let ativosPatrimoniaisCategoria = '';
 let ativosPatrimoniaisOrdenacao = 'nome';
 let ativosPatrimoniaisAba = 'ativos';
+let lancamentosFiltroConta = '';
+let lancamentosOrdenacao = 'vencimento';
+let lancamentosVisao = 'cronologica';
+let lancamentosPeriodoCustom = null; // {de, ate} — quando preenchido, sobrepõe o mês global selecionado
 let comissaoVendedorSelecionado = '';
 let comissaoDataDeSelecionada = null;
 let comissaoDataAteSelecionada = null;
@@ -1426,6 +1436,16 @@ document.getElementById('btnSairMobile').addEventListener('click', ()=>{
   document.getElementById('btnSair').click();
 });
 
+function atualizarBadgesBottomNav(){
+  const hoje = todayISO();
+  const vencidasPagar = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento && l.dataVencimento<hoje).length;
+  const vencidasReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento && l.dataVencimento<hoje).length;
+  const bp = document.getElementById('bnBadgePagar');
+  const br = document.getElementById('bnBadgeReceber');
+  if(bp){ bp.textContent = vencidasPagar>9?'9+':vencidasPagar; bp.style.display = vencidasPagar>0?'flex':'none'; }
+  if(br){ br.textContent = vencidasReceber>9?'9+':vencidasReceber; br.style.display = vencidasReceber>0?'flex':'none'; }
+}
+
 function render(){
   const __viewAnterior = __ultimaViewRenderizada;
   if(!__restaurandoHistoria && typeof history!=='undefined' && history.pushState){
@@ -1479,6 +1499,7 @@ function render(){
   else if(currentView==='configuracoes') main.innerHTML = viewConfiguracoes();
   else if(currentView==='configuracao-detalhe') main.innerHTML = viewConfiguracaoDetalhe();
   attachViewHandlers();
+  atualizarBadgesBottomNav();
   if(__viewAnterior!==currentView && typeof window!=='undefined'){
     window.scrollTo(0,0);
     if(document.documentElement) document.documentElement.scrollTop = 0;
@@ -3340,14 +3361,17 @@ function movimentosRealizados(){
 }
 
 function rowHTML(l){
-  const statusClass = l.status==='pendente' && l.dataVencimento && l.dataVencimento<todayISO() ? 'atrasado' : l.status;
-  const statusLabel = {pago:'Pago', recebido:'Recebido', cancelado:'Cancelado', pendente: statusClass==='atrasado' ? 'Atrasado' : 'Pendente'}[l.status];
+  const hoje = todayISO();
+  const venceHoje = l.status==='pendente' && l.dataVencimento===hoje;
+  const diasAtraso = l.status==='pendente' && l.dataVencimento && l.dataVencimento<hoje ? Math.floor((new Date(hoje)-new Date(l.dataVencimento))/86400000) : 0;
+  const statusClass = diasAtraso>0 ? 'atrasado' : (venceHoje ? 'vence-hoje' : l.status);
+  const statusLabel = {pago:'Pago', recebido:'Recebido', cancelado:'Cancelado', pendente: diasAtraso>0 ? `Atrasado · ${diasAtraso}d` : (venceHoje ? 'Vence hoje' : 'Pendente')}[l.status];
   return `
-    <div class="ledger-row" data-id="${l.id}" data-action="abrir-lancamento" style="cursor:pointer;">
+    <div class="ledger-row ${statusClass==='atrasado'?'linha-atrasada':''} ${statusClass==='vence-hoje'?'linha-vence-hoje':''}" data-id="${l.id}" data-action="abrir-lancamento" style="cursor:pointer;">
       <span class="dot ${l.tipo}"></span>
       <span class="mono" style="font-size:12px;color:var(--text-soft)">${fmtDate(l.dataPagamento || l.dataVencimento)}</span>
       <div class="desc-cell">
-        <div>${escapeHTML(l.descricao)}${(l.valorRecebido>0.004 && l.status==='pendente') ? ` <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Já recebeu/pagou parte — falta ${brl(l.valor-l.valorRecebido)}">🔸 Parcial</span>` : ''}${l.origem==='forneira' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Forneira</span>' : ''}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Ativo Patrimonial</span>' : ''}${l.origem==='vk-estoque' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Estoque VK</span>' : ''}${l.semNF ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Entrada sem nota fiscal — regularizar depois">⚠️ sem NF</span>' : ''}${(l.tipo==='entrada' && l.custoProdutoVendido>0) ? (()=>{ const m=l.valor-l.custoProdutoVendido; const p=l.valor>0?(m/l.valor*100):0; return ` <span style="color:${m>=0?'var(--success)':'var(--danger)'};font-size:11px;font-weight:600;" title="Margem de contribuição">${m>=0?'📈':'📉'} ${p.toFixed(0)}%</span>`; })() : ''}${l.grupoDivisaoId ? ' <span style="color:#7B5CD6;font-size:11px;" title="Faz parte de uma despesa dividida em várias categorias">🏷️ Dividida</span>' : ''}${l.aprovacao==='pendente' ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Aguardando aprovação — não pode ser paga ainda">⏳ aprovação</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}${l.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${l.id}" style="cursor:pointer;font-size:11px;" title="Ver comprovante">📎</span>` : ''}</div>
+        <div>${escapeHTML(l.descricao)}${l.recorrenciaId ? ' <span style="color:var(--blue-accent);font-size:11px;" title="Lançamento recorrente">🔁</span>' : ''}${(l.valorRecebido>0.004 && l.status==='pendente') ? ` <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Já recebeu/pagou parte — falta ${brl(l.valor-l.valorRecebido)}">🔸 Parcial</span>` : ''}${l.origem==='forneira' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Forneira</span>' : ''}${l.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Transferência</span>' : ''}${l.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Investimento</span>' : ''}${l.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Ativo Patrimonial</span>' : ''}${l.origem==='vk-estoque' ? ' <span style="color:var(--blue-accent);font-size:11px;">· Estoque VK</span>' : ''}${l.semNF ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Entrada sem nota fiscal — regularizar depois">⚠️ sem NF</span>' : ''}${(l.tipo==='entrada' && l.custoProdutoVendido>0) ? (()=>{ const m=l.valor-l.custoProdutoVendido; const p=l.valor>0?(m/l.valor*100):0; return ` <span style="color:${m>=0?'var(--success)':'var(--danger)'};font-size:11px;font-weight:600;" title="Margem de contribuição">${m>=0?'📈':'📉'} ${p.toFixed(0)}%</span>`; })() : ''}${l.grupoDivisaoId ? ' <span style="color:#7B5CD6;font-size:11px;" title="Faz parte de uma despesa dividida em várias categorias">🏷️ Dividida</span>' : ''}${l.aprovacao==='pendente' ? ' <span style="color:var(--warn);font-size:11px;font-weight:600;" title="Aguardando aprovação — não pode ser paga ainda">⏳ aprovação</span>' : ''}${l.observacao ? ' <span style="color:var(--text-soft);font-size:11px;" title="Tem observação">📝</span>' : ''}${l.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${l.id}" style="cursor:pointer;font-size:11px;" title="Ver comprovante">📎</span>` : ''}<span data-action="duplicar-lancamento" data-id="${l.id}" style="cursor:pointer;font-size:11px;color:var(--text-soft);margin-left:2px;" title="Duplicar para o mesmo dia do mês seguinte">⧉</span></div>
         <div class="cat">${l.fornecedor ? escapeHTML(l.fornecedor) : `<span class="conta-tag"><span class="conta-swatch" style="background:${corConta(l.contaId)}"></span>${escapeHTML(nomeConta(l.contaId))}</span> · ${escapeHTML(l.categoria)}`}</div>
       </div>
       <span class="col-cat mono" style="font-size:11.5px;color:var(--text-soft)">${fmtDate(l.dataVencimento)}</span>
@@ -3405,33 +3429,93 @@ function listaLancamentosAgrupadaHTML(lista){
   }).join('');
 }
 
-function viewLancamentos(tipo){
-  const titulo = tipo==='saida' ? 'Contas a Pagar' : 'Contas a Receber';
-  const categorias = todasCategoriasFlat(tipo);
-  const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
-  const deMes = `${mesGlobalRef}-01`;
-  const ateMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
+// Filtra a lista de lançamentos de Pagar/Receber segundo TODOS os filtros ativos (categoria,
+// status, busca, conta, período) — reaproveitada tanto na primeira renderização quanto no
+// wiring de filtros (pra manter os dois exatamente consistentes).
+function obterListaLancamentosFiltrada(tipo, opts){
+  opts = opts || {};
+  const periodo = lancamentosPeriodoCustom || (()=>{
+    const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
+    return { de: `${mesGlobalRef}-01`, ate: `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}` };
+  })();
   let lista = state.lancamentos.filter(l=>{
     if(l.tipo!==tipo || l.origem==='transferencia' || l.origem==='investimento') return false;
     if(l.status==='pendente'){
       // Pendente "acompanha" os meses: aparece a partir do mês do vencimento em diante, até ser resolvido.
-      return l.dataVencimento && l.dataVencimento<=ateMes;
+      return l.dataVencimento && l.dataVencimento<=periodo.ate;
     }
     const refMes = l.dataPagamento || l.dataVencimento;
-    return refMes && refMes>=deMes && refMes<=ateMes;
+    return refMes && refMes>=periodo.de && refMes<=periodo.ate;
   });
-  if(lancamentosBuscaPreenchida){
-    const termo = lancamentosBuscaPreenchida.toLowerCase();
+  const busca = opts.busca ?? lancamentosBuscaPreenchida;
+  if(busca){
+    const termo = busca.toLowerCase();
     lista = lista.filter(l=> l.descricao.toLowerCase().includes(termo) || (l.fornecedor||'').toLowerCase().includes(termo) || (l.observacao||'').toLowerCase().includes(termo));
   }
-  lista.sort((a,b)=> (a.dataVencimento||'').localeCompare(b.dataVencimento||''));
+  const status = opts.status ?? 'todos';
+  if(status!=='todos') lista = lista.filter(l=> status==='pago' ? (l.status==='pago'||l.status==='recebido') : l.status===status);
+  const categoria = opts.categoria ?? 'todas';
+  if(categoria!=='todas') lista = lista.filter(l=>l.categoria===categoria);
+  const conta = opts.conta ?? lancamentosFiltroConta;
+  if(conta) lista = lista.filter(l=>l.contaId===conta);
+  return lista;
+}
+
+function ordenarLancamentos(lista, ordenacao){
+  const arr = [...lista];
+  if(ordenacao==='valor') arr.sort((a,b)=>b.valor-a.valor);
+  else if(ordenacao==='descricao') arr.sort((a,b)=>a.descricao.localeCompare(b.descricao));
+  else if(ordenacao==='status') arr.sort((a,b)=>a.status.localeCompare(b.status));
+  else arr.sort((a,b)=>(a.dataVencimento||'').localeCompare(b.dataVencimento||''));
+  return arr;
+}
+
+// Monta o corpo da lista conforme a visão escolhida: cronológica (agrupada por grupoId, como já
+// era) ou agrupada por categoria/fornecedor (visão alternativa).
+function corpoListaLancamentosHTML(lista, visao){
+  if(!lista.length) return null;
+  if(visao==='categoria' || visao==='fornecedor'){
+    const chaveDe = l => visao==='categoria' ? (l.categoria||'Sem categoria') : (l.fornecedor||'Sem fornecedor/cliente identificado');
+    const porGrupo = {};
+    lista.forEach(l=>{ const k = chaveDe(l); if(!porGrupo[k]) porGrupo[k]=[]; porGrupo[k].push(l); });
+    return Object.entries(porGrupo).sort((a,b)=>b[1].reduce((s,l)=>s+valorEmAberto(l),0)-a[1].reduce((s,l)=>s+valorEmAberto(l),0)).map(([nome,itens])=>`
+      <div class="ativo-categoria-label">${escapeHTML(nome)} <span style="font-weight:400;color:var(--text-soft);">(${itens.length} · ${brl(itens.reduce((s,l)=>s+valorEmAberto(l),0))})</span></div>
+      ${itens.map(rowHTML).join('')}
+    `).join('');
+  }
+  return listaLancamentosAgrupadaHTML(lista);
+}
+
+function viewLancamentos(tipo){
+  const titulo = tipo==='saida' ? 'Contas a Pagar' : 'Contas a Receber';
+  const categorias = todasCategoriasFlat(tipo);
+  const hoje = todayISO();
+  let lista = obterListaLancamentosFiltrada(tipo);
+  lista = ordenarLancamentos(lista, lancamentosOrdenacao);
+
+  // Resumo do período: quanto já foi resolvido, quanto falta, e quantas contas vencidas
+  const totalPendente = lista.filter(l=>l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
+  const totalResolvido = lista.filter(l=>l.status==='pago'||l.status==='recebido').reduce((s,l)=>s+l.valor,0);
+  const totalVencidas = lista.filter(l=>l.status==='pendente' && l.dataVencimento && l.dataVencimento<hoje).length;
 
   return `
     <div class="topbar">
       <div><h1>${titulo}</h1><p>${tipo==='saida' ? 'Obrigações e despesas da empresa' : 'Valores a receber de clientes e outras fontes'}</p></div>
-      ${dropdownNovoHTML()}
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn ghost" id="btnExportarLancamentosPDF">📄 Exportar</button>
+        ${dropdownNovoHTML()}
+      </div>
     </div>
-    ${mesNavHTML()}
+    ${lancamentosPeriodoCustom ? `
+    <div class="report-controls" style="display:flex;align-items:center;gap:10px;">
+      <span style="font-size:12.5px;">Período customizado: <strong>${fmtDate(lancamentosPeriodoCustom.de)} a ${fmtDate(lancamentosPeriodoCustom.ate)}</strong></span>
+      <button class="btn ghost sm" id="btnLimparPeriodoCustom">Voltar pro mês</button>
+    </div>` : mesNavHTML()}
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
+      <div class="card"><div class="label">${tipo==='saida'?'Pendente de pagar':'Pendente de receber'}</div><div class="value mono" style="color:var(--warn);">${brl(totalPendente)}</div></div>
+      <div class="card"><div class="label">${tipo==='saida'?'Já pago':'Já recebido'}</div><div class="value mono" style="color:var(--success);">${brl(totalResolvido)}</div></div>
+      ${totalVencidas>0 ? `<div class="card"><div class="label">Vencidas</div><div class="value mono" style="color:var(--danger);">${totalVencidas}</div></div>` : ''}
+    </div>
     <div class="panel">
       <div class="filter-bar">
         <input type="text" id="filtroBusca" value="${escapeHTML(lancamentosBuscaPreenchida)}" placeholder="🔍 Buscar por descrição, nº do pedido..." style="flex:1;min-width:180px;border:2px solid var(--blue-accent);border-radius:8px;padding:9px 12px;font-size:12.5px;background:var(--white);">
@@ -3444,16 +3528,123 @@ function viewLancamentos(tipo){
           <option value="todas">Todas as categorias</option>
           ${categorias.map(c=>`<option value="${c}">${c}</option>`).join('')}
         </select>
+        ${state.contas.length>1 ? `<select id="filtroConta"><option value="">Todas as contas</option>${state.contas.map(c=>`<option value="${c.id}" ${lancamentosFiltroConta===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>` : ''}
+        <select id="filtroOrdenacao">
+          <option value="vencimento" ${lancamentosOrdenacao==='vencimento'?'selected':''}>Ordenar por vencimento</option>
+          <option value="valor" ${lancamentosOrdenacao==='valor'?'selected':''}>Maior valor</option>
+          <option value="descricao" ${lancamentosOrdenacao==='descricao'?'selected':''}>Descrição (A-Z)</option>
+          <option value="status" ${lancamentosOrdenacao==='status'?'selected':''}>Status</option>
+        </select>
+        <button class="btn ghost sm" id="btnPeriodoCustom">📅 Período</button>
+      </div>
+      <div class="report-controls" style="padding:0 16px 12px;display:flex;gap:8px;">
+        <button class="btn ${lancamentosVisao==='cronologica'?'':'ghost'} sm" data-visao="cronologica">Cronológico</button>
+        <button class="btn ${lancamentosVisao==='categoria'?'':'ghost'} sm" data-visao="categoria">Por categoria</button>
+        <button class="btn ${lancamentosVisao==='fornecedor'?'':'ghost'} sm" data-visao="fornecedor">Por ${tipo==='saida'?'fornecedor':'cliente'}</button>
       </div>
       <div class="ledger-row head">
         <span></span><span>Vence</span><span>Descrição</span><span class="col-cat">Venc. orig.</span><span class="col-status">Status</span><span style="text-align:right;">Valor</span>
       </div>
       <div class="panel-body" id="listaLancamentos">
-        ${lista.length? listaLancamentosAgrupadaHTML(lista) : `<div class="empty">Nenhum lançamento em ${titulo.toLowerCase()} neste mês.</div>`}
+        ${corpoListaLancamentosHTML(lista, lancamentosVisao) ?? `<div class="empty">Nenhum lançamento em ${titulo.toLowerCase()} neste período.</div>`}
       </div>
     </div>
     ${tipo==='entrada' ? relatorioInadimplenciaHTML() : ''}
   `;
+}
+
+function openPeriodoCustomModal(tipo){
+  const modal = document.getElementById('modalContent');
+  const atual = lancamentosPeriodoCustom || {};
+  modal.innerHTML = `
+    <h3>Período customizado</h3>
+    <div class="note" style="margin-top:0;">Enquanto um período customizado estiver ativo, ele substitui o mês selecionado lá em cima.</div>
+    <div class="field-row">
+      <div class="field"><label>De</label><input type="date" id="periodoDe" value="${atual.de||todayISO().slice(0,8)+'01'}"></div>
+      <div class="field"><label>Até</label><input type="date" id="periodoAte" value="${atual.ate||todayISO()}"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnAplicarPeriodo">Aplicar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnAplicarPeriodo').addEventListener('click', ()=>{
+    const de = document.getElementById('periodoDe').value;
+    const ate = document.getElementById('periodoAte').value;
+    if(!de || !ate || de>ate){ showToast('Escolha um período válido'); return; }
+    lancamentosPeriodoCustom = { de, ate };
+    closeModal(); render();
+  });
+}
+
+// Duplica um lançamento pro mesmo dia do mês seguinte, como novo pendente — não mexe no original.
+function duplicarLancamentoProximoMes(id){
+  const l = state.lancamentos.find(x=>x.id===id);
+  if(!l) return;
+  const dataBase = new Date(l.dataVencimento || todayISO());
+  dataBase.setMonth(dataBase.getMonth()+1);
+  const novaData = dataBase.toISOString().slice(0,10);
+  const novo = {
+    ...l, id: uid(), status:'pendente', dataVencimento: novaData, dataPagamento:null, valorRecebido:0,
+    historicoRecebimentos:[], criadoEm: new Date().toISOString(), origem:'manual', grupoId:null, comprovanteFoto:null,
+    vkPedidoId:null, aprovacao:undefined
+  };
+  state.lancamentos.push(novo);
+  persist(); render();
+  showToast(`Duplicado para ${fmtDate(novaData)}`);
+}
+
+// PDF da lista de Contas a Pagar/Receber, respeitando os filtros/ordenação atuais da tela
+function gerarLancamentosPDF(lista, tipo){
+  if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
+  if(!lista.length){ showToast('Nenhum lançamento pra exportar com esse filtro'); return; }
+  const { jsPDF } = window.jspdf;
+  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+  const M = 18, W = 210 - M*2;
+  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
+  let y = 22;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
+  docPdf.text('Livro Caixa Financeiro VK', M, y);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
+  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
+  y += 7;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 9;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
+  docPdf.text(tipo==='saida' ? 'Contas a Pagar' : 'Contas a Receber', M, y);
+  y += 9;
+
+  const total = lista.reduce((s,l)=>s+valorEmAberto(l),0);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
+  docPdf.text(`${lista.length} lançamento(s)   ·   total ${brl(total)}`, M, y);
+  y += 8;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(8); docPdf.setTextColor(...SOFT);
+  docPdf.text('VENCE', M, y); docPdf.text('DESCRIÇÃO', M+22, y); docPdf.text('STATUS', M+130, y); docPdf.text('VALOR', M+W, y, { align:'right' });
+  y += 4;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 5;
+
+  lista.forEach(l=>{
+    if(y > 275){ docPdf.addPage(); y = 20; }
+    const hoje = todayISO();
+    const atrasado = l.status==='pendente' && l.dataVencimento && l.dataVencimento<hoje;
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...INK);
+    docPdf.text(fmtDate(l.dataVencimento), M, y);
+    const desc = l.descricao.length>48 ? l.descricao.slice(0,48)+'…' : l.descricao;
+    docPdf.text(desc, M+22, y);
+    docPdf.setTextColor(...(atrasado?DANGER:SOFT));
+    docPdf.text(atrasado?'Atrasado':{pago:'Pago',recebido:'Recebido',pendente:'Pendente',cancelado:'Cancelado'}[l.status], M+130, y);
+    docPdf.setTextColor(...(l.tipo==='entrada'?SUCCESS:DANGER));
+    docPdf.text(`${l.tipo==='entrada'?'+':'-'} ${brl(valorEmAberto(l))}`, M+W, y, { align:'right' });
+    y += 5.5;
+  });
+
+  docPdf.save(`${tipo==='saida'?'contas-a-pagar':'contas-a-receber'}-${todayISO()}.pdf`);
 }
 
 function relatorioInadimplenciaHTML(){
@@ -12284,7 +12475,67 @@ function executarAcaoSelecaoLote(acao){
     const tipos = [...new Set(lancs.map(l=>l.tipo))];
     if(tipos.length>1){ showToast('Pra trocar a categoria, selecione só despesas ou só receitas — as categorias são diferentes'); return; }
     openAlterarCategoriaLoteModal(lancs, tipos[0]);
+  } else if(acao==='marcar-pago'){
+    const pendentes = lancs.filter(l=>l.status==='pendente');
+    if(!pendentes.length){ showToast('Nenhum dos selecionados está pendente'); return; }
+    const aguardandoAprovacao = pendentes.filter(l=>l.tipo==='saida' && l.aprovacao==='pendente');
+    if(aguardandoAprovacao.length===pendentes.length){ showToast('Todos os selecionados ainda aguardam aprovação — aprove primeiro'); return; }
+    openMarcarPagoLoteModal(pendentes.filter(l=>!(l.tipo==='saida' && l.aprovacao==='pendente')));
+  } else if(acao==='duplicar'){
+    if(!confirm(`Duplicar ${lancs.length} lançamento(s) para o mesmo dia do mês seguinte?`)) return;
+    lancs.forEach(l=>duplicarLancamentoProximoMesSemRender(l.id));
+    limparSelecaoLanc(); persist(); render();
+    showToast(`${lancs.length} lançamento(s) duplicado(s)`);
   }
+}
+
+function duplicarLancamentoProximoMesSemRender(id){
+  const l = state.lancamentos.find(x=>x.id===id);
+  if(!l) return;
+  const dataBase = new Date(l.dataVencimento || todayISO());
+  dataBase.setMonth(dataBase.getMonth()+1);
+  const novaData = dataBase.toISOString().slice(0,10);
+  state.lancamentos.push({
+    ...l, id: uid(), status:'pendente', dataVencimento: novaData, dataPagamento:null, valorRecebido:0,
+    historicoRecebimentos:[], criadoEm: new Date().toISOString(), origem:'manual', grupoId:null, comprovanteFoto:null,
+    vkPedidoId:null, aprovacao:undefined
+  });
+}
+
+function openMarcarPagoLoteModal(lancs){
+  const modal = document.getElementById('modalContent');
+  const tipos = [...new Set(lancs.map(l=>l.tipo))];
+  const acaoLabel = tipos.length>1 ? 'pagamento/recebimento' : (tipos[0]==='entrada'?'recebimento':'pagamento');
+  const total = lancs.reduce((s,l)=>s+valorEmAberto(l),0);
+  modal.innerHTML = `
+    <h3>Confirmar ${acaoLabel} — ${lancs.length} lançamento(s)</h3>
+    <div class="note" style="margin-top:0;">Cada um será marcado como resolvido pelo valor total em aberto — total ${brl(total)}. Se algum tiver pagamento parcial, o restante é quitado agora.</div>
+    <div class="field-row">
+      <div class="field"><label>Data</label><input type="date" id="loteData" value="${todayISO()}"></div>
+      <div class="field"><label>Conta (usada só pra quem não tiver conta definida)</label><select id="loteConta">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarLotePago">Confirmar</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnConfirmarLotePago').addEventListener('click', ()=>{
+    const data = document.getElementById('loteData').value || todayISO();
+    const contaPadrao = document.getElementById('loteConta').value;
+    lancs.forEach(l=>{
+      const falta = Math.round((l.valor-(l.valorRecebido||0))*100)/100;
+      if(!l.historicoRecebimentos) l.historicoRecebimentos = [];
+      l.historicoRecebimentos.push({ valor: falta, data, contaId: l.contaId||contaPadrao });
+      l.valorRecebido = l.valor;
+      l.status = l.tipo==='entrada' ? 'recebido' : 'pago';
+      l.dataPagamento = data;
+      if(!l.contaId) l.contaId = contaPadrao;
+    });
+    registrarLog('Marcado como pago/recebido em lote', `${lancs.length} lançamento(s)`);
+    limparSelecaoLanc(); persist(); closeModal(); render();
+    showToast(`${lancs.length} lançamento(s) confirmado(s)`);
+  });
 }
 
 function openAlterarDescricaoLoteModal(lancs){
@@ -12820,46 +13071,54 @@ function attachViewHandlers(){
   const filtroStatus = document.getElementById('filtroStatus');
   const filtroCategoria = document.getElementById('filtroCategoria');
   const filtroBusca = document.getElementById('filtroBusca');
+  const filtroConta = document.getElementById('filtroConta');
+  const filtroOrdenacao = document.getElementById('filtroOrdenacao');
   if(filtroStatus || filtroCategoria || filtroBusca){
+    const tipoAtual = currentView==='receber' ? 'entrada' : 'saida';
     const applyFilters = ()=>{
-      const tipo = currentView==='receber' ? 'entrada' : 'saida';
-      const fs = filtroStatus.value, fc = filtroCategoria.value;
-      const termo = filtroBusca.value.trim().toLowerCase();
-      const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
-      const deMes = `${mesGlobalRef}-01`;
-      const ateMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
-      let lista = state.lancamentos.filter(l=>{
-        if(l.tipo!==tipo || l.origem==='transferencia') return false;
-        const refMes = l.dataVencimento || l.dataPagamento;
-        return refMes && refMes>=deMes && refMes<=ateMes;
-      });
-      if(fs!=='todos') lista = lista.filter(l=> fs==='pago' ? (l.status==='pago'||l.status==='recebido') : l.status===fs);
-      if(fc!=='todas') lista = lista.filter(l=>l.categoria===fc);
-      if(termo) lista = lista.filter(l=> l.descricao.toLowerCase().includes(termo) || (l.fornecedor||'').toLowerCase().includes(termo) || (l.observacao||'').toLowerCase().includes(termo));
-      lista.sort((a,b)=> (a.dataVencimento||'').localeCompare(b.dataVencimento||''));
-      document.getElementById('listaLancamentos').innerHTML = lista.length ? lista.map(rowHTML).join('') : `<div class="empty">Nenhum resultado para esse filtro.</div>`;
-      document.querySelectorAll('#listaLancamentos [data-action]').forEach(btn=>{
-        btn.addEventListener('click', ()=>{
-          const id = btn.dataset.id, action = btn.dataset.action;
-          const l = state.lancamentos.find(x=>x.id===id);
-          if(!l) return;
-          if(action==='quitar'){ abrirQuitarModal(id); }
-          else if(action==='editar'){ openLancamentoModal(l.tipo, l); }
-          else if(action==='excluir'){ excluirLancamento(id); }
-          else if(action==='ver-detalhe'){ openDetalheLancamentoModal(l); }
-          else if(action==='abrir-lancamento'){
-            if(l.origem==='transferencia') openDetalheLancamentoModal(l);
-            else openLancamentoModal(l.tipo, l);
-          }
-        });
-      });
+      lancamentosBuscaPreenchida = filtroBusca.value;
+      if(filtroConta) lancamentosFiltroConta = filtroConta.value;
+      if(filtroOrdenacao) lancamentosOrdenacao = filtroOrdenacao.value;
+      let lista = obterListaLancamentosFiltrada(tipoAtual, { status: filtroStatus.value, categoria: filtroCategoria.value });
+      lista = ordenarLancamentos(lista, lancamentosOrdenacao);
+      document.getElementById('listaLancamentos').innerHTML = corpoListaLancamentosHTML(lista, lancamentosVisao) ?? `<div class="empty">Nenhum resultado para esse filtro.</div>`;
+      ligarAcoesListaLancamentos();
       atualizarSelecaoUI();
     };
     filtroStatus?.addEventListener('change', applyFilters);
     filtroCategoria?.addEventListener('change', applyFilters);
     filtroBusca?.addEventListener('input', applyFilters);
-    lancamentosBuscaPreenchida = '';
+    filtroConta?.addEventListener('change', applyFilters);
+    filtroOrdenacao?.addEventListener('change', applyFilters);
+    document.querySelectorAll('[data-visao]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{ lancamentosVisao = btn.dataset.visao; render(); });
+    });
+    document.getElementById('btnPeriodoCustom')?.addEventListener('click', ()=>openPeriodoCustomModal(tipoAtual));
+    document.getElementById('btnLimparPeriodoCustom')?.addEventListener('click', ()=>{ lancamentosPeriodoCustom = null; render(); });
+    document.getElementById('btnExportarLancamentosPDF')?.addEventListener('click', ()=>{
+      const listaExport = ordenarLancamentos(obterListaLancamentosFiltrada(tipoAtual), lancamentosOrdenacao);
+      gerarLancamentosPDF(listaExport, tipoAtual);
+    });
   }
+  function ligarAcoesListaLancamentos(){
+    document.querySelectorAll('#listaLancamentos [data-action]').forEach(btn=>{
+      btn.addEventListener('click', (e)=>{
+        const id = btn.dataset.id, action = btn.dataset.action;
+        const l = state.lancamentos.find(x=>x.id===id);
+        if(!l) return;
+        if(action==='quitar'){ abrirQuitarModal(id); }
+        else if(action==='editar'){ openLancamentoModal(l.tipo, l); }
+        else if(action==='excluir'){ excluirLancamento(id); }
+        else if(action==='ver-detalhe'){ openDetalheLancamentoModal(l); }
+        else if(action==='duplicar-lancamento'){ e.stopPropagation(); duplicarLancamentoProximoMes(id); }
+        else if(action==='abrir-lancamento'){
+          if(l.origem==='transferencia') openDetalheLancamentoModal(l);
+          else openLancamentoModal(l.tipo, l);
+        }
+      });
+    });
+  }
+  ligarAcoesListaLancamentos();
 
   // Relatórios
   const reportSelect = document.getElementById('reportSelect');
