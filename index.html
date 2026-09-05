@@ -3286,6 +3286,59 @@ function painelOQueMudouHTML(){
     </div>`;
 }
 
+// Ponte do Caixa — visual em cascata explicando por que o caixa do mês mudou (não é um relatório
+// novo, é uma leitura rápida pra tela inicial). Reaproveita svgCascata já existente.
+function ponteCaixaHTML(t){
+  const passos = [
+    { label:'Caixa Inicial', valor:t.saldoInicial },
+    { label:'Entradas', valor:t.entradasMes },
+    { label:'Saídas', valor:-t.saidasMes },
+  ];
+  return `
+    <div class="dash-section-label">Ponte do Caixa — ${competenciaLabel(mesGlobalRef)}</div>
+    <div class="panel"><div class="panel-body" style="padding:10px 6px;overflow-x:auto;">${svgCascata(passos)}</div></div>
+  `;
+}
+
+// Painel "Hoje" — bem enxuto, só o que se refere ao DIA de hoje (diferente do Centro de Comando,
+// que já cobre o panorama do mês inteiro logo acima).
+function painelHojeHTML(){
+  const hoje = todayISO();
+  const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+  const entraHoje = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento===hoje).reduce((s,l)=>s+l.valor,0);
+  const saiHoje = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento===hoje).reduce((s,l)=>s+l.valor,0);
+  const venceHojeQtd = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento===hoje).length;
+  const insights = gerarInsightsFinanceiros();
+  const risco = insights.find(i=>i.tipo==='risco');
+  const oportunidade = insights.find(i=>i.tipo==='oportunidade');
+  return `
+    <div class="dash-section-label">Hoje — ${fmtDate(hoje)}</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 18px;font-size:13px;line-height:2;">
+      <div>💰 Tenho: <strong class="mono">${vm(brl(saldoContasHoje))}</strong></div>
+      <div>📥 Entrou hoje: <strong class="mono" style="color:var(--success);">${vm(brl(entraHoje))}</strong></div>
+      <div>📤 Saiu hoje: <strong class="mono" style="color:var(--danger);">${vm(brl(saiHoje))}</strong></div>
+      <div>⚠️ Vence hoje: <strong>${venceHojeQtd} conta(s)</strong></div>
+      ${risco ? `<div style="cursor:pointer;" data-action="ir-para-insight" data-goto="${risco.goto}" data-view="${risco.view||''}" data-relatorio="${risco.relatorio||''}">🔴 Principal risco: ${escapeHTML(risco.titulo)}</div>` : ''}
+      ${oportunidade ? `<div style="cursor:pointer;" data-action="ir-para-insight" data-goto="${oportunidade.goto}" data-view="${oportunidade.view||''}" data-relatorio="${oportunidade.relatorio||''}">🟢 Principal oportunidade: ${escapeHTML(oportunidade.titulo)}</div>` : ''}
+    </div></div>
+  `;
+}
+
+// Card de Qualidade dos Dados — 1 número, linka pros relatórios que já detalham o problema
+function cardQualidadeDadosHTML(){
+  const semCategoria = state.lancamentos.filter(l=>!l.categoria && l.origem!=='transferencia').length;
+  const totalLancamentos = state.lancamentos.filter(l=>l.origem!=='transferencia').length;
+  const pctClassificado = totalLancamentos>0 ? Math.round((1-semCategoria/totalLancamentos)*100) : 100;
+  const cor = pctClassificado>=90?'var(--success)':pctClassificado>=70?'var(--warn)':'var(--danger)';
+  return `
+    <div class="panel" data-ir-relatorio="dados_inconsistentes" style="cursor:pointer;">
+      <div class="panel-body" style="padding:12px 18px;display:flex;align-items:center;justify-content:space-between;">
+        <span style="font-size:12.5px;font-weight:600;">🔍 Qualidade dos dados</span>
+        <span class="mono" style="font-weight:700;color:${cor};">${pctClassificado}%</span>
+      </div>
+    </div>`;
+}
+
 function cardCentralDecisaoCompactoHTML(){
   const hoje = todayISO();
   const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
@@ -3418,6 +3471,10 @@ function viewDashboard(){
       <div class="card"><div class="label">📤 A pagar</div><div class="value mono neg">${vm(brl(pend.aPagar))}</div></div>
       <div class="card"><div class="label">📥 A receber</div><div class="value mono pos">${vm(brl(pend.aReceber))}</div></div>
     </div>
+
+    ${painelHojeHTML()}
+    ${ponteCaixaHTML(t)}
+    ${cardQualidadeDadosHTML()}
 
     ${(()=>{
       const hoje = todayISO();
