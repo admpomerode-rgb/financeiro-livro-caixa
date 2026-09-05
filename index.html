@@ -3502,6 +3502,7 @@ function viewDashboard(){
     <div class="panel">
       <div class="panel-body" style="padding:6px 0;">
         <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="diagnostico_automatico"><span>🩺 Diagnóstico Automático do Mês</span><span style="color:var(--blue-accent);">→</span></div>
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="oque_faria_se_fosse_dono"><span>👑 O Que Eu Faria Se Fosse o Dono?</span><span style="color:var(--blue-accent);">→</span></div>
         <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="gerencial"><span>📊 Dashboard Gerencial — visão anual completa</span><span style="color:var(--blue-accent);">→</span></div>
         <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="health_score"><span>❤️ Saúde da Empresa — tendência 12 meses</span><span style="color:var(--blue-accent);">→</span></div>
         <div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" data-ir-relatorio="central_inteligencia"><span>🧠 Central de Inteligência Financeira</span><span style="color:var(--blue-accent);">→</span></div>
@@ -6692,6 +6693,24 @@ function viewRelatorios(){
     { id:'simulador_decisao_compra', icone:'🛒', nome:'Simulador de Decisão de Compra', desc:'Compara comprar à vista, parcelado ou não comprar' },
     { id:'simulador_antecipacao', icone:'⏩', nome:'Simulador de Antecipação', desc:'Compara receber antecipado com esperar o vencimento' },
     { id:'reversoes_financeiras', icone:'↩️', nome:'Reversões Financeiras', desc:'Lançamentos pagos/recebidos que depois foram revertidos ou cancelados' },
+    { id:'oque_faria_se_fosse_dono', icone:'👑', nome:'O Que Eu Faria Se Fosse o Dono?', desc:'Plano de ação narrativo — situação, problema, oportunidade, recomendação e ação prioritária' },
+    { id:'linha_tempo_financeira', icone:'📜', nome:'Linha do Tempo Financeira', desc:'Principais acontecimentos financeiros mês a mês' },
+    { id:'efeito_domino_financeiro', icone:'🎲', nome:'Efeito Dominó Financeiro', desc:'Simula: se este cliente atrasar, quais contas ficam sem cobertura?' },
+    { id:'resultado_sem_maiores_clientes', icone:'👥', nome:'Resultado sem os 10 Maiores Clientes', desc:'A empresa continuaria saudável sem eles?' },
+    { id:'resultado_sem_maior_despesa', icone:'✂️', nome:'Resultado sem a Maior Despesa', desc:'Quanto o resultado mudaria eliminando a maior despesa do mês' },
+    { id:'lucro_de_verdade', icone:'🔎', nome:'Lucro de Verdade', desc:'Separa resultado "no papel" do dinheiro que efetivamente entrou/saiu' },
+    { id:'caixa_parece_livre', icone:'🎭', nome:'Caixa que Parece Livre', desc:'Quanto do saldo em conta já está comprometido nos próximos 30 dias' },
+    { id:'tempo_recuperar_prejuizo', icone:'🩹', nome:'Quanto Tempo pra Recuperar um Prejuízo?', desc:'Calculadora — meses necessários no ritmo atual de lucro' },
+    { id:'custo_inadimplencia_lucro', icone:'💔', nome:'Custo da Inadimplência no Lucro', desc:'Quanto a inadimplência está destruindo de resultado, não só de caixa' },
+    { id:'risco_aumento_fornecedor', icone:'📈', nome:'Risco de Aumento de Fornecedor', desc:'Simula reajustes de 5/10/15/20% nos principais fornecedores' },
+    { id:'custo_oculto_fornecedores', icone:'🔍', nome:'Custo Oculto dos Fornecedores', desc:'Cruza preço, prazo e frequência pra mostrar o custo real de cada fornecedor' },
+    { id:'cliente_trabalho_pouco_resultado', icone:'😓', nome:'Cliente que Dá Trabalho e Pouco Resultado', desc:'Clientes com muita frequência mas baixo ticket ou margem' },
+    { id:'cliente_mais_valioso', icone:'👑', nome:'Cliente Mais Valioso', desc:'Score combinando receita, margem, frequência e pontualidade' },
+    { id:'despesas_crescem_mais_receita', icone:'🚩', nome:'Despesas que Crescem Mais que a Receita', desc:'Categorias de despesa saindo do controle proporcionalmente' },
+    { id:'simulador_crescimento', icone:'🌱', nome:'Simulador de Crescimento', desc:'Quanto de capital de giro um crescimento de X% exigiria' },
+    { id:'limite_crescimento_seguro', icone:'🚦', nome:'Limite de Crescimento Seguro', desc:'Até quanto dá pra crescer sem faltar capital de giro' },
+    { id:'crescimento_da_prejuizo', icone:'⚠️', nome:'Crescimento que Dá Prejuízo', desc:'Detecta se a margem atual sustenta vender mais' },
+    { id:'qual_crescimento_vale_pena', icone:'⚖️', nome:'Qual Crescimento Vale a Pena?', desc:'Compara crescer receita vs. reduzir despesa, no impacto do lucro' },
     { id:'breakeven', icone:'⚖️', nome:'Ponto de Equilíbrio', desc:'Vendas mínimas pra cobrir os custos, em 3 cenários (otimista/realista/pessimista)' },
     { id:'valuation', icone:'💎', nome:'Valuation Estimado', desc:'Estimativa educacional de valor da empresa por múltiplos de EBITDA e faturamento' },
     { id:'aging', icone:'⏳', nome:'Aging — Vencidos por Faixa', desc:'Contas a receber e a pagar por faixa de atraso, com ranking de inadimplentes' },
@@ -6724,7 +6743,7 @@ function viewRelatorios(){
 const RELATORIOS_NOMES = {
   gerencial:'Dashboard Gerencial', executivo:'Dashboard Executivo', dre:'DRE', balanco:'Balanço Patrimonial', mei:'Declaração MEI', indicadores:'Indicadores Financeiros',
   produto:'Rentabilidade por Produto', investimentos:'Relatório de Investimentos', liquidez:'Índices de Liquidez', aging:'Aging — Vencidos por Faixa', dfc:'DFC — Fluxo de Caixa', cartoes:'Cartões de Crédito',
-  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio', yoy:'Comparativo Ano a Ano', sazonalidade:'Análise de Sazonalidade', calendario_vencimentos:'Calendário de Vencimentos', carga_tributaria:'Carga Tributária', simulador_preco:'Simulador de Preço', formas_pagamento:'Formas de Pagamento', rentabilidade_cliente:'Rentabilidade por Cliente', pe_produto:'Ponto de Equilíbrio por Produto', metas_comerciais:'Metas Comerciais', fixo_variavel_tempo:'Custo Fixo vs Variável no Tempo', onde_dinheiro:'Onde Meu Dinheiro Está', health_score:'Saúde da Empresa', eficiencia_cobranca:'Eficiência de Cobrança', variacao_preco_insumos:'Variação de Preço de Insumos', concentracao_clientes:'Concentração de Risco de Clientes', volume_margem_produto:'Ranking Volume x Margem por Produto', saude_cadastros:'Saúde dos Cadastros', projecao_comissoes:'Projeção de Comissões a Pagar', fcl:'Fluxo de Caixa Livre', payback:'Payback de Investimento', cvl_multiproduto:'Análise Custo-Volume-Lucro', dmpl:'Mutações do Patrimônio Líquido', provisoes:'Provisões (Férias/13º)', fluxo_centro_custo:'Fluxo de Caixa por Centro de Custo', conciliacao_saldo:'Conciliação de Saldo por Conta', taxa_conversao_funil:'Taxa de Conversão do Funil', novos_vs_recorrentes:'Novos Clientes vs. Recorrentes', taxa_recompra:'Taxa de Recompra', ltv_cac:'LTV e Relação LTV/CAC', abc_estoque:'Curva ABC de Estoque', estoque_abaixo_minimo:'Estoque Abaixo do Mínimo', obsolescencia_estoque:'Obsolescência de Estoque', comparativo_preco_fornecedores:'Comparativo de Preço entre Fornecedores', calendario_obrigacoes:'Calendário de Obrigações Acessórias', manutencao_consolidada:'Manutenção Preventiva Consolidada', vida_util_remanescente:'Vida Útil Remanescente', roi_ativo:'Custo e Valor Atual por Ativo', alocacao_ativos:'Alocação de Ativos', divergencias:'Divergências e Exceções', posicao_bancaria:'Posição Bancária Consolidada', taxas_bancarias:'Taxas e Tarifas Bancárias', amortizacao_emprestimos:'Amortização de Empréstimos', seguros_ativos:'Seguros de Ativos', preco_tabela_praticado:'Preço de Tabela vs. VK', limite_credito:'Limite de Crédito Disponível', multas_penalidades:'Multas e Penalidades', central_inteligencia:'Central de Inteligência Financeira', central_alertas:'Central de Alertas', calendario_financeiro:'Calendário Financeiro', central_cliente:'Central do Cliente', centro_comando:'Centro de Comando', fluxo_caixa_diario:'Fluxo de Caixa Diário', receitas_categoria:'Receitas por Categoria', margem_mensal:'Margem Mensal', ticket_medio_evolutivo:'Ticket Médio Evolutivo', vendas_canceladas:'Vendas Canceladas', comprometimento_futuro:'Comprometimento Futuro', parcelamentos:'Parcelamentos', receita_cliente_tempo:'Receita por Cliente ao Longo do Tempo', clientes_perdidos_risco:'Clientes Perdidos e em Risco', compras_periodo:'Compras por Período', evolucao_custos:'Evolução dos Custos', inflacao_interna:'Inflação Interna da Empresa', lucro_cliente:'Lucro por Cliente', capital_giro:'Capital de Giro', endividamento_vencimento:'Endividamento por Vencimento', super_relatorio_anual:'Super Relatório Anual', despesas_centro_custo:'Despesas por Centro de Custo', crescimento_clientes:'Crescimento de Clientes', dependencia_financeira:'Dependência Financeira', lucro_canal:'Lucro por Canal', obrigacoes_futuras:'Obrigações Futuras', evolucao_patrimonial:'Evolução Patrimonial', giro_caixa:'Giro de Caixa', dependencia_capital_terceiros:'Dependência de Capital de Terceiros', ncg:'Necessidade de Capital de Giro (NCG)', caixa_minimo:'Caixa Mínimo Recomendado', custo_financeiro_vendas:'Custo Financeiro das Vendas', vendas_parceladas:'Vendas Parceladas', prazo_recebimento_vendas:'Prazo de Recebimento das Vendas', desembolso_financeiro:'Desembolso Financeiro', compromissos_semana:'Compromissos por Semana', risco_caixa_data:'Risco de Caixa por Data', rentabilidade_forma_pagamento:'Rentabilidade por Forma de Pagamento', custo_real_parcelamento:'Custo Real do Parcelamento', evolucao_poder_compra:'Evolução do Poder de Compra', vazamentos_financeiros:'Vazamentos Financeiros', custo_por_mil_receita:'Custo por R$1.000 de Receita', dependencia_poucas_operacoes:'Dependência de Poucas Operações', decisoes_financeiras:'Decisões Financeiras', diagnostico_automatico:'Diagnóstico Automático do Mês', para_onde_foi_dinheiro:'Para Onde Foi o Dinheiro?', causas_variacao_lucro:'Causas da Variação do Lucro', eficiencia_dinheiro:'Eficiência do Dinheiro', movimentacoes_sem_classificacao:'Movimentações Sem Classificação', dados_inconsistentes:'Dados Inconsistentes', suspeitos_duplicidade:'Lançamentos Suspeitos de Duplicidade', custo_efetivo_conta:'Custo Efetivo por Conta Bancária', rentabilidade_saldo_parado:'Rentabilidade do Saldo Parado', dinheiro_transitorio:'Dinheiro Transitório', simulador_decisao_compra:'Simulador de Decisão de Compra', simulador_antecipacao:'Simulador de Antecipação', reversoes_financeiras:'Reversões Financeiras'
+  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio', yoy:'Comparativo Ano a Ano', sazonalidade:'Análise de Sazonalidade', calendario_vencimentos:'Calendário de Vencimentos', carga_tributaria:'Carga Tributária', simulador_preco:'Simulador de Preço', formas_pagamento:'Formas de Pagamento', rentabilidade_cliente:'Rentabilidade por Cliente', pe_produto:'Ponto de Equilíbrio por Produto', metas_comerciais:'Metas Comerciais', fixo_variavel_tempo:'Custo Fixo vs Variável no Tempo', onde_dinheiro:'Onde Meu Dinheiro Está', health_score:'Saúde da Empresa', eficiencia_cobranca:'Eficiência de Cobrança', variacao_preco_insumos:'Variação de Preço de Insumos', concentracao_clientes:'Concentração de Risco de Clientes', volume_margem_produto:'Ranking Volume x Margem por Produto', saude_cadastros:'Saúde dos Cadastros', projecao_comissoes:'Projeção de Comissões a Pagar', fcl:'Fluxo de Caixa Livre', payback:'Payback de Investimento', cvl_multiproduto:'Análise Custo-Volume-Lucro', dmpl:'Mutações do Patrimônio Líquido', provisoes:'Provisões (Férias/13º)', fluxo_centro_custo:'Fluxo de Caixa por Centro de Custo', conciliacao_saldo:'Conciliação de Saldo por Conta', taxa_conversao_funil:'Taxa de Conversão do Funil', novos_vs_recorrentes:'Novos Clientes vs. Recorrentes', taxa_recompra:'Taxa de Recompra', ltv_cac:'LTV e Relação LTV/CAC', abc_estoque:'Curva ABC de Estoque', estoque_abaixo_minimo:'Estoque Abaixo do Mínimo', obsolescencia_estoque:'Obsolescência de Estoque', comparativo_preco_fornecedores:'Comparativo de Preço entre Fornecedores', calendario_obrigacoes:'Calendário de Obrigações Acessórias', manutencao_consolidada:'Manutenção Preventiva Consolidada', vida_util_remanescente:'Vida Útil Remanescente', roi_ativo:'Custo e Valor Atual por Ativo', alocacao_ativos:'Alocação de Ativos', divergencias:'Divergências e Exceções', posicao_bancaria:'Posição Bancária Consolidada', taxas_bancarias:'Taxas e Tarifas Bancárias', amortizacao_emprestimos:'Amortização de Empréstimos', seguros_ativos:'Seguros de Ativos', preco_tabela_praticado:'Preço de Tabela vs. VK', limite_credito:'Limite de Crédito Disponível', multas_penalidades:'Multas e Penalidades', central_inteligencia:'Central de Inteligência Financeira', central_alertas:'Central de Alertas', calendario_financeiro:'Calendário Financeiro', central_cliente:'Central do Cliente', centro_comando:'Centro de Comando', fluxo_caixa_diario:'Fluxo de Caixa Diário', receitas_categoria:'Receitas por Categoria', margem_mensal:'Margem Mensal', ticket_medio_evolutivo:'Ticket Médio Evolutivo', vendas_canceladas:'Vendas Canceladas', comprometimento_futuro:'Comprometimento Futuro', parcelamentos:'Parcelamentos', receita_cliente_tempo:'Receita por Cliente ao Longo do Tempo', clientes_perdidos_risco:'Clientes Perdidos e em Risco', compras_periodo:'Compras por Período', evolucao_custos:'Evolução dos Custos', inflacao_interna:'Inflação Interna da Empresa', lucro_cliente:'Lucro por Cliente', capital_giro:'Capital de Giro', endividamento_vencimento:'Endividamento por Vencimento', super_relatorio_anual:'Super Relatório Anual', despesas_centro_custo:'Despesas por Centro de Custo', crescimento_clientes:'Crescimento de Clientes', dependencia_financeira:'Dependência Financeira', lucro_canal:'Lucro por Canal', obrigacoes_futuras:'Obrigações Futuras', evolucao_patrimonial:'Evolução Patrimonial', giro_caixa:'Giro de Caixa', dependencia_capital_terceiros:'Dependência de Capital de Terceiros', ncg:'Necessidade de Capital de Giro (NCG)', caixa_minimo:'Caixa Mínimo Recomendado', custo_financeiro_vendas:'Custo Financeiro das Vendas', vendas_parceladas:'Vendas Parceladas', prazo_recebimento_vendas:'Prazo de Recebimento das Vendas', desembolso_financeiro:'Desembolso Financeiro', compromissos_semana:'Compromissos por Semana', risco_caixa_data:'Risco de Caixa por Data', rentabilidade_forma_pagamento:'Rentabilidade por Forma de Pagamento', custo_real_parcelamento:'Custo Real do Parcelamento', evolucao_poder_compra:'Evolução do Poder de Compra', vazamentos_financeiros:'Vazamentos Financeiros', custo_por_mil_receita:'Custo por R$1.000 de Receita', dependencia_poucas_operacoes:'Dependência de Poucas Operações', decisoes_financeiras:'Decisões Financeiras', diagnostico_automatico:'Diagnóstico Automático do Mês', para_onde_foi_dinheiro:'Para Onde Foi o Dinheiro?', causas_variacao_lucro:'Causas da Variação do Lucro', eficiencia_dinheiro:'Eficiência do Dinheiro', movimentacoes_sem_classificacao:'Movimentações Sem Classificação', dados_inconsistentes:'Dados Inconsistentes', suspeitos_duplicidade:'Lançamentos Suspeitos de Duplicidade', custo_efetivo_conta:'Custo Efetivo por Conta Bancária', rentabilidade_saldo_parado:'Rentabilidade do Saldo Parado', dinheiro_transitorio:'Dinheiro Transitório', simulador_decisao_compra:'Simulador de Decisão de Compra', simulador_antecipacao:'Simulador de Antecipação', reversoes_financeiras:'Reversões Financeiras', oque_faria_se_fosse_dono:'O Que Eu Faria Se Fosse o Dono?', linha_tempo_financeira:'Linha do Tempo Financeira', efeito_domino_financeiro:'Efeito Dominó Financeiro', resultado_sem_maiores_clientes:'Resultado sem os 10 Maiores Clientes', resultado_sem_maior_despesa:'Resultado sem a Maior Despesa', lucro_de_verdade:'Lucro de Verdade', caixa_parece_livre:'Caixa que Parece Livre', tempo_recuperar_prejuizo:'Quanto Tempo pra Recuperar um Prejuízo?', custo_inadimplencia_lucro:'Custo da Inadimplência no Lucro', risco_aumento_fornecedor:'Risco de Aumento de Fornecedor', custo_oculto_fornecedores:'Custo Oculto dos Fornecedores', cliente_trabalho_pouco_resultado:'Cliente que Dá Trabalho e Pouco Resultado', cliente_mais_valioso:'Cliente Mais Valioso', despesas_crescem_mais_receita:'Despesas que Crescem Mais que a Receita', simulador_crescimento:'Simulador de Crescimento', limite_crescimento_seguro:'Limite de Crescimento Seguro', crescimento_da_prejuizo:'Crescimento que Dá Prejuízo', qual_crescimento_vale_pena:'Qual Crescimento Vale a Pena?'
 };
 
 function viewRelatorioDetalhe(){
@@ -10959,6 +10978,435 @@ function renderSimuladorAntecipacao(){
       </div>
       <div id="simAntResultado" style="margin-top:14px;"></div>
     </div></div>
+  `;
+}
+
+// Linha do Tempo Financeira — principais acontecimentos de cada mês, últimos 12 meses
+function renderLinhaTempoFinanceira(){
+  const hoje = new Date();
+  const meses = Array.from({length:12},(_,i)=>{ const d = new Date(hoje.getFullYear(), hoje.getMonth()-11+i, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; }).reverse();
+  const eventos = [];
+  meses.forEach((m,idx)=>{
+    const dm = dadosMesGerencial(m, 'todos');
+    const [a,mm] = m.split('-').map(Number);
+    const de = `${m}-01`, ate = `${m}-${String(new Date(a,mm,0).getDate()).padStart(2,'0')}`;
+    const maiorDespesa = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=de && l.dataPagamento<=ate).sort((x,y)=>y.valor-x.valor)[0];
+    const mesAnteriorRef = meses[idx+1];
+    const dmAnterior = mesAnteriorRef ? dadosMesGerencial(mesAnteriorRef, 'todos') : null;
+    const partes = [];
+    if(dmAnterior && dmAnterior.receita>0){
+      const variacao = ((dm.receita-dmAnterior.receita)/dmAnterior.receita*100);
+      if(Math.abs(variacao)>=10) partes.push(`Receita ${variacao>=0?'subiu':'caiu'} ${Math.abs(variacao).toFixed(0)}%`);
+    }
+    if(maiorDespesa && maiorDespesa.valor>=1000) partes.push(`Maior despesa: "${maiorDespesa.descricao}" (${brl(maiorDespesa.valor)})`);
+    if(dm.lucro<0) partes.push('Mês fechou no prejuízo');
+    if(partes.length) eventos.push({ data:`${m}-15`, label:`${competenciaLabel(m)}: ${partes.join(' · ')}` });
+  });
+  return `
+    <div class="note" style="margin-top:0;">Só mostra meses com algo digno de nota — variação de receita relevante, despesa grande ou prejuízo.</div>
+    ${!eventos.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nada de especialmente notável nos últimos 12 meses.</div></div>` : `
+    <div class="panel"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">${svgTimelineMarcos(eventos)}</div></div>`}
+  `;
+}
+
+// Resultado sem os 10 Maiores Clientes — "empresa continua saudável sem eles?"
+function renderResultadoSemMaioresClientes(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const vendas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate);
+  const porCliente = {};
+  vendas.forEach(l=>{ porCliente[l.fornecedor]=(porCliente[l.fornecedor]||0)+l.valor; });
+  const top10 = Object.entries(porCliente).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  const receitaTop10 = top10.reduce((s,c)=>s+c[1],0);
+  const receitaTotal = Object.values(porCliente).reduce((a,b)=>a+b,0);
+  const despesaTotal = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+  const receitaSemTop10 = receitaTotal - receitaTop10;
+  const lucroComTodos = receitaTotal - despesaTotal;
+  const lucroSemTop10 = receitaSemTop10 - despesaTotal;
+  return `
+    <div class="note" style="margin-top:0;">Últimos 12 meses. Simula remover a receita dos 10 maiores clientes, mantendo a despesa igual (assumindo que os custos fixos continuariam os mesmos).</div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;">
+      <div class="card"><div class="label">Resultado com todos os clientes</div><div class="value mono" style="color:${lucroComTodos>=0?'var(--success)':'var(--danger)'};">${brl(lucroComTodos)}</div></div>
+      <div class="card saldo"><div class="label">Resultado sem os 10 maiores</div><div class="value mono" style="color:${lucroSemTop10>=0?'var(--success)':'var(--danger)'};">${brl(lucroSemTop10)}</div></div>
+    </div>
+    <div class="note" style="${lucroSemTop10<0?'border-color:var(--danger);':'border-color:var(--success);'}">${lucroSemTop10>=0 ? `A empresa continuaria com resultado positivo mesmo sem esses 10 clientes — ${brl(receitaTop10)} de receita representam ${receitaTotal>0?(receitaTop10/receitaTotal*100).toFixed(0):0}% do total, mas não são indispensáveis pra sobreviver.` : `Sem esses 10 clientes, o resultado viraria prejuízo — eles representam ${receitaTotal>0?(receitaTop10/receitaTotal*100).toFixed(0):0}% da receita e são, hoje, indispensáveis pro negócio se manter saudável.`}</div>
+  `;
+}
+
+// Resultado sem a Maior Despesa — quanto o resultado mudaria eliminando temporariamente uma despesa específica
+function renderResultadoSemMaiorDespesa(mesRef){
+  mesRef = mesRef || mesGlobalRef;
+  const dm = dadosMesGerencial(mesRef, 'todos');
+  const maiorCategoria = Object.entries(dm.despesasPorCategoria).sort((a,b)=>b[1]-a[1])[0];
+  if(!maiorCategoria) return `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhuma despesa nesse mês.</div></div>`;
+  const lucroAtual = dm.lucro;
+  const lucroSemMaior = lucroAtual + maiorCategoria[1];
+  return `
+    <div class="report-controls"><input type="month" id="semMaiorDespesaMes" value="${mesRef}"></div>
+    <div class="note" style="margin-top:0;">Maior categoria de despesa do mês: <strong>${escapeHTML(maiorCategoria[0])}</strong> (${brl(maiorCategoria[1])}).</div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;">
+      <div class="card"><div class="label">Resultado real do mês</div><div class="value mono" style="color:${lucroAtual>=0?'var(--success)':'var(--danger)'};">${brl(lucroAtual)}</div></div>
+      <div class="card saldo"><div class="label">Resultado sem essa despesa</div><div class="value mono" style="color:${lucroSemMaior>=0?'var(--success)':'var(--danger)'};">${brl(lucroSemMaior)}</div></div>
+    </div>
+  `;
+}
+
+// Lucro de Verdade — separa resultado contábil (por vencimento) de dinheiro efetivamente disponível (por pagamento)
+function renderLucroDeVerdade(mesRef){
+  mesRef = mesRef || mesGlobalRef;
+  const [anoM,mesM] = mesRef.split('-').map(Number);
+  const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
+  const dm = dadosMesGerencial(mesRef, 'todos'); // já é por pagamento realizado (base caixa)
+  const receitaPorVencimento = state.lancamentos.filter(l=>l.tipo==='entrada' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataVencimento>=de && l.dataVencimento<=ate && l.status!=='cancelado').reduce((s,l)=>s+l.valor,0);
+  const despesaPorVencimento = state.lancamentos.filter(l=>l.tipo==='saida' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataVencimento>=de && l.dataVencimento<=ate && l.status!=='cancelado').reduce((s,l)=>s+l.valor,0);
+  const lucroContabil = receitaPorVencimento - despesaPorVencimento;
+  const dinheiroDisponivel = dm.lucro;
+  return `
+    <div class="report-controls"><input type="month" id="lucroVerdadeMes" value="${mesRef}"></div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;">
+      <div class="card"><div class="label">Resultado "no papel" (por vencimento)</div><div class="value mono">${brl(lucroContabil)}</div></div>
+      <div class="card saldo"><div class="label">Dinheiro que efetivamente entrou/saiu</div><div class="value mono">${brl(dinheiroDisponivel)}</div></div>
+    </div>
+    <div class="note" style="margin-top:0;">A diferença entre os dois mostra quanto do resultado "combinado" pro mês ainda não virou dinheiro de verdade (ficou pendente), ou quanto entrou/saiu esse mês referente a compromissos de outros meses.</div>
+  `;
+}
+
+// Caixa que Parece Livre — dinheiro em conta que parece disponível mas já está comprometido em 30 dias
+function renderCaixaQueParecelivre(){
+  const hoje = todayISO();
+  const em30 = new Date(); em30.setDate(em30.getDate()+30);
+  const em30ISO = em30.toISOString().slice(0,10);
+  const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+  const comprometido30d = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento<=em30ISO).reduce((s,l)=>s+valorEmAberto(l),0);
+  const cartoesNaoFaturados = state.cartoes.reduce((s,c)=>{ const comp = competenciaAtual(c); return s + (faturaStatus(c.id, comp)==='aberta' ? totalCompetencia(c.id, comp) : 0); }, 0);
+  const totalComprometido = comprometido30d + cartoesNaoFaturados;
+  const livreDeVerdade = Math.max(0, saldoContasHoje - totalComprometido);
+  return `
+    <div class="panel"><div class="panel-body" style="padding:26px 20px;text-align:center;">
+      <div style="font-size:12px;color:var(--text-soft);">Saldo em caixa que aparece na tela: ${brl(saldoContasHoje)}</div>
+      <div style="font-size:38px;font-weight:800;color:${livreDeVerdade<saldoContasHoje*0.3?'var(--danger)':'var(--success)'};margin-top:6px;">${brl(livreDeVerdade)}</div>
+      <div style="font-size:13px;color:var(--text-soft);margin-top:4px;">é o que sobra de verdade, livre de compromissos dos próximos 30 dias</div>
+    </div></div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;">
+      <div class="card"><div class="label">Contas a pagar em 30 dias</div><div class="value mono">${brl(comprometido30d)}</div></div>
+      <div class="card"><div class="label">Fatura de cartão em aberto</div><div class="value mono">${brl(cartoesNaoFaturados)}</div></div>
+    </div>
+  `;
+}
+
+// Efeito Dominó Financeiro — "se este cliente atrasar, o que fica sem cobertura?"
+function renderEfeitoDominoFinanceiro(){
+  const hoje = todayISO();
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const porCliente = {};
+  state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{ porCliente[l.fornecedor]=(porCliente[l.fornecedor]||0)+l.valor; });
+  const clientesTop = Object.entries(porCliente).sort((a,b)=>b[1]-a[1]).slice(0,15).map(([nome])=>nome);
+  const pendentesDoCliente = {};
+  clientesTop.forEach(nome=>{
+    pendentesDoCliente[nome] = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.fornecedor===nome).reduce((s,l)=>s+valorEmAberto(l),0);
+  });
+  return `
+    <div class="note" style="margin-top:0;">Escolha um cliente pra simular: se o que ele deve receber não entrar, quais contas a pagar dos próximos 30 dias ficariam sem cobertura?</div>
+    <div class="panel"><div class="panel-body" style="padding:18px;">
+      <div class="field"><label>Cliente</label><select id="dominoClienteSelect"><option value="">Selecione...</option>${clientesTop.map(n=>`<option value="${escapeHTML(n)}">${escapeHTML(n)} (a receber: ${brl(pendentesDoCliente[n])})</option>`).join('')}</select></div>
+      <div id="dominoResultado" style="margin-top:14px;"></div>
+    </div></div>
+  `;
+}
+
+// Quanto Tempo pra Recuperar um Prejuízo?
+function renderTempoRecuperarPrejuizo(){
+  const lucroMedioMensal = (()=>{
+    const hoje = new Date();
+    const meses = Array.from({length:3},(_,i)=>{ const d = new Date(hoje.getFullYear(), hoje.getMonth()-1-i, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+    const lucros = meses.map(m=>dadosMesGerencial(m,'todos').lucro);
+    return lucros.reduce((a,b)=>a+b,0)/lucros.length;
+  })();
+  return `
+    <div class="note" style="margin-top:0;">Lucro médio dos últimos 3 meses fechados: ${brl(lucroMedioMensal)}.</div>
+    <div class="panel"><div class="panel-body" style="padding:18px;">
+      <div class="field"><label>Valor do prejuízo a recuperar (R$)</label><input type="text" inputmode="decimal" id="tempoRecPrejuizo" placeholder="0,00"></div>
+      <div id="tempoRecResultado" style="margin-top:14px;"></div>
+    </div></div>
+  `;
+}
+
+// Custo da Inadimplência no Lucro — não só quanto está atrasado, mas o impacto no resultado
+function renderCustoInadimplenciaLucro(mesRef){
+  mesRef = mesRef || mesGlobalRef;
+  const hoje = todayISO();
+  const vencidoPendente = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento<hoje).reduce((s,l)=>s+valorEmAberto(l),0);
+  const dm = dadosMesGerencial(mesRef, 'todos');
+  const lucroSemInadimplencia = dm.lucro + vencidoPendente;
+  const pctDoLucro = dm.lucro!==0 ? (vencidoPendente/Math.abs(dm.lucro)*100) : null;
+  return `
+    <div class="report-controls"><input type="month" id="custoInadimplenciaMes" value="${mesRef}"></div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;">
+      <div class="card"><div class="label">Total vencido e não recebido</div><div class="value mono" style="color:var(--danger);">${brl(vencidoPendente)}</div></div>
+      <div class="card saldo"><div class="label">Resultado do mês se tivesse recebido tudo</div><div class="value mono">${brl(lucroSemInadimplencia)}</div></div>
+    </div>
+    ${pctDoLucro!==null ? `<div class="note" style="margin-top:0;">Isso equivale a ${pctDoLucro.toFixed(0)}% do resultado atual do mês — a inadimplência não é só "dinheiro atrasado", é resultado que deixou de se concretizar.</div>` : ''}
+  `;
+}
+
+// Risco de Aumento de Fornecedor — simula impacto de reajustes de 5/10/15/20% nos principais fornecedores
+function renderRiscoAumentoFornecedor(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const porFornecedor = {};
+  state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{ porFornecedor[l.fornecedor]=(porFornecedor[l.fornecedor]||0)+l.valor; });
+  const top5 = Object.entries(porFornecedor).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const gastoAnualTop5 = top5.reduce((s,f)=>s+f[1],0);
+  const cenarios = [5,10,15,20].map(pct=>({ pct, impactoAnual: gastoAnualTop5*(pct/100) }));
+  return `
+    <div class="note" style="margin-top:0;">Últimos 12 meses, considerando os 5 fornecedores de maior gasto (total: ${brl(gastoAnualTop5)}/ano).</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 18px;">
+      ${cenarios.map(c=>`<div style="display:flex;justify-content:space-between;padding:6px 0;"><span>Se reajustarem ${c.pct}%</span><span class="mono" style="font-weight:600;color:var(--warn);">+${brl(c.impactoAnual)}/ano</span></div>`).join('')}
+    </div></div>
+    <div class="dash-section-label">Os 5 fornecedores considerados</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">${top5.map(f=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span>${escapeHTML(f[0])}</span><span class="mono">${brl(f[1])}</span></div>`).join('')}</div></div>
+  `;
+}
+
+// Custo Oculto dos Fornecedores — cruza preço + prazo + frequência num score simples
+function renderCustoOcultoFornecedores(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const compras = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate);
+  const porFornecedor = {};
+  compras.forEach(l=>{
+    if(!porFornecedor[l.fornecedor]) porFornecedor[l.fornecedor] = { valor:0, qtd:0, atrasos:[] };
+    porFornecedor[l.fornecedor].valor += l.valor; porFornecedor[l.fornecedor].qtd += 1;
+    if(l.dataVencimento && l.dataPagamento) porFornecedor[l.fornecedor].atrasos.push(Math.round((new Date(l.dataPagamento)-new Date(l.dataVencimento))/86400000));
+  });
+  const lista = Object.entries(porFornecedor).map(([nome,d])=>{
+    const prazoMedio = d.atrasos.length ? d.atrasos.reduce((a,b)=>a+b,0)/d.atrasos.length : 0;
+    return { nome, valor:d.valor, qtd:d.qtd, prazoMedio };
+  }).sort((a,b)=>b.valor-a.valor).slice(0,15);
+  return `
+    <div class="note" style="margin-top:0;">Últimos 12 meses. Cruza volume comprado, frequência e prazo médio de pagamento — um fornecedor "barato" mas que exige pagamento muito rápido pode custar mais caro em fôlego de caixa do que parece.</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${lista.map(f=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto auto auto;">
+          <span>${escapeHTML(f.nome)}</span>
+          <span class="mono" style="color:var(--text-soft);">${f.qtd}x</span>
+          <span class="mono" style="color:${f.prazoMedio>0?'var(--warn)':'var(--success)'};">${f.prazoMedio>=0?'+':''}${f.prazoMedio.toFixed(0)}d</span>
+          <span class="mono" style="font-weight:600;">${brl(f.valor)}</span>
+        </div>
+      `).join('') || `<div class="empty">Sem dados suficientes.</div>`}
+    </div></div>
+  `;
+}
+
+// Cliente que Dá Trabalho e Pouco Resultado — muitas transações, baixo ticket ou baixa margem
+function renderClienteDaTrabalhoPoucoResultado(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const vendas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate);
+  const porCliente = {};
+  vendas.forEach(l=>{
+    if(!porCliente[l.fornecedor]) porCliente[l.fornecedor] = { valor:0, qtd:0, custo:0, temCusto:0 };
+    porCliente[l.fornecedor].valor += l.valor; porCliente[l.fornecedor].qtd += 1;
+    if(l.custoProdutoVendido!=null){ porCliente[l.fornecedor].custo += l.custoProdutoVendido; porCliente[l.fornecedor].temCusto += 1; }
+  });
+  const lista = Object.entries(porCliente).filter(([,d])=>d.qtd>=3).map(([nome,d])=>({ nome, ticket:d.valor/d.qtd, qtd:d.qtd, margemPct: d.temCusto>0 ? (d.valor-d.custo)/d.valor*100 : null })).sort((a,b)=>a.ticket-b.ticket);
+  const suspeitos = lista.filter(c=>c.qtd>=5 && (c.margemPct===null || c.margemPct<15)).slice(0,10);
+  return `
+    <div class="note" style="margin-top:0;">Últimos 12 meses. Clientes com 5+ compras, ticket baixo ou margem apertada — muito contato/esforço operacional pra pouco resultado financeiro.</div>
+    ${!suspeitos.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum cliente nesse perfil identificado.</div></div>` : `
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${suspeitos.map(c=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
+          <span>${escapeHTML(c.nome)}</span>
+          <span class="mono" style="color:var(--text-soft);">${c.qtd}x · tkt ${brl(c.ticket)}</span>
+          <span class="mono" style="color:${c.margemPct===null?'var(--text-soft)':'var(--warn)'};">${c.margemPct!==null?c.margemPct.toFixed(0)+'%':'sem custo'}</span>
+        </div>
+      `).join('')}
+    </div></div>`}
+  `;
+}
+
+// Cliente Mais Valioso — combina receita + margem + frequência + pontualidade num score
+function renderClienteMaisValioso(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const vendas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate);
+  const porCliente = {};
+  vendas.forEach(l=>{
+    if(!porCliente[l.fornecedor]) porCliente[l.fornecedor] = { valor:0, qtd:0, custo:0, temCusto:0, atrasos:[] };
+    const c = porCliente[l.fornecedor];
+    c.valor += l.valor; c.qtd += 1;
+    if(l.custoProdutoVendido!=null){ c.custo += l.custoProdutoVendido; c.temCusto += 1; }
+    if(l.dataVencimento) c.atrasos.push(Math.round((new Date(l.dataPagamento)-new Date(l.dataVencimento))/86400000));
+  });
+  const clientes = Object.entries(porCliente).filter(([,c])=>c.qtd>=2).map(([nome,c])=>{
+    const margemPct = c.temCusto>0 ? (c.valor-c.custo)/c.valor*100 : 15; // assume média se não tem dado
+    const prazoMedio = c.atrasos.length ? c.atrasos.reduce((a,b)=>a+b,0)/c.atrasos.length : 0;
+    const pontualidadeScore = Math.max(0, 100-prazoMedio*3);
+    return { nome, valor:c.valor, qtd:c.qtd, margemPct, pontualidadeScore };
+  });
+  const maxValor = Math.max(1, ...clientes.map(c=>c.valor));
+  const maxQtd = Math.max(1, ...clientes.map(c=>c.qtd));
+  const ranking = clientes.map(c=>{
+    const scoreValor = (c.valor/maxValor)*40;
+    const scoreMargem = Math.max(0,Math.min(1,c.margemPct/30))*25;
+    const scoreFrequencia = (c.qtd/maxQtd)*20;
+    const scorePontualidade = (c.pontualidadeScore/100)*15;
+    return { ...c, scoreTotal: scoreValor+scoreMargem+scoreFrequencia+scorePontualidade };
+  }).sort((a,b)=>b.scoreTotal-a.scoreTotal).slice(0,10);
+  return `
+    <div class="note" style="margin-top:0;">Últimos 12 meses. Score combina receita (40%), margem (25%, assume 15% se não souber o custo), frequência (20%) e pontualidade de pagamento (15%) — não é simplesmente quem mais compra.</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${ranking.map((c,i)=>`
+        <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto;">
+          <span class="mono" style="color:var(--text-soft);">#${i+1}</span>
+          <span>${escapeHTML(c.nome)}</span>
+          <span class="mono" style="font-weight:600;">${c.scoreTotal.toFixed(0)} pts</span>
+        </div>
+      `).join('') || `<div class="empty">Sem dados suficientes.</div>`}
+    </div></div>
+  `;
+}
+
+// Despesas que Crescem Mais que a Receita — compara taxa de crescimento
+function renderDespesasCrescemMaisQueReceita(){
+  const hoje = new Date();
+  const de1 = new Date(hoje.getFullYear(), hoje.getMonth()-3, 1).toISOString().slice(0,10);
+  const ate1 = new Date(hoje.getFullYear(), hoje.getMonth(), 0).toISOString().slice(0,10);
+  const de2 = new Date(hoje.getFullYear(), hoje.getMonth()-6, 1).toISOString().slice(0,10);
+  const ate2 = new Date(hoje.getFullYear(), hoje.getMonth()-3, 0).toISOString().slice(0,10);
+  const receitaRecente = resultadoOperacionalPeriodo(de1,ate1).receitaTotal;
+  const receitaAnterior = resultadoOperacionalPeriodo(de2,ate2).receitaTotal;
+  const receitaVarPct = receitaAnterior>0 ? ((receitaRecente-receitaAnterior)/receitaAnterior*100) : 0;
+  const despesaPorCategoria = (de,ate) => {
+    const porCat = {};
+    state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{ porCat[l.categoria]=(porCat[l.categoria]||0)+l.valor; });
+    return porCat;
+  };
+  const recente = despesaPorCategoria(de1,ate1), anterior = despesaPorCategoria(de2,ate2);
+  const categorias = [...new Set([...Object.keys(recente),...Object.keys(anterior)])];
+  const foraDeControle = categorias.map(cat=>{
+    const r = recente[cat]||0, a = anterior[cat]||0;
+    const varPct = a>0 ? ((r-a)/a*100) : (r>0?100:0);
+    return { cat, varPct, valor:r };
+  }).filter(c=>c.valor>0 && c.varPct>receitaVarPct+5).sort((a,b)=>b.varPct-a.varPct);
+  return `
+    <div class="note" style="margin-top:0;">Receita cresceu ${receitaVarPct.toFixed(0)}% (últimos 3 meses vs 3 anteriores). Categorias abaixo cresceram mais que isso — sinal de custo saindo do controle proporcionalmente.</div>
+    ${!foraDeControle.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhuma categoria crescendo mais que a receita. 🎉</div></div>` : `
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${foraDeControle.map(c=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span>${escapeHTML(c.cat)}</span><span class="mono" style="font-weight:600;color:var(--danger);">+${c.varPct.toFixed(0)}%</span></div>`).join('')}
+    </div></div>`}
+  `;
+}
+
+// Simulador de Crescimento — quanto de caixa/capital de giro um crescimento de X% exigiria
+function renderSimuladorCrescimento(){
+  const receitaMediaMensal = mediaReceitaMensalRecente();
+  const aReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.origem!=='transferencia').reduce((s,l)=>s+valorEmAberto(l),0);
+  const estoqueInsumos = totalEstoqueInsumos();
+  const ncgAtual = aReceber + estoqueInsumos;
+  return `
+    <div class="note" style="margin-top:0;">Receita média mensal atual: ${brl(receitaMediaMensal)}. NCG atual (a receber + estoque): ${brl(ncgAtual)}.</div>
+    <div class="panel"><div class="panel-body" style="padding:18px;">
+      <div class="field"><label>% de crescimento a simular</label><input type="text" inputmode="decimal" id="simCrescPct" placeholder="Ex: 20" value="20"></div>
+      <div id="simCrescResultado" style="margin-top:14px;"></div>
+    </div></div>
+  `;
+}
+
+// Limite de Crescimento Seguro — até quanto dá pra crescer sem faltar capital de giro
+function renderLimiteCrescimentoSeguro(){
+  const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+  const de90 = new Date(); de90.setDate(de90.getDate()-90);
+  const gastoMedioDiario = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90.toISOString().slice(0,10) && ev.data<=todayISO() && !ehMovimentoDeCapital(ev)).reduce((s,ev)=>s+ev.valor,0)/90;
+  const reservaMinima = gastoMedioDiario*60;
+  const folgaDisponivel = Math.max(0, saldoContasHoje-reservaMinima);
+  const aReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.origem!=='transferencia').reduce((s,l)=>s+valorEmAberto(l),0);
+  const estoqueInsumos = totalEstoqueInsumos();
+  const ncgAtual = aReceber + estoqueInsumos;
+  const limitePct = ncgAtual>0 ? (folgaDisponivel/ncgAtual*100) : null;
+  return `
+    <div class="panel"><div class="panel-body" style="padding:26px 20px;text-align:center;">
+      <div style="font-size:44px;font-weight:800;color:var(--blue-accent);">${limitePct!==null?limitePct.toFixed(0)+'%':'—'}</div>
+      <div style="font-size:13px;color:var(--text-soft);margin-top:4px;">de crescimento a folga de caixa atual sustentaria, sem precisar de dinheiro novo</div>
+    </div></div>
+    <div class="note" style="margin-top:0;">Baseado em: folga de caixa acima da reserva mínima (${brl(folgaDisponivel)}) ÷ Necessidade de Capital de Giro atual (${brl(ncgAtual)}). Crescer além disso provavelmente exigiria captar mais capital (empréstimo, aporte) pra sustentar o ciclo operacional maior.</div>
+  `;
+}
+
+// Crescimento que Dá Prejuízo — detecta se a margem de contribuição atual sustenta crescer
+function renderCrescimentoQueDaPrejuizo(){
+  const dm = dadosMesGerencial(mesGlobalRef, 'todos');
+  const margemContribPct = dm.margemContribPct!==null ? dm.margemContribPct*100 : null;
+  const risco = margemContribPct!==null && margemContribPct<=0;
+  return `
+    <div class="panel"><div class="panel-body" style="padding:26px 20px;text-align:center;">
+      <div style="font-size:38px;font-weight:800;color:${risco?'var(--danger)':'var(--success)'};">${margemContribPct!==null?margemContribPct.toFixed(1)+'%':'—'}</div>
+      <div style="font-size:13px;color:var(--text-soft);margin-top:4px;">margem de contribuição atual</div>
+    </div></div>
+    <div class="note" style="${risco?'border-color:var(--danger);':'border-color:var(--success);'}">${risco ? '⚠️ Sua margem de contribuição está zerada ou negativa — cada venda a mais está gerando MAIS prejuízo, não lucro. Crescer nesse cenário piora o resultado, não melhora. Reveja preço ou custo variável antes de investir em crescer.' : `Com margem de contribuição positiva (${margemContribPct.toFixed(1)}%), cada venda a mais ajuda a cobrir o custo fixo e gerar lucro — crescer tende a ajudar, desde que o custo fixo não precise crescer na mesma proporção.`}</div>
+  `;
+}
+
+// Qual Crescimento Vale a Pena? — compara crescer receita X% vs reduzir despesa Y%, no impacto do lucro
+function renderQualCrescimentoValeAPena(){
+  const dm = dadosMesGerencial(mesGlobalRef, 'todos');
+  const margemContribPct = dm.margemContribPct || 0;
+  return `
+    <div class="note" style="margin-top:0;">Compara o efeito no lucro de crescer a receita vs. reduzir a despesa, na mesma proporção percentual.</div>
+    <div class="panel"><div class="panel-body" style="padding:18px;">
+      <div class="field"><label>% a comparar</label><input type="text" inputmode="decimal" id="qualCrescPct" placeholder="Ex: 10" value="10"></div>
+      <div id="qualCrescResultado" style="margin-top:14px;"></div>
+    </div></div>
+    <div class="note">Regra geral: aumentar receita só melhora o lucro na proporção da margem de contribuição (${(margemContribPct*100).toFixed(1)}%) — já reduzir despesa vira lucro quase 1 pra 1. Por isso, na maioria dos negócios, cortar R$1 de despesa costuma valer mais que vender R$1 a mais.</div>
+  `;
+}
+
+// "O Que Eu Faria Se Fosse o Dono?" — narrativa em formato de plano de ação
+function renderOQueFariaSeFosseDono(){
+  const hoje = todayISO();
+  const dm = dadosMesGerencial(mesGlobalRef, 'todos');
+  const [anoM,mesM] = mesGlobalRef.split('-').map(Number);
+  const mesAnteriorRef = mesM===1 ? `${anoM-1}-12` : `${anoM}-${String(mesM-1).padStart(2,'0')}`;
+  const dmAnterior = dadosMesGerencial(mesAnteriorRef, 'todos');
+  const receitaVarPct = dmAnterior.receita>0 ? ((dm.receita-dmAnterior.receita)/dmAnterior.receita*100) : 0;
+  const despesaVarPct = dmAnterior.despesaTotal>0 ? ((dm.despesaTotal-dmAnterior.despesaTotal)/dmAnterior.despesaTotal*100) : 0;
+
+  const { de:de12m, ate:ate12m } = ultimos12MesesAte(mesGlobalRef);
+  const porCliente = {};
+  state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=de12m && l.dataPagamento<=ate12m).forEach(l=>{ porCliente[l.fornecedor]=(porCliente[l.fornecedor]||0)+l.valor; });
+  const totalCli = Object.values(porCliente).reduce((a,b)=>a+b,0);
+  const top3valor = Object.values(porCliente).sort((a,b)=>b-a).slice(0,3).reduce((a,b)=>a+b,0);
+  const pctTop3 = totalCli>0 ? (top3valor/totalCli*100) : 0;
+
+  const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+  const de90 = new Date(); de90.setDate(de90.getDate()-90);
+  const gastoMedioDiario = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90.toISOString().slice(0,10) && ev.data<=hoje && !ehMovimentoDeCapital(ev)).reduce((s,ev)=>s+ev.valor,0)/90;
+  const reservaMinima = gastoMedioDiario*60;
+  const caixaSeguro = Math.max(0, saldoContasHoje-reservaMinima);
+  const lucroMedioMensal = (()=>{ const meses=[mesGlobalRef, mesAnteriorRef]; const lucros=meses.map(m=>dadosMesGerencial(m,'todos').lucro); return lucros.reduce((a,b)=>a+b,0)/lucros.length; })();
+  const valorInvestimentoRecomendado = Math.min(caixaSeguro, Math.max(0,lucroMedioMensal));
+
+  const situacaoSaudavel = dm.margemLiquidaPct>0 && saldoContasHoje>=reservaMinima;
+  const problemaPrincipal = despesaVarPct>receitaVarPct+5 ? `despesas cresceram ${despesaVarPct.toFixed(0)}% enquanto a receita cresceu ${receitaVarPct.toFixed(0)}%`
+    : pctTop3>=40 ? `${pctTop3.toFixed(0)}% da receita concentrada em só 3 clientes`
+    : saldoContasHoje<reservaMinima ? 'caixa abaixo da reserva mínima recomendada'
+    : null;
+  const acaoPrioritaria = despesaVarPct>receitaVarPct+5 ? 'reduzir despesas que cresceram acima da receita, antes de assumir novos compromissos'
+    : pctTop3>=40 ? 'buscar diversificar a base de clientes'
+    : saldoContasHoje<reservaMinima ? 'priorizar reconstruir a reserva de caixa'
+    : 'manter o ritmo, sem urgência de mudança';
+
+  return `
+    <div class="panel"><div class="panel-body" style="padding:22px;">
+      <div style="font-size:13.5px;line-height:1.9;">
+        <div><strong>Situação atual:</strong> empresa ${situacaoSaudavel?'saudável':'em atenção'}${pctTop3>=30?`, porém com concentração elevada em clientes (${pctTop3.toFixed(0)}% em 3 clientes)`:''}.</div>
+        <div style="margin-top:8px;"><strong>Problema principal:</strong> ${problemaPrincipal || 'nenhum problema grave identificado no momento'}.</div>
+        <div style="margin-top:8px;"><strong>Oportunidade:</strong> ${despesaVarPct>5 ? `revisar despesas recorrentes poderia liberar caixa mensal` : 'manter a operação enxuta como está'}.</div>
+        <div style="margin-top:8px;"><strong>Recomendação:</strong> ${saldoContasHoje<reservaMinima ? 'não assumir novos compromissos fixos neste momento' : 'seguir com cautela, sem grandes mudanças bruscas'}.</div>
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);">
+          <div><strong>Caixa seguro disponível:</strong> ${brl(caixaSeguro)}</div>
+          <div style="margin-top:4px;"><strong>Valor recomendado pra investir:</strong> ${brl(valorInvestimentoRecomendado)}</div>
+          <div style="margin-top:4px;"><strong>Ação prioritária:</strong> ${acaoPrioritaria}.</div>
+        </div>
+      </div>
+    </div></div>
+    <div class="note" style="margin-top:0;">Gerado automaticamente a partir dos indicadores atuais. É uma leitura simplificada dos números — não substitui seu julgamento sobre o contexto do negócio.</div>
   `;
 }
 
@@ -16097,6 +16545,24 @@ function attachViewHandlers(){
         relatorioAtivo==='simulador_decisao_compra' ? renderSimuladorDecisaoCompra() :
         relatorioAtivo==='simulador_antecipacao' ? renderSimuladorAntecipacao() :
         relatorioAtivo==='reversoes_financeiras' ? renderReversoesFinanceiras() :
+        relatorioAtivo==='oque_faria_se_fosse_dono' ? renderOQueFariaSeFosseDono() :
+        relatorioAtivo==='linha_tempo_financeira' ? renderLinhaTempoFinanceira() :
+        relatorioAtivo==='efeito_domino_financeiro' ? renderEfeitoDominoFinanceiro() :
+        relatorioAtivo==='resultado_sem_maiores_clientes' ? renderResultadoSemMaioresClientes() :
+        relatorioAtivo==='resultado_sem_maior_despesa' ? renderResultadoSemMaiorDespesa() :
+        relatorioAtivo==='lucro_de_verdade' ? renderLucroDeVerdade() :
+        relatorioAtivo==='caixa_parece_livre' ? renderCaixaQueParecelivre() :
+        relatorioAtivo==='tempo_recuperar_prejuizo' ? renderTempoRecuperarPrejuizo() :
+        relatorioAtivo==='custo_inadimplencia_lucro' ? renderCustoInadimplenciaLucro() :
+        relatorioAtivo==='risco_aumento_fornecedor' ? renderRiscoAumentoFornecedor() :
+        relatorioAtivo==='custo_oculto_fornecedores' ? renderCustoOcultoFornecedores() :
+        relatorioAtivo==='cliente_trabalho_pouco_resultado' ? renderClienteDaTrabalhoPoucoResultado() :
+        relatorioAtivo==='cliente_mais_valioso' ? renderClienteMaisValioso() :
+        relatorioAtivo==='despesas_crescem_mais_receita' ? renderDespesasCrescemMaisQueReceita() :
+        relatorioAtivo==='simulador_crescimento' ? renderSimuladorCrescimento() :
+        relatorioAtivo==='limite_crescimento_seguro' ? renderLimiteCrescimentoSeguro() :
+        relatorioAtivo==='crescimento_da_prejuizo' ? renderCrescimentoQueDaPrejuizo() :
+        relatorioAtivo==='qual_crescimento_vale_pena' ? renderQualCrescimentoValeAPena() :
         relatorioAtivo==='breakeven' ? renderRelatorioBreakEven() :
         relatorioAtivo==='valuation' ? renderRelatorioValuation() :
         relatorioAtivo==='mensal' ? renderSuperRelatorioMensal(mensalMesRef) :
@@ -16250,7 +16716,79 @@ function attachViewHandlers(){
         simAntTaxa?.addEventListener('input', calcularSimAnt);
         simAntDias?.addEventListener('input', calcularSimAnt);
       }
-      [['fclMes','renderFluxoCaixaLivre'],['cvlMes','renderCVLMultiproduto'],['fccMes','renderFluxoCaixaCentroCusto'],['novosRecMes','renderNovosVsRecorrentes'],['taxasBancMes','renderTaxasTarifasBancarias'],['fluxoDiarioMes','renderFluxoCaixaDiario'],['receitasCategoriaMes','renderReceitasPorCategoria'],['comprasPeriodoMes','renderComprasPorPeriodo'],['despesasCentroCustoMes','renderDespesasPorCentroCusto'],['crescimentoClientesMes','renderCrescimentoClientes'],['custoFinanceiroVendasMes','renderCustoFinanceiroVendas'],['desembolsoMes','renderDesembolsoFinanceiro'],['paraOndeFoiMes','renderParaOndeFoiDinheiro'],['causasLucroMes','renderCausasVariacaoLucro'],['eficienciaDinheiroMes','renderEficienciaDinheiro'],['diagnosticoMes','renderDiagnosticoAutomatico']].forEach(([idc,fn])=>{
+      const dominoClienteSelect = document.getElementById('dominoClienteSelect');
+      if(dominoClienteSelect) dominoClienteSelect.addEventListener('change', ()=>{
+        const nome = dominoClienteSelect.value;
+        const el = document.getElementById('dominoResultado');
+        if(!nome){ el.innerHTML=''; return; }
+        const hoje = todayISO();
+        const em30 = new Date(); em30.setDate(em30.getDate()+30);
+        const em30ISO = em30.toISOString().slice(0,10);
+        const valorEsperado = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.fornecedor===nome).reduce((s,l)=>s+valorEmAberto(l),0);
+        const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+        const aPagar30d = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento<=em30ISO).sort((a,b)=>a.dataVencimento.localeCompare(b.dataVencimento));
+        const totalAPagar30d = aPagar30d.reduce((s,l)=>s+valorEmAberto(l),0);
+        const saldoProjetadoComCliente = saldoContasHoje - totalAPagar30d;
+        const saldoProjetadoSemCliente = saldoContasHoje - valorEsperado - totalAPagar30d;
+        let contasAfetadas = [];
+        if(saldoProjetadoSemCliente<0){
+          let acumulado = saldoContasHoje - valorEsperado;
+          for(const l of aPagar30d){ acumulado -= valorEmAberto(l); if(acumulado<0) contasAfetadas.push(l); }
+        }
+        el.innerHTML = `
+          <div class="cards" style="grid-template-columns:1fr 1fr;">
+            <div class="card"><div class="label">Saldo projetado (30d) com esse cliente pagando</div><div class="value mono" style="color:${saldoProjetadoComCliente>=0?'var(--success)':'var(--danger)'};">${brl(saldoProjetadoComCliente)}</div></div>
+            <div class="card saldo"><div class="label">Saldo projetado (30d) SE ELE ATRASAR</div><div class="value mono" style="color:${saldoProjetadoSemCliente>=0?'var(--success)':'var(--danger)'};">${brl(saldoProjetadoSemCliente)}</div></div>
+          </div>
+          ${contasAfetadas.length ? `<div class="note" style="border-color:var(--danger);margin-top:10px;">⚠️ Se esse valor não entrar, ${contasAfetadas.length} conta(s) a pagar ficariam sem cobertura: ${contasAfetadas.slice(0,3).map(l=>escapeHTML(l.descricao)).join(', ')}${contasAfetadas.length>3?'…':''}</div>` : `<div class="note" style="border-color:var(--success);margin-top:10px;">✓ Mesmo se esse cliente atrasar, o caixa dos próximos 30 dias continuaria positivo.</div>`}
+        `;
+      });
+      const tempoRecPrejuizo = document.getElementById('tempoRecPrejuizo');
+      if(tempoRecPrejuizo) tempoRecPrejuizo.addEventListener('input', ()=>{
+        const prejuizo = numBR(tempoRecPrejuizo.value);
+        const el = document.getElementById('tempoRecResultado');
+        if(isNaN(prejuizo) || prejuizo<=0){ el.innerHTML=''; return; }
+        const hoje2 = new Date();
+        const mesesBase = Array.from({length:3},(_,i)=>{ const d = new Date(hoje2.getFullYear(), hoje2.getMonth()-1-i, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+        const lucroMedio = mesesBase.map(m=>dadosMesGerencial(m,'todos').lucro).reduce((a,b)=>a+b,0)/3;
+        if(lucroMedio<=0){ el.innerHTML = `<div class="note" style="border-color:var(--danger);">Com o lucro médio atual (${brl(lucroMedio)}), não tem como recuperar — é preciso primeiro voltar a dar lucro positivo.</div>`; return; }
+        const mesesNecessarios = prejuizo/lucroMedio;
+        el.innerHTML = `<div class="note">No ritmo atual de lucro médio (${brl(lucroMedio)}/mês), levaria aproximadamente <strong>${mesesNecessarios.toFixed(1)} mês(es)</strong> pra recuperar esse prejuízo.</div>`;
+      });
+      const simCrescPct = document.getElementById('simCrescPct');
+      const calcularSimCresc = ()=>{
+        const pct = numBR(simCrescPct.value) || 0;
+        const el = document.getElementById('simCrescResultado');
+        const receitaMediaMensal = mediaReceitaMensalRecente();
+        const aReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.origem!=='transferencia').reduce((s,l)=>s+valorEmAberto(l),0);
+        const ncgAtual = aReceber + totalEstoqueInsumos();
+        const novaReceita = receitaMediaMensal*(1+pct/100);
+        const novoNCG = ncgAtual*(1+pct/100);
+        const capitalAdicionalNecessario = novoNCG - ncgAtual;
+        el.innerHTML = `
+          <div class="cards" style="grid-template-columns:1fr 1fr;">
+            <div class="card"><div class="label">Nova receita mensal estimada</div><div class="value mono">${brl(novaReceita)}</div></div>
+            <div class="card saldo"><div class="label">Capital de giro adicional necessário</div><div class="value mono">${brl(capitalAdicionalNecessario)}</div></div>
+          </div>
+          <div class="note" style="margin-top:10px;">Crescer ${pct}% tende a exigir mais dinheiro "preso" em estoque e a receber, proporcionalmente — esse é o valor aproximado que precisaria estar disponível pra sustentar esse crescimento sem sufocar o caixa.</div>`;
+      };
+      if(simCrescPct){ simCrescPct.addEventListener('input', calcularSimCresc); calcularSimCresc(); }
+      const qualCrescPct = document.getElementById('qualCrescPct');
+      const calcularQualCresc = ()=>{
+        const pct = numBR(qualCrescPct.value) || 0;
+        const el = document.getElementById('qualCrescResultado');
+        const dmQ = dadosMesGerencial(mesGlobalRef, 'todos');
+        const impactoReceita = dmQ.receita*(pct/100)*(dmQ.margemContribPct||0);
+        const impactoDespesa = dmQ.despesaTotal*(pct/100);
+        el.innerHTML = `
+          <div class="cards" style="grid-template-columns:1fr 1fr;">
+            <div class="card"><div class="label">Crescer receita ${pct}%</div><div class="value mono" style="color:var(--success);">+${brl(impactoReceita)} no lucro</div></div>
+            <div class="card saldo"><div class="label">Reduzir despesa ${pct}%</div><div class="value mono" style="color:var(--success);">+${brl(impactoDespesa)} no lucro</div></div>
+          </div>
+          <div class="note" style="margin-top:10px;">${impactoDespesa>impactoReceita ? 'Reduzir despesa nessa proporção traz mais resultado do que crescer a receita na mesma proporção.' : 'Crescer a receita nessa proporção traz mais resultado do que reduzir a despesa na mesma proporção — incomum, mas acontece quando a margem de contribuição é alta.'}</div>`;
+      };
+      if(qualCrescPct){ qualCrescPct.addEventListener('input', calcularQualCresc); calcularQualCresc(); }
+      [['fclMes','renderFluxoCaixaLivre'],['cvlMes','renderCVLMultiproduto'],['fccMes','renderFluxoCaixaCentroCusto'],['novosRecMes','renderNovosVsRecorrentes'],['taxasBancMes','renderTaxasTarifasBancarias'],['fluxoDiarioMes','renderFluxoCaixaDiario'],['receitasCategoriaMes','renderReceitasPorCategoria'],['comprasPeriodoMes','renderComprasPorPeriodo'],['despesasCentroCustoMes','renderDespesasPorCentroCusto'],['crescimentoClientesMes','renderCrescimentoClientes'],['custoFinanceiroVendasMes','renderCustoFinanceiroVendas'],['desembolsoMes','renderDesembolsoFinanceiro'],['paraOndeFoiMes','renderParaOndeFoiDinheiro'],['causasLucroMes','renderCausasVariacaoLucro'],['eficienciaDinheiroMes','renderEficienciaDinheiro'],['diagnosticoMes','renderDiagnosticoAutomatico'],['semMaiorDespesaMes','renderResultadoSemMaiorDespesa'],['lucroVerdadeMes','renderLucroDeVerdade'],['custoInadimplenciaMes','renderCustoInadimplenciaLucro']].forEach(([idc,fn])=>{
         const el = document.getElementById(idc);
         if(el) el.addEventListener('change', ()=>{
           if(!el.value) return;
