@@ -1941,7 +1941,7 @@ async function sincronizarPedidosVK(){
       if(p.status === 'cancelado'){
         cancelados++;
         if(existente){
-          if(existente.status !== 'cancelado'){ existente.status = 'cancelado'; existente.dataPagamento = null; marcadosCancelados++; }
+          if(existente.status !== 'cancelado'){ registrarReversaoSePreciso(existente, existente.status, 'cancelado'); existente.status = 'cancelado'; existente.dataPagamento = null; marcadosCancelados++; }
           return;
         }
         if(emAprovacao){
@@ -2551,6 +2551,17 @@ function sugerirCategoriaFornecedor(descricao, tipo){
     fornecedor: fornecedorSugerido ? fornecedorSugerido[0] : null, qtdFornecedor: fornecedorSugerido ? fornecedorSugerido[1] : 0,
     totalMatches: matches.length
   };
+}
+
+// Registra uma reversão SÓ quando o lançamento estava efetivamente pago/recebido e deixou de estar
+// (voltou a pendente, ou foi cancelado depois de já ter sido pago). Diferente do antigo log de
+// auditoria (removido por ser write-only e pesar no armazenamento) — aqui só grava o que interessa
+// pro relatório "Lançamentos Estornados/Revertidos", então cresce devagar e tem uso de verdade.
+function registrarReversaoSePreciso(l, statusAntigo, statusNovo){
+  if((statusAntigo==='pago'||statusAntigo==='recebido') && statusNovo!==statusAntigo){
+    if(!l.statusHistorico) l.statusHistorico = [];
+    l.statusHistorico.push({ de: statusAntigo, para: statusNovo, data: todayISO(), valorNaEpoca: l.valor, dataPagamentoQueTinha: l.dataPagamento });
+  }
 }
 
 function opcoesCategoriaHTML(tipo, selecionada){
@@ -6680,6 +6691,7 @@ function viewRelatorios(){
     { id:'dinheiro_transitorio', icone:'↔️', nome:'Dinheiro Transitório', desc:'Valores que passam pelas contas mas não são receita/despesa real' },
     { id:'simulador_decisao_compra', icone:'🛒', nome:'Simulador de Decisão de Compra', desc:'Compara comprar à vista, parcelado ou não comprar' },
     { id:'simulador_antecipacao', icone:'⏩', nome:'Simulador de Antecipação', desc:'Compara receber antecipado com esperar o vencimento' },
+    { id:'reversoes_financeiras', icone:'↩️', nome:'Reversões Financeiras', desc:'Lançamentos pagos/recebidos que depois foram revertidos ou cancelados' },
     { id:'breakeven', icone:'⚖️', nome:'Ponto de Equilíbrio', desc:'Vendas mínimas pra cobrir os custos, em 3 cenários (otimista/realista/pessimista)' },
     { id:'valuation', icone:'💎', nome:'Valuation Estimado', desc:'Estimativa educacional de valor da empresa por múltiplos de EBITDA e faturamento' },
     { id:'aging', icone:'⏳', nome:'Aging — Vencidos por Faixa', desc:'Contas a receber e a pagar por faixa de atraso, com ranking de inadimplentes' },
@@ -6712,7 +6724,7 @@ function viewRelatorios(){
 const RELATORIOS_NOMES = {
   gerencial:'Dashboard Gerencial', executivo:'Dashboard Executivo', dre:'DRE', balanco:'Balanço Patrimonial', mei:'Declaração MEI', indicadores:'Indicadores Financeiros',
   produto:'Rentabilidade por Produto', investimentos:'Relatório de Investimentos', liquidez:'Índices de Liquidez', aging:'Aging — Vencidos por Faixa', dfc:'DFC — Fluxo de Caixa', cartoes:'Cartões de Crédito',
-  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio', yoy:'Comparativo Ano a Ano', sazonalidade:'Análise de Sazonalidade', calendario_vencimentos:'Calendário de Vencimentos', carga_tributaria:'Carga Tributária', simulador_preco:'Simulador de Preço', formas_pagamento:'Formas de Pagamento', rentabilidade_cliente:'Rentabilidade por Cliente', pe_produto:'Ponto de Equilíbrio por Produto', metas_comerciais:'Metas Comerciais', fixo_variavel_tempo:'Custo Fixo vs Variável no Tempo', onde_dinheiro:'Onde Meu Dinheiro Está', health_score:'Saúde da Empresa', eficiencia_cobranca:'Eficiência de Cobrança', variacao_preco_insumos:'Variação de Preço de Insumos', concentracao_clientes:'Concentração de Risco de Clientes', volume_margem_produto:'Ranking Volume x Margem por Produto', saude_cadastros:'Saúde dos Cadastros', projecao_comissoes:'Projeção de Comissões a Pagar', fcl:'Fluxo de Caixa Livre', payback:'Payback de Investimento', cvl_multiproduto:'Análise Custo-Volume-Lucro', dmpl:'Mutações do Patrimônio Líquido', provisoes:'Provisões (Férias/13º)', fluxo_centro_custo:'Fluxo de Caixa por Centro de Custo', conciliacao_saldo:'Conciliação de Saldo por Conta', taxa_conversao_funil:'Taxa de Conversão do Funil', novos_vs_recorrentes:'Novos Clientes vs. Recorrentes', taxa_recompra:'Taxa de Recompra', ltv_cac:'LTV e Relação LTV/CAC', abc_estoque:'Curva ABC de Estoque', estoque_abaixo_minimo:'Estoque Abaixo do Mínimo', obsolescencia_estoque:'Obsolescência de Estoque', comparativo_preco_fornecedores:'Comparativo de Preço entre Fornecedores', calendario_obrigacoes:'Calendário de Obrigações Acessórias', manutencao_consolidada:'Manutenção Preventiva Consolidada', vida_util_remanescente:'Vida Útil Remanescente', roi_ativo:'Custo e Valor Atual por Ativo', alocacao_ativos:'Alocação de Ativos', divergencias:'Divergências e Exceções', posicao_bancaria:'Posição Bancária Consolidada', taxas_bancarias:'Taxas e Tarifas Bancárias', amortizacao_emprestimos:'Amortização de Empréstimos', seguros_ativos:'Seguros de Ativos', preco_tabela_praticado:'Preço de Tabela vs. VK', limite_credito:'Limite de Crédito Disponível', multas_penalidades:'Multas e Penalidades', central_inteligencia:'Central de Inteligência Financeira', central_alertas:'Central de Alertas', calendario_financeiro:'Calendário Financeiro', central_cliente:'Central do Cliente', centro_comando:'Centro de Comando', fluxo_caixa_diario:'Fluxo de Caixa Diário', receitas_categoria:'Receitas por Categoria', margem_mensal:'Margem Mensal', ticket_medio_evolutivo:'Ticket Médio Evolutivo', vendas_canceladas:'Vendas Canceladas', comprometimento_futuro:'Comprometimento Futuro', parcelamentos:'Parcelamentos', receita_cliente_tempo:'Receita por Cliente ao Longo do Tempo', clientes_perdidos_risco:'Clientes Perdidos e em Risco', compras_periodo:'Compras por Período', evolucao_custos:'Evolução dos Custos', inflacao_interna:'Inflação Interna da Empresa', lucro_cliente:'Lucro por Cliente', capital_giro:'Capital de Giro', endividamento_vencimento:'Endividamento por Vencimento', super_relatorio_anual:'Super Relatório Anual', despesas_centro_custo:'Despesas por Centro de Custo', crescimento_clientes:'Crescimento de Clientes', dependencia_financeira:'Dependência Financeira', lucro_canal:'Lucro por Canal', obrigacoes_futuras:'Obrigações Futuras', evolucao_patrimonial:'Evolução Patrimonial', giro_caixa:'Giro de Caixa', dependencia_capital_terceiros:'Dependência de Capital de Terceiros', ncg:'Necessidade de Capital de Giro (NCG)', caixa_minimo:'Caixa Mínimo Recomendado', custo_financeiro_vendas:'Custo Financeiro das Vendas', vendas_parceladas:'Vendas Parceladas', prazo_recebimento_vendas:'Prazo de Recebimento das Vendas', desembolso_financeiro:'Desembolso Financeiro', compromissos_semana:'Compromissos por Semana', risco_caixa_data:'Risco de Caixa por Data', rentabilidade_forma_pagamento:'Rentabilidade por Forma de Pagamento', custo_real_parcelamento:'Custo Real do Parcelamento', evolucao_poder_compra:'Evolução do Poder de Compra', vazamentos_financeiros:'Vazamentos Financeiros', custo_por_mil_receita:'Custo por R$1.000 de Receita', dependencia_poucas_operacoes:'Dependência de Poucas Operações', decisoes_financeiras:'Decisões Financeiras', diagnostico_automatico:'Diagnóstico Automático do Mês', para_onde_foi_dinheiro:'Para Onde Foi o Dinheiro?', causas_variacao_lucro:'Causas da Variação do Lucro', eficiencia_dinheiro:'Eficiência do Dinheiro', movimentacoes_sem_classificacao:'Movimentações Sem Classificação', dados_inconsistentes:'Dados Inconsistentes', suspeitos_duplicidade:'Lançamentos Suspeitos de Duplicidade', custo_efetivo_conta:'Custo Efetivo por Conta Bancária', rentabilidade_saldo_parado:'Rentabilidade do Saldo Parado', dinheiro_transitorio:'Dinheiro Transitório', simulador_decisao_compra:'Simulador de Decisão de Compra', simulador_antecipacao:'Simulador de Antecipação'
+  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio', yoy:'Comparativo Ano a Ano', sazonalidade:'Análise de Sazonalidade', calendario_vencimentos:'Calendário de Vencimentos', carga_tributaria:'Carga Tributária', simulador_preco:'Simulador de Preço', formas_pagamento:'Formas de Pagamento', rentabilidade_cliente:'Rentabilidade por Cliente', pe_produto:'Ponto de Equilíbrio por Produto', metas_comerciais:'Metas Comerciais', fixo_variavel_tempo:'Custo Fixo vs Variável no Tempo', onde_dinheiro:'Onde Meu Dinheiro Está', health_score:'Saúde da Empresa', eficiencia_cobranca:'Eficiência de Cobrança', variacao_preco_insumos:'Variação de Preço de Insumos', concentracao_clientes:'Concentração de Risco de Clientes', volume_margem_produto:'Ranking Volume x Margem por Produto', saude_cadastros:'Saúde dos Cadastros', projecao_comissoes:'Projeção de Comissões a Pagar', fcl:'Fluxo de Caixa Livre', payback:'Payback de Investimento', cvl_multiproduto:'Análise Custo-Volume-Lucro', dmpl:'Mutações do Patrimônio Líquido', provisoes:'Provisões (Férias/13º)', fluxo_centro_custo:'Fluxo de Caixa por Centro de Custo', conciliacao_saldo:'Conciliação de Saldo por Conta', taxa_conversao_funil:'Taxa de Conversão do Funil', novos_vs_recorrentes:'Novos Clientes vs. Recorrentes', taxa_recompra:'Taxa de Recompra', ltv_cac:'LTV e Relação LTV/CAC', abc_estoque:'Curva ABC de Estoque', estoque_abaixo_minimo:'Estoque Abaixo do Mínimo', obsolescencia_estoque:'Obsolescência de Estoque', comparativo_preco_fornecedores:'Comparativo de Preço entre Fornecedores', calendario_obrigacoes:'Calendário de Obrigações Acessórias', manutencao_consolidada:'Manutenção Preventiva Consolidada', vida_util_remanescente:'Vida Útil Remanescente', roi_ativo:'Custo e Valor Atual por Ativo', alocacao_ativos:'Alocação de Ativos', divergencias:'Divergências e Exceções', posicao_bancaria:'Posição Bancária Consolidada', taxas_bancarias:'Taxas e Tarifas Bancárias', amortizacao_emprestimos:'Amortização de Empréstimos', seguros_ativos:'Seguros de Ativos', preco_tabela_praticado:'Preço de Tabela vs. VK', limite_credito:'Limite de Crédito Disponível', multas_penalidades:'Multas e Penalidades', central_inteligencia:'Central de Inteligência Financeira', central_alertas:'Central de Alertas', calendario_financeiro:'Calendário Financeiro', central_cliente:'Central do Cliente', centro_comando:'Centro de Comando', fluxo_caixa_diario:'Fluxo de Caixa Diário', receitas_categoria:'Receitas por Categoria', margem_mensal:'Margem Mensal', ticket_medio_evolutivo:'Ticket Médio Evolutivo', vendas_canceladas:'Vendas Canceladas', comprometimento_futuro:'Comprometimento Futuro', parcelamentos:'Parcelamentos', receita_cliente_tempo:'Receita por Cliente ao Longo do Tempo', clientes_perdidos_risco:'Clientes Perdidos e em Risco', compras_periodo:'Compras por Período', evolucao_custos:'Evolução dos Custos', inflacao_interna:'Inflação Interna da Empresa', lucro_cliente:'Lucro por Cliente', capital_giro:'Capital de Giro', endividamento_vencimento:'Endividamento por Vencimento', super_relatorio_anual:'Super Relatório Anual', despesas_centro_custo:'Despesas por Centro de Custo', crescimento_clientes:'Crescimento de Clientes', dependencia_financeira:'Dependência Financeira', lucro_canal:'Lucro por Canal', obrigacoes_futuras:'Obrigações Futuras', evolucao_patrimonial:'Evolução Patrimonial', giro_caixa:'Giro de Caixa', dependencia_capital_terceiros:'Dependência de Capital de Terceiros', ncg:'Necessidade de Capital de Giro (NCG)', caixa_minimo:'Caixa Mínimo Recomendado', custo_financeiro_vendas:'Custo Financeiro das Vendas', vendas_parceladas:'Vendas Parceladas', prazo_recebimento_vendas:'Prazo de Recebimento das Vendas', desembolso_financeiro:'Desembolso Financeiro', compromissos_semana:'Compromissos por Semana', risco_caixa_data:'Risco de Caixa por Data', rentabilidade_forma_pagamento:'Rentabilidade por Forma de Pagamento', custo_real_parcelamento:'Custo Real do Parcelamento', evolucao_poder_compra:'Evolução do Poder de Compra', vazamentos_financeiros:'Vazamentos Financeiros', custo_por_mil_receita:'Custo por R$1.000 de Receita', dependencia_poucas_operacoes:'Dependência de Poucas Operações', decisoes_financeiras:'Decisões Financeiras', diagnostico_automatico:'Diagnóstico Automático do Mês', para_onde_foi_dinheiro:'Para Onde Foi o Dinheiro?', causas_variacao_lucro:'Causas da Variação do Lucro', eficiencia_dinheiro:'Eficiência do Dinheiro', movimentacoes_sem_classificacao:'Movimentações Sem Classificação', dados_inconsistentes:'Dados Inconsistentes', suspeitos_duplicidade:'Lançamentos Suspeitos de Duplicidade', custo_efetivo_conta:'Custo Efetivo por Conta Bancária', rentabilidade_saldo_parado:'Rentabilidade do Saldo Parado', dinheiro_transitorio:'Dinheiro Transitório', simulador_decisao_compra:'Simulador de Decisão de Compra', simulador_antecipacao:'Simulador de Antecipação', reversoes_financeiras:'Reversões Financeiras'
 };
 
 function viewRelatorioDetalhe(){
@@ -10873,6 +10885,38 @@ function renderRentabilidadeSaldoParado(){
 }
 
 // Dinheiro Transitório — valores que passam pelas contas mas não são receita/despesa real (além de transferências, já excluídas em outros lugares)
+// Reversões Financeiras — lançamentos que estavam pagos/recebidos e foram revertidos (voltaram a
+// pendente, ou foram cancelados depois de já pagos). Usa statusHistorico, que só existe a partir de
+// agora — reversões feitas ANTES dessa função existir não aparecem aqui (o sistema não tinha como
+// saber disso no passado).
+function renderReversoesFinanceiras(){
+  const { de, ate } = ultimos12MesesAte(mesGlobalRef);
+  const comReversao = state.lancamentos.filter(l=>l.statusHistorico && l.statusHistorico.length);
+  const eventos = [];
+  comReversao.forEach(l=>{
+    l.statusHistorico.filter(h=>h.data>=de && h.data<=ate).forEach(h=>{
+      eventos.push({ descricao:l.descricao, tipo:l.tipo, ...h });
+    });
+  });
+  eventos.sort((a,b)=>b.data.localeCompare(a.data));
+  const totalRevertido = eventos.reduce((s,ev)=>s+ev.valorNaEpoca,0);
+  return `
+    <div class="note" style="margin-top:0;">Últimos 12 meses. Só identifica reversões feitas <strong>a partir de agora</strong> — o sistema não guardava esse histórico antes, então uma reversão feita no passado não vai aparecer aqui, mesmo estando dentro do período.</div>
+    <div class="cards"><div class="card"><div class="label">Reversões identificadas</div><div class="value mono" style="color:${eventos.length>0?'var(--warn)':'var(--success)'};">${eventos.length}</div></div></div>
+    ${!eventos.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhuma reversão registrada ainda nesse período.</div></div>` : `
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${eventos.map(ev=>`
+        <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto;">
+          <span class="mono" style="font-size:11px;color:var(--text-soft);">${fmtDate(ev.data)}</span>
+          <div class="desc-cell"><div>${escapeHTML(ev.descricao)}</div><div class="cat">Estava "${({pago:'Pago',recebido:'Recebido'})[ev.de]}", virou "${({pendente:'Pendente',cancelado:'Cancelado'})[ev.para]||ev.para}"</div></div>
+          <span class="mono" style="font-weight:600;color:var(--warn);">${brl(ev.valorNaEpoca)}</span>
+        </div>
+      `).join('')}
+    </div></div>
+    <div class="note">Total revertido no período: ${brl(totalRevertido)}.</div>`}
+  `;
+}
+
 function renderDinheiroTransitorio(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
   const transferencias = state.lancamentos.filter(l=>l.origem==='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate);
@@ -16052,6 +16096,7 @@ function attachViewHandlers(){
         relatorioAtivo==='dinheiro_transitorio' ? renderDinheiroTransitorio() :
         relatorioAtivo==='simulador_decisao_compra' ? renderSimuladorDecisaoCompra() :
         relatorioAtivo==='simulador_antecipacao' ? renderSimuladorAntecipacao() :
+        relatorioAtivo==='reversoes_financeiras' ? renderReversoesFinanceiras() :
         relatorioAtivo==='breakeven' ? renderRelatorioBreakEven() :
         relatorioAtivo==='valuation' ? renderRelatorioValuation() :
         relatorioAtivo==='mensal' ? renderSuperRelatorioMensal(mensalMesRef) :
@@ -18650,6 +18695,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     }
     if(isEdit){
       registrarLog('Lançamento editado', `${tipo==='entrada'?'Receita':'Despesa'} "${payload.descricao}" — ${brl(payload.valor)}`);
+      registrarReversaoSePreciso(existing, existing.status, payload.status);
       Object.assign(existing, payload);
     } else {
       registrarLog('Lançamento criado', `${tipo==='entrada'?'Receita':'Despesa'} "${payload.descricao}" — ${brl(payload.valor)}${payload.aprovacao==='pendente'?' (aguardando aprovação)':''}`);
