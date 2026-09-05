@@ -943,6 +943,7 @@ function aplicarMigracoes(s){
   if(!s.custosProdutosVK) s.custosProdutosVK = [];
   if(!s.precosTabelaProdutos) s.precosTabelaProdutos = {};
   if(!s.emprestimos) s.emprestimos = [];
+  if(s.metaInvestimento===undefined) s.metaInvestimento = 0;
   if(!s.vendasBonificadas) s.vendasBonificadas = [];
   if(!s.orcamentoAlertaPct) s.orcamentoAlertaPct = {};
   ['saida','entrada'].forEach(tipo=>{
@@ -1207,6 +1208,9 @@ let lancamentosFiltroConta = '';
 let lancamentosOrdenacao = 'vencimento';
 let lancamentosVisao = 'cronologica';
 let lancamentosPeriodoCustom = null; // {de, ate} — quando preenchido, sobrepõe o mês global selecionado
+let investimentosOrdenacao = 'valor';
+let investimentosBusca = '';
+let investimentosMostrarArquivadas = false;
 let comissaoVendedorSelecionado = '';
 let comissaoDataDeSelecionada = null;
 let comissaoDataAteSelecionada = null;
@@ -1732,6 +1736,27 @@ function totalInvestimentos(){
 }
 function ativosVencidosRF(){
   return state.ativosInvestimento.filter(a=>a.tipoAtivo==='rendafixa' && !a.resgatado && a.vencimento && a.vencimento<=todayISO());
+}
+// Custo investido (principal aplicado, sem valorização de mercado) reconstituído numa data
+// passada — só conta ativos já aplicados até aquela data, e desconta os já resgatados até lá.
+// É uma aproximação (não reconstrói o valor DE MERCADO histórico, só o principal aportado),
+// mas é reconstituível com precisão porque data de aplicação/resgate ficam salvas.
+function custoInvestidoEmData(contaId, dataISO){
+  return state.ativosInvestimento.filter(a=>{
+    if(contaId && a.contaId!==contaId) return false;
+    if(!a.dataAplicacao || a.dataAplicacao>dataISO) return false;
+    if(a.resgatado && a.dataResgate && a.dataResgate<=dataISO) return false;
+    return true;
+  }).reduce((s,a)=>s+(a.valorAplicado||0),0);
+}
+function custoInvestidoHistorico(contaId, dias){
+  const hoje = new Date();
+  const pontos = [];
+  for(let i=dias-1;i>=0;i--){
+    const d = new Date(hoje); d.setDate(d.getDate()-i);
+    pontos.push(custoInvestidoEmData(contaId, d.toISOString().slice(0,10)));
+  }
+  return pontos;
 }
 function rotuloTipoAtivo(a){
   return { acao:'Ação (B3)', fii:'FII', cripto:'Criptomoeda', rendafixa:'Renda Fixa', interno:'Investimento na Empresa' }[a.tipoAtivo] || a.tipoAtivo;
@@ -5824,19 +5849,80 @@ function viewInvestimentos(){
   const total = totalInvestimentos();
   const custo = custoTotalInvestimentos();
   const rendimento = total - custo;
+  const rentabilidadePct = custo>0 ? (rendimento/custo*100) : 0;
+  const hoje = todayISO();
+
+  // Comparação com o mês passado — usa o PRINCIPAL investido reconstituído (não o valor de
+  // mercado histórico, que não temos como reconstituir com precisão sem guardar cotação por dia)
+  const [anoM,mesM] = hoje.slice(0,7).split('-').map(Number);
+  const ultimoDiaMesPassado = new Date(anoM, mesM-1, 0).toISOString().slice(0,10);
+  const custoMesPassado = custoInvestidoEmData(null, ultimoDiaMesPassado);
+  const variacaoAporte = custoMesPassado>0 ? ((custo-custoMesPassado)/custoMesPassado*100) : null;
+
+  // Composição por tipo de ativo (RF/RV/Interno), pro gráfico de pizza
+  const idsContasAtivas = new Set(state.contasInvestimento.filter(c=>!c.arquivada).map(c=>c.id));
+  const composicaoTipo = {};
+  state.ativosInvestimento.filter(a=>!a.resgatado && idsContasAtivas.has(a.contaId)).forEach(a=>{
+    const rotulo = a.tipoAtivo==='rendafixa' ? 'Renda Fixa' : a.tipoAtivo==='interno' ? 'Na Empresa' : 'Renda Variável';
+    composicaoTipo[rotulo] = (composicaoTipo[rotulo]||0) + valorAtivo(a);
+  });
+
+  // Ranking de rentabilidade % por ativo (só os que têm custo>0 e não são renda fixa/manual, onde valorAtual=custo sempre)
+  const ativosComRentabilidade = state.ativosInvestimento.filter(a=>!a.resgatado && idsContasAtivas.has(a.contaId) && custoAtivo(a)>0).map(a=>{
+    const c = custoAtivo(a), v = valorAtivo(a);
+    return { nome: a.nome||a.ticker||'Ativo', pct: (v-c)/c*100 };
+  }).filter(a=>Math.abs(a.pct)>0.01);
+  const melhores = [...ativosComRentabilidade].sort((a,b)=>b.pct-a.pct).slice(0,3);
+  const piores = [...ativosComRentabilidade].sort((a,b)=>a.pct-b.pct).slice(0,3);
+
+  // Alertas: cotação desatualizada (7+ dias) e nota de corretagem parada há muito tempo
+  const contasComCotacaoAtrasada = [];
+  state.contasInvestimento.filter(c=>!c.arquivada).forEach(c=>{
+    const ativosMercado = state.ativosInvestimento.filter(a=>a.contaId===c.id && !a.resgatado && (a.tipoAtivo==='acao'||a.tipoAtivo==='fii'||a.tipoAtivo==='cripto') && !a.manual);
+    const desatualizados = ativosMercado.filter(a=>!a.dataUltimaCotacao || (new Date(hoje)-new Date(a.dataUltimaCotacao))/86400000>7);
+    if(desatualizados.length) contasComCotacaoAtrasada.push({ nome:c.nome, qtd:desatualizados.length });
+  });
+  const notasAntigas = (state.notasPendentes||[]).filter(n=>n.dataPregao && (new Date(hoje)-new Date(n.dataPregao))/86400000>15);
+
+  const anosMetaInv = state.metaInvestimento || 0;
+  const pctMetaInv = anosMetaInv>0 ? Math.min(100, total/anosMetaInv*100) : null;
+
   return `
     <div class="topbar">
       <div><h1>Investimentos</h1><p>Carteira de aplicações — renda fixa e renda variável</p></div>
       <div class="topbar-actions-stack">
         <button class="btn ghost" id="btnImportarNota">📄 Importar nota (PDF)</button>
         <button class="btn ghost" id="btnAtualizarCotacoes">⟳ Atualizar cotações</button>
+        <button class="btn ghost" id="btnExportarInvestimentosPDF">📄 Exportar posição</button>
+        <button class="btn ghost" id="btnMetaInvestimento">🎯 Definir meta</button>
       </div>
     </div>
     <div class="cards cards-3">
       <div class="card saldo"><div class="label">Total investido</div><div class="value mono">${brl(custo)}</div></div>
-      <div class="card"><div class="label">Diferença das atualizações</div><div class="value mono ${rendimento>=0?'pos':'neg'}">${brl(rendimento)}</div></div>
+      <div class="card"><div class="label">Diferença das atualizações</div><div class="value mono ${rendimento>=0?'pos':'neg'}">${brl(rendimento)} <span style="font-size:12px;font-weight:400;">(${rentabilidadePct>=0?'+':''}${rentabilidadePct.toFixed(1)}%)</span></div></div>
       <div class="card"><div class="label">Saldo após atualização</div><div class="value mono">${brl(total)}</div></div>
     </div>
+    ${variacaoAporte!==null ? `<div class="note" style="margin-top:0;">${variacaoAporte>=0?'▲':'▼'} Principal aplicado ${variacaoAporte>=0?'cresceu':'caiu'} ${Math.abs(variacaoAporte).toFixed(1)}% em relação ao fim do mês passado (compara o valor aportado, não a valorização de mercado).</div>` : ''}
+    ${anosMetaInv>0 ? `
+    <div class="panel"><div class="panel-body" style="padding:14px 18px;">
+      <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;"><span style="font-weight:600;">🎯 Meta de investimento</span><span class="mono">${brl(total)} / ${brl(anosMetaInv)}</span></div>
+      <div style="background:var(--bone);border-radius:5px;height:9px;overflow:hidden;"><div style="width:${pctMetaInv}%;height:100%;background:${pctMetaInv>=100?'var(--success)':'var(--blue-accent)'};"></div></div>
+      <div style="font-size:11px;color:var(--text-soft);margin-top:3px;">${pctMetaInv.toFixed(0)}% da meta${pctMetaInv>=100?' — meta batida! 🎉':''}</div>
+    </div></div>` : ''}
+    ${Object.keys(composicaoTipo).length>1 ? `
+    <div class="dash-section-label">Composição por tipo</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 18px;">${svgPizza(Object.entries(composicaoTipo).map(([label,valor])=>({label,valor})))}</div></div>` : ''}
+    ${(melhores.length || piores.length) ? `
+    <div class="cards" style="grid-template-columns:1fr 1fr;">
+      <div class="panel"><div class="panel-head"><h2>📈 Melhores rentabilidades</h2></div><div class="panel-body" style="padding:12px 18px;">
+        ${melhores.length ? melhores.map(a=>`<div style="display:flex;justify-content:space-between;padding:5px 0;"><span>${escapeHTML(a.nome)}</span><span class="mono" style="color:var(--success);font-weight:600;">+${a.pct.toFixed(1)}%</span></div>`).join('') : '<div class="empty">Sem dados suficientes.</div>'}
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>📉 Piores rentabilidades</h2></div><div class="panel-body" style="padding:12px 18px;">
+        ${piores.length ? piores.map(a=>`<div style="display:flex;justify-content:space-between;padding:5px 0;"><span>${escapeHTML(a.nome)}</span><span class="mono" style="color:${a.pct<0?'var(--danger)':'var(--success)'};font-weight:600;">${a.pct>=0?'+':''}${a.pct.toFixed(1)}%</span></div>`).join('') : '<div class="empty">Sem dados suficientes.</div>'}
+      </div></div>
+    </div>` : ''}
+    ${contasComCotacaoAtrasada.length ? `<div class="note" style="border-color:var(--warn);">⚠️ ${contasComCotacaoAtrasada.map(c=>`${escapeHTML(c.nome)} (${c.qtd} ativo(s))`).join(', ')} com cotação desatualizada há mais de 7 dias — clique em "Atualizar cotações".</div>` : ''}
+    ${notasAntigas.length ? `<div class="note" style="border-color:var(--warn);">⚠️ ${notasAntigas.length} nota(s) de corretagem parada(s) há mais de 15 dias sem revisar — role a lista abaixo pra dar uma olhada.</div>` : ''}
     ${(()=>{ const orfaos = ativosOrfaosInvestimento(); return orfaos.length ? `
     <div class="panel" style="margin-bottom:16px;border-left:3px solid var(--danger);">
       <div class="panel-head"><h2>🚨 Ativos órfãos encontrados (${orfaos.length})</h2></div>
@@ -5912,37 +5998,114 @@ function viewInvestimentos(){
         }).join('')}
       </div>
     </div>` : ''}
-    <div class="conta-cards">
-      ${state.contasInvestimento.map(c=>{
-        const v = valorContaInvestimento(c.id);
-        const cu = custoContaInvestimento(c.id);
-        const rend = v-cu;
-        return `
-        <div class="conta-card" style="--accent-c:${c.cor}">
-          <div class="dropdown-wrap card-menu-wrap">
-            <button class="icon-btn" data-action="toggle-menu-conta-inv" data-id="${c.id}" title="Mais opções">⋮</button>
-            <div class="dropdown-menu" data-menu-conta-inv="${c.id}">
-              <button type="button" data-conta-inv-menu="transformar" data-id="${c.id}">🔀 Transformar em subconta de outra conta</button>
-              <button type="button" data-conta-inv-menu="editar" data-id="${c.id}">✎ Editar conta</button>
-              <button type="button" data-conta-inv-menu="excluir" data-id="${c.id}" style="color:var(--danger);">✕ Excluir conta</button>
-            </div>
-          </div>
-          <div class="card-top">
-            ${bankLogoHTML({ cor:c.cor, banco:c.instituicao, bancoDominio:c.instituicaoDominio, nome:c.nome }, 34)}
-            <div class="nome-wrap">
-              <div class="nome">${escapeHTML(c.nome)}</div>
-              <div class="banco">${escapeHTML(c.instituicao || '—')} · ${({renda_variavel:'Renda Variável',renda_fixa:'Renda Fixa',interno:'Na Empresa'})[c.tipo]}</div>
-            </div>
-          </div>
-          <div class="saldo mono ${rend>=0?'pos':'neg'}">${brl(v)}</div>
-          <div style="font-size:11.5px;color:var(--text-soft);margin-top:2px;">Rendimento: <span class="mono" style="color:${rend>=0?'var(--success)':'var(--danger)'}">${brl(rend)}</span></div>
-          <button class="btn ghost sm" data-action="ver-ativos" data-id="${c.id}" style="width:100%;margin-top:12px;">Ver ativos</button>
-        </div>
-      `;}).join('')}
+    <div class="report-controls" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <input type="text" id="investimentosBuscaInput" placeholder="Buscar conta..." value="${escapeHTML(investimentosBusca)}" style="flex:1;min-width:160px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;">
+      <select id="investimentosOrdenacaoSelect">
+        <option value="valor" ${investimentosOrdenacao==='valor'?'selected':''}>Maior valor</option>
+        <option value="rendimento" ${investimentosOrdenacao==='rendimento'?'selected':''}>Melhor rendimento %</option>
+        <option value="nome" ${investimentosOrdenacao==='nome'?'selected':''}>Nome (A-Z)</option>
+      </select>
+      ${state.contasInvestimento.some(c=>c.arquivada) ? `<button class="btn ghost sm" id="btnToggleInvArquivadas">${investimentosMostrarArquivadas?'Ocultar':'Mostrar'} arquivadas</button>` : ''}
+    </div>
+    <div class="conta-cards" id="investimentosCardsWrap">
+      ${montarCardsInvestimento()}
       <div class="add-conta-card" id="btnNovaContaInv">+ Adicionar conta de investimento</div>
     </div>
     <div class="note" style="margin-top:0;">Cotações de ações, FIIs (B3) e criptomoedas são buscadas automaticamente via APIs públicas gratuitas quando o app está publicado e com internet — clique em "Atualizar cotações". Renda fixa (CDB, Tesouro, poupança) não tem cotação de mercado: o valor mostrado é uma estimativa pela taxa cadastrada.</div>
   `;
+}
+
+// Atualiza só os cards de investimento (busca/ordenação/arquivadas) sem redesenhar a tela
+// inteira — evita que o campo de busca perca o foco a cada letra digitada.
+function atualizarInvestimentosCards(){
+  const wrap = document.getElementById('investimentosCardsWrap');
+  if(!wrap) return;
+  wrap.innerHTML = montarCardsInvestimento() + `<div class="add-conta-card" id="btnNovaContaInv">+ Adicionar conta de investimento</div>`;
+  wrap.querySelectorAll('[data-action="marcar-inv-principal"]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const conta = state.contasInvestimento.find(c=>c.id===btn.dataset.id);
+      if(!conta) return;
+      const jaEra = conta.principal;
+      state.contasInvestimento.forEach(c=>{ c.principal = false; });
+      conta.principal = !jaEra;
+      persist(); atualizarInvestimentosCards();
+    });
+  });
+  wrap.querySelectorAll('[data-action="ver-ativos"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ invContaId = btn.dataset.id; currentView='ativos-inv'; render(); });
+  });
+  document.getElementById('btnNovaContaInv')?.addEventListener('click', ()=>openContaInvestimentoModal());
+  wrap.querySelectorAll('[data-action="toggle-menu-conta-inv"]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const menu = document.querySelector(`[data-menu-conta-inv="${btn.dataset.id}"]`);
+      document.querySelectorAll('.dropdown-menu[data-menu-conta-inv]').forEach(m=>{ if(m!==menu) m.classList.remove('open'); });
+      menu?.classList.toggle('open');
+      if(menu) ajustarPosicaoDropdown(menu);
+    });
+  });
+  wrap.querySelectorAll('[data-conta-inv-menu]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('.dropdown-menu[data-menu-conta-inv]').forEach(m=>m.classList.remove('open'));
+      const acao = btn.dataset.contaInvMenu, id = btn.dataset.id;
+      const conta = state.contasInvestimento.find(c=>c.id===id);
+      if(!conta) return;
+      if(acao==='editar') openContaInvestimentoModal(conta);
+      else if(acao==='transformar') openTransformarContaSubcontaModal(id);
+      else if(acao==='arquivar'){ conta.arquivada = true; if(conta.principal) conta.principal=false; persist(); atualizarInvestimentosCards(); showToast('Conta arquivada'); }
+      else if(acao==='desarquivar'){ conta.arquivada = false; persist(); atualizarInvestimentosCards(); showToast('Conta reativada'); }
+      else if(acao==='excluir'){
+        const usada = state.ativosInvestimento.some(a=>a.contaId===id);
+        if(usada && !confirm('Essa conta tem ativos cadastrados. Excluí-la remove os ativos junto. Continuar?')) return;
+        state.contasInvestimento = state.contasInvestimento.filter(c=>c.id!==id);
+        state.ativosInvestimento = state.ativosInvestimento.filter(a=>a.contaId!==id);
+        persist(); render(); showToast('Conta de investimento excluída');
+      }
+    });
+  });
+}
+
+function montarCardsInvestimento(){
+  let contasExibidas = state.contasInvestimento.filter(c=>investimentosMostrarArquivadas ? true : !c.arquivada);
+  if(investimentosBusca.trim()) contasExibidas = contasExibidas.filter(c=>c.nome.toLowerCase().includes(investimentosBusca.trim().toLowerCase()));
+  const comMetricas = contasExibidas.map(c=>{
+    const v = valorContaInvestimento(c.id), cu = custoContaInvestimento(c.id);
+    return { c, v, cu, rend: v-cu, rendPct: cu>0?(v-cu)/cu*100:0 };
+  });
+  if(investimentosOrdenacao==='valor') comMetricas.sort((a,b)=>b.v-a.v);
+  else if(investimentosOrdenacao==='rendimento') comMetricas.sort((a,b)=>b.rendPct-a.rendPct);
+  else comMetricas.sort((a,b)=>a.c.nome.localeCompare(b.c.nome));
+  if(!comMetricas.length) return `<div class="empty" style="grid-column:1/-1;">Nenhuma conta encontrada.</div>`;
+  return comMetricas.map(({c,v,cu,rend,rendPct})=>{
+    const sparkline = custoInvestidoHistorico(c.id, 30);
+    const sparkMin = Math.min(...sparkline), sparkMax = Math.max(...sparkline);
+    const sparkRange = Math.max(1, sparkMax-sparkMin);
+    return `
+  <div class="conta-card ${c.principal?'conta-principal':''}" style="--accent-c:${c.cor};${c.arquivada?'opacity:.6;':''}">
+    <div class="dropdown-wrap card-menu-wrap">
+      <button class="icon-btn" data-action="marcar-inv-principal" data-id="${c.id}" title="${c.principal?'Conta principal':'Marcar como principal'}" style="${c.principal?'color:var(--warn);':''}position:absolute;top:14px;left:14px;">${c.principal?'★':'☆'}</button>
+      <button class="icon-btn" data-action="toggle-menu-conta-inv" data-id="${c.id}" title="Mais opções">⋮</button>
+      <div class="dropdown-menu" data-menu-conta-inv="${c.id}">
+        <button type="button" data-conta-inv-menu="transformar" data-id="${c.id}">🔀 Transformar em subconta de outra conta</button>
+        <button type="button" data-conta-inv-menu="editar" data-id="${c.id}">✎ Editar conta</button>
+        ${!c.arquivada ? `<button type="button" data-conta-inv-menu="arquivar" data-id="${c.id}">🗄️ Arquivar</button>` : `<button type="button" data-conta-inv-menu="desarquivar" data-id="${c.id}">↩️ Reativar</button>`}
+        <button type="button" data-conta-inv-menu="excluir" data-id="${c.id}" style="color:var(--danger);">✕ Excluir conta</button>
+      </div>
+    </div>
+    <div class="card-top">
+      ${bankLogoHTML({ cor:c.cor, banco:c.instituicao, bancoDominio:c.instituicaoDominio, nome:c.nome }, 34)}
+      <div class="nome-wrap">
+        <div class="nome">${escapeHTML(c.nome)}${c.principal?' <span style="color:var(--warn);font-size:11px;">★</span>':''}</div>
+        <div class="banco">${escapeHTML(c.instituicao || '—')} · ${({renda_variavel:'Renda Variável',renda_fixa:'Renda Fixa',interno:'Na Empresa'})[c.tipo]}</div>
+      </div>
+    </div>
+    <div class="saldo mono ${rend>=0?'pos':'neg'}">${brl(v)}</div>
+    <div style="font-size:11.5px;color:var(--text-soft);margin-top:2px;">Rendimento: <span class="mono" style="color:${rend>=0?'var(--success)':'var(--danger)'}">${brl(rend)} (${rendPct>=0?'+':''}${rendPct.toFixed(1)}%)</span></div>
+    ${sparkRange>0 ? `<div style="display:flex;align-items:flex-end;gap:1.5px;height:22px;margin-top:8px;" title="Principal aplicado nos últimos 30 dias">${sparkline.map(val=>`<div style="flex:1;background:${c.cor};opacity:.5;border-radius:1px;height:${Math.max(2,Math.round((val-sparkMin)/sparkRange*20))}px;"></div>`).join('')}</div>` : ''}
+    <button class="btn ghost sm" data-action="ver-ativos" data-id="${c.id}" style="width:100%;margin-top:12px;">Ver ativos</button>
+  </div>
+`;}).join('');
 }
 
 function viewAtivosInvestimento(contaId){
@@ -15185,43 +15348,8 @@ function attachViewHandlers(){
   });
 
   // Investimentos
-  const btnNovaContaInv = document.getElementById('btnNovaContaInv');
-  if(btnNovaContaInv) btnNovaContaInv.addEventListener('click', ()=>openContaInvestimentoModal());
-  document.querySelectorAll('[data-action="toggle-menu-conta-inv"]').forEach(btn=>{
-    btn.addEventListener('click', (e)=>{
-      e.stopPropagation();
-      const menu = document.querySelector(`[data-menu-conta-inv="${btn.dataset.id}"]`);
-      document.querySelectorAll('.dropdown-menu[data-menu-conta-inv]').forEach(m=>{ if(m!==menu) m.classList.remove('open'); });
-      menu?.classList.toggle('open');
-      if(menu) ajustarPosicaoDropdown(menu);
-    });
-  });
-  document.querySelectorAll('[data-conta-inv-menu]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      document.querySelectorAll('.dropdown-menu[data-menu-conta-inv]').forEach(m=>m.classList.remove('open'));
-      const id = btn.dataset.id;
-      if(btn.dataset.contaInvMenu==='transformar'){
-        openTransformarContaSubcontaModal(id);
-      } else if(btn.dataset.contaInvMenu==='editar'){
-        openContaInvestimentoModal(state.contasInvestimento.find(c=>c.id===id));
-      } else {
-        const usada = state.ativosInvestimento.some(a=>a.contaId===id);
-        if(usada && !confirm('Essa conta tem ativos cadastrados. Excluí-la remove os ativos junto. Continuar?')) return;
-        state.contasInvestimento = state.contasInvestimento.filter(c=>c.id!==id);
-        state.ativosInvestimento = state.ativosInvestimento.filter(a=>a.contaId!==id);
-        persist(); render(); showToast('Conta de investimento excluída');
-      }
-    });
-  });
   document.addEventListener('click', ()=>{
     document.querySelectorAll('.dropdown-menu[data-menu-conta-inv]').forEach(m=>m.classList.remove('open'));
-  });
-  document.querySelectorAll('[data-action="ver-ativos"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      invContaId = btn.dataset.id;
-      currentView = 'ativos-inv';
-      render();
-    });
   });
   document.querySelectorAll('[data-action="add-ativo-direto"]').forEach(btn=>{
     btn.addEventListener('click', ()=>openAtivoModal(null, btn.dataset.id));
@@ -15353,6 +15481,12 @@ function attachViewHandlers(){
   document.querySelectorAll('[data-action="revisar-nota"]').forEach(row=>{
     row.addEventListener('click', ()=>openImportarNotaModal(null, row.dataset.id));
   });
+  if(document.getElementById('investimentosCardsWrap')) atualizarInvestimentosCards();
+  document.getElementById('investimentosBuscaInput')?.addEventListener('input', (e)=>{ investimentosBusca = e.target.value; atualizarInvestimentosCards(); });
+  document.getElementById('investimentosOrdenacaoSelect')?.addEventListener('change', (e)=>{ investimentosOrdenacao = e.target.value; atualizarInvestimentosCards(); });
+  document.getElementById('btnToggleInvArquivadas')?.addEventListener('click', ()=>{ investimentosMostrarArquivadas = !investimentosMostrarArquivadas; render(); });
+  document.getElementById('btnExportarInvestimentosPDF')?.addEventListener('click', ()=>gerarInvestimentosPDF());
+  document.getElementById('btnMetaInvestimento')?.addEventListener('click', ()=>openMetaInvestimentoModal());
 
   const btnSalvarConfigProcessos = document.getElementById('btnSalvarConfigProcessos');
   if(btnSalvarConfigProcessos) btnSalvarConfigProcessos.addEventListener('click', ()=>{
@@ -17211,6 +17345,87 @@ function openTransformarContaSubcontaModal(contaId){
     render();
     showToast(`Pronto — "${nomeSubconta}" agora é uma subconta dentro de "${contaDestino.nome}"`);
   });
+}
+
+function openMetaInvestimentoModal(){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Meta de investimento</h3>
+    <div class="note" style="margin-top:0;">Defina quanto você planeja ter investido (saldo após atualização) — aparece como barra de progresso na tela de Investimentos. Deixe 0 pra remover a meta.</div>
+    <div class="field"><label>Valor da meta (R$)</label><input type="text" inputmode="decimal" id="metaInvValor" value="${state.metaInvestimento||''}" placeholder="0,00"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarMetaInv">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarMetaInv').addEventListener('click', ()=>{
+    const valor = numBR(document.getElementById('metaInvValor').value) || 0;
+    state.metaInvestimento = valor;
+    persist(); closeModal(); render();
+    showToast(valor>0 ? 'Meta definida' : 'Meta removida');
+  });
+}
+
+// PDF da posição consolidada de investimentos — uma seção por conta
+function gerarInvestimentosPDF(){
+  if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
+  const contasAtivas = state.contasInvestimento.filter(c=>!c.arquivada);
+  if(!contasAtivas.length){ showToast('Nenhuma conta de investimento ativa pra exportar'); return; }
+  const { jsPDF } = window.jspdf;
+  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+  const M = 18, W = 210 - M*2;
+  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
+  let y = 22;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
+  docPdf.text('Livro Caixa Financeiro VK', M, y);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
+  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
+  y += 7;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 9;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
+  docPdf.text('Posição de Investimentos', M, y);
+  y += 9;
+
+  const totalGeral = totalInvestimentos(), custoGeral = custoTotalInvestimentos();
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
+  docPdf.text(`Total investido: ${brl(custoGeral)}   ·   Saldo atual: ${brl(totalGeral)}   ·   Rendimento: ${brl(totalGeral-custoGeral)}`, M, y);
+  y += 10;
+
+  contasAtivas.forEach(conta=>{
+    if(y > 265){ docPdf.addPage(); y = 20; }
+    const v = valorContaInvestimento(conta.id), cu = custoContaInvestimento(conta.id);
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(11); docPdf.setTextColor(...BLUEDEEP);
+    docPdf.text(`${conta.nome} — ${conta.instituicao||''}`, M, y);
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(10); docPdf.setTextColor(...INK);
+    docPdf.text(brl(v), M+W, y, { align:'right' });
+    y += 6;
+    const ativos = state.ativosInvestimento.filter(a=>a.contaId===conta.id && !a.resgatado);
+    if(!ativos.length){
+      docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
+      docPdf.text('Nenhum ativo nessa conta.', M, y);
+      y += 8;
+    } else {
+      ativos.forEach(a=>{
+        if(y > 275){ docPdf.addPage(); y = 20; }
+        const va = valorAtivo(a), ca = custoAtivo(a);
+        docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...INK);
+        docPdf.text((a.nome||a.ticker||'Ativo').slice(0,45), M, y);
+        docPdf.setTextColor(...(va>=ca?SUCCESS:DANGER));
+        docPdf.text(brl(va), M+W, y, { align:'right' });
+        y += 5.5;
+      });
+      y += 4;
+    }
+    docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+    y += 8;
+  });
+
+  docPdf.save(`investimentos-${todayISO()}.pdf`);
 }
 
 function openContaInvestimentoModal(existing){
