@@ -665,6 +665,7 @@
         <div class="nav-item" data-view="busca-global" title="Busca Global"><span class="nav-dot"></span><span class="nav-abbr">BG</span><span class="nav-label">Busca Global</span></div>
         <div class="nav-item" data-view="central-decisao" title="Central de Decisão"><span class="nav-dot"></span><span class="nav-abbr">CD</span><span class="nav-label">Central de Decisão</span></div>
         <div class="nav-item" data-view="assistente" title="Perguntar ao Livro Caixa"><span class="nav-dot"></span><span class="nav-abbr">PA</span><span class="nav-label">Perguntar ao Livro Caixa</span></div>
+        <div class="nav-item" data-view="veiculos" title="Meus Carros"><span class="nav-dot"></span><span class="nav-abbr">MC</span><span class="nav-label">Meus Carros</span></div>
         <div class="nav-item" data-view="navegacao-objetivo" title="O Que Você Quer Fazer?"><span class="nav-dot"></span><span class="nav-abbr">OB</span><span class="nav-label">O Que Você Quer Fazer?</span></div>
         <div class="nav-item" data-view="orcamento" title="Orçamento e Planejamento"><span class="nav-dot"></span><span class="nav-abbr">OR</span><span class="nav-label">Orçamento e Planejamento</span></div>
         <div class="nav-item" data-view="simulacao" title="Simulação &quot;E Se&quot;"><span class="nav-dot"></span><span class="nav-abbr">SE</span><span class="nav-label">Simulação "E Se"</span></div>
@@ -952,6 +953,13 @@ function aplicarMigracoes(s){
   if(!s.metasFinanceirasMes) s.metasFinanceirasMes = { faturamento:0, lucro:0, reducaoDespesaPct:0 };
   if(!s.limitesCreditoCliente) s.limitesCreditoCliente = {};
   if(!s.decisoesFinanceiras) s.decisoesFinanceiras = [];
+  if(!s.veiculos) s.veiculos = [];
+  if(!s.veiculoAbastecimentos) s.veiculoAbastecimentos = [];
+  if(!s.veiculoDespesas) s.veiculoDespesas = [];
+  if(!s.veiculoReceitas) s.veiculoReceitas = [];
+  if(!s.veiculoServicos) s.veiculoServicos = [];
+  if(!s.veiculoLeituras) s.veiculoLeituras = [];
+  if(!s.veiculoLembretes) s.veiculoLembretes = [];
   if(!s.cofresVirtuais) s.cofresVirtuais = [
     { nome:'Operacional', pct:50 }, { nome:'Impostos', pct:15 }, { nome:'Emergência', pct:15 },
     { nome:'Investimentos', pct:10 }, { nome:'Distribuição aos Sócios', pct:10 },
@@ -1397,6 +1405,7 @@ function moreItensDef(){
     { view:'busca-global', icone:'🔍', nome:'Busca Global', grupo:'Análise' },
     { view:'central-decisao', icone:'🧭', nome:'Central de Decisão', grupo:'Análise' },
     { view:'assistente', icone:'💬', nome:'Perguntar ao Livro Caixa', grupo:'Análise' },
+    { view:'veiculos', icone:'🚗', nome:'Meus Carros', grupo:'Operacional' },
     { view:'navegacao-objetivo', icone:'🧭', nome:'O Que Você Quer Fazer?', grupo:'Análise' },
     { view:'orcamento', icone:'🗂️', nome:'Orçamento e Planejamento', grupo:'Análise' },
     { view:'simulacao', icone:'🔮', nome:'Simulação "E Se"', grupo:'Análise' },
@@ -1536,6 +1545,7 @@ function render(){
   else if(currentView==='busca-global') main.innerHTML = viewBuscaGlobal();
   else if(currentView==='central-decisao') main.innerHTML = viewCentralDecisao();
   else if(currentView==='assistente') main.innerHTML = viewAssistente();
+  else if(currentView==='veiculos') main.innerHTML = viewVeiculos();
   else if(currentView==='navegacao-objetivo') main.innerHTML = viewNavegacaoObjetivo();
   attachViewHandlers();
   atualizarBadgesBottomNav();
@@ -2769,6 +2779,335 @@ function registrarReprogramacaoSePreciso(l, vencimentoAntigo, vencimentoNovo){
     if(!l.historicoReprogramacao) l.historicoReprogramacao = [];
     l.historicoReprogramacao.push({ de:vencimentoAntigo, para:vencimentoNovo, data:todayISO() });
   }
+}
+
+/* ====================== MEUS CARROS ====================== */
+let veiculoSelecionadoId = null;
+let veiculoTabAtiva = 'geral';
+
+function veiculoAtivo(){ return state.veiculos.find(v=>v.id===veiculoSelecionadoId); }
+
+// Cria o lançamento REAL no Livro Caixa (Contas a Pagar/Receber ou já pago/recebido, conforme
+// escolhido) — é isso que garante que abastecimento/despesa/receita/serviço do veículo aparece
+// normalmente no Extrato, Contas a Pagar/Receber e em todos os relatórios, em vez de virar um
+// registro paralelo que só existe dentro do módulo de veículos.
+function criarLancamentoVeiculo({ tipo, veiculoId, descricao, categoria, valor, contaId, data, status }){
+  const id = uid();
+  state.lancamentos.push({
+    id, tipo, categoria, descricao, valor, contaId,
+    dataVencimento: data, dataPagamento: status==='pago'||status==='recebido' ? data : null,
+    status: status || (tipo==='entrada'?'recebido':'pago'),
+    origem: 'veiculo', veiculoId, fornecedor: null,
+    criadoEm: new Date().toISOString()
+  });
+  return id;
+}
+// Atualiza o lançamento vinculado quando o registro do veículo é editado — mantém os dois em
+// sincronia (evita ficar com o valor certo só num lado e desatualizado no outro).
+function atualizarLancamentoVeiculo(lancamentoId, { descricao, categoria, valor, contaId, data, status }){
+  const l = state.lancamentos.find(x=>x.id===lancamentoId);
+  if(!l) return;
+  l.descricao = descricao; l.categoria = categoria; l.valor = valor; l.contaId = contaId;
+  l.dataVencimento = data;
+  if(status){ l.status = status; l.dataPagamento = (status==='pago'||status==='recebido') ? data : null; }
+}
+function excluirLancamentoVeiculo(lancamentoId){
+  state.lancamentos = state.lancamentos.filter(l=>l.id!==lancamentoId);
+}
+
+// Todos os registros do veículo (abastecimento/despesa/receita/serviço/leitura) numa lista só,
+// cada um com um "tipo" e "km" pra dar pra ordenar cronologicamente/por km junto.
+function todosRegistrosVeiculo(veiculoId){
+  const abst = state.veiculoAbastecimentos.filter(a=>a.veiculoId===veiculoId).map(a=>({ ...a, tipoRegistro:'abastecimento' }));
+  const desp = state.veiculoDespesas.filter(a=>a.veiculoId===veiculoId).map(a=>({ ...a, tipoRegistro:'despesa' }));
+  const rec = state.veiculoReceitas.filter(a=>a.veiculoId===veiculoId).map(a=>({ ...a, tipoRegistro:'receita' }));
+  const serv = state.veiculoServicos.filter(a=>a.veiculoId===veiculoId).map(a=>({ ...a, tipoRegistro:'servico' }));
+  const leit = state.veiculoLeituras.filter(a=>a.veiculoId===veiculoId).map(a=>({ ...a, tipoRegistro:'leitura', valor:0 }));
+  return [...abst, ...desp, ...rec, ...serv, ...leit].sort((a,b)=>a.data.localeCompare(b.data) || (a.km||0)-(b.km||0));
+}
+function kmAtualVeiculo(veiculoId){
+  const todos = todosRegistrosVeiculo(veiculoId).filter(r=>r.km>0);
+  const maiorKm = todos.length ? Math.max(...todos.map(r=>r.km)) : 0;
+  const v = state.veiculos.find(x=>x.id===veiculoId);
+  return Math.max(maiorKm, v?.kmInicial||0);
+}
+
+// Consumo (km/L) — só é confiável entre dois abastecimentos com TANQUE CHEIO marcado (senão a
+// conta de litros consumidos no meio do caminho não fecha). Sem pelo menos 2 tanques cheios, não
+// inventa número — retorna null em tudo, pra tela mostrar "sem dados suficientes" honestamente.
+function calcularConsumoVeiculo(veiculoId){
+  const abst = state.veiculoAbastecimentos.filter(a=>a.veiculoId===veiculoId && a.km>0).sort((a,b)=>a.km-b.km);
+  const pares = [];
+  let idxUltimoTanqueCheio = abst.findIndex(a=>a.tanqueCheio);
+  if(idxUltimoTanqueCheio>=0){
+    for(let i=idxUltimoTanqueCheio+1;i<abst.length;i++){
+      if(abst[i].tanqueCheio){
+        const kmRodado = abst[i].km - abst[idxUltimoTanqueCheio].km;
+        const litros = abst.slice(idxUltimoTanqueCheio+1, i+1).reduce((s,a)=>s+a.litros,0);
+        if(kmRodado>0 && litros>0) pares.push({ kmRodado, litros, consumo: kmRodado/litros, dataFim: abst[i].data });
+        idxUltimoTanqueCheio = i;
+      }
+    }
+  }
+  const kmTotal = pares.reduce((s,p)=>s+p.kmRodado,0);
+  const litrosTotal = pares.reduce((s,p)=>s+p.litros,0);
+  return {
+    mediaGeral: litrosTotal>0 ? kmTotal/litrosTotal : null,
+    menor: pares.length ? Math.min(...pares.map(p=>p.consumo)) : null,
+    maior: pares.length ? Math.max(...pares.map(p=>p.consumo)) : null,
+    ultimo: pares.length ? pares[pares.length-1].consumo : null,
+    pares, qtdTanqueCheio: abst.filter(a=>a.tanqueCheio).length, totalAbastecimentos: abst.length
+  };
+}
+/* ====================== FIM AUXILIARES MEUS CARROS ====================== */
+
+/* ====================== FIM AUXILIARES MEUS CARROS ====================== */
+
+function viewVeiculos(){
+  if(!state.veiculos.length){
+    return `
+      <div class="topbar"><div><h1>Meus Carros</h1><p>Controle de veículos — abastecimento, despesas, receitas e serviços, integrado ao seu financeiro</p></div></div>
+      <div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum veículo cadastrado ainda.</div></div>
+      <button class="btn" id="btnNovoVeiculo" style="margin-top:12px;">+ Cadastrar veículo</button>
+    `;
+  }
+  if(!veiculoSelecionadoId || !state.veiculos.some(v=>v.id===veiculoSelecionadoId)) veiculoSelecionadoId = state.veiculos[0].id;
+  return viewVeiculoDetalhe(veiculoSelecionadoId);
+}
+
+function viewVeiculoDetalhe(veiculoId){
+  const v = state.veiculos.find(x=>x.id===veiculoId);
+  if(!v) return viewVeiculos();
+  const km = kmAtualVeiculo(veiculoId);
+  const tabs = [
+    { id:'geral', nome:'Geral' }, { id:'abastecimento', nome:'Abastecimento' },
+    { id:'despesa', nome:'Despesa' }, { id:'receita', nome:'Receita' },
+    { id:'servico', nome:'Serviço' }, { id:'historico', nome:'Histórico' },
+    { id:'lembretes', nome:'Lembretes' },
+  ];
+  return `
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;">
+        <div style="width:42px;height:42px;border-radius:50%;background:var(--bone);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;">🚗</div>
+        <div style="min-width:0;">
+          <select id="veiculoSelectAtivo" style="font-size:16px;font-weight:700;border:none;background:none;padding:0;max-width:100%;">
+            ${state.veiculos.map(x=>`<option value="${x.id}" ${x.id===veiculoId?'selected':''}>${escapeHTML(x.nome)}</option>`).join('')}
+          </select>
+          <div style="font-size:11.5px;color:var(--text-soft);">${escapeHTML(v.marca||'')} ${escapeHTML(v.modelo||'')}${v.placa?' · '+escapeHTML(v.placa):''} · ${km.toLocaleString('pt-BR')} km</div>
+        </div>
+      </div>
+      <button class="btn ghost sm" data-action="editar-veiculo" data-id="${v.id}">✎</button>
+    </div>
+    <div class="toggle-row" id="veiculoTabsRow" style="overflow-x:auto;flex-wrap:nowrap;width:auto;-webkit-overflow-scrolling:touch;">
+      ${tabs.map(t=>`<button type="button" data-tab="${t.id}" class="${veiculoTabAtiva===t.id?'active':''}" style="white-space:nowrap;">${t.nome}</button>`).join('')}
+    </div>
+    <div id="veiculoConteudo">${renderVeiculoTabConteudo(v)}</div>
+    <div class="dropdown-wrap" style="position:fixed;right:20px;bottom:80px;z-index:40;">
+      <button class="btn" id="btnNovoRegistroVeiculo" data-action="toggle-menu-novo-veiculo" style="width:52px;height:52px;border-radius:50%;font-size:24px;box-shadow:0 4px 14px rgba(0,0,0,0.2);padding:0;">+</button>
+      <div class="dropdown-menu" data-menu-novo-veiculo style="right:0;left:auto;bottom:60px;top:auto;">
+        <button type="button" data-novo-veiculo="lembrete">⏰ Lembrete</button>
+        <button type="button" data-novo-veiculo="leitura">📍 Leitura</button>
+        <button type="button" data-novo-veiculo="servico">🔧 Serviço</button>
+        <button type="button" data-novo-veiculo="receita">💰 Receita</button>
+        <button type="button" data-novo-veiculo="despesa">📄 Despesa</button>
+        <button type="button" data-novo-veiculo="abastecimento">⛽ Abastecimento</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderVeiculoTabConteudo(v){
+  if(veiculoTabAtiva==='geral') return renderVeiculoGeral(v);
+  if(veiculoTabAtiva==='abastecimento') return renderVeiculoAbastecimento(v);
+  if(veiculoTabAtiva==='despesa') return renderVeiculoRegistrosSimples(v,'despesa');
+  if(veiculoTabAtiva==='receita') return renderVeiculoRegistrosSimples(v,'receita');
+  if(veiculoTabAtiva==='servico') return renderVeiculoRegistrosSimples(v,'servico');
+  if(veiculoTabAtiva==='historico') return renderVeiculoHistorico(v);
+  if(veiculoTabAtiva==='lembretes') return renderVeiculoLembretes(v);
+  return '';
+}
+
+function renderVeiculoGeral(v){
+  const todos = todosRegistrosVeiculo(v.id);
+  if(!todos.length) return `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum registro ainda. Toque no + pra adicionar abastecimento, despesa, receita ou serviço.</div></div>`;
+
+  const datas = todos.map(r=>r.data).sort();
+  const deData = datas[0], ateData = datas[datas.length-1];
+  const dias = Math.max(1, Math.round((new Date(ateData)-new Date(deData))/86400000));
+
+  const custoTotal = todos.filter(r=>['abastecimento','despesa','servico'].includes(r.tipoRegistro)).reduce((s,r)=>s+(r.valor||0),0);
+  const receitaTotal = todos.filter(r=>r.tipoRegistro==='receita').reduce((s,r)=>s+(r.valor||0),0);
+  const saldoTotal = receitaTotal - custoTotal;
+  const kms = todos.filter(r=>r.km>0).map(r=>r.km);
+  const distanciaTotal = kms.length>1 ? Math.max(...kms)-Math.min(...kms) : 0;
+
+  const porCategoria = {};
+  todos.filter(r=>r.tipoRegistro==='abastecimento').forEach(r=>{ porCategoria['Abastecimento']=(porCategoria['Abastecimento']||0)+r.valor; });
+  todos.filter(r=>r.tipoRegistro==='servico').forEach(r=>{ porCategoria['Serviço']=(porCategoria['Serviço']||0)+r.valor; });
+  todos.filter(r=>r.tipoRegistro==='despesa').forEach(r=>{ const cat=r.categoria||'Despesa'; porCategoria[cat]=(porCategoria[cat]||0)+r.valor; });
+  const dadosDonut = Object.entries(porCategoria).filter(([,vl])=>vl>0).map(([nome,valor])=>({nome,valor}));
+
+  const pontosOdometro = todos.filter(r=>r.km>0);
+
+  const porMes = {};
+  todos.forEach(r=>{
+    if(r.tipoRegistro==='leitura') return;
+    const mes = r.data.slice(0,7);
+    if(!porMes[mes]) porMes[mes] = { abastecimento:0, despesa:0, servico:0 };
+    if(r.tipoRegistro==='abastecimento') porMes[mes].abastecimento += r.valor;
+    else if(r.tipoRegistro==='despesa') porMes[mes].despesa += r.valor;
+    else if(r.tipoRegistro==='servico') porMes[mes].servico += r.valor;
+  });
+  const mesesOrdenados = Object.keys(porMes).sort().slice(-6);
+
+  return `
+    <div class="note" style="margin-top:0;">${todos.length} registro(s) · ${fmtDate(deData)} – ${fmtDate(ateData)}</div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:14px;">
+      <div class="card saldo"><div class="label">Saldo</div><div class="value mono" style="color:${saldoTotal>=0?'var(--success)':'var(--danger)'};">${brl(saldoTotal)}</div><div class="cat">${brl(saldoTotal/dias)}/dia</div></div>
+      <div class="card"><div class="label">Distância</div><div class="value mono">${distanciaTotal.toLocaleString('pt-BR')} km</div><div class="cat">${(distanciaTotal/dias).toFixed(0)} km/dia</div></div>
+      <div class="card"><div class="label">Custo</div><div class="value mono" style="color:var(--danger);">${brl(custoTotal)}</div><div class="cat">${distanciaTotal>0?brl(custoTotal/distanciaTotal)+'/km':'—'}</div></div>
+      <div class="card"><div class="label">Receita</div><div class="value mono" style="color:var(--success);">${brl(receitaTotal)}</div><div class="cat">${distanciaTotal>0?brl(receitaTotal/distanciaTotal)+'/km':'—'}</div></div>
+    </div>
+    ${dadosDonut.length ? `<div class="dash-section-label">Comparativo de gastos</div><div class="panel"><div class="panel-body" style="padding:14px 18px;">${svgPizza(dadosDonut, true)}</div></div>` : ''}
+    ${pontosOdometro.length>1 ? `<div class="dash-section-label">Odômetro</div><div class="panel"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">${svgLinhasMultiplas([{nome:'Km', valores:pontosOdometro.map(p=>p.km)}], pontosOdometro.map(p=>fmtDateCurta(p.data)))}</div></div>` : ''}
+    ${mesesOrdenados.length ? `<div class="dash-section-label">Gastos mensais</div><div class="panel"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">${svgLinhasMultiplas([
+      { nome:'Abastecimento', valores:mesesOrdenados.map(m=>porMes[m].abastecimento) },
+      { nome:'Despesa', valores:mesesOrdenados.map(m=>porMes[m].despesa) },
+      { nome:'Serviço', valores:mesesOrdenados.map(m=>porMes[m].servico) },
+    ], mesesOrdenados.map(m=>competenciaLabel(m)))}</div></div>` : ''}
+  `;
+}
+
+function renderVeiculoAbastecimento(v){
+  const abst = state.veiculoAbastecimentos.filter(a=>a.veiculoId===v.id).sort((a,b)=>a.km-b.km);
+  if(!abst.length) return `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum abastecimento registrado ainda.</div></div>`;
+
+  const consumo = calcularConsumoVeiculo(v.id);
+  const custoTotal = abst.reduce((s,a)=>s+a.valor,0);
+  const volumeTotal = abst.reduce((s,a)=>s+a.litros,0);
+  const precoMedio = volumeTotal>0 ? custoTotal/volumeTotal : 0;
+  const precos = abst.map(a=>a.precoLitro||(a.litros>0?a.valor/a.litros:0)).filter(p=>p>0);
+  const kmValues = abst.map(a=>a.km).filter(k=>k>0);
+  const distanciaTotal = kmValues.length>1 ? Math.max(...kmValues)-Math.min(...kmValues) : 0;
+  const datas = abst.map(a=>a.data).sort();
+  const dias = Math.max(1, Math.round((new Date(datas[datas.length-1])-new Date(datas[0]))/86400000));
+
+  // Rotina de abastecimento
+  const kmEntre = [];
+  for(let i=1;i<abst.length;i++){ if(abst[i].km>0 && abst[i-1].km>0) kmEntre.push(abst[i].km-abst[i-1].km); }
+  const kmEntreMedia = kmEntre.length ? kmEntre.reduce((a,b)=>a+b,0)/kmEntre.length : null;
+  const diasEntre = [];
+  for(let i=1;i<abst.length;i++){ diasEntre.push(Math.round((new Date(abst[i].data)-new Date(abst[i-1].data))/86400000)); }
+  const freqDiasMedia = diasEntre.length ? diasEntre.reduce((a,b)=>a+b,0)/diasEntre.length : null;
+  const autonomiaEstimada = (consumo.mediaGeral && v.capacidadeTanque>0) ? consumo.mediaGeral*v.capacidadeTanque : null;
+  const projecaoMensal = (custoTotal/dias)*30;
+
+  // Postos
+  const porPosto = {};
+  abst.forEach(a=>{
+    const chave = a.posto || 'Sem posto informado';
+    if(!porPosto[chave]) porPosto[chave] = { valor:0, litros:0, qtd:0, precos:[] };
+    porPosto[chave].valor += a.valor; porPosto[chave].litros += a.litros; porPosto[chave].qtd++;
+    if(a.precoLitro) porPosto[chave].precos.push(a.precoLitro);
+  });
+
+  // Combustíveis
+  const porCombustivel = {};
+  abst.forEach(a=>{ const c=a.tipoCombustivel||'Não informado'; porCombustivel[c]=(porCombustivel[c]||0)+a.litros; });
+  const dadosDonutCombustivel = Object.entries(porCombustivel).map(([nome,valor])=>({nome,valor}));
+
+  return `
+    <div class="cards" style="grid-template-columns:1fr 1fr;margin-bottom:14px;">
+      <div class="card"><div class="label">Custo total</div><div class="value mono">${brl(custoTotal)}</div><div class="cat">${brl(custoTotal/dias)}/dia · ${distanciaTotal>0?brl(custoTotal/distanciaTotal)+'/km':'—'}</div></div>
+      <div class="card"><div class="label">Volume total</div><div class="value mono">${volumeTotal.toFixed(2)} L</div><div class="cat">${(volumeTotal/abst.length).toFixed(2)} L/abastec.</div></div>
+    </div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;margin-bottom:14px;">
+      <div class="card"><div class="label">Preço médio / L</div><div class="value mono">${brl(precoMedio)}</div>${precos.length?`<div class="cat">Menor ${brl(Math.min(...precos))} · Maior ${brl(Math.max(...precos))}</div>`:''}</div>
+      <div class="card"><div class="label">Consumo médio</div><div class="value mono">${consumo.mediaGeral!==null?consumo.mediaGeral.toFixed(2)+' km/L':'Sem dados suficientes'}</div>${consumo.pares.length?`<div class="cat">Menor ${consumo.menor.toFixed(2)} · Maior ${consumo.maior.toFixed(2)} km/L</div>`:`<div class="cat">Precisa de 2+ abastecimentos com tanque cheio</div>`}</div>
+    </div>
+    <div class="dash-section-label">Rotina de abastecimento</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:14px 18px;display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div><div style="font-size:11px;color:var(--text-soft);">Entre abastecimentos</div><div style="font-size:16px;font-weight:700;">${kmEntreMedia!==null?Math.round(kmEntreMedia)+' km':'—'}</div></div>
+      <div><div style="font-size:11px;color:var(--text-soft);">Frequência</div><div style="font-size:16px;font-weight:700;">${freqDiasMedia!==null?freqDiasMedia.toFixed(1)+' dias':'—'}</div></div>
+      <div><div style="font-size:11px;color:var(--text-soft);">Autonomia estimada</div><div style="font-size:16px;font-weight:700;">${autonomiaEstimada!==null?Math.round(autonomiaEstimada)+' km':'—'}</div></div>
+      <div><div style="font-size:11px;color:var(--text-soft);">Projeção mensal</div><div style="font-size:16px;font-weight:700;">${brl(projecaoMensal)}</div></div>
+    </div>
+    ${!v.capacidadeTanque ? `<div class="note" style="margin:0;border-radius:0;">Pra calcular a autonomia estimada, informe a capacidade do tanque ao editar o veículo.</div>` : ''}
+    <div class="note" style="margin:0;border-radius:0;">${consumo.qtdTanqueCheio} de ${consumo.totalAbastecimentos} abastecimento(s) com tanque cheio (${(consumo.qtdTanqueCheio/consumo.totalAbastecimentos*100).toFixed(1)}%) — a média é medida de um tanque cheio até o próximo.</div>
+    </div>
+    <div class="dash-section-label">Postos de combustível</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+      ${Object.entries(porPosto).sort((a,b)=>b[1].valor-a[1].valor).map(([nome,d])=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;">
+          <div class="desc-cell"><div>${escapeHTML(nome)}</div><div class="cat">${d.qtd} registro(s) · ${d.litros.toFixed(2)} L</div></div>
+          <span class="mono" style="font-weight:600;">${brl(d.valor)}</span>
+        </div>
+      `).join('')}
+    </div></div>
+    ${dadosDonutCombustivel.length ? `<div class="dash-section-label">Combustíveis</div><div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:14px 18px;">${svgPizza(dadosDonutCombustivel, true)}</div></div>` : ''}
+  `;
+}
+
+// Despesa, Receita e Serviço têm exatamente o mesmo formato de tela (lista + total), só muda a
+// fonte de dados e a cor — por isso uma função só reaproveitada pelas 3 abas.
+function renderVeiculoRegistrosSimples(v, tipoRegistro){
+  const mapaArray = { despesa: state.veiculoDespesas, receita: state.veiculoReceitas, servico: state.veiculoServicos };
+  const mapaCor = { despesa: 'var(--danger)', receita: 'var(--success)', servico: 'var(--warn)' };
+  const mapaAction = { despesa: 'nova-despesa-veiculo', receita: 'nova-receita-veiculo', servico: 'novo-servico-veiculo' };
+  const lista = mapaArray[tipoRegistro].filter(r=>r.veiculoId===v.id).sort((a,b)=>b.data.localeCompare(a.data));
+  const total = lista.reduce((s,r)=>s+r.valor,0);
+  return `
+    <div class="cards" style="margin-bottom:14px;"><div class="card"><div class="label">Total</div><div class="value mono" style="color:${mapaCor[tipoRegistro]};">${brl(total)}</div></div></div>
+    <div class="report-controls"><button class="btn" data-action="${mapaAction[tipoRegistro]}" data-id="${v.id}">+ Adicionar</button></div>
+    ${!lista.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum registro ainda.</div></div>` : `
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${lista.map(r=>`
+        <div class="ledger-row compact" data-action="editar-registro-veiculo" data-tipo="${tipoRegistro}" data-id="${r.id}" style="cursor:pointer;grid-template-columns:auto 1fr auto;">
+          <span class="mono" style="font-size:11px;color:var(--text-soft);">${fmtDate(r.data)}</span>
+          <div class="desc-cell"><div>${escapeHTML(r.descricao)}</div><div class="cat">${escapeHTML(r.categoria||'')}${r.km>0?' · '+r.km.toLocaleString('pt-BR')+' km':''}${r.oficina?' · '+escapeHTML(r.oficina):''}</div></div>
+          <span class="mono" style="font-weight:600;color:${mapaCor[tipoRegistro]};">${brl(r.valor)}</span>
+        </div>
+      `).join('')}
+    </div></div>`}
+  `;
+}
+
+function renderVeiculoHistorico(v){
+  const todos = todosRegistrosVeiculo(v.id).slice().reverse();
+  if(!todos.length) return `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum registro ainda.</div></div>`;
+  const icones = { abastecimento:'⛽', despesa:'📄', receita:'💰', servico:'🔧', leitura:'📍' };
+  return `
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${todos.map(r=>`
+        <div class="ledger-row compact" data-action="editar-registro-veiculo" data-tipo="${r.tipoRegistro}" data-id="${r.id}" style="cursor:pointer;grid-template-columns:auto auto 1fr auto;">
+          <span>${icones[r.tipoRegistro]}</span>
+          <span class="mono" style="font-size:11px;color:var(--text-soft);">${fmtDate(r.data)}</span>
+          <div class="desc-cell"><div>${escapeHTML(r.descricao||r.tipoRegistro)}</div><div class="cat">${r.km>0?r.km.toLocaleString('pt-BR')+' km':''}</div></div>
+          <span class="mono" style="font-weight:600;color:${r.tipoRegistro==='receita'?'var(--success)':r.tipoRegistro==='leitura'?'var(--text-soft)':'var(--danger)'};">${r.valor>0?brl(r.valor):''}</span>
+        </div>
+      `).join('')}
+    </div></div>
+  `;
+}
+
+function renderVeiculoLembretes(v){
+  const lembretes = state.veiculoLembretes.filter(l=>l.veiculoId===v.id);
+  const km = kmAtualVeiculo(v.id);
+  return `
+    <div class="report-controls"><button class="btn" data-action="novo-lembrete-veiculo" data-id="${v.id}">+ Novo lembrete</button></div>
+    ${!lembretes.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum lembrete configurado.</div></div>` : `
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${lembretes.map(l=>{
+        const faltamKm = l.tipo==='km' ? l.kmAlvo-km : null;
+        const faltamDias = l.tipo==='data' ? Math.round((new Date(l.dataAlvo)-new Date(todayISO()))/86400000) : null;
+        return `
+        <div class="ledger-row compact" data-action="editar-lembrete-veiculo" data-id="${l.id}" style="cursor:pointer;grid-template-columns:1fr auto;">
+          <div class="desc-cell"><div>${escapeHTML(l.descricao)}</div><div class="cat">${l.tipo==='km' ? `${l.kmAlvo.toLocaleString('pt-BR')} km` : fmtDate(l.dataAlvo)}</div></div>
+          <span class="mono" style="font-weight:600;color:${(faltamKm!==null&&faltamKm<=0)||(faltamDias!==null&&faltamDias<=0)?'var(--danger)':'var(--warn)'};">${faltamKm!==null?`em ${faltamKm} km`:`em ${faltamDias} dia(s)`}</span>
+        </div>`;
+      }).join('')}
+    </div></div>`}
+  `;
 }
 
 function opcoesCategoriaHTML(tipo, selecionada){
@@ -21199,6 +21538,63 @@ function attachViewHandlers(){
     sincronizarProcessos();
   });
   document.getElementById('btnNovoOrcamentoManual')?.addEventListener('click', ()=>openNovoOrcamentoManualModal());
+  document.getElementById('btnNovoVeiculo')?.addEventListener('click', ()=>openVeiculoModal());
+  document.getElementById('veiculoSelectAtivo')?.addEventListener('change', (e)=>{
+    veiculoSelecionadoId = e.target.value;
+    veiculoTabAtiva = 'geral';
+    render();
+  });
+  document.querySelectorAll('[data-action="editar-veiculo"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openVeiculoModal(state.veiculos.find(v=>v.id===btn.dataset.id)));
+  });
+  document.querySelectorAll('#veiculoTabsRow [data-tab]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      veiculoTabAtiva = btn.dataset.tab;
+      const wrap = document.getElementById('veiculoConteudo');
+      const v = veiculoAtivo();
+      if(wrap && v){
+        wrap.innerHTML = renderVeiculoTabConteudo(v);
+        document.querySelectorAll('#veiculoTabsRow [data-tab]').forEach(b=>b.classList.toggle('active', b.dataset.tab===veiculoTabAtiva));
+        attachViewHandlers();
+      }
+    });
+  });
+  document.querySelectorAll('[data-action="nova-despesa-veiculo"]').forEach(btn=>btn.addEventListener('click', ()=>openVeiculoRegistroModal(btn.dataset.id, 'despesa')));
+  document.querySelectorAll('[data-action="nova-receita-veiculo"]').forEach(btn=>btn.addEventListener('click', ()=>openVeiculoRegistroModal(btn.dataset.id, 'receita')));
+  document.querySelectorAll('[data-action="novo-servico-veiculo"]').forEach(btn=>btn.addEventListener('click', ()=>openVeiculoRegistroModal(btn.dataset.id, 'servico')));
+  document.querySelectorAll('[data-action="novo-lembrete-veiculo"]').forEach(btn=>btn.addEventListener('click', ()=>openLembreteVeiculoModal(btn.dataset.id)));
+  document.querySelectorAll('[data-action="editar-lembrete-veiculo"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openLembreteVeiculoModal(null, state.veiculoLembretes.find(l=>l.id===btn.dataset.id)));
+  });
+  document.querySelectorAll('[data-action="editar-registro-veiculo"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const tipo = btn.dataset.tipo, id = btn.dataset.id;
+      const mapaArray = { abastecimento:'veiculoAbastecimentos', despesa:'veiculoDespesas', receita:'veiculoReceitas', servico:'veiculoServicos', leitura:'veiculoLeituras' };
+      const existing = state[mapaArray[tipo]].find(r=>r.id===id);
+      if(!existing) return;
+      if(tipo==='abastecimento') openAbastecimentoModal(existing.veiculoId, existing);
+      else if(tipo==='leitura') openLeituraModal(existing.veiculoId, existing);
+      else openVeiculoRegistroModal(existing.veiculoId, tipo, existing);
+    });
+  });
+  document.querySelector('[data-action="toggle-menu-novo-veiculo"]')?.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    const menu = document.querySelector('[data-menu-novo-veiculo]');
+    menu?.classList.toggle('open');
+    if(menu) ajustarPosicaoDropdown(menu);
+  });
+  document.querySelectorAll('[data-novo-veiculo]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('.dropdown-menu[data-menu-novo-veiculo]').forEach(m=>m.classList.remove('open'));
+      const v = veiculoAtivo();
+      if(!v) return;
+      const tipo = btn.dataset.novoVeiculo;
+      if(tipo==='abastecimento') openAbastecimentoModal(v.id);
+      else if(tipo==='leitura') openLeituraModal(v.id);
+      else if(tipo==='lembrete') openLembreteVeiculoModal(v.id);
+      else openVeiculoRegistroModal(v.id, tipo);
+    });
+  });
   document.querySelectorAll('[data-action="aprovar-orcamento-processo"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const o = (state.orcamentosProcessos||[]).find(x=>x.id===btn.dataset.id);
@@ -23300,6 +23696,256 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
     });
     persist(); closeModal(); render();
     showToast('Transferência realizada');
+  });
+}
+
+function openVeiculoModal(existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit ? 'Editar veículo' : 'Novo veículo'}</h3>
+    <div class="field"><label>Apelido</label><input type="text" id="vcNome" value="${existing?escapeHTML(existing.nome):''}" placeholder="Ex: Celta Vermelho"></div>
+    <div class="field-row">
+      <div class="field"><label>Marca</label><input type="text" id="vcMarca" value="${existing?escapeHTML(existing.marca||''):''}" placeholder="Ex: Chevrolet"></div>
+      <div class="field"><label>Modelo</label><input type="text" id="vcModelo" value="${existing?escapeHTML(existing.modelo||''):''}" placeholder="Ex: Celta"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Placa (opcional)</label><input type="text" id="vcPlaca" value="${existing?escapeHTML(existing.placa||''):''}"></div>
+      <div class="field"><label>Km inicial/atual</label><input type="text" inputmode="numeric" id="vcKmInicial" value="${existing?existing.kmInicial||'':''}" placeholder="Ex: 53326"></div>
+    </div>
+    <div class="field"><label>Capacidade do tanque em litros (opcional — usado só pra estimar autonomia)</label><input type="text" inputmode="decimal" id="vcCapacidadeTanque" value="${existing?existing.capacidadeTanque||'':''}" placeholder="Ex: 50"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      ${isEdit ? `<button class="btn ghost" id="btnExcluirVeiculo" style="color:var(--danger);">Excluir</button>` : ''}
+      <button class="btn" id="btnSalvarVeiculo">${isEdit?'Salvar':'Cadastrar'}</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnExcluirVeiculo')?.addEventListener('click', ()=>{
+    if(!confirm(`Excluir "${existing.nome}"? Os abastecimentos/despesas/receitas/serviços já registrados continuam no histórico financeiro, só deixam de aparecer agrupados nesse veículo.`)) return;
+    state.veiculos = state.veiculos.filter(v=>v.id!==existing.id);
+    if(veiculoSelecionadoId===existing.id) veiculoSelecionadoId = null;
+    persist(); closeModal(); currentView='veiculos'; render();
+  });
+  document.getElementById('btnSalvarVeiculo').addEventListener('click', ()=>{
+    const nome = document.getElementById('vcNome').value.trim();
+    if(!nome){ showToast('Dê um apelido pro veículo'); return; }
+    const dados = {
+      nome, marca: document.getElementById('vcMarca').value.trim(),
+      modelo: document.getElementById('vcModelo').value.trim(),
+      placa: document.getElementById('vcPlaca').value.trim(),
+      kmInicial: numBR(document.getElementById('vcKmInicial').value) || 0,
+      capacidadeTanque: numBR(document.getElementById('vcCapacidadeTanque').value) || null,
+    };
+    if(isEdit){ Object.assign(existing, dados); }
+    else { const id = uid(); state.veiculos.push({ id, ...dados }); veiculoSelecionadoId = id; }
+    persist(); closeModal(); currentView='veiculos'; render();
+    showToast(isEdit?'Veículo atualizado':'Veículo cadastrado');
+  });
+}
+
+function openAbastecimentoModal(veiculoId, existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit?'Editar abastecimento':'Novo abastecimento'}</h3>
+    <div class="field-row">
+      <div class="field"><label>Data</label><input type="date" id="abData" value="${existing?existing.data:todayISO()}"></div>
+      <div class="field"><label>Km no momento</label><input type="text" inputmode="numeric" id="abKm" value="${existing?existing.km:''}" placeholder="Ex: 53326"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Combustível</label><input type="text" id="abTipoCombustivel" value="${existing?escapeHTML(existing.tipoCombustivel||''):''}" placeholder="Ex: Etanol, Gasolina"></div>
+      <div class="field"><label>Posto (opcional)</label><input type="text" id="abPosto" value="${existing?escapeHTML(existing.posto||''):''}" placeholder="Ex: Posto Frateli"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Litros</label><input type="text" inputmode="decimal" id="abLitros" value="${existing?existing.litros:''}" placeholder="0,00"></div>
+      <div class="field"><label>Valor total (R$)</label><input type="text" inputmode="decimal" id="abValor" value="${existing?existing.valor:''}" placeholder="0,00"></div>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;margin:6px 0 14px;">
+      <input type="checkbox" id="abTanqueCheio" style="width:17px;height:17px;" ${existing?.tanqueCheio?'checked':''}>
+      Encheu o tanque (necessário pra calcular consumo médio corretamente)
+    </label>
+    <div class="field-row">
+      <div class="field"><label>Conta</label><select id="abConta">${state.contas.map(c=>`<option value="${c.id}" ${existing?.contaId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+      <div class="field"><label>Status</label><select id="abStatus">
+        <option value="pago" ${(!existing||existing.status==='pago')?'selected':''}>Já pago</option>
+        <option value="pendente" ${existing?.status==='pendente'?'selected':''}>Pendente</option>
+      </select></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      ${isEdit ? `<button class="btn ghost" id="btnExcluirRegistroVeiculo" style="color:var(--danger);">Excluir</button>` : ''}
+      <button class="btn" id="btnSalvarAbastecimento">${isEdit?'Salvar':'Registrar'}</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnExcluirRegistroVeiculo')?.addEventListener('click', ()=>{
+    if(!confirm('Excluir esse abastecimento? Isso também remove o lançamento financeiro vinculado a ele.')) return;
+    if(existing.lancamentoId) excluirLancamentoVeiculo(existing.lancamentoId);
+    state.veiculoAbastecimentos = state.veiculoAbastecimentos.filter(a=>a.id!==existing.id);
+    persist(); closeModal(); render();
+  });
+  document.getElementById('btnSalvarAbastecimento').addEventListener('click', ()=>{
+    const data = document.getElementById('abData').value;
+    const km = numBR(document.getElementById('abKm').value) || 0;
+    const litros = numBR(document.getElementById('abLitros').value) || 0;
+    const valor = numBR(document.getElementById('abValor').value) || 0;
+    if(!data || valor<=0){ showToast('Preencha a data e o valor'); return; }
+    const tipoCombustivel = document.getElementById('abTipoCombustivel').value.trim();
+    const posto = document.getElementById('abPosto').value.trim();
+    const tanqueCheio = document.getElementById('abTanqueCheio').checked;
+    const contaId = document.getElementById('abConta').value;
+    const status = document.getElementById('abStatus').value;
+    const descricao = `Abastecimento${tipoCombustivel?' — '+tipoCombustivel:''}${posto?' — '+posto:''}`;
+    const dadosLanc = { descricao, categoria:'Combustível', valor, contaId, data, status };
+    if(isEdit){
+      Object.assign(existing, { data, km, litros, valor, precoLitro: litros>0?valor/litros:0, tipoCombustivel, posto, tanqueCheio, contaId, status });
+      if(existing.lancamentoId) atualizarLancamentoVeiculo(existing.lancamentoId, { ...dadosLanc, tipo:'saida' });
+    } else {
+      const lancamentoId = criarLancamentoVeiculo({ tipo:'saida', veiculoId, ...dadosLanc });
+      state.veiculoAbastecimentos.push({ id:uid(), veiculoId, data, km, litros, valor, precoLitro: litros>0?valor/litros:0, tipoCombustivel, posto, tanqueCheio, contaId, status, lancamentoId });
+    }
+    persist(); closeModal(); render();
+    showToast(isEdit?'Abastecimento atualizado':'Abastecimento registrado');
+  });
+}
+
+// Despesa, Receita e Serviço reaproveitam o MESMO modal (a diferença é só o rótulo, a categoria
+// disponível e se conta como entrada ou saída financeira).
+function openVeiculoRegistroModal(veiculoId, tipoRegistro, existing){
+  const isEdit = !!existing;
+  const config = {
+    despesa: { titulo:'Despesa do veículo', array:'veiculoDespesas', tipoLanc:'saida', temCategoria:true, temOficina:false },
+    receita: { titulo:'Receita do veículo', array:'veiculoReceitas', tipoLanc:'entrada', temCategoria:true, temOficina:false },
+    servico: { titulo:'Serviço/Manutenção', array:'veiculoServicos', tipoLanc:'saida', temCategoria:false, temOficina:true },
+  }[tipoRegistro];
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit?'Editar':'Novo'} — ${config.titulo}</h3>
+    <div class="field-row">
+      <div class="field"><label>Data</label><input type="date" id="vrData" value="${existing?existing.data:todayISO()}"></div>
+      <div class="field"><label>Km (opcional)</label><input type="text" inputmode="numeric" id="vrKm" value="${existing?existing.km||'':''}" placeholder="Ex: 53326"></div>
+    </div>
+    <div class="field"><label>Descrição</label><input type="text" id="vrDescricao" value="${existing?escapeHTML(existing.descricao):''}" placeholder="${tipoRegistro==='servico'?'Ex: Troca de óleo':'Descrição'}"></div>
+    ${config.temOficina ? `<div class="field"><label>Oficina (opcional)</label><input type="text" id="vrOficina" value="${existing?escapeHTML(existing.oficina||''):''}"></div>` : ''}
+    ${config.temCategoria ? `<div class="field"><label>Categoria</label><select id="vrCategoria">${opcoesCategoriaHTML(config.tipoLanc, existing?.categoria)}</select></div>` : ''}
+    <div class="field-row">
+      <div class="field"><label>Valor (R$)</label><input type="text" inputmode="decimal" id="vrValor" value="${existing?existing.valor:''}" placeholder="0,00"></div>
+      <div class="field"><label>Conta</label><select id="vrConta">${state.contas.map(c=>`<option value="${c.id}" ${existing?.contaId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+    </div>
+    <div class="field"><label>Status</label><select id="vrStatus">
+      <option value="${config.tipoLanc==='entrada'?'recebido':'pago'}" selected>${config.tipoLanc==='entrada'?'Já recebido':'Já pago'}</option>
+      <option value="pendente" ${existing?.status==='pendente'?'selected':''}>Pendente</option>
+    </select></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      ${isEdit ? `<button class="btn ghost" id="btnExcluirRegistroVeiculo" style="color:var(--danger);">Excluir</button>` : ''}
+      <button class="btn" id="btnSalvarRegistroVeiculo">${isEdit?'Salvar':'Registrar'}</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnExcluirRegistroVeiculo')?.addEventListener('click', ()=>{
+    if(!confirm('Excluir esse registro? Isso também remove o lançamento financeiro vinculado a ele.')) return;
+    if(existing.lancamentoId) excluirLancamentoVeiculo(existing.lancamentoId);
+    state[config.array] = state[config.array].filter(r=>r.id!==existing.id);
+    persist(); closeModal(); render();
+  });
+  document.getElementById('btnSalvarRegistroVeiculo').addEventListener('click', ()=>{
+    const data = document.getElementById('vrData').value;
+    const descricao = document.getElementById('vrDescricao').value.trim();
+    const valor = numBR(document.getElementById('vrValor').value) || 0;
+    if(!data || !descricao || valor<=0){ showToast('Preencha data, descrição e valor'); return; }
+    const km = numBR(document.getElementById('vrKm')?.value) || 0;
+    const oficina = config.temOficina ? document.getElementById('vrOficina').value.trim() : null;
+    const categoria = config.temCategoria ? document.getElementById('vrCategoria').value : (tipoRegistro==='servico'?'Manutenção de Veículos':null);
+    const contaId = document.getElementById('vrConta').value;
+    const status = document.getElementById('vrStatus').value;
+    const dadosLanc = { descricao, categoria, valor, contaId, data, status };
+    if(isEdit){
+      Object.assign(existing, { data, descricao, km, oficina, categoria, valor, contaId, status });
+      if(existing.lancamentoId) atualizarLancamentoVeiculo(existing.lancamentoId, { ...dadosLanc, tipo:config.tipoLanc });
+    } else {
+      const lancamentoId = criarLancamentoVeiculo({ tipo:config.tipoLanc, veiculoId, ...dadosLanc });
+      state[config.array].push({ id:uid(), veiculoId, data, descricao, km, oficina, categoria, valor, contaId, status, lancamentoId });
+    }
+    persist(); closeModal(); render();
+    showToast(isEdit?'Registro atualizado':'Registro salvo');
+  });
+}
+
+function openLeituraModal(veiculoId, existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit?'Editar leitura':'Nova leitura de odômetro'}</h3>
+    <div class="note" style="margin-top:0;">Registra só a quilometragem, sem custo — útil pra acompanhar a distância percorrida entre um abastecimento e outro.</div>
+    <div class="field-row">
+      <div class="field"><label>Data</label><input type="date" id="ltData" value="${existing?existing.data:todayISO()}"></div>
+      <div class="field"><label>Km</label><input type="text" inputmode="numeric" id="ltKm" value="${existing?existing.km:''}" placeholder="Ex: 53400"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      ${isEdit ? `<button class="btn ghost" id="btnExcluirRegistroVeiculo" style="color:var(--danger);">Excluir</button>` : ''}
+      <button class="btn" id="btnSalvarLeitura">${isEdit?'Salvar':'Registrar'}</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnExcluirRegistroVeiculo')?.addEventListener('click', ()=>{
+    if(!confirm('Excluir essa leitura?')) return;
+    state.veiculoLeituras = state.veiculoLeituras.filter(r=>r.id!==existing.id);
+    persist(); closeModal(); render();
+  });
+  document.getElementById('btnSalvarLeitura').addEventListener('click', ()=>{
+    const data = document.getElementById('ltData').value;
+    const km = numBR(document.getElementById('ltKm').value) || 0;
+    if(!data || km<=0){ showToast('Preencha a data e o km'); return; }
+    if(isEdit){ Object.assign(existing, { data, km }); }
+    else { state.veiculoLeituras.push({ id:uid(), veiculoId, data, km }); }
+    persist(); closeModal(); render();
+    showToast('Leitura registrada');
+  });
+}
+
+function openLembreteVeiculoModal(veiculoId, existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit?'Editar lembrete':'Novo lembrete'}</h3>
+    <div class="field"><label>Descrição</label><input type="text" id="lbDescricao" value="${existing?escapeHTML(existing.descricao):''}" placeholder="Ex: Próxima troca de óleo"></div>
+    <div class="field"><label>Tipo</label><select id="lbTipo">
+      <option value="km" ${(!existing||existing.tipo==='km')?'selected':''}>Por quilometragem</option>
+      <option value="data" ${existing?.tipo==='data'?'selected':''}>Por data</option>
+    </select></div>
+    <div class="field" id="lbKmWrap" style="display:${!existing||existing.tipo==='km'?'block':'none'};"><label>Km alvo</label><input type="text" inputmode="numeric" id="lbKmAlvo" value="${existing?.kmAlvo||''}" placeholder="Ex: 60000"></div>
+    <div class="field" id="lbDataWrap" style="display:${existing?.tipo==='data'?'block':'none'};"><label>Data alvo</label><input type="date" id="lbDataAlvo" value="${existing?.dataAlvo||''}"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      ${isEdit ? `<button class="btn ghost" id="btnExcluirLembreteVeiculo" style="color:var(--danger);">Excluir</button>` : ''}
+      <button class="btn" id="btnSalvarLembreteVeiculo">${isEdit?'Salvar':'Criar'}</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('lbTipo').addEventListener('change', (e)=>{
+    document.getElementById('lbKmWrap').style.display = e.target.value==='km'?'block':'none';
+    document.getElementById('lbDataWrap').style.display = e.target.value==='data'?'block':'none';
+  });
+  document.getElementById('btnExcluirLembreteVeiculo')?.addEventListener('click', ()=>{
+    if(!confirm('Excluir esse lembrete?')) return;
+    state.veiculoLembretes = state.veiculoLembretes.filter(l=>l.id!==existing.id);
+    persist(); closeModal(); render();
+  });
+  document.getElementById('btnSalvarLembreteVeiculo').addEventListener('click', ()=>{
+    const descricao = document.getElementById('lbDescricao').value.trim();
+    const tipo = document.getElementById('lbTipo').value;
+    if(!descricao){ showToast('Descreva o lembrete'); return; }
+    const kmAlvo = tipo==='km' ? numBR(document.getElementById('lbKmAlvo').value) : null;
+    const dataAlvo = tipo==='data' ? document.getElementById('lbDataAlvo').value : null;
+    if(tipo==='km' && !(kmAlvo>0)){ showToast('Preencha o km alvo'); return; }
+    if(tipo==='data' && !dataAlvo){ showToast('Preencha a data alvo'); return; }
+    if(isEdit){ Object.assign(existing, { descricao, tipo, kmAlvo, dataAlvo }); }
+    else { state.veiculoLembretes.push({ id:uid(), veiculoId, descricao, tipo, kmAlvo, dataAlvo, ativo:true }); }
+    persist(); closeModal(); render();
+    showToast(isEdit?'Lembrete atualizado':'Lembrete criado');
   });
 }
 
