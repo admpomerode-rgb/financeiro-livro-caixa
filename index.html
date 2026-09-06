@@ -17031,13 +17031,23 @@ function viewVKAprovacoes(){
           ` : ''}
           ${!ehPedido && item.itens && item.itens.length>1 ? `
           <div style="margin-top:14px;">
-            <label style="font-size:12.5px;font-weight:600;color:var(--text-soft);">Categoria de cada item (${item.itens.length} itens)</label>
-            ${item.itens.map((it,idx)=>`
-              <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
-                <span style="flex:1;min-width:140px;font-size:12.5px;">${escapeHTML(it.nome)} <span class="mono" style="color:var(--text-soft);">${brl(it.valor)}</span></span>
-                <select class="aprov-item-categoria" data-id="${item.id}" data-idx="${idx}" style="max-width:200px;flex:1;min-width:160px;">${opcoesCategoriaHTML('saida', item.categoriasItens?.[idx] || item.categoria)}</select>
-              </div>
-            `).join('')}
+            <div class="field" style="max-width:340px;">
+              <label>Categoria</label>
+              <select id="aprovCategoria_${item.id}" style="display:${item.categorizarPorItem?'none':'block'};">${opcoesCategoriaHTML('saida', item.categoria)}</select>
+            </div>
+            <label style="display:flex;align-items:center;gap:9px;font-size:12.5px;cursor:pointer;margin-top:10px;color:var(--text-soft);">
+              <input type="checkbox" class="aprov-dividir-itens-toggle" data-id="${item.id}" style="width:16px;height:16px;" ${item.categorizarPorItem?'checked':''}>
+              Categorizar cada item separadamente (gera um lançamento por item — por padrão, entra como uma despesa única)
+            </label>
+            <div id="aprovItensWrap_${item.id}" style="display:${item.categorizarPorItem?'block':'none'};margin-top:10px;">
+              <label style="font-size:12.5px;font-weight:600;color:var(--text-soft);">Categoria de cada item (${item.itens.length} itens)</label>
+              ${item.itens.map((it,idx)=>`
+                <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
+                  <span style="flex:1;min-width:140px;font-size:12.5px;">${escapeHTML(it.nome)} <span class="mono" style="color:var(--text-soft);">${brl(it.valor)}</span></span>
+                  <select class="aprov-item-categoria" data-id="${item.id}" data-idx="${idx}" style="max-width:200px;flex:1;min-width:160px;">${opcoesCategoriaHTML('saida', item.categoriasItens?.[idx] || item.categoria)}</select>
+                </div>
+              `).join('')}
+            </div>
           </div>
           ` : `
           <div class="field" style="margin-top:14px;max-width:340px;">
@@ -17246,8 +17256,10 @@ function aprovarItemVK(id){
   } else {
     const ehCartaoEl = document.getElementById('aprovCartaoToggle_'+id) || document.querySelector(`.aprov-cartao-toggle[data-id="${id}"]`);
     const ehCartao = ehCartaoEl ? ehCartaoEl.checked : false;
+    const dividirItensEl = document.querySelector(`.aprov-dividir-itens-toggle[data-id="${id}"]`);
+    const quiseDividirPorItem = dividirItensEl ? dividirItensEl.checked : false;
     const itensSelects = [...document.querySelectorAll(`.aprov-item-categoria[data-id="${id}"]`)];
-    const temVariosItens = item.itens && item.itens.length>1 && itensSelects.length===item.itens.length;
+    const temVariosItens = quiseDividirPorItem && item.itens && item.itens.length>1 && itensSelects.length===item.itens.length;
 
     if(ehCartao){
       const cartaoId = document.getElementById('aprovCartaoSelect_'+id)?.value;
@@ -17271,7 +17283,7 @@ function aprovarItemVK(id){
         state.comprasCartao.push({
           id: uid(), cartaoId, grupoId: uid(),
           descricao: item.descricao, categoria, valor: item.valor,
-          fornecedor: item.contraparte||'', numeroNF: item.numeroNF||null,
+          fornecedor: item.contraparte||'', numeroNF: item.numeroNF||null, itens: item.itens||null,
           dataCompra, competencia, parcela: 1, totalParcelas: 1
         });
         registrarLog('Entrada de estoque VK aprovada como compra no cartão', `"${item.descricao}" — ${brl(item.valor)} — ${cartao.nome}`);
@@ -17300,7 +17312,7 @@ function aprovarItemVK(id){
           descricao: item.descricao, valor: item.valor, fornecedor: item.contraparte,
           observacao: item.observacao, contaId: contaEstoqueId, dataVencimento: item.dataVencimento,
           status: 'pendente', dataPagamento: null,
-          origem: 'vk-estoque', vkEntradaId: item.vkEntradaId, semNF: !!item.semNF, numeroNF: item.numeroNF||null,
+          origem: 'vk-estoque', vkEntradaId: item.vkEntradaId, semNF: !!item.semNF, numeroNF: item.numeroNF||null, itens: item.itens||null,
           criadoEm: new Date().toISOString()
         });
         registrarLog('Entrada de estoque VK aprovada', `"${item.descricao}" — ${brl(item.valor)}`);
@@ -20615,6 +20627,14 @@ function attachViewHandlers(){
       if(wrap) wrap.style.display = chk.checked ? 'block' : 'none';
       const wrapConta = document.getElementById('aprovContaEstoqueWrap_'+chk.dataset.id);
       if(wrapConta) wrapConta.style.display = chk.checked ? 'none' : 'block';
+    });
+  });
+  document.querySelectorAll('.aprov-dividir-itens-toggle').forEach(chk=>{
+    chk.addEventListener('change', ()=>{
+      const itensWrap = document.getElementById('aprovItensWrap_'+chk.dataset.id);
+      if(itensWrap) itensWrap.style.display = chk.checked ? 'block' : 'none';
+      const categoriaSelect = document.getElementById('aprovCategoria_'+chk.dataset.id);
+      if(categoriaSelect) categoriaSelect.style.display = chk.checked ? 'none' : 'block';
     });
   });
   document.querySelectorAll('[data-action="aprovar-vk-aprovacao"]').forEach(btn=>{
