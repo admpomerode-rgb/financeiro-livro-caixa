@@ -6446,6 +6446,7 @@ function viewExtrato(contaId){
         <div class="field" style="margin:0;max-width:120px;"><label style="font-size:10.5px;">De</label><input type="date" id="extratoFiltroDe" style="padding:6px 8px;font-size:12px;"></div>
         <div class="field" style="margin:0;max-width:120px;"><label style="font-size:10.5px;">Até</label><input type="date" id="extratoFiltroAte" style="padding:6px 8px;font-size:12px;"></div>
         <button class="btn ghost sm" id="btnBaixarExtratoPDF">📄 Baixar PDF</button>
+        <button class="btn ghost sm" id="btnConciliarExtrato">🔄 Conciliar / Importar extrato</button>
       </div>
       <div class="toggle-row" id="extratoModoBuscaRow" style="margin:8px 16px 8px;flex-wrap:wrap;width:auto;">
         <button type="button" data-modo="conta" class="${extratoModoBusca==='conta'?'active':''}">Nesta conta</button>
@@ -15838,6 +15839,12 @@ function atualizarAtivosListaConteudo(){
     `;
   }
   container.innerHTML = corpoListaHTML;
+  container.querySelectorAll('[data-action="ver-qrcode-ativo"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const a = state.ativosPatrimoniais.find(x=>x.id===btn.dataset.id);
+      if(a) openQRCodeAtivoModal(a);
+    });
+  });
   container.querySelectorAll('[data-action="editar-ativo-patrimonial"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const a = state.ativosPatrimoniais.find(x=>x.id===btn.dataset.id);
@@ -15878,6 +15885,7 @@ function rowAtivoPatrimonialHTML(a, avisos){
       <span class="mono ativo-patrimonial-col" style="font-size:12.5px;color:var(--danger);">-${brl(d.depreciacaoAcumulada)}</span>
       <span class="mono" style="font-weight:600;">${brl(d.valorAtual)}</span>
       <div class="row-actions">
+        <button class="icon-btn" data-action="ver-qrcode-ativo" data-id="${a.id}" title="QR Code do ativo">▦</button>
         <button class="icon-btn" data-action="editar-ativo-patrimonial" data-id="${a.id}" title="Editar">✎</button>
         <button class="icon-btn" data-action="excluir-ativo-patrimonial" data-id="${a.id}" title="Excluir">✕</button>
       </div>
@@ -16350,6 +16358,35 @@ function openReavaliacaoModal(ativo){
     registrarLog('Reavaliação de ativo registrada', `"${ativo.nome}" — novo valor ${brl(valorLaudo)}`);
     persist(); closeModal(); render();
     showToast('Reavaliação registrada');
+  });
+}
+
+// QR Code físico do ativo — pra imprimir e colar no objeto (ou na Ficha de Patrimônio, quando o
+// adesivo não puder ir direto no item). Não é um link clicável (o sistema não tem endereço público
+// pra abrir direto num ativo específico) — codifica o número de patrimônio e o nome, que dá pra
+// conferir com qualquer leitor de QR Code do celular sem depender do app.
+function openQRCodeAtivoModal(ativo){
+  const conteudo = `Patrimônio: ${ativo.numeroPatrimonio || ativo.id}\nNome: ${ativo.nome}`;
+  const urlQR = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=8&data=${encodeURIComponent(conteudo)}`;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>QR Code — ${escapeHTML(ativo.nome)}</h3>
+    <div class="note" style="margin-top:0;">Escaneando com a câmera do celular, mostra o número de patrimônio e o nome do ativo — não abre nada automaticamente, é só pra identificar o objeto sem depender do sistema aberto.</div>
+    <div style="text-align:center;padding:16px 0;">
+      <img src="${urlQR}" alt="QR Code do ativo" style="width:220px;height:220px;border:1px solid var(--line);border-radius:8px;">
+      <div style="margin-top:10px;font-size:12.5px;color:var(--text-soft);">Patrimônio: ${escapeHTML(ativo.numeroPatrimonio||'—')}</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Fechar</button>
+      <button class="btn" id="btnImprimirQRAtivo">🖨️ Imprimir</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnImprimirQRAtivo').addEventListener('click', ()=>{
+    const w = window.open('', '_blank');
+    w.document.write(`<html><head><title>QR Code — ${escapeHTML(ativo.nome)}</title></head><body style="text-align:center;font-family:sans-serif;padding:40px;"><img src="${urlQR}" style="width:280px;height:280px;"><p>${escapeHTML(ativo.nome)}${ativo.numeroPatrimonio?' · Patrimônio '+escapeHTML(ativo.numeroPatrimonio):''}</p></body></html>`);
+    w.document.close();
+    w.print();
   });
 }
 
@@ -20757,6 +20794,12 @@ function attachViewHandlers(){
       showToast('Removido da lista de pendentes');
     });
   });
+  document.querySelectorAll('[data-action="ver-qrcode-ativo"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const a = state.ativosPatrimoniais.find(x=>x.id===btn.dataset.id);
+      if(a) openQRCodeAtivoModal(a);
+    });
+  });
   document.querySelectorAll('[data-action="editar-ativo-patrimonial"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const a = state.ativosPatrimoniais.find(x=>x.id===btn.dataset.id);
@@ -21086,6 +21129,14 @@ function attachViewHandlers(){
     if(chartExtratoDiario) desenharGraficoBarrasDuasCores('chartExtratoDiario', extratoGraficoDadosAtual);
     atualizarSelecaoUI();
   };
+  document.getElementById('btnConciliarExtrato')?.addEventListener('click', ()=>{
+    if(extratoTodasContas || !extratoContaId){ abrirConciliacaoEscolherConta(); return; }
+    conciliacaoContaId = extratoContaId;
+    window.__conciliacaoResultado = null;
+    window.__conciliacaoContaAtual = null;
+    currentView = 'conciliacao';
+    render();
+  });
   document.getElementById('extratoFiltroConta')?.addEventListener('change', (e)=>{
     if(e.target.value==='todas'){ extratoTodasContas = true; }
     else { extratoTodasContas = false; extratoContaId = e.target.value; }
