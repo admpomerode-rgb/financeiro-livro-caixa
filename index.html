@@ -361,7 +361,7 @@
 
   /* Contas bancárias */
   .conta-cards{display:grid;grid-template-columns:repeat(auto-fill, minmax(220px,1fr));gap:14px;margin-bottom:22px;}
-  .conta-card{background:var(--white);border:1px solid var(--line);border-radius:10px;padding:16px 18px;border-top:3px solid var(--accent-c, var(--blue-accent));position:relative;}
+  .conta-card{background:var(--white);border:1px solid var(--line);border-radius:10px;padding:48px 18px 16px;border-top:3px solid var(--accent-c, var(--blue-accent));position:relative;}
   .conta-card.conta-principal{box-shadow:0 0 0 2px var(--warn);}
   .conta-card.conta-negativa{background:#FFF8F7;}
   .conta-cards-compacto{grid-template-columns:1fr !important;}
@@ -390,7 +390,7 @@
   .add-conta-card:hover{border-color:var(--blue-accent);color:var(--blue-accent);}
 
   /* Cartões de crédito */
-  .cartao-card{background:linear-gradient(145deg, var(--ink), #1B2430);color:var(--white);border-radius:14px;padding:20px 20px 18px;position:relative;overflow:hidden;border-top:8px solid var(--accent-c, var(--blue-accent));}
+  .cartao-card{background:linear-gradient(145deg, var(--ink), #1B2430);color:var(--white);border-radius:14px;padding:48px 20px 18px;position:relative;overflow:hidden;border-top:8px solid var(--accent-c, var(--blue-accent));}
   .cartao-card .card-menu-wrap{position:absolute;top:14px;right:14px;z-index:2;}
   .cartao-card .card-menu-wrap > .icon-btn{background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.18);color:#E4E7EC;font-weight:700;}
   .cartao-card .card-menu-wrap > .icon-btn:hover{border-color:var(--white);color:var(--white);background:rgba(255,255,255,0.18);}
@@ -1078,6 +1078,7 @@ function executarDesfazer(){
 
 /* ---------------- Navegação ---------------- */
 let currentView = 'dashboard';
+let relatoriosCardsAtivos = [];
 let extratoContaId = null;
 let extratoBuscaTermo = '';
 let extratoModoBusca = 'conta';
@@ -3303,7 +3304,7 @@ function painelOQueMudouHTML(){
   return `
     <div class="panel" id="painelOQueMudou" style="border-left:3px solid var(--blue-accent);position:relative;">
       <button id="btnFecharOQueMudou" style="position:absolute;top:10px;right:10px;background:none;border:none;font-size:16px;color:var(--text-soft);cursor:pointer;">✕</button>
-      <div class="panel-head"><h2>👋 O que mudou desde sua última visita</h2></div>
+      <div class="panel-head" style="padding-right:44px;"><h2>👋 O que mudou desde sua última visita</h2></div>
       <div class="panel-body" style="padding:12px 18px;">
         ${itens.map(i=>`<div style="padding:5px 0;font-size:13px;">${i.icone} ${i.texto}</div>`).join('')}
       </div>
@@ -3487,11 +3488,13 @@ function viewDashboard(){
   return `
     <div class="topbar dash-topbar">
       <div class="dash-titulo"><h1>Dashboard</h1><p>Visão geral da saúde financeira da empresa</p></div>
-      <button id="btnToggleModoVisualizacao" class="btn ghost sm" style="flex-shrink:0;">${state.modoVisualizacao==='simples'?'📊 Ver tudo':'⚡ Modo simples'}</button>
     </div>
     ${painelOQueMudouHTML()}
     ${cardCentroComandoCompactoHTML()}
     ${cardCentralDecisaoCompactoHTML()}
+    <div style="display:flex;justify-content:flex-end;margin-bottom:6px;">
+      <button id="btnToggleModoVisualizacao" class="btn ghost sm">${state.modoVisualizacao==='simples'?'📊 Ver tudo':'⚡ Modo simples'}</button>
+    </div>
     ${mesNavHTML()}
 
     <div class="dash-hero-row">
@@ -6691,224 +6694,279 @@ function viewIntegracoes(){
 
 function viewRelatorios(){
   const cards = [
-    { id:'gerencial', icone:'📊', nome:'Dashboard Gerencial', desc:'Visão anual completa — receita/despesa por mês, saídas e entradas por categoria, margem de contribuição, lucro e ponto de equilíbrio' },
-    { id:'executivo', icone:'🧭', nome:'Dashboard Executivo', desc:'Resumo visual com semáforos — receita, lucro, EBITDA, margem, evolução mensal e top clientes/categorias' },
-    { id:'mensal', icone:'📅', nome:'Super Relatório Mensal', desc:'Tudo sobre o mês — DRE, indicadores, orçamento, alertas — num relatório só' },
-    { id:'dre', icone:'📊', nome:'DRE', desc:'Demonstrativo de resultado, com análise vertical e horizontal' },
-    { id:'balanco', icone:'⚖️', nome:'Balanço Patrimonial', desc:'Ativos, passivos e patrimônio líquido' },
-    { id:'indicadores', icone:'📈', nome:'Indicadores Financeiros', desc:'Margem, liquidez, ticket médio, ponto de equilíbrio e mais' },
-    { id:'custos_margem_produtos', icone:'🧮', nome:'Custos e Margem de Produtos', desc:'Custo de produção (vindo do VK Industrial) cruzado com outras despesas do produto (juros, energia, comissão etc.) lançadas aqui', viewDireta:'custos-margem-produtos' },
-    { id:'produto', icone:'🍪', nome:'Rentabilidade por Produto', desc:'Receita, custo e margem por produto ou linha' },
-    { id:'investimentos', icone:'💰', nome:'Relatório de Investimentos', desc:'Total aplicado no mês (renda fixa + variável), ativos mais investidos e custos das operações' },
-    { id:'liquidez', icone:'💧', nome:'Índices de Liquidez', desc:'Liquidez imediata, seca, corrente e geral + capital de giro, endividamento e solvência' },
-    { id:'cartoes', icone:'💳', nome:'Cartões de Crédito', desc:'Uso do limite por cartão, gastos por categoria, comprometido futuro e maiores compras' },
-    { id:'abc_clientes', icone:'👥', nome:'Curva ABC de Clientes', desc:'Ranking de clientes (ticket médio, frequência) + classificação A/B/C pelo volume de receita (últimos 12 meses)' },
-    { id:'abc_despesas', icone:'📉', nome:'Curva ABC de Despesas', desc:'Classifica categorias de despesa em A/B/C pelo volume gasto (últimos 12 meses)' },
-    { id:'abc_fornecedores', icone:'🏭', nome:'Auditoria de Fornecedores', desc:'Curva ABC de compras por fornecedor, com prazo médio de pagamento (PMP)' },
-    { id:'inadimplencia_cac', icone:'⚠️', nome:'Inadimplência e CAC', desc:'Taxa de inadimplência, perfil de clientes atrasados e custo de aquisição de clientes' },
-    { id:'canal_venda', icone:'🛒', nome:'Receita por Canal de Venda', desc:'Compara receita, participação e ticket médio entre canais de venda' },
-    { id:'comissoes', icone:'🤝', nome:'Desempenho Comercial e Comissões', desc:'Comissões por vendedor, metas e ticket médio (abre a tela de Comissões)' },
-    { id:'orcamento', icone:'🎯', nome:'Orçado vs. Realizado', desc:'Comparativo entre o planejado e o executado por categoria (abre Orçamento e Planejamento)' },
-    { id:'rolling_forecast', icone:'🔁', nome:'Rolling Forecast 12 Meses', desc:'Projeção contínua dos próximos 12 meses, sempre recalculada a partir de hoje, com base no seu histórico recente' },
-    { id:'centro_lucro', icone:'🏢', nome:'Centro de Lucro / Unidade de Negócio', desc:'Resultado (receita − despesa) completo por centro de custo, lado a lado' },
-    { id:'yoy', icone:'📅', nome:'Comparativo Ano a Ano', desc:'Mês a mês desse ano lado a lado com o mesmo mês do ano passado, com % de crescimento' },
-    { id:'sazonalidade', icone:'🌦️', nome:'Análise de Sazonalidade', desc:'Meses de pico e de baixa ao longo dos anos, com base no seu próprio histórico' },
-    { id:'calendario_vencimentos', icone:'🗓️', nome:'Calendário de Vencimentos', desc:'Contratos, garantias de ativos, cartões e contas grandes que vencem nos próximos 90 dias, tudo junto' },
-    { id:'carga_tributaria', icone:'🧾', nome:'Carga Tributária', desc:'Impostos pagos no mês e no ano, % sobre a receita e projeção do próximo DAS' },
-    { id:'simulador_preco', icone:'🧮', nome:'Simulador de Preço', desc:'Calculadora — informe custo e margem desejada, calcula o preço de venda' },
-    { id:'formas_pagamento', icone:'💳', nome:'Formas de Pagamento', desc:'Distribuição de entradas e saídas por Pix, cartão, dinheiro, boleto etc.' },
-    { id:'rentabilidade_cliente', icone:'👤', nome:'Rentabilidade por Cliente', desc:'Receita, ticket médio e participação de cada cliente nos últimos 12 meses' },
-    { id:'pe_produto', icone:'⚖️', nome:'Ponto de Equilíbrio por Produto', desc:'Quantas unidades de cada produto são necessárias pra cobrir o custo fixo alocado' },
-    { id:'metas_comerciais', icone:'🎯', nome:'Metas Comerciais', desc:'Progresso de cada vendedor em relação à meta mensal cadastrada' },
-    { id:'fixo_variavel_tempo', icone:'📊', nome:'Custo Fixo vs Variável no Tempo', desc:'Como a proporção entre custo fixo e variável mudou nos últimos 12 meses' },
-    { id:'onde_dinheiro', icone:'🧭', nome:'Onde Meu Dinheiro Está', desc:'Foto única do patrimônio — saldo em contas, investimentos, a receber e ativos' },
-    { id:'health_score', icone:'❤️', nome:'Saúde da Empresa', desc:'Gráfico de tendência dos últimos 12 meses (0 a 100), mostrando o que está puxando o resultado pra cima ou pra baixo' },
-    { id:'eficiencia_cobranca', icone:'⏱️', nome:'Eficiência de Cobrança', desc:'Prazo médio entre vencimento e recebimento de fato, e ranking de quem mais atrasa' },
-    { id:'variacao_preco_insumos', icone:'📈', nome:'Variação de Preço de Insumos', desc:'Como o valor pago pelos insumos mudou ao longo das entradas de estoque já registradas' },
-    { id:'concentracao_clientes', icone:'⚠️', nome:'Concentração de Risco de Clientes', desc:'Quanto % da receita vem do maior cliente, dos 3 e dos 5 maiores' },
-    { id:'volume_margem_produto', icone:'💎', nome:'Ranking Volume x Margem por Produto', desc:'Cruza quantidade vendida com margem — acha quem vende muito com pouco lucro, e o contrário' },
-    { id:'saude_cadastros', icone:'🩺', nome:'Saúde dos Cadastros', desc:'Fornecedores e ativos patrimoniais com informação faltando (CNPJ, telefone, foto, nota fiscal)' },
-    { id:'projecao_comissoes', icone:'🤝', nome:'Projeção de Comissões a Pagar', desc:'Comissões já geradas mas ainda pendentes, por vendedor e por vencimento' },
-    { id:'fcl', icone:'💧', nome:'Fluxo de Caixa Livre', desc:'EBITDA menos investimento em ativos — o que sobrou de verdade depois de operar e reinvestir' },
-    { id:'payback', icone:'⏳', nome:'Payback de Investimento', desc:'Calculadora — em quantos meses um investimento se paga, dado o ganho mensal esperado' },
-    { id:'cvl_multiproduto', icone:'📐', nome:'Análise Custo-Volume-Lucro', desc:'Margem de contribuição de cada produto no mês, e o peso de cada um no resultado' },
-    { id:'dmpl', icone:'📗', nome:'Mutações do Patrimônio Líquido', desc:'Como o Patrimônio Líquido mudou mês a mês nos últimos 12 meses' },
-    { id:'provisoes', icone:'🗂️', nome:'Provisões (Férias/13º)', desc:'Calculadora — estimativa de férias e 13º proporcional a partir da folha informada' },
-    { id:'fluxo_centro_custo', icone:'🏗️', nome:'Fluxo de Caixa por Centro de Custo', desc:'Entradas e saídas realizadas, separadas por centro de custo' },
-    { id:'conciliacao_saldo', icone:'✅', nome:'Conciliação de Saldo por Conta', desc:'Compara o saldo calculado pelo sistema com o saldo real do extrato bancário' },
-    { id:'taxa_conversao_funil', icone:'🔻', nome:'Taxa de Conversão do Funil', desc:'% de oportunidades que viraram pedido, e depois faturamento' },
-    { id:'novos_vs_recorrentes', icone:'🆕', nome:'Novos Clientes vs. Recorrentes', desc:'Quantos clientes compraram pela primeira vez no mês vs já eram conhecidos' },
-    { id:'taxa_recompra', icone:'🔁', nome:'Taxa de Recompra', desc:'% de clientes que compraram mais de uma vez nos últimos 12 meses' },
-    { id:'ltv_cac', icone:'💗', nome:'LTV e Relação LTV/CAC', desc:'Valor estimado do cliente ao longo do tempo, comparado ao custo de aquisição' },
-    { id:'abc_estoque', icone:'📦', nome:'Curva ABC de Estoque', desc:'Insumos que mais pesam no valor total parado em estoque (não no volume de compra)' },
-    { id:'estoque_abaixo_minimo', icone:'🔻', nome:'Estoque Abaixo do Mínimo', desc:'Insumos com quantidade atual abaixo do mínimo configurado' },
-    { id:'obsolescencia_estoque', icone:'🕸️', nome:'Obsolescência de Estoque', desc:'Insumos sem entrada registrada há 90+ dias — possível item parado/esquecido' },
-    { id:'comparativo_preco_fornecedores', icone:'⚖️', nome:'Comparativo de Preço entre Fornecedores', desc:'Mesmo insumo, fornecedores diferentes — quem cobra mais caro' },
-    { id:'calendario_obrigacoes', icone:'📆', nome:'Calendário de Obrigações Acessórias', desc:'Datas de referência do DAS e da declaração anual do MEI' },
-    { id:'manutencao_consolidada', icone:'🔧', nome:'Manutenção Preventiva Consolidada', desc:'Todas as manutenções programadas de todos os ativos, numa lista só' },
-    { id:'vida_util_remanescente', icone:'⏱️', nome:'Vida Útil Remanescente', desc:'Quanto tempo falta pra cada ativo terminar de depreciar' },
-    { id:'roi_ativo', icone:'📐', nome:'Custo e Valor Atual por Ativo', desc:'Custo original vs. valor contábil atual e desgaste acumulado de cada ativo' },
-    { id:'alocacao_ativos', icone:'🥧', nome:'Alocação de Ativos', desc:'% investido em Renda Fixa vs. Renda Variável' },
-    { id:'divergencias', icone:'🔍', nome:'Divergências e Exceções', desc:'Lançamentos fora do padrão — valores muito altos, sem categoria, data futura' },
-    { id:'posicao_bancaria', icone:'🏦', nome:'Posição Bancária Consolidada', desc:'Saldo de todas as contas bancárias, lado a lado' },
-    { id:'taxas_bancarias', icone:'💸', nome:'Taxas e Tarifas Bancárias', desc:'Quanto foi pago em taxas, tarifas e anuidades no mês' },
-    { id:'amortizacao_emprestimos', icone:'🏦', nome:'Amortização de Empréstimos', desc:'Saldo devedor e parcelas restantes de cada empréstimo/financiamento cadastrado' },
-    { id:'seguros_ativos', icone:'🛡️', nome:'Seguros de Ativos', desc:'Vigência e valor dos seguros cadastrados, com alerta de vencimento próximo' },
-    { id:'preco_tabela_praticado', icone:'🏷️', nome:'Preço de Tabela vs. VK', desc:'Compara seu preço de tabela interno com o preço configurado no VK Industrial' },
-    { id:'limite_credito', icone:'💳', nome:'Limite de Crédito Disponível', desc:'Saldo + limite de cheque especial disponível em cada conta' },
-    { id:'multas_penalidades', icone:'🚨', nome:'Multas e Penalidades', desc:'Total pago em multas nos últimos 12 meses' },
-    { id:'central_inteligencia', icone:'🧠', nome:'Central de Inteligência Financeira', desc:'Análise automática do negócio, classificada em Risco, Atenção e Oportunidade' },
-    { id:'central_alertas', icone:'🔔', nome:'Central de Alertas', desc:'Todos os avisos do sistema — contas vencidas, limites, orçamentos, vencimentos — num lugar só' },
-    { id:'calendario_financeiro', icone:'📅', nome:'Calendário Financeiro', desc:'Visão em calendário (não lista) de entradas, saídas e vencimentos do mês' },
-    { id:'central_cliente', icone:'👥', nome:'Central do Cliente', desc:'Faturamento, prazo de pagamento, inadimplência e limite de crédito, consolidado por cliente' },
-    { id:'centro_comando', icone:'🎛️', nome:'Centro de Comando', desc:'O que está acontecendo, o que precisa de atenção, o que vai acontecer e o que fazer — tudo num só lugar' },
-    { id:'fluxo_caixa_diario', icone:'📆', nome:'Fluxo de Caixa Diário', desc:'Saldo inicial, entradas, saídas e saldo final de cada dia do mês' },
-    { id:'receitas_categoria', icone:'💹', nome:'Receitas por Categoria', desc:'Origem do faturamento e participação de cada categoria' },
-    { id:'margem_mensal', icone:'📐', nome:'Margem Mensal', desc:'Evolução da margem bruta e líquida ao longo dos últimos 12 meses' },
-    { id:'ticket_medio_evolutivo', icone:'🎫', nome:'Ticket Médio Evolutivo', desc:'Evolução do ticket médio de venda mês a mês' },
-    { id:'vendas_canceladas', icone:'❌', nome:'Vendas Canceladas', desc:'Quantidade, valor, clientes e produtos dos pedidos cancelados' },
-    { id:'comprometimento_futuro', icone:'🔒', nome:'Comprometimento Futuro', desc:'Quanto do dinheiro futuro já está comprometido com obrigações' },
-    { id:'parcelamentos', icone:'💳', nome:'Parcelamentos', desc:'Compras parceladas no cartão, parcelas já vencidas e futuras' },
-    { id:'receita_cliente_tempo', icone:'📈', nome:'Receita por Cliente ao Longo do Tempo', desc:'Evolução individual da receita dos principais clientes' },
-    { id:'clientes_perdidos_risco', icone:'⚠️', nome:'Clientes Perdidos e em Risco', desc:'Clientes que pararam de comprar ou tiveram queda relevante' },
-    { id:'compras_periodo', icone:'🛒', nome:'Compras por Período', desc:'Compras de insumo por mês, fornecedor e categoria' },
-    { id:'evolucao_custos', icone:'📊', nome:'Evolução dos Custos', desc:'Quais categorias de despesa mais cresceram recentemente' },
-    { id:'inflacao_interna', icone:'🌡️', nome:'Inflação Interna da Empresa', desc:'Índice de evolução do custo médio de compra de insumos' },
-    { id:'lucro_cliente', icone:'💎', nome:'Lucro por Cliente', desc:'Quanto cada cliente realmente contribui pro lucro (com custo do produto)' },
-    { id:'capital_giro', icone:'⚙️', nome:'Capital de Giro', desc:'Quanto dinheiro de curto prazo a operação precisa pra funcionar' },
-    { id:'endividamento_vencimento', icone:'📉', nome:'Endividamento por Vencimento', desc:'Dívidas separadas por curto, médio e longo prazo' },
-    { id:'super_relatorio_anual', icone:'🏆', nome:'Super Relatório Anual', desc:'Visão consolidada dos 12 meses — melhor/pior mês, clientes, despesas' },
-    { id:'despesas_centro_custo', icone:'🏗️', nome:'Despesas por Centro de Custo', desc:'Detalhamento e comparação das despesas por centro de custo' },
-    { id:'crescimento_clientes', icone:'👥', nome:'Crescimento de Clientes', desc:'Novos, ativos, recuperados e clientes que ficaram inativos no mês' },
-    { id:'dependencia_financeira', icone:'⚖️', nome:'Dependência Financeira', desc:'Concentração em cliente, fornecedor e canal de venda' },
-    { id:'lucro_canal', icone:'🛍️', nome:'Lucro por Canal', desc:'Comparação da rentabilidade entre canais de venda' },
-    { id:'obrigacoes_futuras', icone:'📋', nome:'Obrigações Futuras', desc:'Contas, impostos, cartões, parcelas e contratos vencendo, tudo junto' },
-    { id:'evolucao_patrimonial', icone:'🏛️', nome:'Evolução Patrimonial', desc:'Ativo, passivo e patrimônio líquido evoluindo mês a mês' },
-    { id:'giro_caixa', icone:'🔄', nome:'Giro de Caixa', desc:'Quantos dias a empresa opera só com o dinheiro disponível' },
-    { id:'dependencia_capital_terceiros', icone:'🏦', nome:'Dependência de Capital de Terceiros', desc:'Quanto da operação depende de fornecedores, cartão e empréstimos' },
-    { id:'ncg', icone:'⚙️', nome:'Necessidade de Capital de Giro (NCG)', desc:'Quanto dinheiro fica preso na operação, sem contar o caixa' },
-    { id:'caixa_minimo', icone:'🛟', nome:'Caixa Mínimo Recomendado', desc:'Reserva mínima operacional baseada no histórico de gastos' },
-    { id:'custo_financeiro_vendas', icone:'💳', nome:'Custo Financeiro das Vendas', desc:'Quanto juros e taxas financeiras consomem da receita' },
-    { id:'vendas_parceladas', icone:'📅', nome:'Vendas Parceladas', desc:'Quanto das vendas atuais ainda será recebido nos próximos meses' },
-    { id:'prazo_recebimento_vendas', icone:'⏱️', nome:'Prazo de Recebimento das Vendas', desc:'Perfil das vendas por prazo — à vista, 7, 14, 30, 60, 90+ dias' },
-    { id:'desembolso_financeiro', icone:'💸', nome:'Desembolso Financeiro', desc:'Quando o dinheiro efetivamente sai, além da despesa contabilizada' },
-    { id:'compromissos_semana', icone:'📆', nome:'Compromissos por Semana', desc:'Visão semanal dos próximos desembolsos e recebimentos' },
-    { id:'risco_caixa_data', icone:'🚨', nome:'Risco de Caixa por Data', desc:'Dias específicos em que o saldo projetado pode ficar crítico' },
-    { id:'rentabilidade_forma_pagamento', icone:'💵', nome:'Rentabilidade por Forma de Pagamento', desc:'Compara a margem das vendas conforme Pix, cartão, boleto etc.' },
-    { id:'custo_real_parcelamento', icone:'🧮', nome:'Custo Real do Parcelamento', desc:'Volume de compras parceladas vs à vista no cartão' },
-    { id:'evolucao_poder_compra', icone:'📊', nome:'Evolução do Poder de Compra', desc:'Receita, despesa e capacidade financeira ao longo do tempo' },
-    { id:'vazamentos_financeiros', icone:'🕳️', nome:'Vazamentos Financeiros', desc:'Pequenas despesas recorrentes que acumulam valores relevantes' },
-    { id:'custo_por_mil_receita', icone:'📏', nome:'Custo por R$1.000 de Receita', desc:'Quanto a empresa gasta pra gerar cada R$1.000 faturados' },
-    { id:'dependencia_poucas_operacoes', icone:'🎲', nome:'Dependência de Poucas Operações', desc:'Quanto do resultado depende de poucas vendas grandes' },
-    { id:'decisoes_financeiras', icone:'📝', nome:'Decisões Financeiras', desc:'Registro de decisões (comprar, investir, contratar) — previsto x realizado' },
-    { id:'diagnostico_automatico', icone:'🩺', nome:'Diagnóstico Automático do Mês', desc:'Interpretação narrativa dos números — principal problema, oportunidade e recomendação' },
-    { id:'para_onde_foi_dinheiro', icone:'🗺️', nome:'Para Onde Foi o Dinheiro?', desc:'Explica as principais movimentações do mês em linguagem simples' },
-    { id:'causas_variacao_lucro', icone:'🔍', nome:'Causas da Variação do Lucro', desc:'O que mais contribuiu pra queda ou melhora do resultado' },
-    { id:'eficiencia_dinheiro', icone:'⚡', nome:'Eficiência do Dinheiro', desc:'Quanto cada R$1,00 disponível está gerando de receita e lucro' },
-    { id:'movimentacoes_sem_classificacao', icone:'🏷️', nome:'Movimentações Sem Classificação', desc:'Lançamentos sem categoria, centro de custo ou fornecedor' },
-    { id:'dados_inconsistentes', icone:'🔧', nome:'Dados Inconsistentes', desc:'Informações incompatíveis ou incompletas que podem distorcer relatórios' },
-    { id:'suspeitos_duplicidade', icone:'👯', nome:'Lançamentos Suspeitos de Duplicidade', desc:'Lançamentos muito parecidos em data, valor, descrição e fornecedor' },
-    { id:'custo_efetivo_conta', icone:'🏦', nome:'Custo Efetivo por Conta Bancária', desc:'Quanto cada conta custa em tarifas vs quanto é movimentado' },
-    { id:'rentabilidade_saldo_parado', icone:'💤', nome:'Rentabilidade do Saldo Parado', desc:'Quanto o dinheiro parado em conta corrente poderia render' },
-    { id:'dinheiro_transitorio', icone:'↔️', nome:'Dinheiro Transitório', desc:'Valores que passam pelas contas mas não são receita/despesa real' },
-    { id:'simulador_decisao_compra', icone:'🛒', nome:'Simulador de Decisão de Compra', desc:'Compara comprar à vista, parcelado ou não comprar' },
-    { id:'simulador_antecipacao', icone:'⏩', nome:'Simulador de Antecipação', desc:'Compara receber antecipado com esperar o vencimento' },
-    { id:'reversoes_financeiras', icone:'↩️', nome:'Reversões Financeiras', desc:'Lançamentos pagos/recebidos que depois foram revertidos ou cancelados' },
-    { id:'oque_faria_se_fosse_dono', icone:'👑', nome:'O Que Eu Faria Se Fosse o Dono?', desc:'Plano de ação narrativo — situação, problema, oportunidade, recomendação e ação prioritária' },
-    { id:'linha_tempo_financeira', icone:'📜', nome:'Linha do Tempo Financeira', desc:'Principais acontecimentos financeiros mês a mês' },
-    { id:'efeito_domino_financeiro', icone:'🎲', nome:'Efeito Dominó Financeiro', desc:'Simula: se este cliente atrasar, quais contas ficam sem cobertura?' },
-    { id:'resultado_sem_maiores_clientes', icone:'👥', nome:'Resultado sem os 10 Maiores Clientes', desc:'A empresa continuaria saudável sem eles?' },
-    { id:'resultado_sem_maior_despesa', icone:'✂️', nome:'Resultado sem a Maior Despesa', desc:'Quanto o resultado mudaria eliminando a maior despesa do mês' },
-    { id:'lucro_de_verdade', icone:'🔎', nome:'Lucro de Verdade', desc:'Separa resultado "no papel" do dinheiro que efetivamente entrou/saiu' },
-    { id:'caixa_parece_livre', icone:'🎭', nome:'Caixa que Parece Livre', desc:'Quanto do saldo em conta já está comprometido nos próximos 30 dias' },
-    { id:'tempo_recuperar_prejuizo', icone:'🩹', nome:'Quanto Tempo pra Recuperar um Prejuízo?', desc:'Calculadora — meses necessários no ritmo atual de lucro' },
-    { id:'custo_inadimplencia_lucro', icone:'💔', nome:'Custo da Inadimplência no Lucro', desc:'Quanto a inadimplência está destruindo de resultado, não só de caixa' },
-    { id:'risco_aumento_fornecedor', icone:'📈', nome:'Risco de Aumento de Fornecedor', desc:'Simula reajustes de 5/10/15/20% nos principais fornecedores' },
-    { id:'custo_oculto_fornecedores', icone:'🔍', nome:'Custo Oculto dos Fornecedores', desc:'Cruza preço, prazo e frequência pra mostrar o custo real de cada fornecedor' },
-    { id:'cliente_trabalho_pouco_resultado', icone:'😓', nome:'Cliente que Dá Trabalho e Pouco Resultado', desc:'Clientes com muita frequência mas baixo ticket ou margem' },
-    { id:'cliente_mais_valioso', icone:'👑', nome:'Cliente Mais Valioso', desc:'Score combinando receita, margem, frequência e pontualidade' },
-    { id:'despesas_crescem_mais_receita', icone:'🚩', nome:'Despesas que Crescem Mais que a Receita', desc:'Categorias de despesa saindo do controle proporcionalmente' },
-    { id:'simulador_crescimento', icone:'🌱', nome:'Simulador de Crescimento', desc:'Quanto de capital de giro um crescimento de X% exigiria' },
-    { id:'limite_crescimento_seguro', icone:'🚦', nome:'Limite de Crescimento Seguro', desc:'Até quanto dá pra crescer sem faltar capital de giro' },
-    { id:'crescimento_da_prejuizo', icone:'⚠️', nome:'Crescimento que Dá Prejuízo', desc:'Detecta se a margem atual sustenta vender mais' },
-    { id:'qual_crescimento_vale_pena', icone:'⚖️', nome:'Qual Crescimento Vale a Pena?', desc:'Compara crescer receita vs. reduzir despesa, no impacto do lucro' },
-    { id:'simulador_custos_subirem', icone:'📈', nome:'E se meus custos subirem?', desc:'Testa aumento de 5/10/20/30% nos custos' },
-    { id:'indice_previsibilidade', icone:'🔮', nome:'Índice de Previsibilidade Financeira', desc:'Mede quanto do resultado futuro é previsível vs. incerto' },
-    { id:'qualidade_receita', icone:'✨', nome:'Qualidade da Receita', desc:'Separa receita "boa" (no prazo) de "ruim" (atrasada/inadimplente)' },
-    { id:'mapa_margem_perdida', icone:'🕳️', nome:'Mapa de Margem Perdida', desc:'Onde a margem está escapando: desconto, comissão, juros, inadimplência' },
-    { id:'preco_minimo_seguro', icone:'🛡️', nome:'Preço Mínimo Seguro', desc:'Menor preço que cobre custo variável + fatia do custo fixo' },
-    { id:'distancia_prejuizo', icone:'📏', nome:'Distância até o Prejuízo', desc:'Quanto a receita pode cair antes do resultado zerar' },
-    { id:'distancia_caixa_critico', icone:'🚨', nome:'Distância até o Caixa Crítico', desc:'Mesmo conceito, aplicado ao dinheiro disponível' },
-    { id:'meta_caixa_reverso', icone:'🎯', nome:'Meta de Caixa Reverso', desc:'Calculadora — quanto guardar por mês pra atingir um valor numa data' },
-    { id:'retorno_sobre_crescimento', icone:'💹', nome:'Retorno sobre Crescimento', desc:'Quanto de receita adicional cada real de capital extra gerou' },
-    { id:'eficiencia_receita_incremental', icone:'➕', nome:'Eficiência da Receita Incremental', desc:'Cada R$1 adicional de receita gera quanto de lucro' },
-    { id:'diluicao_margem', icone:'🔽', nome:'Análise de Diluição de Margem', desc:'Detecta se a receita cresce mas a margem % está caindo' },
-    { id:'alavancagem_operacional', icone:'⚡', nome:'Análise de Alavancagem Operacional', desc:'Quanto o lucro reage a uma variação de receita' },
-    { id:'mapa_decisoes_pendentes', icone:'📋', nome:'Mapa de Decisões Pendentes', desc:'Decisões registradas que ainda não têm resultado real' },
-    { id:'detector_tendencia', icone:'🧭', nome:'Detector de Tendência', desc:'Receita em alta, queda ou estável, olhando os últimos 6 meses' },
-    { id:'saude_por_area', icone:'🩺', nome:'Saúde por Área', desc:'Nota individual pra Financeiro, Vendas, Clientes, Fornecedores, Caixa, Investimentos e Custos' },
-    { id:'margem_ponto_seguranca', icone:'🎚️', nome:'Margem e Ponto de Segurança', desc:'Quanto pode errar, vender menos ou gastar mais antes de comprometer o resultado' },
-    { id:'indice_geral_gestao', icone:'🏅', nome:'Índice Geral de Gestão Financeira', desc:'Nota de 0 a 100 combinando saúde, previsibilidade e concentração de clientes' },
-    { id:'cofres_virtuais', icone:'🧩', nome:'Cofres Virtuais', desc:'Organiza o saldo total em potes nomeados (impostos, emergência, investimentos...), sem mover dinheiro de verdade' },
-    { id:'dna_financeiro', icone:'🧬', nome:'DNA Financeiro da Empresa', desc:'Perfil resumido combinando liquidez, estabilidade, dependência de clientes e mais' },
-    { id:'automacoes_inteligentes', icone:'🤖', nome:'Automações Inteligentes', desc:'Regras que detectam condições e sugerem ações — o sistema não move dinheiro sozinho' },
-    { id:'central_negociacao', icone:'🤝', nome:'Central de Negociação', desc:'Compara à vista, 30, 60 e 90 dias, considerando desconto e valor do dinheiro no tempo' },
-    { id:'laboratorio_financeiro', icone:'🧪', nome:'Laboratório Financeiro', desc:'Salve cenários nomeados (Conservador/Normal/Crescimento) da Simulação "E Se" pra comparar' },
-    { id:'linha_tempo_manual', icone:'📌', nome:'Linha do Tempo da Empresa', desc:'Registre marcos importantes (investimento, contratação, novo fornecedor) e veja a evolução' },
-    { id:'foto_financeira', icone:'📸', nome:'Foto Financeira', desc:'Registre a situação atual e compare com outro momento no tempo' },
-    { id:'maquina_tempo_passado', icone:'⏳', nome:'Máquina do Tempo Financeira', desc:'Veja como estava a situação financeira numa data passada' },
-    { id:'saldo_medio_pico_vale', icone:'📊', nome:'Saldo Médio, Pico e Vale de Caixa', desc:'Média do saldo no mês, maior e menor saldo atingido' },
-    { id:'movimentacoes_alto_valor', icone:'💵', nome:'Movimentações de Alto Valor', desc:'Maiores entradas e saídas individuais do mês' },
-    { id:'pontualidade_pagamento', icone:'⏱️', nome:'Pontualidade e Prazo Real de Pagamento', desc:'% pago antes/no dia/depois e prazo real médio' },
-    { id:'pontualidade_recebimento', icone:'⏱️', nome:'Pontualidade e Prazo Real de Recebimento', desc:'Comportamento real de pagamento dos clientes' },
-    { id:'contas_reprogramadas', icone:'🔄', nome:'Contas Reprogramadas', desc:'Contas que tiveram o vencimento alterado' },
-    { id:'contas_pagas_antecipadamente', icone:'⏩', nome:'Contas Pagas Antecipadamente', desc:'Quanto foi pago antes do vencimento' },
-    { id:'custo_atraso_pagamentos', icone:'💸', nome:'Custo do Atraso em Pagamentos', desc:'Multas e juros pagos por atrasar contas' },
-    { id:'rentabilidade_conta_bancaria', icone:'🏦', nome:'Rentabilidade por Conta Bancária', desc:'Compara o que cada conta rende com o que custa' },
-    { id:'cliente_caro_atender', icone:'💰', nome:'Cliente Mais Caro de Atender', desc:'Estima custo de atendimento por cancelamentos e descontos' },
-    { id:'clientes_mais_pontuais', icone:'✅', nome:'Clientes Mais Pontuais', desc:'Ranking dos clientes pelo comportamento de pagamento' },
-    { id:'clientes_mais_problematicos', icone:'🚩', nome:'Clientes Mais Problemáticos', desc:'Score combinando atrasos, cancelamentos e descontos' },
-    { id:'evolucao_individual_cliente', icone:'📈', nome:'Evolução Individual do Cliente', desc:'Escolha um cliente e veja sua evolução mês a mês' },
-    { id:'clientes_aumentaram_reduziram', icone:'↕️', nome:'Clientes: Aumentaram vs Reduziram Compras', desc:'Compara os últimos 3 meses com os 3 anteriores' },
-    { id:'ranking_fornecedores', icone:'🏆', nome:'Ranking de Fornecedores', desc:'Maior volume de compra e mais utilizado' },
-    { id:'evolucao_preco_fornecedor', icone:'📈', nome:'Evolução de Preço por Fornecedor', desc:'Fornecedores com maior aumento de gasto recente' },
-    { id:'custo_real_cartoes', icone:'💳', nome:'Custo Real dos Cartões', desc:'Compras, tarifas e juros de cada cartão' },
-    { id:'cartao_utilizacao_limite', icone:'📶', nome:'Cartão: Utilização e Concentração do Limite', desc:'Cartão mais usado e quanto do limite está comprometido' },
-    { id:'parcelas_futuras_cartao', icone:'📅', nome:'Parcelas Futuras por Cartão', desc:'Compromissos de cartão ainda não vencidos, por cartão' },
-    { id:'velocidade_crescimento', icone:'🚀', nome:'Velocidade de Crescimento', desc:'Taxa de crescimento de receita, lucro, despesas e clientes' },
-    { id:'crescimento_sem_caixa', icone:'🕳️', nome:'Crescimento sem Caixa', desc:'Detecta se a empresa cresce mas consome capital' },
-    { id:'oportunidades_perdidas', icone:'😔', nome:'Oportunidades Perdidas', desc:'Quanto ficou na mesa em saldo parado, desconto e multas' },
-    { id:'indicadores_em_mudanca', icone:'🔔', nome:'Indicadores em Mudança', desc:'Só mostra o que mudou significativamente vs mês passado' },
-    { id:'onde_esta_drenando', icone:'🩸', nome:'O Que Está Drenando Meu Dinheiro?', desc:'Ranking das maiores saídas com destaque pro que mais cresceu' },
-    { id:'onde_esta_ganhando', icone:'💎', nome:'Onde Estou Ganhando Dinheiro?', desc:'Margem por canal e por produto, consolidado' },
-    { id:'onde_esta_perdendo', icone:'⚠️', nome:'Onde Estou Perdendo Dinheiro?', desc:'Sinais que parecem bons mas escondem problema de margem' },
-    { id:'breakeven', icone:'⚖️', nome:'Ponto de Equilíbrio', desc:'Vendas mínimas pra cobrir os custos, em 3 cenários (otimista/realista/pessimista)' },
-    { id:'valuation', icone:'💎', nome:'Valuation Estimado', desc:'Estimativa educacional de valor da empresa por múltiplos de EBITDA e faturamento' },
-    { id:'aging', icone:'⏳', nome:'Aging — Vencidos por Faixa', desc:'Contas a receber e a pagar por faixa de atraso, com ranking de inadimplentes' },
-    { id:'dfc', icone:'🔄', nome:'DFC — Fluxo de Caixa', desc:'Demonstração do fluxo de caixa pelo método direto: operacional, investimento e financiamento' },
-    { id:'mei', icone:'🧾', nome:'Declaração MEI', desc:'Números prontos pra DASN-SIMEI' },
-    { id:'previsao', icone:'🔮', nome:'Previsão de Saldo Futuro', desc:'Projeção dia a dia do saldo em caixa pros próximos 30/60/90 dias, com base no que já está lançado' },
-    { id:'stress', icone:'🧪', nome:'Cenário de Stress (Stress Test)', desc:'E se as maiores contas a receber atrasarem — o caixa aguenta pagar o que já está previsto?' },
-    { id:'socios', icone:'🤝', nome:'Split entre Sócios', desc:'Divide o lucro/prejuízo do mês entre os sócios cadastrados, por percentual de participação' },
-    { id:'orcamento_anual', icone:'📆', nome:'Orçamento Anual', desc:'Orçado x realizado do ano inteiro, com acompanhamento por trimestre' },
-    { id:'descontos_bonificacoes', icone:'🏷️', nome:'Descontos e Bonificações', desc:'Pedidos com desconto aplicado e pedidos de bonificação, vindos do VK Industrial' },
+    { id:'gerencial', icone:'📊', nome:'Dashboard Gerencial', desc:'Visão anual completa — receita/despesa por mês, saídas e entradas por categoria, margem de contribuição, lucro e ponto de equilíbrio' , cat:'Visão Geral e Diagnóstico' },
+    { id:'executivo', icone:'🧭', nome:'Dashboard Executivo', desc:'Resumo visual com semáforos — receita, lucro, EBITDA, margem, evolução mensal e top clientes/categorias' , cat:'Visão Geral e Diagnóstico' },
+    { id:'mensal', icone:'📅', nome:'Super Relatório Mensal', desc:'Tudo sobre o mês — DRE, indicadores, orçamento, alertas — num relatório só' , cat:'Visão Geral e Diagnóstico' },
+    { id:'dre', icone:'📊', nome:'DRE', desc:'Demonstrativo de resultado, com análise vertical e horizontal' , cat:'Visão Geral e Diagnóstico' },
+    { id:'balanco', icone:'⚖️', nome:'Balanço Patrimonial', desc:'Ativos, passivos e patrimônio líquido' , cat:'Visão Geral e Diagnóstico' },
+    { id:'indicadores', icone:'📈', nome:'Indicadores Financeiros', desc:'Margem, liquidez, ticket médio, ponto de equilíbrio e mais' , cat:'Visão Geral e Diagnóstico' },
+    { id:'custos_margem_produtos', icone:'🧮', nome:'Custos e Margem de Produtos', desc:'Custo de produção (vindo do VK Industrial) cruzado com outras despesas do produto (juros, energia, comissão etc.) lançadas aqui', viewDireta:'custos-margem-produtos' , cat:'Produtos e Margem' },
+    { id:'produto', icone:'🍪', nome:'Rentabilidade por Produto', desc:'Receita, custo e margem por produto ou linha' , cat:'Produtos e Margem' },
+    { id:'investimentos', icone:'💰', nome:'Relatório de Investimentos', desc:'Total aplicado no mês (renda fixa + variável), ativos mais investidos e custos das operações' , cat:'Investimentos e Patrimônio' },
+    { id:'liquidez', icone:'💧', nome:'Índices de Liquidez', desc:'Liquidez imediata, seca, corrente e geral + capital de giro, endividamento e solvência' , cat:'Caixa e Liquidez' },
+    { id:'cartoes', icone:'💳', nome:'Cartões de Crédito', desc:'Uso do limite por cartão, gastos por categoria, comprometido futuro e maiores compras' , cat:'Cartões e Dívidas' },
+    { id:'abc_clientes', icone:'👥', nome:'Curva ABC de Clientes', desc:'Ranking de clientes (ticket médio, frequência) + classificação A/B/C pelo volume de receita (últimos 12 meses)' , cat:'Vendas, Clientes e Comercial' },
+    { id:'abc_despesas', icone:'📉', nome:'Curva ABC de Despesas', desc:'Classifica categorias de despesa em A/B/C pelo volume gasto (últimos 12 meses)' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'abc_fornecedores', icone:'🏭', nome:'Auditoria de Fornecedores', desc:'Curva ABC de compras por fornecedor, com prazo médio de pagamento (PMP)' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'inadimplencia_cac', icone:'⚠️', nome:'Inadimplência e CAC', desc:'Taxa de inadimplência, perfil de clientes atrasados e custo de aquisição de clientes' , cat:'Vendas, Clientes e Comercial' },
+    { id:'canal_venda', icone:'🛒', nome:'Receita por Canal de Venda', desc:'Compara receita, participação e ticket médio entre canais de venda' , cat:'Vendas, Clientes e Comercial' },
+    { id:'comissoes', icone:'🤝', nome:'Desempenho Comercial e Comissões', desc:'Comissões por vendedor, metas e ticket médio (abre a tela de Comissões)' , cat:'Vendas, Clientes e Comercial' },
+    { id:'orcamento', icone:'🎯', nome:'Orçado vs. Realizado', desc:'Comparativo entre o planejado e o executado por categoria (abre Orçamento e Planejamento)' , cat:'Planejamento, Metas e Decisões' },
+    { id:'rolling_forecast', icone:'🔁', nome:'Rolling Forecast 12 Meses', desc:'Projeção contínua dos próximos 12 meses, sempre recalculada a partir de hoje, com base no seu histórico recente' , cat:'Crescimento e Projeções' },
+    { id:'centro_lucro', icone:'🏢', nome:'Centro de Lucro / Unidade de Negócio', desc:'Resultado (receita − despesa) completo por centro de custo, lado a lado' , cat:'Produtos e Margem' },
+    { id:'yoy', icone:'📅', nome:'Comparativo Ano a Ano', desc:'Mês a mês desse ano lado a lado com o mesmo mês do ano passado, com % de crescimento' , cat:'Crescimento e Projeções' },
+    { id:'sazonalidade', icone:'🌦️', nome:'Análise de Sazonalidade', desc:'Meses de pico e de baixa ao longo dos anos, com base no seu próprio histórico' , cat:'Crescimento e Projeções' },
+    { id:'calendario_vencimentos', icone:'🗓️', nome:'Calendário de Vencimentos', desc:'Contratos, garantias de ativos, cartões e contas grandes que vencem nos próximos 90 dias, tudo junto' , cat:'Impostos e Calendários' },
+    { id:'carga_tributaria', icone:'🧾', nome:'Carga Tributária', desc:'Impostos pagos no mês e no ano, % sobre a receita e projeção do próximo DAS' , cat:'Impostos e Calendários' },
+    { id:'simulador_preco', icone:'🧮', nome:'Simulador de Preço', desc:'Calculadora — informe custo e margem desejada, calcula o preço de venda' , cat:'Produtos e Margem' },
+    { id:'formas_pagamento', icone:'💳', nome:'Formas de Pagamento', desc:'Distribuição de entradas e saídas por Pix, cartão, dinheiro, boleto etc.' , cat:'Vendas, Clientes e Comercial' },
+    { id:'rentabilidade_cliente', icone:'👤', nome:'Rentabilidade por Cliente', desc:'Receita, ticket médio e participação de cada cliente nos últimos 12 meses' , cat:'Vendas, Clientes e Comercial' },
+    { id:'pe_produto', icone:'⚖️', nome:'Ponto de Equilíbrio por Produto', desc:'Quantas unidades de cada produto são necessárias pra cobrir o custo fixo alocado' , cat:'Produtos e Margem' },
+    { id:'metas_comerciais', icone:'🎯', nome:'Metas Comerciais', desc:'Progresso de cada vendedor em relação à meta mensal cadastrada' , cat:'Vendas, Clientes e Comercial' },
+    { id:'fixo_variavel_tempo', icone:'📊', nome:'Custo Fixo vs Variável no Tempo', desc:'Como a proporção entre custo fixo e variável mudou nos últimos 12 meses' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'onde_dinheiro', icone:'🧭', nome:'Onde Meu Dinheiro Está', desc:'Foto única do patrimônio — saldo em contas, investimentos, a receber e ativos' , cat:'Visão Geral e Diagnóstico' },
+    { id:'health_score', icone:'❤️', nome:'Saúde da Empresa', desc:'Gráfico de tendência dos últimos 12 meses (0 a 100), mostrando o que está puxando o resultado pra cima ou pra baixo' , cat:'Visão Geral e Diagnóstico' },
+    { id:'eficiencia_cobranca', icone:'⏱️', nome:'Eficiência de Cobrança', desc:'Prazo médio entre vencimento e recebimento de fato, e ranking de quem mais atrasa' , cat:'Vendas, Clientes e Comercial' },
+    { id:'variacao_preco_insumos', icone:'📈', nome:'Variação de Preço de Insumos', desc:'Como o valor pago pelos insumos mudou ao longo das entradas de estoque já registradas' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'concentracao_clientes', icone:'⚠️', nome:'Concentração de Risco de Clientes', desc:'Quanto % da receita vem do maior cliente, dos 3 e dos 5 maiores' , cat:'Vendas, Clientes e Comercial' },
+    { id:'volume_margem_produto', icone:'💎', nome:'Ranking Volume x Margem por Produto', desc:'Cruza quantidade vendida com margem — acha quem vende muito com pouco lucro, e o contrário' , cat:'Produtos e Margem' },
+    { id:'saude_cadastros', icone:'🩺', nome:'Saúde dos Cadastros', desc:'Fornecedores e ativos patrimoniais com informação faltando (CNPJ, telefone, foto, nota fiscal)' , cat:'Visão Geral e Diagnóstico' },
+    { id:'projecao_comissoes', icone:'🤝', nome:'Projeção de Comissões a Pagar', desc:'Comissões já geradas mas ainda pendentes, por vendedor e por vencimento' , cat:'Vendas, Clientes e Comercial' },
+    { id:'fcl', icone:'💧', nome:'Fluxo de Caixa Livre', desc:'EBITDA menos investimento em ativos — o que sobrou de verdade depois de operar e reinvestir' , cat:'Caixa e Liquidez' },
+    { id:'payback', icone:'⏳', nome:'Payback de Investimento', desc:'Calculadora — em quantos meses um investimento se paga, dado o ganho mensal esperado' , cat:'Investimentos e Patrimônio' },
+    { id:'cvl_multiproduto', icone:'📐', nome:'Análise Custo-Volume-Lucro', desc:'Margem de contribuição de cada produto no mês, e o peso de cada um no resultado' , cat:'Produtos e Margem' },
+    { id:'dmpl', icone:'📗', nome:'Mutações do Patrimônio Líquido', desc:'Como o Patrimônio Líquido mudou mês a mês nos últimos 12 meses' , cat:'Investimentos e Patrimônio' },
+    { id:'provisoes', icone:'🗂️', nome:'Provisões (Férias/13º)', desc:'Calculadora — estimativa de férias e 13º proporcional a partir da folha informada' , cat:'Planejamento, Metas e Decisões' },
+    { id:'fluxo_centro_custo', icone:'🏗️', nome:'Fluxo de Caixa por Centro de Custo', desc:'Entradas e saídas realizadas, separadas por centro de custo' , cat:'Caixa e Liquidez' },
+    { id:'conciliacao_saldo', icone:'✅', nome:'Conciliação de Saldo por Conta', desc:'Compara o saldo calculado pelo sistema com o saldo real do extrato bancário' , cat:'Caixa e Liquidez' },
+    { id:'taxa_conversao_funil', icone:'🔻', nome:'Taxa de Conversão do Funil', desc:'% de oportunidades que viraram pedido, e depois faturamento' , cat:'Vendas, Clientes e Comercial' },
+    { id:'novos_vs_recorrentes', icone:'🆕', nome:'Novos Clientes vs. Recorrentes', desc:'Quantos clientes compraram pela primeira vez no mês vs já eram conhecidos' , cat:'Vendas, Clientes e Comercial' },
+    { id:'taxa_recompra', icone:'🔁', nome:'Taxa de Recompra', desc:'% de clientes que compraram mais de uma vez nos últimos 12 meses' , cat:'Vendas, Clientes e Comercial' },
+    { id:'ltv_cac', icone:'💗', nome:'LTV e Relação LTV/CAC', desc:'Valor estimado do cliente ao longo do tempo, comparado ao custo de aquisição' , cat:'Vendas, Clientes e Comercial' },
+    { id:'abc_estoque', icone:'📦', nome:'Curva ABC de Estoque', desc:'Insumos que mais pesam no valor total parado em estoque (não no volume de compra)' , cat:'Produtos e Margem' },
+    { id:'estoque_abaixo_minimo', icone:'🔻', nome:'Estoque Abaixo do Mínimo', desc:'Insumos com quantidade atual abaixo do mínimo configurado' , cat:'Produtos e Margem' },
+    { id:'obsolescencia_estoque', icone:'🕸️', nome:'Obsolescência de Estoque', desc:'Insumos sem entrada registrada há 90+ dias — possível item parado/esquecido' , cat:'Produtos e Margem' },
+    { id:'comparativo_preco_fornecedores', icone:'⚖️', nome:'Comparativo de Preço entre Fornecedores', desc:'Mesmo insumo, fornecedores diferentes — quem cobra mais caro' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'calendario_obrigacoes', icone:'📆', nome:'Calendário de Obrigações Acessórias', desc:'Datas de referência do DAS e da declaração anual do MEI' , cat:'Impostos e Calendários' },
+    { id:'manutencao_consolidada', icone:'🔧', nome:'Manutenção Preventiva Consolidada', desc:'Todas as manutenções programadas de todos os ativos, numa lista só' , cat:'Investimentos e Patrimônio' },
+    { id:'vida_util_remanescente', icone:'⏱️', nome:'Vida Útil Remanescente', desc:'Quanto tempo falta pra cada ativo terminar de depreciar' , cat:'Investimentos e Patrimônio' },
+    { id:'roi_ativo', icone:'📐', nome:'Custo e Valor Atual por Ativo', desc:'Custo original vs. valor contábil atual e desgaste acumulado de cada ativo' , cat:'Investimentos e Patrimônio' },
+    { id:'alocacao_ativos', icone:'🥧', nome:'Alocação de Ativos', desc:'% investido em Renda Fixa vs. Renda Variável' , cat:'Investimentos e Patrimônio' },
+    { id:'divergencias', icone:'🔍', nome:'Divergências e Exceções', desc:'Lançamentos fora do padrão — valores muito altos, sem categoria, data futura' , cat:'Visão Geral e Diagnóstico' },
+    { id:'posicao_bancaria', icone:'🏦', nome:'Posição Bancária Consolidada', desc:'Saldo de todas as contas bancárias, lado a lado' , cat:'Caixa e Liquidez' },
+    { id:'taxas_bancarias', icone:'💸', nome:'Taxas e Tarifas Bancárias', desc:'Quanto foi pago em taxas, tarifas e anuidades no mês' , cat:'Caixa e Liquidez' },
+    { id:'amortizacao_emprestimos', icone:'🏦', nome:'Amortização de Empréstimos', desc:'Saldo devedor e parcelas restantes de cada empréstimo/financiamento cadastrado' , cat:'Cartões e Dívidas' },
+    { id:'seguros_ativos', icone:'🛡️', nome:'Seguros de Ativos', desc:'Vigência e valor dos seguros cadastrados, com alerta de vencimento próximo' , cat:'Investimentos e Patrimônio' },
+    { id:'preco_tabela_praticado', icone:'🏷️', nome:'Preço de Tabela vs. VK', desc:'Compara seu preço de tabela interno com o preço configurado no VK Industrial' , cat:'Produtos e Margem' },
+    { id:'limite_credito', icone:'💳', nome:'Limite de Crédito Disponível', desc:'Saldo + limite de cheque especial disponível em cada conta' , cat:'Caixa e Liquidez' },
+    { id:'multas_penalidades', icone:'🚨', nome:'Multas e Penalidades', desc:'Total pago em multas nos últimos 12 meses' , cat:'Caixa e Liquidez' },
+    { id:'central_inteligencia', icone:'🧠', nome:'Central de Inteligência Financeira', desc:'Análise automática do negócio, classificada em Risco, Atenção e Oportunidade' , cat:'Visão Geral e Diagnóstico' },
+    { id:'central_alertas', icone:'🔔', nome:'Central de Alertas', desc:'Todos os avisos do sistema — contas vencidas, limites, orçamentos, vencimentos — num lugar só' , cat:'Visão Geral e Diagnóstico' },
+    { id:'calendario_financeiro', icone:'📅', nome:'Calendário Financeiro', desc:'Visão em calendário (não lista) de entradas, saídas e vencimentos do mês' , cat:'Impostos e Calendários' },
+    { id:'central_cliente', icone:'👥', nome:'Central do Cliente', desc:'Faturamento, prazo de pagamento, inadimplência e limite de crédito, consolidado por cliente' , cat:'Vendas, Clientes e Comercial' },
+    { id:'centro_comando', icone:'🎛️', nome:'Centro de Comando', desc:'O que está acontecendo, o que precisa de atenção, o que vai acontecer e o que fazer — tudo num só lugar' , cat:'Visão Geral e Diagnóstico' },
+    { id:'fluxo_caixa_diario', icone:'📆', nome:'Fluxo de Caixa Diário', desc:'Saldo inicial, entradas, saídas e saldo final de cada dia do mês' , cat:'Caixa e Liquidez' },
+    { id:'receitas_categoria', icone:'💹', nome:'Receitas por Categoria', desc:'Origem do faturamento e participação de cada categoria' , cat:'Vendas, Clientes e Comercial' },
+    { id:'margem_mensal', icone:'📐', nome:'Margem Mensal', desc:'Evolução da margem bruta e líquida ao longo dos últimos 12 meses' , cat:'Produtos e Margem' },
+    { id:'ticket_medio_evolutivo', icone:'🎫', nome:'Ticket Médio Evolutivo', desc:'Evolução do ticket médio de venda mês a mês' , cat:'Vendas, Clientes e Comercial' },
+    { id:'vendas_canceladas', icone:'❌', nome:'Vendas Canceladas', desc:'Quantidade, valor, clientes e produtos dos pedidos cancelados' , cat:'Vendas, Clientes e Comercial' },
+    { id:'comprometimento_futuro', icone:'🔒', nome:'Comprometimento Futuro', desc:'Quanto do dinheiro futuro já está comprometido com obrigações' , cat:'Caixa e Liquidez' },
+    { id:'parcelamentos', icone:'💳', nome:'Parcelamentos', desc:'Compras parceladas no cartão, parcelas já vencidas e futuras' , cat:'Cartões e Dívidas' },
+    { id:'receita_cliente_tempo', icone:'📈', nome:'Receita por Cliente ao Longo do Tempo', desc:'Evolução individual da receita dos principais clientes' , cat:'Vendas, Clientes e Comercial' },
+    { id:'clientes_perdidos_risco', icone:'⚠️', nome:'Clientes Perdidos e em Risco', desc:'Clientes que pararam de comprar ou tiveram queda relevante' , cat:'Vendas, Clientes e Comercial' },
+    { id:'compras_periodo', icone:'🛒', nome:'Compras por Período', desc:'Compras de insumo por mês, fornecedor e categoria' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'evolucao_custos', icone:'📊', nome:'Evolução dos Custos', desc:'Quais categorias de despesa mais cresceram recentemente' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'inflacao_interna', icone:'🌡️', nome:'Inflação Interna da Empresa', desc:'Índice de evolução do custo médio de compra de insumos' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'lucro_cliente', icone:'💎', nome:'Lucro por Cliente', desc:'Quanto cada cliente realmente contribui pro lucro (com custo do produto)' , cat:'Vendas, Clientes e Comercial' },
+    { id:'capital_giro', icone:'⚙️', nome:'Capital de Giro', desc:'Quanto dinheiro de curto prazo a operação precisa pra funcionar' , cat:'Caixa e Liquidez' },
+    { id:'endividamento_vencimento', icone:'📉', nome:'Endividamento por Vencimento', desc:'Dívidas separadas por curto, médio e longo prazo' , cat:'Cartões e Dívidas' },
+    { id:'super_relatorio_anual', icone:'🏆', nome:'Super Relatório Anual', desc:'Visão consolidada dos 12 meses — melhor/pior mês, clientes, despesas' , cat:'Visão Geral e Diagnóstico' },
+    { id:'despesas_centro_custo', icone:'🏗️', nome:'Despesas por Centro de Custo', desc:'Detalhamento e comparação das despesas por centro de custo' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'crescimento_clientes', icone:'👥', nome:'Crescimento de Clientes', desc:'Novos, ativos, recuperados e clientes que ficaram inativos no mês' , cat:'Vendas, Clientes e Comercial' },
+    { id:'dependencia_financeira', icone:'⚖️', nome:'Dependência Financeira', desc:'Concentração em cliente, fornecedor e canal de venda' , cat:'Vendas, Clientes e Comercial' },
+    { id:'lucro_canal', icone:'🛍️', nome:'Lucro por Canal', desc:'Comparação da rentabilidade entre canais de venda' , cat:'Produtos e Margem' },
+    { id:'obrigacoes_futuras', icone:'📋', nome:'Obrigações Futuras', desc:'Contas, impostos, cartões, parcelas e contratos vencendo, tudo junto' , cat:'Caixa e Liquidez' },
+    { id:'evolucao_patrimonial', icone:'🏛️', nome:'Evolução Patrimonial', desc:'Ativo, passivo e patrimônio líquido evoluindo mês a mês' , cat:'Investimentos e Patrimônio' },
+    { id:'giro_caixa', icone:'🔄', nome:'Giro de Caixa', desc:'Quantos dias a empresa opera só com o dinheiro disponível' , cat:'Caixa e Liquidez' },
+    { id:'dependencia_capital_terceiros', icone:'🏦', nome:'Dependência de Capital de Terceiros', desc:'Quanto da operação depende de fornecedores, cartão e empréstimos' , cat:'Caixa e Liquidez' },
+    { id:'ncg', icone:'⚙️', nome:'Necessidade de Capital de Giro (NCG)', desc:'Quanto dinheiro fica preso na operação, sem contar o caixa' , cat:'Caixa e Liquidez' },
+    { id:'caixa_minimo', icone:'🛟', nome:'Caixa Mínimo Recomendado', desc:'Reserva mínima operacional baseada no histórico de gastos' , cat:'Caixa e Liquidez' },
+    { id:'custo_financeiro_vendas', icone:'💳', nome:'Custo Financeiro das Vendas', desc:'Quanto juros e taxas financeiras consomem da receita' , cat:'Vendas, Clientes e Comercial' },
+    { id:'vendas_parceladas', icone:'📅', nome:'Vendas Parceladas', desc:'Quanto das vendas atuais ainda será recebido nos próximos meses' , cat:'Vendas, Clientes e Comercial' },
+    { id:'prazo_recebimento_vendas', icone:'⏱️', nome:'Prazo de Recebimento das Vendas', desc:'Perfil das vendas por prazo — à vista, 7, 14, 30, 60, 90+ dias' , cat:'Vendas, Clientes e Comercial' },
+    { id:'desembolso_financeiro', icone:'💸', nome:'Desembolso Financeiro', desc:'Quando o dinheiro efetivamente sai, além da despesa contabilizada' , cat:'Caixa e Liquidez' },
+    { id:'compromissos_semana', icone:'📆', nome:'Compromissos por Semana', desc:'Visão semanal dos próximos desembolsos e recebimentos' , cat:'Caixa e Liquidez' },
+    { id:'risco_caixa_data', icone:'🚨', nome:'Risco de Caixa por Data', desc:'Dias específicos em que o saldo projetado pode ficar crítico' , cat:'Caixa e Liquidez' },
+    { id:'rentabilidade_forma_pagamento', icone:'💵', nome:'Rentabilidade por Forma de Pagamento', desc:'Compara a margem das vendas conforme Pix, cartão, boleto etc.' , cat:'Vendas, Clientes e Comercial' },
+    { id:'custo_real_parcelamento', icone:'🧮', nome:'Custo Real do Parcelamento', desc:'Volume de compras parceladas vs à vista no cartão' , cat:'Cartões e Dívidas' },
+    { id:'evolucao_poder_compra', icone:'📊', nome:'Evolução do Poder de Compra', desc:'Receita, despesa e capacidade financeira ao longo do tempo' , cat:'Caixa e Liquidez' },
+    { id:'vazamentos_financeiros', icone:'🕳️', nome:'Vazamentos Financeiros', desc:'Pequenas despesas recorrentes que acumulam valores relevantes' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'custo_por_mil_receita', icone:'📏', nome:'Custo por R$1.000 de Receita', desc:'Quanto a empresa gasta pra gerar cada R$1.000 faturados' , cat:'Caixa e Liquidez' },
+    { id:'dependencia_poucas_operacoes', icone:'🎲', nome:'Dependência de Poucas Operações', desc:'Quanto do resultado depende de poucas vendas grandes' , cat:'Caixa e Liquidez' },
+    { id:'decisoes_financeiras', icone:'📝', nome:'Decisões Financeiras', desc:'Registro de decisões (comprar, investir, contratar) — previsto x realizado' , cat:'Planejamento, Metas e Decisões' },
+    { id:'diagnostico_automatico', icone:'🩺', nome:'Diagnóstico Automático do Mês', desc:'Interpretação narrativa dos números — principal problema, oportunidade e recomendação' , cat:'Visão Geral e Diagnóstico' },
+    { id:'para_onde_foi_dinheiro', icone:'🗺️', nome:'Para Onde Foi o Dinheiro?', desc:'Explica as principais movimentações do mês em linguagem simples' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'causas_variacao_lucro', icone:'🔍', nome:'Causas da Variação do Lucro', desc:'O que mais contribuiu pra queda ou melhora do resultado' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'eficiencia_dinheiro', icone:'⚡', nome:'Eficiência do Dinheiro', desc:'Quanto cada R$1,00 disponível está gerando de receita e lucro' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'movimentacoes_sem_classificacao', icone:'🏷️', nome:'Movimentações Sem Classificação', desc:'Lançamentos sem categoria, centro de custo ou fornecedor' , cat:'Visão Geral e Diagnóstico' },
+    { id:'dados_inconsistentes', icone:'🔧', nome:'Dados Inconsistentes', desc:'Informações incompatíveis ou incompletas que podem distorcer relatórios' , cat:'Visão Geral e Diagnóstico' },
+    { id:'suspeitos_duplicidade', icone:'👯', nome:'Lançamentos Suspeitos de Duplicidade', desc:'Lançamentos muito parecidos em data, valor, descrição e fornecedor' , cat:'Visão Geral e Diagnóstico' },
+    { id:'custo_efetivo_conta', icone:'🏦', nome:'Custo Efetivo por Conta Bancária', desc:'Quanto cada conta custa em tarifas vs quanto é movimentado' , cat:'Caixa e Liquidez' },
+    { id:'rentabilidade_saldo_parado', icone:'💤', nome:'Rentabilidade do Saldo Parado', desc:'Quanto o dinheiro parado em conta corrente poderia render' , cat:'Caixa e Liquidez' },
+    { id:'dinheiro_transitorio', icone:'↔️', nome:'Dinheiro Transitório', desc:'Valores que passam pelas contas mas não são receita/despesa real' , cat:'Caixa e Liquidez' },
+    { id:'simulador_decisao_compra', icone:'🛒', nome:'Simulador de Decisão de Compra', desc:'Compara comprar à vista, parcelado ou não comprar' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'simulador_antecipacao', icone:'⏩', nome:'Simulador de Antecipação', desc:'Compara receber antecipado com esperar o vencimento' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'reversoes_financeiras', icone:'↩️', nome:'Reversões Financeiras', desc:'Lançamentos pagos/recebidos que depois foram revertidos ou cancelados' , cat:'Caixa e Liquidez' },
+    { id:'oque_faria_se_fosse_dono', icone:'👑', nome:'O Que Eu Faria Se Fosse o Dono?', desc:'Plano de ação narrativo — situação, problema, oportunidade, recomendação e ação prioritária' , cat:'Visão Geral e Diagnóstico' },
+    { id:'linha_tempo_financeira', icone:'📜', nome:'Linha do Tempo Financeira', desc:'Principais acontecimentos financeiros mês a mês' , cat:'Crescimento e Projeções' },
+    { id:'efeito_domino_financeiro', icone:'🎲', nome:'Efeito Dominó Financeiro', desc:'Simula: se este cliente atrasar, quais contas ficam sem cobertura?' , cat:'Crescimento e Projeções' },
+    { id:'resultado_sem_maiores_clientes', icone:'👥', nome:'Resultado sem os 10 Maiores Clientes', desc:'A empresa continuaria saudável sem eles?' , cat:'Crescimento e Projeções' },
+    { id:'resultado_sem_maior_despesa', icone:'✂️', nome:'Resultado sem a Maior Despesa', desc:'Quanto o resultado mudaria eliminando a maior despesa do mês' , cat:'Crescimento e Projeções' },
+    { id:'lucro_de_verdade', icone:'🔎', nome:'Lucro de Verdade', desc:'Separa resultado "no papel" do dinheiro que efetivamente entrou/saiu' , cat:'Crescimento e Projeções' },
+    { id:'caixa_parece_livre', icone:'🎭', nome:'Caixa que Parece Livre', desc:'Quanto do saldo em conta já está comprometido nos próximos 30 dias' , cat:'Caixa e Liquidez' },
+    { id:'tempo_recuperar_prejuizo', icone:'🩹', nome:'Quanto Tempo pra Recuperar um Prejuízo?', desc:'Calculadora — meses necessários no ritmo atual de lucro' , cat:'Crescimento e Projeções' },
+    { id:'custo_inadimplencia_lucro', icone:'💔', nome:'Custo da Inadimplência no Lucro', desc:'Quanto a inadimplência está destruindo de resultado, não só de caixa' , cat:'Vendas, Clientes e Comercial' },
+    { id:'risco_aumento_fornecedor', icone:'📈', nome:'Risco de Aumento de Fornecedor', desc:'Simula reajustes de 5/10/15/20% nos principais fornecedores' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'custo_oculto_fornecedores', icone:'🔍', nome:'Custo Oculto dos Fornecedores', desc:'Cruza preço, prazo e frequência pra mostrar o custo real de cada fornecedor' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'cliente_trabalho_pouco_resultado', icone:'😓', nome:'Cliente que Dá Trabalho e Pouco Resultado', desc:'Clientes com muita frequência mas baixo ticket ou margem' , cat:'Vendas, Clientes e Comercial' },
+    { id:'cliente_mais_valioso', icone:'👑', nome:'Cliente Mais Valioso', desc:'Score combinando receita, margem, frequência e pontualidade' , cat:'Vendas, Clientes e Comercial' },
+    { id:'despesas_crescem_mais_receita', icone:'🚩', nome:'Despesas que Crescem Mais que a Receita', desc:'Categorias de despesa saindo do controle proporcionalmente' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'simulador_crescimento', icone:'🌱', nome:'Simulador de Crescimento', desc:'Quanto de capital de giro um crescimento de X% exigiria' , cat:'Crescimento e Projeções' },
+    { id:'limite_crescimento_seguro', icone:'🚦', nome:'Limite de Crescimento Seguro', desc:'Até quanto dá pra crescer sem faltar capital de giro' , cat:'Crescimento e Projeções' },
+    { id:'crescimento_da_prejuizo', icone:'⚠️', nome:'Crescimento que Dá Prejuízo', desc:'Detecta se a margem atual sustenta vender mais' , cat:'Crescimento e Projeções' },
+    { id:'qual_crescimento_vale_pena', icone:'⚖️', nome:'Qual Crescimento Vale a Pena?', desc:'Compara crescer receita vs. reduzir despesa, no impacto do lucro' , cat:'Crescimento e Projeções' },
+    { id:'simulador_custos_subirem', icone:'📈', nome:'E se meus custos subirem?', desc:'Testa aumento de 5/10/20/30% nos custos' , cat:'Crescimento e Projeções' },
+    { id:'indice_previsibilidade', icone:'🔮', nome:'Índice de Previsibilidade Financeira', desc:'Mede quanto do resultado futuro é previsível vs. incerto' , cat:'Visão Geral e Diagnóstico' },
+    { id:'qualidade_receita', icone:'✨', nome:'Qualidade da Receita', desc:'Separa receita "boa" (no prazo) de "ruim" (atrasada/inadimplente)' , cat:'Vendas, Clientes e Comercial' },
+    { id:'mapa_margem_perdida', icone:'🕳️', nome:'Mapa de Margem Perdida', desc:'Onde a margem está escapando: desconto, comissão, juros, inadimplência' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'preco_minimo_seguro', icone:'🛡️', nome:'Preço Mínimo Seguro', desc:'Menor preço que cobre custo variável + fatia do custo fixo' , cat:'Produtos e Margem' },
+    { id:'distancia_prejuizo', icone:'📏', nome:'Distância até o Prejuízo', desc:'Quanto a receita pode cair antes do resultado zerar' , cat:'Caixa e Liquidez' },
+    { id:'distancia_caixa_critico', icone:'🚨', nome:'Distância até o Caixa Crítico', desc:'Mesmo conceito, aplicado ao dinheiro disponível' , cat:'Caixa e Liquidez' },
+    { id:'meta_caixa_reverso', icone:'🎯', nome:'Meta de Caixa Reverso', desc:'Calculadora — quanto guardar por mês pra atingir um valor numa data' , cat:'Caixa e Liquidez' },
+    { id:'retorno_sobre_crescimento', icone:'💹', nome:'Retorno sobre Crescimento', desc:'Quanto de receita adicional cada real de capital extra gerou' , cat:'Investimentos e Patrimônio' },
+    { id:'eficiencia_receita_incremental', icone:'➕', nome:'Eficiência da Receita Incremental', desc:'Cada R$1 adicional de receita gera quanto de lucro' , cat:'Produtos e Margem' },
+    { id:'diluicao_margem', icone:'🔽', nome:'Análise de Diluição de Margem', desc:'Detecta se a receita cresce mas a margem % está caindo' , cat:'Produtos e Margem' },
+    { id:'alavancagem_operacional', icone:'⚡', nome:'Análise de Alavancagem Operacional', desc:'Quanto o lucro reage a uma variação de receita' , cat:'Produtos e Margem' },
+    { id:'mapa_decisoes_pendentes', icone:'📋', nome:'Mapa de Decisões Pendentes', desc:'Decisões registradas que ainda não têm resultado real' , cat:'Planejamento, Metas e Decisões' },
+    { id:'detector_tendencia', icone:'🧭', nome:'Detector de Tendência', desc:'Receita em alta, queda ou estável, olhando os últimos 6 meses' , cat:'Visão Geral e Diagnóstico' },
+    { id:'saude_por_area', icone:'🩺', nome:'Saúde por Área', desc:'Nota individual pra Financeiro, Vendas, Clientes, Fornecedores, Caixa, Investimentos e Custos' , cat:'Visão Geral e Diagnóstico' },
+    { id:'margem_ponto_seguranca', icone:'🎚️', nome:'Margem e Ponto de Segurança', desc:'Quanto pode errar, vender menos ou gastar mais antes de comprometer o resultado' , cat:'Caixa e Liquidez' },
+    { id:'indice_geral_gestao', icone:'🏅', nome:'Índice Geral de Gestão Financeira', desc:'Nota de 0 a 100 combinando saúde, previsibilidade e concentração de clientes' , cat:'Visão Geral e Diagnóstico' },
+    { id:'cofres_virtuais', icone:'🧩', nome:'Cofres Virtuais', desc:'Organiza o saldo total em potes nomeados (impostos, emergência, investimentos...), sem mover dinheiro de verdade' , cat:'Caixa e Liquidez' },
+    { id:'dna_financeiro', icone:'🧬', nome:'DNA Financeiro da Empresa', desc:'Perfil resumido combinando liquidez, estabilidade, dependência de clientes e mais' , cat:'Visão Geral e Diagnóstico' },
+    { id:'automacoes_inteligentes', icone:'🤖', nome:'Automações Inteligentes', desc:'Regras que detectam condições e sugerem ações — o sistema não move dinheiro sozinho' , cat:'Ferramentas, Simuladores e Automações' },
+    { id:'central_negociacao', icone:'🤝', nome:'Central de Negociação', desc:'Compara à vista, 30, 60 e 90 dias, considerando desconto e valor do dinheiro no tempo' , cat:'Ferramentas, Simuladores e Automações' },
+    { id:'laboratorio_financeiro', icone:'🧪', nome:'Laboratório Financeiro', desc:'Salve cenários nomeados (Conservador/Normal/Crescimento) da Simulação "E Se" pra comparar' , cat:'Planejamento, Metas e Decisões' },
+    { id:'linha_tempo_manual', icone:'📌', nome:'Linha do Tempo da Empresa', desc:'Registre marcos importantes (investimento, contratação, novo fornecedor) e veja a evolução' , cat:'Planejamento, Metas e Decisões' },
+    { id:'foto_financeira', icone:'📸', nome:'Foto Financeira', desc:'Registre a situação atual e compare com outro momento no tempo' , cat:'Caixa e Liquidez' },
+    { id:'maquina_tempo_passado', icone:'⏳', nome:'Máquina do Tempo Financeira', desc:'Veja como estava a situação financeira numa data passada' , cat:'Caixa e Liquidez' },
+    { id:'saldo_medio_pico_vale', icone:'📊', nome:'Saldo Médio, Pico e Vale de Caixa', desc:'Média do saldo no mês, maior e menor saldo atingido' , cat:'Caixa e Liquidez' },
+    { id:'movimentacoes_alto_valor', icone:'💵', nome:'Movimentações de Alto Valor', desc:'Maiores entradas e saídas individuais do mês' , cat:'Caixa e Liquidez' },
+    { id:'pontualidade_pagamento', icone:'⏱️', nome:'Pontualidade e Prazo Real de Pagamento', desc:'% pago antes/no dia/depois e prazo real médio' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'pontualidade_recebimento', icone:'⏱️', nome:'Pontualidade e Prazo Real de Recebimento', desc:'Comportamento real de pagamento dos clientes' , cat:'Vendas, Clientes e Comercial' },
+    { id:'contas_reprogramadas', icone:'🔄', nome:'Contas Reprogramadas', desc:'Contas que tiveram o vencimento alterado' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'contas_pagas_antecipadamente', icone:'⏩', nome:'Contas Pagas Antecipadamente', desc:'Quanto foi pago antes do vencimento' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'custo_atraso_pagamentos', icone:'💸', nome:'Custo do Atraso em Pagamentos', desc:'Multas e juros pagos por atrasar contas' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'rentabilidade_conta_bancaria', icone:'🏦', nome:'Rentabilidade por Conta Bancária', desc:'Compara o que cada conta rende com o que custa' , cat:'Caixa e Liquidez' },
+    { id:'cliente_caro_atender', icone:'💰', nome:'Cliente Mais Caro de Atender', desc:'Estima custo de atendimento por cancelamentos e descontos' , cat:'Vendas, Clientes e Comercial' },
+    { id:'clientes_mais_pontuais', icone:'✅', nome:'Clientes Mais Pontuais', desc:'Ranking dos clientes pelo comportamento de pagamento' , cat:'Vendas, Clientes e Comercial' },
+    { id:'clientes_mais_problematicos', icone:'🚩', nome:'Clientes Mais Problemáticos', desc:'Score combinando atrasos, cancelamentos e descontos' , cat:'Vendas, Clientes e Comercial' },
+    { id:'evolucao_individual_cliente', icone:'📈', nome:'Evolução Individual do Cliente', desc:'Escolha um cliente e veja sua evolução mês a mês' , cat:'Vendas, Clientes e Comercial' },
+    { id:'clientes_aumentaram_reduziram', icone:'↕️', nome:'Clientes: Aumentaram vs Reduziram Compras', desc:'Compara os últimos 3 meses com os 3 anteriores' , cat:'Vendas, Clientes e Comercial' },
+    { id:'ranking_fornecedores', icone:'🏆', nome:'Ranking de Fornecedores', desc:'Maior volume de compra e mais utilizado' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'evolucao_preco_fornecedor', icone:'📈', nome:'Evolução de Preço por Fornecedor', desc:'Fornecedores com maior aumento de gasto recente' , cat:'Custos, Despesas e Fornecedores' },
+    { id:'custo_real_cartoes', icone:'💳', nome:'Custo Real dos Cartões', desc:'Compras, tarifas e juros de cada cartão' , cat:'Cartões e Dívidas' },
+    { id:'cartao_utilizacao_limite', icone:'📶', nome:'Cartão: Utilização e Concentração do Limite', desc:'Cartão mais usado e quanto do limite está comprometido' , cat:'Cartões e Dívidas' },
+    { id:'parcelas_futuras_cartao', icone:'📅', nome:'Parcelas Futuras por Cartão', desc:'Compromissos de cartão ainda não vencidos, por cartão' , cat:'Cartões e Dívidas' },
+    { id:'velocidade_crescimento', icone:'🚀', nome:'Velocidade de Crescimento', desc:'Taxa de crescimento de receita, lucro, despesas e clientes' , cat:'Crescimento e Projeções' },
+    { id:'crescimento_sem_caixa', icone:'🕳️', nome:'Crescimento sem Caixa', desc:'Detecta se a empresa cresce mas consome capital' , cat:'Crescimento e Projeções' },
+    { id:'oportunidades_perdidas', icone:'😔', nome:'Oportunidades Perdidas', desc:'Quanto ficou na mesa em saldo parado, desconto e multas' , cat:'Caixa e Liquidez' },
+    { id:'indicadores_em_mudanca', icone:'🔔', nome:'Indicadores em Mudança', desc:'Só mostra o que mudou significativamente vs mês passado' , cat:'Visão Geral e Diagnóstico' },
+    { id:'onde_esta_drenando', icone:'🩸', nome:'O Que Está Drenando Meu Dinheiro?', desc:'Ranking das maiores saídas com destaque pro que mais cresceu' , cat:'Caixa e Liquidez' },
+    { id:'onde_esta_ganhando', icone:'💎', nome:'Onde Estou Ganhando Dinheiro?', desc:'Margem por canal e por produto, consolidado' , cat:'Caixa e Liquidez' },
+    { id:'onde_esta_perdendo', icone:'⚠️', nome:'Onde Estou Perdendo Dinheiro?', desc:'Sinais que parecem bons mas escondem problema de margem' , cat:'Caixa e Liquidez' },
+    { id:'breakeven', icone:'⚖️', nome:'Ponto de Equilíbrio', desc:'Vendas mínimas pra cobrir os custos, em 3 cenários (otimista/realista/pessimista)' , cat:'Produtos e Margem' },
+    { id:'valuation', icone:'💎', nome:'Valuation Estimado', desc:'Estimativa educacional de valor da empresa por múltiplos de EBITDA e faturamento' , cat:'Crescimento e Projeções' },
+    { id:'aging', icone:'⏳', nome:'Aging — Vencidos por Faixa', desc:'Contas a receber e a pagar por faixa de atraso, com ranking de inadimplentes' , cat:'Visão Geral e Diagnóstico' },
+    { id:'dfc', icone:'🔄', nome:'DFC — Fluxo de Caixa', desc:'Demonstração do fluxo de caixa pelo método direto: operacional, investimento e financiamento' , cat:'Visão Geral e Diagnóstico' },
+    { id:'mei', icone:'🧾', nome:'Declaração MEI', desc:'Números prontos pra DASN-SIMEI' , cat:'Impostos e Calendários' },
+    { id:'previsao', icone:'🔮', nome:'Previsão de Saldo Futuro', desc:'Projeção dia a dia do saldo em caixa pros próximos 30/60/90 dias, com base no que já está lançado' , cat:'Caixa e Liquidez' },
+    { id:'stress', icone:'🧪', nome:'Cenário de Stress (Stress Test)', desc:'E se as maiores contas a receber atrasarem — o caixa aguenta pagar o que já está previsto?' , cat:'Caixa e Liquidez' },
+    { id:'socios', icone:'🤝', nome:'Split entre Sócios', desc:'Divide o lucro/prejuízo do mês entre os sócios cadastrados, por percentual de participação' , cat:'Planejamento, Metas e Decisões' },
+    { id:'orcamento_anual', icone:'📆', nome:'Orçamento Anual', desc:'Orçado x realizado do ano inteiro, com acompanhamento por trimestre' , cat:'Planejamento, Metas e Decisões' },
+    { id:'descontos_bonificacoes', icone:'🏷️', nome:'Descontos e Bonificações', desc:'Pedidos com desconto aplicado e pedidos de bonificação, vindos do VK Industrial' , cat:'Vendas, Clientes e Comercial' },
   ];
+  const categoriasOrdem = ['Visão Geral e Diagnóstico','Caixa e Liquidez','Vendas, Clientes e Comercial','Custos, Despesas e Fornecedores','Produtos e Margem','Cartões e Dívidas','Investimentos e Patrimônio','Crescimento e Projeções','Planejamento, Metas e Decisões','Impostos e Calendários','Ferramentas, Simuladores e Automações'];
+  const iconeCategoria = { 'Visão Geral e Diagnóstico':'🧭','Caixa e Liquidez':'💰','Vendas, Clientes e Comercial':'🤝','Custos, Despesas e Fornecedores':'📉','Produtos e Margem':'🍪','Cartões e Dívidas':'💳','Investimentos e Patrimônio':'📈','Crescimento e Projeções':'🚀','Planejamento, Metas e Decisões':'🎯','Impostos e Calendários':'🧾','Ferramentas, Simuladores e Automações':'🧮' };
+  relatoriosCardsAtivos = cards;
   return `
     <div class="topbar">
-      <div><h1>Central de Relatórios</h1><p>Escolha o relatório que você quer ver</p></div>
+      <div><h1>Central de Relatórios</h1><p>${cards.length} relatórios, organizados por categoria</p></div>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px;">
-      ${cards.map(c=>`
-        <div class="more-item" ${c.viewDireta ? `data-goto="${c.viewDireta}"` : `data-action="abrir-relatorio" data-relatorio="${c.id}"`} style="flex-direction:row;text-align:left;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;">
-          <span style="font-size:22px;flex-shrink:0;">${c.icone}</span>
-          <div style="min-width:0;">
-            <div style="font-weight:600;font-size:13px;">${c.nome}</div>
-            <div style="font-size:11px;color:var(--text-soft);margin-top:2px;line-height:1.35;">${c.desc}</div>
-          </div>
-        </div>
-      `).join('')}
-    </div>
+    <div class="field"><input type="text" id="relatoriosBusca" placeholder="Buscar relatório..."></div>
+    <div id="relatoriosGrid">${renderRelatoriosGridHTML(cards, categoriasOrdem, iconeCategoria, '')}</div>
   `;
+}
+
+function relatorioItemHTML(c){
+  return `
+    <div class="more-item" ${c.viewDireta ? `data-goto="${c.viewDireta}"` : `data-action="abrir-relatorio" data-relatorio="${c.id}"`} style="flex-direction:row;text-align:left;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;">
+      <span style="font-size:22px;flex-shrink:0;">${c.icone}</span>
+      <div style="min-width:0;">
+        <div style="font-weight:600;font-size:13px;">${c.nome}</div>
+        <div style="font-size:11px;color:var(--text-soft);margin-top:2px;line-height:1.35;">${c.desc}</div>
+      </div>
+    </div>`;
+}
+
+function renderRelatoriosGridHTML(cards, categoriasOrdem, iconeCategoria, filtro){
+  filtro = (filtro||'').trim().toLowerCase();
+  if(filtro){
+    const filtrados = cards.filter(c=>c.nome.toLowerCase().includes(filtro) || c.desc.toLowerCase().includes(filtro));
+    if(!filtrados.length) return `<div class="empty">Nada encontrado pra "${escapeHTML(filtro)}".</div>`;
+    return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px;">${filtrados.map(relatorioItemHTML).join('')}</div>`;
+  }
+  return categoriasOrdem.map(cat=>{
+    const itensCat = cards.filter(c=>c.cat===cat);
+    if(!itensCat.length) return '';
+    return `
+      <details class="panel" style="margin-bottom:10px;" open>
+        <summary style="padding:14px 18px;cursor:pointer;font-weight:600;font-size:14px;list-style:none;display:flex;align-items:center;gap:8px;">
+          <span>${iconeCategoria[cat]||'📁'}</span> ${escapeHTML(cat)} <span style="color:var(--text-soft);font-weight:400;font-size:12px;">(${itensCat.length})</span>
+        </summary>
+        <div style="padding:0 10px 10px;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px;">
+          ${itensCat.map(relatorioItemHTML).join('')}
+        </div>
+      </details>`;
+  }).join('');
+}
+
+// Re-liga só os cliques DENTRO do #relatoriosGrid — usado depois de uma busca, que só substitui o
+// innerHTML desse container (sem re-renderizar a página inteira, senão o campo de busca perde o
+// foco a cada letra digitada). Isolado com querySelector no container pra não duplicar wiring de
+// nenhum outro elemento da página que já foi ligado pelo attachViewHandlers normal.
+function bindRelatoriosGridWiring(){
+  const grid = document.getElementById('relatoriosGrid');
+  if(!grid) return;
+  grid.querySelectorAll('[data-action="abrir-relatorio"]').forEach(card=>{
+    card.addEventListener('click', ()=>{
+      const id = card.dataset.relatorio;
+      if(id==='comissoes' || id==='orcamento'){
+        currentView = id;
+        render();
+        return;
+      }
+      relatorioAtivo = id;
+      currentView = 'relatorio-detalhe';
+      render();
+    });
+  });
+  grid.querySelectorAll('[data-goto]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      currentView = el.dataset.goto;
+      render();
+    });
+  });
 }
 
 const RELATORIOS_NOMES = {
@@ -19040,6 +19098,15 @@ function attachViewHandlers(){
       bindReportInner();
     });
   });
+  const relatoriosBusca = document.getElementById('relatoriosBusca');
+  if(relatoriosBusca){
+    const categoriasOrdemW = ['Visão Geral e Diagnóstico','Caixa e Liquidez','Vendas, Clientes e Comercial','Custos, Despesas e Fornecedores','Produtos e Margem','Cartões e Dívidas','Investimentos e Patrimônio','Crescimento e Projeções','Planejamento, Metas e Decisões','Impostos e Calendários','Ferramentas, Simuladores e Automações'];
+    const iconeCategoriaW = { 'Visão Geral e Diagnóstico':'🧭','Caixa e Liquidez':'💰','Vendas, Clientes e Comercial':'🤝','Custos, Despesas e Fornecedores':'📉','Produtos e Margem':'🍪','Cartões e Dívidas':'💳','Investimentos e Patrimônio':'📈','Crescimento e Projeções':'🚀','Planejamento, Metas e Decisões':'🎯','Impostos e Calendários':'🧾','Ferramentas, Simuladores e Automações':'🧮' };
+    relatoriosBusca.addEventListener('input', ()=>{
+      document.getElementById('relatoriosGrid').innerHTML = renderRelatoriosGridHTML(relatoriosCardsAtivos, categoriasOrdemW, iconeCategoriaW, relatoriosBusca.value);
+      bindRelatoriosGridWiring();
+    });
+  }
   if(currentView==='central-decisao'){
     const hoje = todayISO();
     const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
