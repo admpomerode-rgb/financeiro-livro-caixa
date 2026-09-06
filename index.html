@@ -18847,6 +18847,66 @@ async function preencherEstatisticasCodigo(){
 function attachViewHandlers(){
   if(currentView!==selecaoViewOrigem){ selecaoLancIds.clear(); selecaoViewOrigem = currentView; }
   atualizarSelecaoUI();
+  // Wiring do módulo "Meus Carros" fica logo no início de propósito: essa função é gigante e, se
+  // algum trecho mais abaixo (de outra tela) lançar um erro, o restante da função para de executar
+  // — colocando aqui, o botão flutuante e as abas do veículo continuam funcionando de qualquer jeito.
+  document.getElementById('btnNovoVeiculo')?.addEventListener('click', ()=>openVeiculoModal());
+  document.getElementById('veiculoSelectAtivo')?.addEventListener('change', (e)=>{
+    veiculoSelecionadoId = e.target.value;
+    veiculoTabAtiva = 'geral';
+    render();
+  });
+  document.querySelectorAll('[data-action="editar-veiculo"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openVeiculoModal(state.veiculos.find(v=>v.id===btn.dataset.id)));
+  });
+  document.querySelectorAll('#veiculoTabsRow [data-tab]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      veiculoTabAtiva = btn.dataset.tab;
+      const wrap = document.getElementById('veiculoConteudo');
+      const v = veiculoAtivo();
+      if(wrap && v){
+        wrap.innerHTML = renderVeiculoTabConteudo(v);
+        document.querySelectorAll('#veiculoTabsRow [data-tab]').forEach(b=>b.classList.toggle('active', b.dataset.tab===veiculoTabAtiva));
+        attachViewHandlers();
+      }
+    });
+  });
+  document.querySelectorAll('[data-action="nova-despesa-veiculo"]').forEach(btn=>btn.addEventListener('click', ()=>openVeiculoRegistroModal(btn.dataset.id, 'despesa')));
+  document.querySelectorAll('[data-action="nova-receita-veiculo"]').forEach(btn=>btn.addEventListener('click', ()=>openVeiculoRegistroModal(btn.dataset.id, 'receita')));
+  document.querySelectorAll('[data-action="novo-servico-veiculo"]').forEach(btn=>btn.addEventListener('click', ()=>openVeiculoRegistroModal(btn.dataset.id, 'servico')));
+  document.querySelectorAll('[data-action="novo-lembrete-veiculo"]').forEach(btn=>btn.addEventListener('click', ()=>openLembreteVeiculoModal(btn.dataset.id)));
+  document.querySelectorAll('[data-action="editar-lembrete-veiculo"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openLembreteVeiculoModal(null, state.veiculoLembretes.find(l=>l.id===btn.dataset.id)));
+  });
+  document.querySelectorAll('[data-action="editar-registro-veiculo"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const tipo = btn.dataset.tipo, id = btn.dataset.id;
+      const mapaArray = { abastecimento:'veiculoAbastecimentos', despesa:'veiculoDespesas', receita:'veiculoReceitas', servico:'veiculoServicos', leitura:'veiculoLeituras' };
+      const existing = state[mapaArray[tipo]].find(r=>r.id===id);
+      if(!existing) return;
+      if(tipo==='abastecimento') openAbastecimentoModal(existing.veiculoId, existing);
+      else if(tipo==='leitura') openLeituraModal(existing.veiculoId, existing);
+      else openVeiculoRegistroModal(existing.veiculoId, tipo, existing);
+    });
+  });
+  document.querySelector('[data-action="toggle-menu-novo-veiculo"]')?.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    const menu = document.querySelector('[data-menu-novo-veiculo]');
+    menu?.classList.toggle('open');
+    if(menu) ajustarPosicaoDropdown(menu);
+  });
+  document.querySelectorAll('[data-novo-veiculo]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('.dropdown-menu[data-menu-novo-veiculo]').forEach(m=>m.classList.remove('open'));
+      const v = veiculoAtivo();
+      if(!v) return;
+      const tipo = btn.dataset.novoVeiculo;
+      if(tipo==='abastecimento') openAbastecimentoModal(v.id);
+      else if(tipo==='leitura') openLeituraModal(v.id);
+      else if(tipo==='lembrete') openLembreteVeiculoModal(v.id);
+      else openVeiculoRegistroModal(v.id, tipo);
+    });
+  });
   if(currentView==='conciliacao'){
     document.getElementById('btnVoltarConciliacao')?.addEventListener('click', ()=>{
       currentView = 'configuracoes';
@@ -21589,63 +21649,6 @@ function attachViewHandlers(){
     sincronizarProcessos();
   });
   document.getElementById('btnNovoOrcamentoManual')?.addEventListener('click', ()=>openNovoOrcamentoManualModal());
-  document.getElementById('btnNovoVeiculo')?.addEventListener('click', ()=>openVeiculoModal());
-  document.getElementById('veiculoSelectAtivo')?.addEventListener('change', (e)=>{
-    veiculoSelecionadoId = e.target.value;
-    veiculoTabAtiva = 'geral';
-    render();
-  });
-  document.querySelectorAll('[data-action="editar-veiculo"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>openVeiculoModal(state.veiculos.find(v=>v.id===btn.dataset.id)));
-  });
-  document.querySelectorAll('#veiculoTabsRow [data-tab]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      veiculoTabAtiva = btn.dataset.tab;
-      const wrap = document.getElementById('veiculoConteudo');
-      const v = veiculoAtivo();
-      if(wrap && v){
-        wrap.innerHTML = renderVeiculoTabConteudo(v);
-        document.querySelectorAll('#veiculoTabsRow [data-tab]').forEach(b=>b.classList.toggle('active', b.dataset.tab===veiculoTabAtiva));
-        attachViewHandlers();
-      }
-    });
-  });
-  document.querySelectorAll('[data-action="nova-despesa-veiculo"]').forEach(btn=>btn.addEventListener('click', ()=>openVeiculoRegistroModal(btn.dataset.id, 'despesa')));
-  document.querySelectorAll('[data-action="nova-receita-veiculo"]').forEach(btn=>btn.addEventListener('click', ()=>openVeiculoRegistroModal(btn.dataset.id, 'receita')));
-  document.querySelectorAll('[data-action="novo-servico-veiculo"]').forEach(btn=>btn.addEventListener('click', ()=>openVeiculoRegistroModal(btn.dataset.id, 'servico')));
-  document.querySelectorAll('[data-action="novo-lembrete-veiculo"]').forEach(btn=>btn.addEventListener('click', ()=>openLembreteVeiculoModal(btn.dataset.id)));
-  document.querySelectorAll('[data-action="editar-lembrete-veiculo"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>openLembreteVeiculoModal(null, state.veiculoLembretes.find(l=>l.id===btn.dataset.id)));
-  });
-  document.querySelectorAll('[data-action="editar-registro-veiculo"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      const tipo = btn.dataset.tipo, id = btn.dataset.id;
-      const mapaArray = { abastecimento:'veiculoAbastecimentos', despesa:'veiculoDespesas', receita:'veiculoReceitas', servico:'veiculoServicos', leitura:'veiculoLeituras' };
-      const existing = state[mapaArray[tipo]].find(r=>r.id===id);
-      if(!existing) return;
-      if(tipo==='abastecimento') openAbastecimentoModal(existing.veiculoId, existing);
-      else if(tipo==='leitura') openLeituraModal(existing.veiculoId, existing);
-      else openVeiculoRegistroModal(existing.veiculoId, tipo, existing);
-    });
-  });
-  document.querySelector('[data-action="toggle-menu-novo-veiculo"]')?.addEventListener('click', (e)=>{
-    e.stopPropagation();
-    const menu = document.querySelector('[data-menu-novo-veiculo]');
-    menu?.classList.toggle('open');
-    if(menu) ajustarPosicaoDropdown(menu);
-  });
-  document.querySelectorAll('[data-novo-veiculo]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      document.querySelectorAll('.dropdown-menu[data-menu-novo-veiculo]').forEach(m=>m.classList.remove('open'));
-      const v = veiculoAtivo();
-      if(!v) return;
-      const tipo = btn.dataset.novoVeiculo;
-      if(tipo==='abastecimento') openAbastecimentoModal(v.id);
-      else if(tipo==='leitura') openLeituraModal(v.id);
-      else if(tipo==='lembrete') openLembreteVeiculoModal(v.id);
-      else openVeiculoRegistroModal(v.id, tipo);
-    });
-  });
   document.querySelectorAll('[data-action="aprovar-orcamento-processo"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const o = (state.orcamentosProcessos||[]).find(x=>x.id===btn.dataset.id);
