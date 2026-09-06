@@ -23623,6 +23623,7 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
       pintarOperacoes();
     }
     persist();
+    render();
     document.getElementById('notaFileInput').value = '';
     document.getElementById('notaRevisao').style.display = 'none';
     if(arquivos.length>1){
