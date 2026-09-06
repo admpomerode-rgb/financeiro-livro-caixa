@@ -508,7 +508,6 @@
     padding:18px 8px;border:1px solid var(--line);border-radius:12px;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;position:relative;
   }
   .more-item .more-icon{font-size:28px;}
-  .more-item .more-star{position:absolute;top:6px;left:8px;font-size:15px;color:var(--text-soft);cursor:pointer;line-height:1;padding:2px;}
   .more-item .more-badge{position:absolute;top:6px;right:8px;background:var(--danger);color:#fff;font-size:10px;font-weight:700;border-radius:9px;min-width:18px;height:18px;display:flex;align-items:center;justify-content:center;padding:0 4px;}
   .more-scroll-fade{position:sticky;bottom:0;height:22px;margin:-22px 0 0;background:linear-gradient(to bottom, rgba(255,255,255,0), var(--white));pointer-events:none;}
   .more-drawer-footer{display:flex;gap:10px;margin-top:16px;}
@@ -942,8 +941,6 @@ function aplicarMigracoes(s){
   if(!s.estoqueInsumos) s.estoqueInsumos = [];
   if(!s.previsoesGastoFuturo) s.previsoesGastoFuturo = [];
   if(!s.recebimentosDinheiroRep) s.recebimentosDinheiroRep = [];
-  if(!s.moreFavoritos) s.moreFavoritos = [];
-  if(!s.moreRecentes) s.moreRecentes = [];
   if(!s.custosProdutosVK) s.custosProdutosVK = [];
   if(!s.precosTabelaProdutos) s.precosTabelaProdutos = {};
   if(!s.emprestimos) s.emprestimos = [];
@@ -1403,11 +1400,10 @@ function moreItensDef(){
   ];
 }
 
-function moreItemHTML(item, favoritado){
+function moreItemHTML(item){
   const badgeCount = item.badge ? item.badge() : 0;
   return `
     <div class="more-item" data-view="${item.view}">
-      <span class="more-star" data-fav-view="${item.view}" title="${favoritado?'Remover dos favoritos':'Adicionar aos favoritos'}">${favoritado?'★':'☆'}</span>
       ${badgeCount>0 ? `<span class="more-badge">${badgeCount>9?'9+':badgeCount}</span>` : ''}
       <span class="more-icon">${item.icone}</span>${escapeHTML(item.nome)}
     </div>`;
@@ -1416,33 +1412,21 @@ function moreItemHTML(item, favoritado){
 function renderMoreDrawerGrid(filtro){
   filtro = (filtro||'').trim().toLowerCase();
   const todos = moreItensDef();
-  const porView = {};
-  todos.forEach(i=>{ porView[i.view] = i; });
   const filtrados = filtro ? todos.filter(i=>i.nome.toLowerCase().includes(filtro)) : todos;
 
   if(filtro){
     document.getElementById('moreDrawerGrid').innerHTML = filtrados.length
-      ? filtrados.map(i=>moreItemHTML(i, (state.moreFavoritos||[]).includes(i.view))).join('')
+      ? filtrados.map(i=>moreItemHTML(i)).join('')
       : `<div class="empty" style="grid-column:1/-1;">Nada encontrado pra "${escapeHTML(filtro)}".</div>`;
     return;
   }
 
-  const favoritos = (state.moreFavoritos||[]).map(v=>porView[v]).filter(Boolean);
-  const recentesViews = (state.moreRecentes||[]).filter(v=>!(state.moreFavoritos||[]).includes(v)).slice(0,4);
-  const recentes = recentesViews.map(v=>porView[v]).filter(Boolean);
   const grupos = ['Operacional','Análise','Cadastros e Configurações'];
-
   let html = '';
-  if(favoritos.length){
-    html += `<div class="more-section-label">⭐ Favoritos</div><div class="more-drawer-grid" style="padding:0;">${favoritos.map(i=>moreItemHTML(i,true)).join('')}</div>`;
-  }
-  if(recentes.length){
-    html += `<div class="more-section-label">🕐 Recentes</div><div class="more-drawer-grid" style="padding:0;">${recentes.map(i=>moreItemHTML(i,false)).join('')}</div>`;
-  }
   grupos.forEach(g=>{
     const itensGrupo = todos.filter(i=>i.grupo===g);
     if(!itensGrupo.length) return;
-    html += `<div class="more-section-label">${g}</div><div class="more-drawer-grid" style="padding:0;">${itensGrupo.map(i=>moreItemHTML(i,(state.moreFavoritos||[]).includes(i.view))).join('')}</div>`;
+    html += `<div class="more-section-label">${g}</div><div class="more-drawer-grid" style="padding:0;">${itensGrupo.map(i=>moreItemHTML(i)).join('')}</div>`;
   });
   document.getElementById('moreDrawerGrid').outerHTML = `<div id="moreDrawerGrid">${html}</div>`;
 }
@@ -1462,23 +1446,9 @@ document.getElementById('btnFecharMais').addEventListener('click', ()=>moreDrawe
 moreDrawer.addEventListener('click', (e)=>{ if(e.target===moreDrawer) moreDrawer.classList.remove('open'); });
 document.getElementById('moreBusca').addEventListener('input', (e)=>renderMoreDrawerGrid(e.target.value));
 document.querySelector('.more-drawer-sheet').addEventListener('click', (e)=>{
-  const star = e.target.closest('.more-star[data-fav-view]');
-  if(star){
-    e.stopPropagation();
-    const v = star.dataset.favView;
-    if(!state.moreFavoritos) state.moreFavoritos = [];
-    if(state.moreFavoritos.includes(v)) state.moreFavoritos = state.moreFavoritos.filter(x=>x!==v);
-    else state.moreFavoritos.push(v);
-    persist();
-    renderMoreDrawerGrid(document.getElementById('moreBusca').value);
-    return;
-  }
   const item = e.target.closest('.more-item[data-view]');
   if(!item) return;
   currentView = item.dataset.view;
-  if(!state.moreRecentes) state.moreRecentes = [];
-  state.moreRecentes = [item.dataset.view, ...state.moreRecentes.filter(v=>v!==item.dataset.view)].slice(0,6);
-  persist();
   moreDrawer.classList.remove('open');
   render();
 });
