@@ -403,7 +403,8 @@
   .cartao-card .fatura-valor{font-size:20px;font-weight:600;margin-bottom:12px;}
   .limit-bar{height:6px;background:rgba(255,255,255,0.12);border-radius:4px;overflow:hidden;margin-bottom:6px;}
   .limit-bar-fill{height:100%;background:var(--accent-c, var(--blue-accent));border-radius:4px;}
-  .cartao-card .limit-info{display:flex;justify-content:space-between;font-size:11px;color:#9AA4B3;margin-bottom:14px;}
+  .limit-info{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:11px;color:#9AA4B3;margin-bottom:14px;}
+  .panel .limit-info{color:var(--text-soft);margin-bottom:0;}
   .cartao-card .cartao-actions-row{display:flex;gap:8px;}
   .cartao-card .cartao-actions-row .btn{flex:1;font-size:12px;padding:8px;}
   .cartao-card .btn.ghost{background:rgba(255,255,255,0.06);border-color:rgba(255,255,255,0.18);color:var(--white);}
@@ -1085,6 +1086,11 @@ let cartoesFiltroAtivo = '';
 let extratoContaId = null;
 let extratoBuscaTermo = '';
 let extratoModoBusca = 'conta';
+let extratoTodasContas = false;
+let extratoFiltroTipo = 'todas';
+let extratoFiltroCategoria = '';
+let extratoFiltroConciliacao = 'todas';
+let extratoGraficoDadosAtual = [];
 let conciliacaoContaId = null;
 let pararCameraQRAtiva = null;
 let relatorioAtivo = 'dre';
@@ -2913,6 +2919,57 @@ function gerarReciboComissaoPDF(cp){
   docPdf.save(nomeArquivo);
 }
 
+// Classifica a situação de conciliação de um evento do extrato usando SÓ campos que já existem de
+// verdade no sistema (l.conciliado, setado pela conciliação OFX ou confirmado manualmente) — não
+// inventa um terceiro estado "divergência" fictício: aqui, "divergência" é uma leitura honesta de
+// um pagamento/recebimento que já está marcado como pago/recebido mas ainda tem uma diferença entre
+// o valor total do lançamento e o valor efetivamente recebido até agora (situação real, derivável).
+function classificarConciliacaoEvento(ev){
+  if(ev.conciliado) return 'conciliado';
+  if(ev.valorRecebidoLancamento>0.004 && Math.abs(ev.valorTotalLancamento-ev.valorRecebidoLancamento)>0.01) return 'divergencia';
+  return 'pendente';
+}
+// Gráfico de barras duplas (entradas em verde, saídas em vermelho) por dia — mesmo estilo visual e
+// mesmas cores do gráfico de "Entradas x Saídas" já usado no Dashboard (desenharGraficoMeses),
+// só que parametrizado por uma lista arbitrária de {label, entradas, saidas} em vez de fixo em meses.
+function desenharGraficoBarrasDuasCores(canvasId, dados){
+  const canvas = document.getElementById(canvasId);
+  if(!canvas || !dados.length) return;
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = canvas.clientWidth || canvas.parentElement.clientWidth || 600;
+  const cssHeight = 160;
+  canvas.width = cssWidth * dpr;
+  canvas.height = cssHeight * dpr;
+  canvas.style.width = cssWidth+'px';
+  canvas.style.height = cssHeight+'px';
+  const ctx = canvas.getContext('2d');
+  if(!ctx) return;
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0,0,cssWidth,cssHeight);
+
+  const maxVal = Math.max(1, ...dados.map(d=>Math.max(d.entradas,d.saidas)));
+  const padLeft = 10, padRight = 10, padBottom = 20, padTop = 10;
+  const chartW = cssWidth - padLeft - padRight;
+  const chartH = cssHeight - padBottom - padTop;
+  const grupoW = chartW / dados.length;
+  const barW = Math.min(18, grupoW*0.32);
+
+  ctx.font = '9.5px Inter, sans-serif';
+  dados.forEach((d,i)=>{
+    const cx = padLeft + grupoW*i + grupoW/2;
+    const hEnt = maxVal>0 ? (d.entradas/maxVal)*chartH : 0;
+    const hSai = maxVal>0 ? (d.saidas/maxVal)*chartH : 0;
+    ctx.fillStyle = '#2E7D5B';
+    ctx.fillRect(cx-barW-1, padTop+chartH-hEnt, barW, hEnt);
+    ctx.fillStyle = '#C24A3D';
+    ctx.fillRect(cx+1, padTop+chartH-hSai, barW, hSai);
+    if(dados.length<=15){
+      ctx.fillStyle = '#8A8F98';
+      ctx.textAlign = 'center';
+      ctx.fillText(d.label, cx, cssHeight-5);
+    }
+  });
+}
 function desenharGraficoMeses(canvasId){
   const canvas = document.getElementById(canvasId);
   if(!canvas) return;
@@ -3873,7 +3930,8 @@ function movimentosRealizados(){
           categoria: l.categoria, descricao: l.descricao, origem: l.origem,
           lancamentoId: l.id, fornecedor: l.fornecedor, produtoTag: l.produtoTag,
           formaRecebimento: h.formaRecebimento, comprovanteFoto: l.comprovanteFoto,
-          observacao: l.observacao, centroCusto: l.centroCusto, itens: l.itens
+          observacao: l.observacao, centroCusto: l.centroCusto, itens: l.itens,
+          conciliado: !!l.conciliado, valorTotalLancamento: l.valor, valorRecebidoLancamento: l.valorRecebido||0
         });
       });
     } else {
@@ -3882,7 +3940,8 @@ function movimentosRealizados(){
         categoria: l.categoria, descricao: l.descricao, origem: l.origem,
         lancamentoId: l.id, fornecedor: l.fornecedor, produtoTag: l.produtoTag,
         formaRecebimento: l.formaRecebimento, comprovanteFoto: l.comprovanteFoto,
-        observacao: l.observacao, centroCusto: l.centroCusto, itens: l.itens
+        observacao: l.observacao, centroCusto: l.centroCusto, itens: l.itens,
+        conciliado: !!l.conciliado, valorTotalLancamento: l.valor, valorRecebidoLancamento: l.valorRecebido||0
       });
     }
   });
@@ -5745,11 +5804,11 @@ function fmtDateCurta(d){
 }
 
 function renderExtratoConteudo(contaId){
-  const conta = state.contas.find(c=>c.id===contaId);
-  if(!conta) return '';
+  const contaUnica = state.contas.find(c=>c.id===contaId);
+  if(!contaUnica && !extratoTodasContas) return '';
   const buscando = !!extratoBuscaTermo;
   const termo = extratoBuscaTermo.toLowerCase();
-  const bate = l => l.descricao.toLowerCase().includes(termo) || (l.fornecedor||'').toLowerCase().includes(termo) || (l.observacao||'').toLowerCase().includes(termo);
+  const bate = l => l.descricao.toLowerCase().includes(termo) || (l.fornecedor||'').toLowerCase().includes(termo) || (l.observacao||'').toLowerCase().includes(termo) || (l.categoria||'').toLowerCase().includes(termo) || String(l.valor).includes(termo);
 
   if(buscando && extratoModoBusca!=='conta'){
     // Pesquisa cruzada em Contas a Receber/Pagar — todas as contas, todos os períodos,
@@ -5765,15 +5824,24 @@ function renderExtratoConteudo(contaId){
     `;
   }
 
-  // Modo "nesta conta" — respeita o mês selecionado no navegador
+  // ---- Escopo: uma conta específica, ou todas (seção 3) ----
+  const contasAlvo = extratoTodasContas ? state.contas : [contaUnica];
+  const idsContasAlvo = new Set(contasAlvo.map(c=>c.id));
+
+  // Modo "nesta conta"/"todas as contas" — respeita o mês selecionado no navegador
   const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
   const deMes = `${mesGlobalRef}-01`;
   const ateMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
-  const todosEventosConta = movimentosRealizados().filter(ev=>ev.contaId===contaId);
-  const saldoAntesDoMes = (conta.saldoInicial||0) + todosEventosConta.filter(ev=>ev.data && ev.data<deMes).reduce((s,ev)=>s+(ev.tipo==='entrada'?ev.valor:-ev.valor),0);
+  const todosEventos = movimentosRealizados().filter(ev=>idsContasAlvo.has(ev.contaId));
+  const saldoAntesDoMes = contasAlvo.reduce((s,c)=>s+(c.saldoInicial||0),0) + todosEventos.filter(ev=>ev.data && ev.data<deMes).reduce((s,ev)=>s+(ev.tipo==='entrada'?ev.valor:-ev.valor),0);
 
-  let lista = todosEventosConta.filter(ev=>ev.data>=deMes && ev.data<=ateMes);
-  let pendentesConta = state.lancamentos.filter(l=>l.status==='pendente' && l.contaId===contaId && l.dataVencimento>=deMes && l.dataVencimento<=ateMes);
+  let lista = todosEventos.filter(ev=>ev.data>=deMes && ev.data<=ateMes);
+  let pendentesConta = state.lancamentos.filter(l=>l.status==='pendente' && idsContasAlvo.has(l.contaId) && l.dataVencimento>=deMes && l.dataVencimento<=ateMes);
+
+  // ---- Filtros novos: Tipo, Categoria, Conciliação (seção 4) ----
+  if(extratoFiltroTipo!=='todas') lista = lista.filter(ev=>ev.tipo===extratoFiltroTipo);
+  if(extratoFiltroCategoria) lista = lista.filter(ev=>ev.categoria===extratoFiltroCategoria);
+  if(extratoFiltroConciliacao!=='todas') lista = lista.filter(ev=>classificarConciliacaoEvento(ev)===extratoFiltroConciliacao);
   if(buscando){
     lista = lista.filter(bate);
     pendentesConta = pendentesConta.filter(bate);
@@ -5782,6 +5850,15 @@ function renderExtratoConteudo(contaId){
   lista.sort((a,b)=> (a.data||'').localeCompare(b.data||''));
   const ehMobile = typeof window!=='undefined' && window.innerWidth <= 900;
 
+  // ---- Resumo Financeiro (seção 2) — sempre sobre o que está filtrado no período ----
+  const saldoAtual = contasAlvo.reduce((s,c)=>s+saldoConta(c.id),0);
+  const entradasPeriodo = lista.filter(ev=>ev.tipo==='entrada').reduce((s,ev)=>s+ev.valor,0);
+  const saidasPeriodo = lista.filter(ev=>ev.tipo==='saida').reduce((s,ev)=>s+ev.valor,0);
+  const resultadoPeriodo = entradasPeriodo - saidasPeriodo;
+  const porConciliacao = { conciliado:{qtd:0,valor:0}, pendente:{qtd:0,valor:0}, divergencia:{qtd:0,valor:0} };
+  lista.forEach(ev=>{ const st = classificarConciliacaoEvento(ev); porConciliacao[st].qtd++; porConciliacao[st].valor += ev.valor; });
+
+  // ---- Saldo corrido, agrupado por dia (mantém o padrão já existente) ----
   let saldo = saldoAntesDoMes;
   const grupos = [];
   let atual = null;
@@ -5796,27 +5873,83 @@ function renderExtratoConteudo(contaId){
     atual.saldoFinal = saldo;
   });
 
+  // ---- Resumo do período (seção 12) ----
+  const maiorEntrada = lista.filter(ev=>ev.tipo==='entrada').sort((a,b)=>b.valor-a.valor)[0];
+  const maiorSaida = lista.filter(ev=>ev.tipo==='saida').sort((a,b)=>b.valor-a.valor)[0];
+  const mesAnteriorRef = mesM===1 ? `${anoM-1}-12` : `${anoM}-${String(mesM-1).padStart(2,'0')}`;
+  const [anoAnt,mesAnt] = mesAnteriorRef.split('-').map(Number);
+  const deAnt = `${mesAnteriorRef}-01`, ateAnt = `${mesAnteriorRef}-${String(new Date(anoAnt,mesAnt,0).getDate()).padStart(2,'0')}`;
+  const eventosMesAnterior = todosEventos.filter(ev=>ev.data>=deAnt && ev.data<=ateAnt);
+  const saidasMesAnterior = eventosMesAnterior.filter(ev=>ev.tipo==='saida').reduce((s,ev)=>s+ev.valor,0);
+  const entradasMesAnterior = eventosMesAnterior.filter(ev=>ev.tipo==='entrada').reduce((s,ev)=>s+ev.valor,0);
+  const temComparacao = eventosMesAnterior.length>0;
+  const varSaidasPct = temComparacao && saidasMesAnterior>0 ? ((saidasPeriodo-saidasMesAnterior)/saidasMesAnterior*100) : null;
+  const varEntradasPct = temComparacao && entradasMesAnterior>0 ? ((entradasPeriodo-entradasMesAnterior)/entradasMesAnterior*100) : null;
+
+  // ---- Análise do período (seção 15) — só entra quando o dado realmente justifica ----
+  const analisePeriodo = [];
+  if(lista.length){
+    if(resultadoPeriodo>0) analisePeriodo.push('As entradas superaram as saídas no período.');
+    else if(resultadoPeriodo<0) analisePeriodo.push('As saídas superaram as entradas no período.');
+    if(varSaidasPct!==null && varSaidasPct>=15) analisePeriodo.push(`As saídas aumentaram ${varSaidasPct.toFixed(0)}% em relação ao período anterior.`);
+    else if(varSaidasPct!==null && varSaidasPct<=-15) analisePeriodo.push(`As saídas caíram ${Math.abs(varSaidasPct).toFixed(0)}% em relação ao período anterior.`);
+    if(porConciliacao.pendente.qtd+porConciliacao.divergencia.qtd>0) analisePeriodo.push(`Existem ${porConciliacao.pendente.qtd+porConciliacao.divergencia.qtd} movimentação(ões) pendentes de conciliação.`);
+    const porCategoriaSaida = {};
+    lista.filter(ev=>ev.tipo==='saida').forEach(ev=>{ porCategoriaSaida[ev.categoria]=(porCategoriaSaida[ev.categoria]||0)+ev.valor; });
+    const catTop = Object.entries(porCategoriaSaida).sort((a,b)=>b[1]-a[1])[0];
+    if(catTop && saidasPeriodo>0 && catTop[1]/saidasPeriodo>=0.4) analisePeriodo.push(`A categoria "${catTop[0]}" concentrou ${Math.round(catTop[1]/saidasPeriodo*100)}% das despesas do período.`);
+  }
+
+  // ---- Visão das contas (seção 14) — só quando "todas as contas" está selecionado ----
+  const visaoContas = extratoTodasContas ? contasAlvo.map(c=>{
+    const evConta = lista.filter(ev=>ev.contaId===c.id);
+    const ent = evConta.filter(ev=>ev.tipo==='entrada').reduce((s,ev)=>s+ev.valor,0);
+    const sai = evConta.filter(ev=>ev.tipo==='saida').reduce((s,ev)=>s+ev.valor,0);
+    return { conta:c, saldo:saldoConta(c.id), entradas:ent, saidas:sai, resultado:ent-sai };
+  }) : [];
+
+  // ---- Gráfico entradas x saídas por dia (seção 13) ----
+  const dadosGrafico = grupos.map(g=>({
+    label: g.dia.slice(8,10),
+    entradas: g.itens.filter(it=>it.ev.tipo==='entrada').reduce((s,it)=>s+it.ev.valor,0),
+    saidas: g.itens.filter(it=>it.ev.tipo==='saida').reduce((s,it)=>s+it.ev.valor,0)
+  }));
+  extratoGraficoDadosAtual = dadosGrafico;
+
+  const badgeConciliacao = ev => {
+    const st = classificarConciliacaoEvento(ev);
+    return st==='conciliado' ? `<span title="Conciliado" style="color:var(--success);">✓</span>`
+      : st==='divergencia' ? `<span title="Divergência — valor recebido diferente do total" style="color:var(--danger);">⚠</span>`
+      : `<span title="Pendente de conciliação" style="color:var(--text-soft);">○</span>`;
+  };
+
+  const linhaMobileHTML = ({ev, saldoApos}) => `
+    <div class="ledger-row compact" data-id="${ev.lancamentoId}" data-action="abrir-lancamento" style="cursor:pointer;">
+      <span class="dot ${ev.tipo}"></span>
+      <div class="desc-cell">
+        <div>${escapeHTML(ev.descricao)}${ev.formaRecebimento ? ` <span style="color:var(--text-soft);font-size:10.5px;">· parcela</span>` : ''}${ev.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Transferência</span>' : ''}${ev.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Investimento</span>' : ''}${ev.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Ativo Patrimonial</span>' : ''}${ev.observacao ? ' <span style="color:var(--text-soft);font-size:10.5px;" title="Tem observação">📝</span>' : ''}${ev.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${ev.lancamentoId}" style="cursor:pointer;font-size:10.5px;" title="Ver comprovante">📎</span>` : ''}${(ev.itens && ev.itens.length>1 && ev.itens.some(it=>it.categoria)) ? ` <span data-action="toggle-itens-detalhe" data-id="${ev.lancamentoId}" style="cursor:pointer;font-size:10.5px;color:var(--blue-accent);font-weight:600;" title="Ver itens e categorias">▾ ${ev.itens.length} itens</span>` : ''} ${badgeConciliacao(ev)}</div>
+        <div class="cat">${ev.fornecedor ? `<span style="text-transform:uppercase;">${escapeHTML(ev.fornecedor)}</span>` : escapeHTML(ev.categoria)}${extratoTodasContas ? ` · ${escapeHTML(nomeConta(ev.contaId))}` : ''}</div>
+      </div>
+      <div style="text-align:right;">
+        <span class="mono" style="font-weight:600;font-size:12.5px;color:${ev.tipo==='entrada'?'var(--success)':'var(--danger)'}">${ev.tipo==='entrada'?'+':'-'} ${brl(ev.valor)}</span>
+        <div style="font-size:10px;color:var(--text-soft);">Saldo: ${brl(saldoApos)}</div>
+      </div>
+      <div class="row-actions">${ev.origem!=='transferencia' ? `<button class="icon-btn" data-action="editar" data-id="${ev.lancamentoId}" title="Editar">✎</button>` : ''}<button class="icon-btn" data-action="excluir" data-id="${ev.lancamentoId}" title="Excluir">✕</button></div>
+    </div>
+    ${(ev.itens && ev.itens.length>1 && ev.itens.some(it=>it.categoria)) ? `
+    <div id="itensDetalhe_${ev.lancamentoId}" style="display:none;padding:6px 16px 10px 34px;background:var(--bone);">
+      ${ev.itens.map(it=>`<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span>${escapeHTML(it.nome)} <span style="color:var(--text-soft);">· ${escapeHTML(it.categoria||ev.categoria)}</span></span><span class="mono">${brl(it.valor)}</span></div>`).join('')}
+    </div>` : ''}
+  `;
+
   const gruposHTML = grupos.slice().reverse().map(g=>`
     <div class="panel extrato-dia">
       <div class="extrato-dia-head">
         <span class="extrato-dia-data">${ehMobile ? fmtDateCurta(g.dia) : fmtDateExtenso(g.dia)}</span>
+        <span style="font-size:11px;color:var(--text-soft);margin-right:10px;">Entradas: <strong style="color:var(--success);">${brl(g.itens.filter(it=>it.ev.tipo==='entrada').reduce((s,it)=>s+it.ev.valor,0))}</strong> · Saídas: <strong style="color:var(--danger);">${brl(g.itens.filter(it=>it.ev.tipo==='saida').reduce((s,it)=>s+it.ev.valor,0))}</strong></span>
         <span>Saldo final do dia: <strong class="mono">${brl(g.saldoFinal)}</strong></span>
       </div>
-      ${g.itens.slice().reverse().map(({ev})=>`
-        <div class="ledger-row compact" data-id="${ev.lancamentoId}" data-action="abrir-lancamento" style="cursor:pointer;">
-          <span class="dot ${ev.tipo}"></span>
-          <div class="desc-cell">
-            <div>${escapeHTML(ev.descricao)}${ev.formaRecebimento ? ` <span style="color:var(--text-soft);font-size:10.5px;">· parcela</span>` : ''}${ev.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Transferência</span>' : ''}${ev.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Investimento</span>' : ''}${ev.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Ativo Patrimonial</span>' : ''}${ev.observacao ? ' <span style="color:var(--text-soft);font-size:10.5px;" title="Tem observação">📝</span>' : ''}${ev.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${ev.lancamentoId}" style="cursor:pointer;font-size:10.5px;" title="Ver comprovante">📎</span>` : ''}${(ev.itens && ev.itens.length>1 && ev.itens.some(it=>it.categoria)) ? ` <span data-action="toggle-itens-detalhe" data-id="${ev.lancamentoId}" style="cursor:pointer;font-size:10.5px;color:var(--blue-accent);font-weight:600;" title="Ver itens e categorias">▾ ${ev.itens.length} itens</span>` : ''}</div>
-            <div class="cat">${ev.fornecedor ? `<span style="text-transform:uppercase;">${escapeHTML(ev.fornecedor)}</span>` : escapeHTML(ev.categoria)}</div>
-          </div>
-          <span class="mono" style="font-weight:600;font-size:12.5px;color:${ev.tipo==='entrada'?'var(--success)':'var(--danger)'}">${ev.tipo==='entrada'?'+':'-'} ${brl(ev.valor)}</span>
-          <div class="row-actions">${ev.origem!=='transferencia' ? `<button class="icon-btn" data-action="editar" data-id="${ev.lancamentoId}" title="Editar">✎</button>` : ''}<button class="icon-btn" data-action="excluir" data-id="${ev.lancamentoId}" title="Excluir">✕</button></div>
-        </div>
-        ${(ev.itens && ev.itens.length>1 && ev.itens.some(it=>it.categoria)) ? `
-        <div id="itensDetalhe_${ev.lancamentoId}" style="display:none;padding:6px 16px 10px 34px;background:var(--bone);">
-          ${ev.itens.map(it=>`<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span>${escapeHTML(it.nome)} <span style="color:var(--text-soft);">· ${escapeHTML(it.categoria||ev.categoria)}</span></span><span class="mono">${brl(it.valor)}</span></div>`).join('')}
-        </div>` : ''}
-      `).join('')}
+      ${g.itens.slice().reverse().map(linhaMobileHTML).join('')}
       <div class="extrato-dia-foot">
         <span>Saldo inicial do dia</span>
         <span class="mono">${brl(g.saldoInicial)}</span>
@@ -5824,10 +5957,91 @@ function renderExtratoConteudo(contaId){
     </div>
   `).join('');
 
+  // ---- Tabela desktop (seção 6) — mesma lista/dados, só apresentação em grade/tabela ----
+  const linhasDesktopHTML = grupos.slice().reverse().map(g=>g.itens.slice().reverse().map(({ev,saldoApos})=>`
+    <div class="ledger-row compact" data-id="${ev.lancamentoId}" data-action="abrir-lancamento" style="cursor:pointer;grid-template-columns:90px 1.6fr 1fr 100px 100px 110px 60px;">
+      <span class="mono" style="font-size:12px;color:var(--text-soft);">${fmtDate(ev.data)}</span>
+      <div class="desc-cell"><div>${escapeHTML(ev.descricao)}${extratoTodasContas ? ` <span style="color:var(--text-soft);font-size:10.5px;">· ${escapeHTML(nomeConta(ev.contaId))}</span>` : ''}${(ev.itens && ev.itens.length>1 && ev.itens.some(it=>it.categoria)) ? ` <span data-action="toggle-itens-detalhe" data-id="${ev.lancamentoId}" style="cursor:pointer;font-size:10.5px;color:var(--blue-accent);font-weight:600;">▾ ${ev.itens.length} itens</span>` : ''}</div></div>
+      <span style="font-size:12px;color:var(--text-soft);">${ev.fornecedor ? escapeHTML(ev.fornecedor) : escapeHTML(ev.categoria)}</span>
+      <span class="mono" style="font-size:12.5px;color:var(--success);text-align:right;">${ev.tipo==='entrada'?brl(ev.valor):''}</span>
+      <span class="mono" style="font-size:12.5px;color:var(--danger);text-align:right;">${ev.tipo==='saida'?brl(ev.valor):''}</span>
+      <span class="mono" style="font-size:12.5px;font-weight:600;text-align:right;">${brl(saldoApos)}</span>
+      <span style="text-align:center;">${badgeConciliacao(ev)}</span>
+    </div>
+    ${(ev.itens && ev.itens.length>1 && ev.itens.some(it=>it.categoria)) ? `
+    <div id="itensDetalhe_${ev.lancamentoId}" style="display:none;padding:6px 16px 10px 100px;background:var(--bone);">
+      ${ev.itens.map(it=>`<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span>${escapeHTML(it.nome)} <span style="color:var(--text-soft);">· ${escapeHTML(it.categoria||ev.categoria)}</span></span><span class="mono">${brl(it.valor)}</span></div>`).join('')}
+    </div>` : ''}
+  `).join('')).join('');
+
   return `
-    ${grupos.length ? gruposHTML : `<div class="panel"><div class="empty">${extratoBuscaTermo ? 'Nenhuma movimentação encontrada para essa busca neste mês.' : 'Nenhuma movimentação nesta conta neste mês.'}</div></div>`}
-    ${pendentesConta.length ? `
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:14px;">
+      <div class="card saldo"><div class="label">Saldo atual</div><div class="value mono">${brl(saldoAtual)}</div></div>
+      <div class="card"><div class="label">Entradas</div><div class="value mono" style="color:var(--success);">${brl(entradasPeriodo)}</div></div>
+      <div class="card"><div class="label">Saídas</div><div class="value mono" style="color:var(--danger);">${brl(saidasPeriodo)}</div></div>
+      <div class="card"><div class="label">Resultado</div><div class="value mono" style="color:${resultadoPeriodo>=0?'var(--success)':'var(--danger)'};">${brl(resultadoPeriodo)}</div></div>
+      <div class="card"><div class="label">Conciliado</div><div class="value mono">${porConciliacao.conciliado.qtd}</div></div>
+      <div class="card"><div class="label">Pendências</div><div class="value mono" style="color:${(porConciliacao.pendente.qtd+porConciliacao.divergencia.qtd)>0?'var(--warn)':'inherit'};">${porConciliacao.pendente.qtd+porConciliacao.divergencia.qtd}</div></div>
+    </div>
+
+    ${visaoContas.length>1 ? `
+    <div class="dash-section-label">Visão das contas</div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-bottom:14px;">
+      ${visaoContas.map(v=>`
+        <div class="card">
+          <div class="label">${escapeHTML(v.conta.nome)}</div>
+          <div class="value mono">${brl(v.saldo)}</div>
+          <div style="font-size:10.5px;color:var(--text-soft);margin-top:4px;">Entradas ${brl(v.entradas)} · Saídas ${brl(v.saidas)}</div>
+        </div>
+      `).join('')}
+    </div>` : ''}
+
+    ${lista.length ? `
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="panel-head"><h2>Entradas × Saídas no período</h2></div>
+      <div class="panel-body"><canvas id="chartExtratoDiario" height="160"></canvas></div>
+    </div>` : ''}
+
+    ${(porConciliacao.pendente.qtd+porConciliacao.divergencia.qtd+porConciliacao.conciliado.qtd)>0 ? `
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="panel-head"><h2>Situação da conciliação</h2></div>
+      <div class="panel-body" style="display:flex;gap:20px;flex-wrap:wrap;">
+        <span style="font-size:13px;">✓ Conciliado: <strong>${porConciliacao.conciliado.qtd}</strong></span>
+        <span style="font-size:13px;">○ Pendente: <strong>${porConciliacao.pendente.qtd}</strong></span>
+        <span style="font-size:13px;">⚠ Divergência: <strong>${porConciliacao.divergencia.qtd}</strong></span>
+      </div>
+    </div>` : ''}
+
+    ${lista.length ? `
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="panel-head"><h2>Resumo do período</h2></div>
+      <div class="panel-body" style="font-size:12.5px;line-height:2;">
+        <div>Quantidade de movimentações: <strong>${lista.length}</strong></div>
+        ${maiorEntrada ? `<div>Maior entrada: <strong style="color:var(--success);">${brl(maiorEntrada.valor)}</strong> — ${escapeHTML(maiorEntrada.descricao)}</div>` : ''}
+        ${maiorSaida ? `<div>Maior saída: <strong style="color:var(--danger);">${brl(maiorSaida.valor)}</strong> — ${escapeHTML(maiorSaida.descricao)}</div>` : ''}
+        ${varSaidasPct!==null ? `<div>${varSaidasPct>=0?'Saídas aumentaram':'Saídas caíram'} <strong>${Math.abs(varSaidasPct).toFixed(0)}%</strong> em relação a ${competenciaLabel(mesAnteriorRef)}.</div>` : ''}
+        ${varEntradasPct!==null ? `<div>${varEntradasPct>=0?'Entradas aumentaram':'Entradas caíram'} <strong>${Math.abs(varEntradasPct).toFixed(0)}%</strong> em relação a ${competenciaLabel(mesAnteriorRef)}.</div>` : ''}
+      </div>
+    </div>` : ''}
+
+    ${analisePeriodo.length ? `
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="panel-head"><h2>🧠 Análise do período</h2></div>
+      <div class="panel-body" style="padding:0;">
+        ${analisePeriodo.map(a=>`<div class="ledger-row compact" style="grid-template-columns:1fr;">${a}</div>`).join('')}
+      </div>
+    </div>` : ''}
+
+    ${ehMobile ? (grupos.length ? gruposHTML : `<div class="panel"><div class="empty">${extratoBuscaTermo ? 'Nenhuma movimentação encontrada para essa busca neste mês.' : 'Nenhuma movimentação neste mês.'}</div></div>`) : (grupos.length ? `
     <div class="panel">
+      <div class="ledger-row head" style="grid-template-columns:90px 1.6fr 1fr 100px 100px 110px 60px;">
+        <span>Data</span><span>Descrição</span><span>Categoria</span><span style="text-align:right;">Entrada</span><span style="text-align:right;">Saída</span><span style="text-align:right;">Saldo</span><span style="text-align:center;">Concil.</span>
+      </div>
+      <div class="panel-body" style="padding:0;">${linhasDesktopHTML}</div>
+    </div>` : `<div class="panel"><div class="empty">${extratoBuscaTermo ? 'Nenhuma movimentação encontrada para essa busca neste mês.' : 'Nenhuma movimentação neste mês.'}</div></div>`)}
+
+    ${pendentesConta.length ? `
+    <div class="panel" style="margin-top:14px;">
       <div class="panel-head"><h2>Previsto (ainda pendente) neste mês</h2></div>
       <div class="panel-body">${pendentesConta.map(rowHTML).join('')}</div>
     </div>` : ''}
@@ -5836,23 +6050,58 @@ function renderExtratoConteudo(contaId){
 
 function viewExtrato(contaId){
   const conta = state.contas.find(c=>c.id===contaId);
-  if(!conta) return viewContas();
+  if(!conta && !extratoTodasContas) return viewContas();
+  const saldoExibido = extratoTodasContas ? state.contas.reduce((s,c)=>s+saldoConta(c.id),0) : saldoConta(contaId);
+  const categoriasDisponiveis = [...new Set([...listaCategorias('saida'), ...listaCategorias('entrada')].map(c=>c.nome))].sort();
   return `
     <div class="topbar">
       <div>
         <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" id="btnVoltarContas">← Contas Bancárias</span>
-        <h1 style="margin-top:6px;">Extrato — ${escapeHTML(conta.nome)}</h1>
-        <p>${escapeHTML(conta.banco||'')} · Saldo atual: <strong class="mono">${brl(saldoConta(contaId))}</strong></p>
+        <h1 style="margin-top:6px;">Extratos Bancários</h1>
+        <p>Movimentações, saldos e conciliação financeira · Saldo atual: <strong class="mono">${brl(saldoExibido)}</strong></p>
       </div>
       <div class="dash-acao" style="display:flex;gap:8px;align-items:center;">
-        ${menuAdicionarContaHTML(contaId)}
+        ${extratoTodasContas ? '' : menuAdicionarContaHTML(contaId)}
       </div>
     </div>
     ${mesNavHTML()}
     <div class="panel">
       <div class="filter-bar" style="align-items:flex-end;">
+        <div class="field" style="margin:0;min-width:150px;">
+          <label style="font-size:10.5px;">Conta</label>
+          <select id="extratoFiltroConta">
+            <option value="todas" ${extratoTodasContas?'selected':''}>Todas as contas</option>
+            ${state.contas.map(c=>`<option value="${c.id}" ${!extratoTodasContas && c.id===contaId?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" style="margin:0;min-width:110px;">
+          <label style="font-size:10.5px;">Tipo</label>
+          <select id="extratoFiltroTipoSelect">
+            <option value="todas" ${extratoFiltroTipo==='todas'?'selected':''}>Todas</option>
+            <option value="entrada" ${extratoFiltroTipo==='entrada'?'selected':''}>Entradas</option>
+            <option value="saida" ${extratoFiltroTipo==='saida'?'selected':''}>Saídas</option>
+          </select>
+        </div>
+        <div class="field" style="margin:0;min-width:140px;">
+          <label style="font-size:10.5px;">Categoria</label>
+          <select id="extratoFiltroCategoriaSelect">
+            <option value="">Todas</option>
+            ${categoriasDisponiveis.map(cat=>`<option value="${escapeHTML(cat)}" ${extratoFiltroCategoria===cat?'selected':''}>${escapeHTML(cat)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" style="margin:0;min-width:130px;">
+          <label style="font-size:10.5px;">Conciliação</label>
+          <select id="extratoFiltroConciliacaoSelect">
+            <option value="todas" ${extratoFiltroConciliacao==='todas'?'selected':''}>Todas</option>
+            <option value="conciliado" ${extratoFiltroConciliacao==='conciliado'?'selected':''}>Conciliadas</option>
+            <option value="pendente" ${extratoFiltroConciliacao==='pendente'?'selected':''}>Pendentes</option>
+            <option value="divergencia" ${extratoFiltroConciliacao==='divergencia'?'selected':''}>Divergências</option>
+          </select>
+        </div>
+      </div>
+      <div class="filter-bar" style="align-items:flex-end;">
         <div style="position:relative;flex:1;min-width:180px;">
-          <input type="text" id="extratoFiltroBusca" value="${escapeHTML(extratoBuscaTermo)}" placeholder="🔍 Buscar por descrição, cliente/fornecedor..." style="width:100%;border:2px solid var(--blue-accent);border-radius:8px;padding:9px 32px 9px 12px;font-size:12.5px;background:var(--white);box-sizing:border-box;">
+          <input type="text" id="extratoFiltroBusca" value="${escapeHTML(extratoBuscaTermo)}" placeholder="🔍 Buscar movimentação (descrição, favorecido, categoria, observação, valor)..." style="width:100%;border:2px solid var(--blue-accent);border-radius:8px;padding:9px 32px 9px 12px;font-size:12.5px;background:var(--white);box-sizing:border-box;">
           <button type="button" id="btnLimparExtratoBusca" title="Limpar busca" style="display:${extratoBuscaTermo?'flex':'none'};position:absolute;right:6px;top:50%;transform:translateY(-50%);width:22px;height:22px;border:none;background:var(--bone);border-radius:50%;align-items:center;justify-content:center;cursor:pointer;color:var(--text-soft);font-size:13px;line-height:1;padding:0;">✕</button>
         </div>
         <div class="field" style="margin:0;max-width:120px;"><label style="font-size:10.5px;">De</label><input type="date" id="extratoFiltroDe" style="padding:6px 8px;font-size:12px;"></div>
@@ -18341,6 +18590,8 @@ function attachViewHandlers(){
   }
   const chartMeses = document.getElementById('chartMeses');
   if(chartMeses) desenharGraficoMeses('chartMeses');
+  const chartExtratoDiario = document.getElementById('chartExtratoDiario');
+  if(chartExtratoDiario) desenharGraficoBarrasDuasCores('chartExtratoDiario', extratoGraficoDadosAtual);
   const chartSimulacao = document.getElementById('chartSimulacao');
   if(chartSimulacao) desenharGraficoSimulacao('chartSimulacao', calcularProjecaoSimulacao(6, state.simulacaoAtual||[]));
 
@@ -20394,6 +20645,10 @@ function attachViewHandlers(){
       extratoContaId = btn.dataset.id;
       extratoBuscaTermo = '';
       extratoModoBusca = 'conta';
+      extratoTodasContas = false;
+      extratoFiltroTipo = 'todas';
+      extratoFiltroCategoria = '';
+      extratoFiltroConciliacao = 'todas';
       currentView = 'extrato';
       render();
     });
@@ -20470,6 +20725,12 @@ function attachViewHandlers(){
           document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
           return;
         }
+        if(action==='toggle-itens-detalhe'){
+          ev.stopPropagation();
+          const detalhe = document.getElementById('itensDetalhe_'+id);
+          if(detalhe) detalhe.style.display = detalhe.style.display==='none' ? 'block' : 'none';
+          return;
+        }
         const l = state.lancamentos.find(x=>x.id===id);
         if(!l) return;
         if(action==='quitar'){ abrirQuitarModal(id); }
@@ -20482,8 +20743,27 @@ function attachViewHandlers(){
         }
       });
     });
+    const chartExtratoDiario = document.getElementById('chartExtratoDiario');
+    if(chartExtratoDiario) desenharGraficoBarrasDuasCores('chartExtratoDiario', extratoGraficoDadosAtual);
     atualizarSelecaoUI();
   };
+  document.getElementById('extratoFiltroConta')?.addEventListener('change', (e)=>{
+    if(e.target.value==='todas'){ extratoTodasContas = true; }
+    else { extratoTodasContas = false; extratoContaId = e.target.value; }
+    render();
+  });
+  document.getElementById('extratoFiltroTipoSelect')?.addEventListener('change', (e)=>{
+    extratoFiltroTipo = e.target.value;
+    atualizarExtratoConteudo();
+  });
+  document.getElementById('extratoFiltroCategoriaSelect')?.addEventListener('change', (e)=>{
+    extratoFiltroCategoria = e.target.value;
+    atualizarExtratoConteudo();
+  });
+  document.getElementById('extratoFiltroConciliacaoSelect')?.addEventListener('change', (e)=>{
+    extratoFiltroConciliacao = e.target.value;
+    atualizarExtratoConteudo();
+  });
   document.getElementById('extratoFiltroBusca')?.addEventListener('input', (e)=>{
     extratoBuscaTermo = e.target.value;
     const btnLimpar = document.getElementById('btnLimparExtratoBusca');
