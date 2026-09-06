@@ -941,6 +941,9 @@ function aplicarMigracoes(s){
   if(!s.estoqueInsumos) s.estoqueInsumos = [];
   if(!s.previsoesGastoFuturo) s.previsoesGastoFuturo = [];
   if(!s.recebimentosDinheiroRep) s.recebimentosDinheiroRep = [];
+  if(!s.recebimentosPixRep) s.recebimentosPixRep = [];
+  if(!s.recebimentosCartaoRep) s.recebimentosCartaoRep = [];
+  if(!s.recebimentosBoletoRep) s.recebimentosBoletoRep = [];
   if(!s.custosProdutosVK) s.custosProdutosVK = [];
   if(!s.precosTabelaProdutos) s.precosTabelaProdutos = {};
   if(!s.emprestimos) s.emprestimos = [];
@@ -1383,7 +1386,7 @@ function moreItensDef(){
     { view:'orcamentos-processos', icone:'📋', nome:'Orçamentos e Compras', grupo:'Operacional', badge:()=>(state.orcamentosProcessos||[]).filter(o=>o.status==='pendente').length },
     { view:'comissoes', icone:'🤝', nome:'Comissões', grupo:'Operacional' },
     { view:'funil', icone:'🔻', nome:'Funil de Vendas', grupo:'Operacional' },
-    { view:'a-receber-representante', icone:'💵', nome:'A Receber do Representante', grupo:'Operacional', badge:()=>(state.recebimentosDinheiroRep||[]).filter(r=>!r.conferido).length },
+    { view:'a-receber-representante', icone:'💵', nome:'A Receber do Representante', grupo:'Operacional', badge:()=>todasFilasRecebimentoRep().filter(r=>!r.conferido).length },
     { view:'relatorios', icone:'📊', nome:'Relatórios', grupo:'Análise' },
     { view:'busca-global', icone:'🔍', nome:'Busca Global', grupo:'Análise' },
     { view:'central-decisao', icone:'🧭', nome:'Central de Decisão', grupo:'Análise' },
@@ -2000,6 +2003,13 @@ async function sincronizarPedidosVK(){
         return;
       }
 
+      // Só vira conta a receber quando o pedido já foi (ao menos parcialmente) entregue — pedido em
+      // produção/aguardando ainda não é receita esperada. Não mexe em quem já tinha virado
+      // lançamento/aprovação antes dessa regra existir — só passa a valer pra pedido novo daqui pra frente.
+      if(!emAprovacao && p.status!=='entregue' && p.status!=='parcial'){
+        return;
+      }
+
       if(emAprovacao){
         jaImportados++;
         if(emAprovacao.vendedorId!==vendedorId || emAprovacao.vendedorNome!==vendedorNome){
@@ -2059,7 +2069,7 @@ async function sincronizarPedidosVK(){
         return;
       }
       state.recebimentosDinheiroRep.push({
-        id: uid(), vkPedidoId: p.id, numero: p.numero,
+        id: uid(), vkPedidoId: p.id, numero: p.numero, forma: 'dinheiro',
         representanteId: p.representanteId || null, representanteNome: rep ? rep.nome : 'Sem representante',
         clienteNome: cliente ? cliente.nome : '—',
         valor: p.valorTotal,
@@ -2070,19 +2080,155 @@ async function sincronizarPedidosVK(){
       recNovos++;
     });
 
+    // Recebimentos em Pix marcados pelo representante no VK Industrial — mesmo tratamento do dinheiro,
+    // só que numa fila separada (pagamentoPix é confirmado pelo próprio banco, mas ainda passa por
+    // conferência aqui pra bater com o extrato antes de considerar quitado de verdade).
+    if(!state.recebimentosPixRep) state.recebimentosPixRep = [];
+    const idsPedidosComFlagPix = new Set(pedidos.filter(p=>p.pagamentoPix===true).map(p=>p.id));
+    let recNovosPix = 0;
+    state.recebimentosPixRep = state.recebimentosPixRep.filter(r=>{
+      if(idsPedidosComFlagPix.has(r.vkPedidoId)) return true;
+      if(r.conferido) return true;
+      return false;
+    });
+    pedidos.filter(p=>p.pagamentoPix===true).forEach(p=>{
+      const jaExiste = state.recebimentosPixRep.find(r=>r.vkPedidoId===p.id);
+      const cliente = clientes.find(c=>c.id===p.clienteId);
+      const rep = representantesVK.find(r=>r.id===p.representanteId);
+      if(jaExiste){
+        if(!jaExiste.conferido){
+          jaExiste.valor = p.valorTotal;
+          jaExiste.dataMarcado = p.pagamentoPixData || jaExiste.dataMarcado;
+        }
+        return;
+      }
+      state.recebimentosPixRep.push({
+        id: uid(), vkPedidoId: p.id, numero: p.numero, forma: 'pix',
+        representanteId: p.representanteId || null, representanteNome: rep ? rep.nome : 'Sem representante',
+        clienteNome: cliente ? cliente.nome : '—',
+        valor: p.valorTotal,
+        dataMarcado: p.pagamentoPixData || new Date().toISOString(),
+        conferido: false, conferidoEm: null,
+        criadoEm: new Date().toISOString()
+      });
+      recNovosPix++;
+    });
+
+    // Recebimentos no cartão marcados pelo representante no VK Industrial — mesma lógica do Pix
+    // (cartão também precisa conferência: a maquininha aprova na hora, mas o dinheiro só cai
+    // na conta alguns dias depois, então fica pendente até bater com o extrato/repasse).
+    if(!state.recebimentosCartaoRep) state.recebimentosCartaoRep = [];
+    const idsPedidosComFlagCartao = new Set(pedidos.filter(p=>p.pagamentoCartao===true).map(p=>p.id));
+    let recNovosCartao = 0;
+    state.recebimentosCartaoRep = state.recebimentosCartaoRep.filter(r=>{
+      if(idsPedidosComFlagCartao.has(r.vkPedidoId)) return true;
+      if(r.conferido) return true;
+      return false;
+    });
+    pedidos.filter(p=>p.pagamentoCartao===true).forEach(p=>{
+      const jaExiste = state.recebimentosCartaoRep.find(r=>r.vkPedidoId===p.id);
+      const cliente = clientes.find(c=>c.id===p.clienteId);
+      const rep = representantesVK.find(r=>r.id===p.representanteId);
+      if(jaExiste){
+        if(!jaExiste.conferido){
+          jaExiste.valor = p.valorTotal;
+          jaExiste.dataMarcado = p.pagamentoCartaoData || jaExiste.dataMarcado;
+        }
+        return;
+      }
+      state.recebimentosCartaoRep.push({
+        id: uid(), vkPedidoId: p.id, numero: p.numero, forma: 'cartao',
+        representanteId: p.representanteId || null, representanteNome: rep ? rep.nome : 'Sem representante',
+        clienteNome: cliente ? cliente.nome : '—',
+        valor: p.valorTotal,
+        dataMarcado: p.pagamentoCartaoData || new Date().toISOString(),
+        conferido: false, conferidoEm: null,
+        criadoEm: new Date().toISOString()
+      });
+      recNovosCartao++;
+    });
+
+    // Recebimentos via boleto marcados pelo representante no VK Industrial — mesma lógica.
+    if(!state.recebimentosBoletoRep) state.recebimentosBoletoRep = [];
+    const idsPedidosComFlagBoleto = new Set(pedidos.filter(p=>p.pagamentoBoleto===true).map(p=>p.id));
+    let recNovosBoleto = 0;
+    state.recebimentosBoletoRep = state.recebimentosBoletoRep.filter(r=>{
+      if(idsPedidosComFlagBoleto.has(r.vkPedidoId)) return true;
+      if(r.conferido) return true;
+      return false;
+    });
+    pedidos.filter(p=>p.pagamentoBoleto===true).forEach(p=>{
+      const jaExiste = state.recebimentosBoletoRep.find(r=>r.vkPedidoId===p.id);
+      const cliente = clientes.find(c=>c.id===p.clienteId);
+      const rep = representantesVK.find(r=>r.id===p.representanteId);
+      if(jaExiste){
+        if(!jaExiste.conferido){
+          jaExiste.valor = p.valorTotal;
+          jaExiste.dataMarcado = p.pagamentoBoletoData || jaExiste.dataMarcado;
+        }
+        return;
+      }
+      state.recebimentosBoletoRep.push({
+        id: uid(), vkPedidoId: p.id, numero: p.numero, forma: 'boleto',
+        representanteId: p.representanteId || null, representanteNome: rep ? rep.nome : 'Sem representante',
+        clienteNome: cliente ? cliente.nome : '—',
+        valor: p.valorTotal,
+        dataMarcado: p.pagamentoBoletoData || new Date().toISOString(),
+        conferido: false, conferidoEm: null,
+        criadoEm: new Date().toISOString()
+      });
+      recNovosBoleto++;
+    });
+
     cfg.ultimaSincronizacao = new Date().toISOString();
     state.vkDivergencias = divergentes;
+
+    // Devolve pro VK Industrial a situação financeira de cada pedido (pago/pendente/atrasado + dias de
+    // atraso), calculada aqui a partir do lançamento real — só escreve quando o valor muda, pra não gastar
+    // gravação à toa a cada sincronização. O representante passa a ver isso direto no perfil do pedido.
+    let atualizadosFinanceiro = 0;
+    const hojeISO = todayISO();
+    const escritasFinanceiro = [];
+    state.lancamentos.filter(l=>l.origem==='vk' && l.vkPedidoId && l.status!=='cancelado').forEach(l=>{
+      let statusFin = 'pago', diasAtraso = 0;
+      if(l.status==='pendente'){
+        if(l.dataVencimento && l.dataVencimento<hojeISO){
+          statusFin = 'atrasado';
+          diasAtraso = Math.floor((new Date(hojeISO) - new Date(l.dataVencimento)) / 86400000);
+        } else {
+          statusFin = 'pendente';
+        }
+      }
+      const chave = `${statusFin}:${diasAtraso}:${l.dataVencimento||''}`;
+      if(l.ultimoFinanceiroEnviadoVK === chave) return;
+      escritasFinanceiro.push({ vkPedidoId: l.vkPedidoId, chave, dados: {
+        financeiro: { status: statusFin, diasAtraso, vencimento: l.dataVencimento||null, atualizadoEm: new Date().toISOString() }
+      }});
+    });
+    if(escritasFinanceiro.length){
+      await Promise.all(escritasFinanceiro.map(item=>
+        db.collection('pedidos').doc(item.vkPedidoId).update(item.dados).then(()=>{
+          const l = state.lancamentos.find(x=>x.vkPedidoId===item.vkPedidoId && x.origem==='vk');
+          if(l){ l.ultimoFinanceiroEnviadoVK = item.chave; atualizadosFinanceiro++; }
+        }).catch(e=>console.error('Falha ao devolver status financeiro pro VK', item.vkPedidoId, e))
+      ));
+    }
+
     persist();
     render();
     console.log(`Sincronização VK: ${pedidos.length} pedidos no total, ${novos} novos aguardando aprovação, ${atualizados} atualizados, ${atualizadosAprovacao} atualizados na fila de aprovação, ${jaImportados} já importados antes, ${cancelados} cancelados (${marcadosCancelados} marcados agora como cancelado), ${divergentes.length} divergência(s) pra conferir.`);
     let msgFinal;
-    if(novos>0 || marcadosCancelados>0 || atualizados>0 || recNovos>0 || bonificacoes>0){
+    if(novos>0 || marcadosCancelados>0 || atualizados>0 || recNovos>0 || recNovosPix>0 || recNovosCartao>0 || recNovosBoleto>0 || bonificacoes>0){
       const partes = [];
       if(novos>0) partes.push(`${novos} pedido(s) aguardando aprovação`);
       if(atualizados>0) partes.push(`${atualizados} corrigido(s)`);
       if(marcadosCancelados>0) partes.push(`${marcadosCancelados} marcado(s) como cancelado(s)`);
       if(bonificacoes>0) partes.push(`${bonificacoes} de bonificação (ignorado)`);
       if(recNovos>0) partes.push(`${recNovos} recebimento(s) em dinheiro novo(s)`);
+      if(recNovosPix>0) partes.push(`${recNovosPix} recebimento(s) em Pix novo(s)`);
+      if(recNovosCartao>0) partes.push(`${recNovosCartao} recebimento(s) em cartão novo(s)`);
+      if(recNovosBoleto>0) partes.push(`${recNovosBoleto} recebimento(s) em boleto novo(s)`);
+      if(atualizadosFinanceiro>0) partes.push(`${atualizadosFinanceiro} status financeiro atualizado(s) no VK`);
       if(divergentes.length>0) partes.push(`${divergentes.length} precisam de conferência`);
       msgFinal = partes.join(' · ');
     } else if(divergentes.length>0){
@@ -16582,8 +16728,8 @@ function viewVK(){
         </div>
         <div class="vk-sync-row">
           <div>
-            <div class="vk-status-label">A receber do representante (dinheiro em mãos)</div>
-            <div class="vk-status-sub">Vem junto da sincronização de pedidos, acima · ${(state.recebimentosDinheiroRep||[]).filter(r=>!r.conferido).length} pedido(s) pendente(s) · total ${brl((state.recebimentosDinheiroRep||[]).filter(r=>!r.conferido).reduce((s,r)=>s+r.valor,0))}</div>
+            <div class="vk-status-label">A receber do representante (dinheiro, Pix, cartão ou boleto em mãos)</div>
+            <div class="vk-status-sub">Vem junto da sincronização de pedidos, acima · ${todasFilasRecebimentoRep().filter(r=>!r.conferido).length} pedido(s) pendente(s) · total ${brl(todasFilasRecebimentoRep().filter(r=>!r.conferido).reduce((s,r)=>s+r.valor,0))}</div>
           </div>
           <span style="font-size:11.5px;color:var(--text-soft);">📍 Tela em "Mais → A Receber do Representante"</span>
         </div>
@@ -16959,11 +17105,27 @@ function viewAvisosPendentesVK(){
   `;
 }
 
+function todasFilasRecebimentoRep(){
+  return [
+    ...(state.recebimentosDinheiroRep||[]),
+    ...(state.recebimentosPixRep||[]),
+    ...(state.recebimentosCartaoRep||[]),
+    ...(state.recebimentosBoletoRep||[])
+  ];
+}
+function filaRecebimentoPorForma(forma){
+  if(forma==='pix') return state.recebimentosPixRep||[];
+  if(forma==='cartao') return state.recebimentosCartaoRep||[];
+  if(forma==='boleto') return state.recebimentosBoletoRep||[];
+  return state.recebimentosDinheiroRep||[];
+}
+const ROTULO_FORMA_REP = { dinheiro:['Dinheiro','amber'], pix:['Pix','blue'], cartao:['Cartão','blue'], boleto:['Boleto','neutral'] };
+
 function viewAReceberRepresentante(){
-  const todosPendentes = (state.recebimentosDinheiroRep||[]).filter(r=>!r.conferido);
+  const todosPendentes = todasFilasRecebimentoRep().filter(r=>!r.conferido);
   const nomesReps = [...new Set(todosPendentes.map(r=>r.representanteNome||'Sem representante'))].sort();
   const pendentes = arRepFiltro ? todosPendentes.filter(r=>(r.representanteNome||'Sem representante')===arRepFiltro) : todosPendentes;
-  const conferidos = [...(state.recebimentosDinheiroRep||[])].filter(r=>r.conferido).sort((a,b)=>(b.conferidoEm||'').localeCompare(a.conferidoEm||''));
+  const conferidos = todasFilasRecebimentoRep().filter(r=>r.conferido).sort((a,b)=>(b.conferidoEm||'').localeCompare(a.conferidoEm||''));
   const porRep = {};
   pendentes.forEach(r=>{
     const chave = r.representanteNome || 'Sem representante';
@@ -16976,7 +17138,7 @@ function viewAReceberRepresentante(){
       <div>
         <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="vk">← Integração VK Industrial</span>
         <h1 style="margin-top:6px;">A Receber do Representante</h1>
-        <p>Pedidos que o representante marcou como recebidos em dinheiro no VK Industrial — dinheiro que ele ainda precisa trazer/repassar</p>
+        <p>Pedidos que o representante marcou como recebidos (dinheiro ou Pix) no VK Industrial — pendente de conferir e liberar aqui</p>
       </div>
       <button class="btn ghost" id="btnPdfARepresentante">📄 Gerar PDF</button>
     </div>
@@ -16997,27 +17159,27 @@ function viewAReceberRepresentante(){
       return `
       <div class="panel" style="margin-bottom:16px;">
         <div class="panel-head">
-          <h2>${escapeHTML(nomeRep)} <span style="font-weight:400;font-size:11.5px;color:var(--text-soft);">· precisa trazer ${brl(totalRep)}</span></h2>
+          <h2>${escapeHTML(nomeRep)} <span style="font-weight:400;font-size:11.5px;color:var(--text-soft);">· precisa liberar ${brl(totalRep)}</span></h2>
           <button class="btn sm" data-action="liberar-tudo-rep" data-rep="${escapeHTML(nomeRep)}">💰 Liberar valores</button>
         </div>
         <div class="panel-body" style="padding:0;">
           ${pedidosRep.sort((a,b)=>(b.dataMarcado||'').localeCompare(a.dataMarcado||'')).map(r=>`
             <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
-              <div class="desc-cell"><div>Pedido N° ${escapeHTML(String(r.numero||'—'))} — ${escapeHTML(r.clienteNome)}</div><div class="cat">Marcado em ${new Date(r.dataMarcado).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'})}</div></div>
+              <div class="desc-cell"><div>Pedido N° ${escapeHTML(String(r.numero||'—'))} — ${escapeHTML(r.clienteNome)} <span class="tag ${ROTULO_FORMA_REP[r.forma][1]}" style="font-size:10px;">${ROTULO_FORMA_REP[r.forma][0]}</span></div><div class="cat">Marcado em ${new Date(r.dataMarcado).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'})}</div></div>
               <span class="mono" style="font-weight:600;">${brl(r.valor)}</span>
-              <button class="btn ghost sm" data-action="liberar-um-rep" data-id="${r.id}">💰 Liberar</button>
+              <button class="btn ghost sm" data-action="liberar-um-rep" data-id="${r.id}" data-forma="${r.forma}">💰 Liberar</button>
             </div>
           `).join('')}
         </div>
       </div>`;
-    }).join('') : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum recebimento em dinheiro pendente${arRepFiltro?' desse representante':''} no momento.</div></div>`}
+    }).join('') : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum recebimento pendente${arRepFiltro?' desse representante':''} no momento.</div></div>`}
     ${conferidos.length ? `
     <details class="panel-details">
       <summary>Já liberados (${conferidos.length})</summary>
       <div class="panel-body">
         ${conferidos.slice(0,50).map(r=>`
           <div class="ledger-row compact" style="grid-template-columns:1fr auto;">
-            <div class="desc-cell"><div>${escapeHTML(r.representanteNome)} — Pedido N° ${escapeHTML(String(r.numero||'—'))}</div><div class="cat">Liberado em ${r.conferidoEm ? new Date(r.conferidoEm).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—'}</div></div>
+            <div class="desc-cell"><div>${escapeHTML(r.representanteNome)} — Pedido N° ${escapeHTML(String(r.numero||'—'))} <span class="tag ${ROTULO_FORMA_REP[r.forma][1]}" style="font-size:10px;">${ROTULO_FORMA_REP[r.forma][0]}</span></div><div class="cat">Liberado em ${r.conferidoEm ? new Date(r.conferidoEm).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—'}</div></div>
             <span class="mono" style="color:var(--text-soft);">${brl(r.valor)}</span>
           </div>
         `).join('')}
@@ -20537,7 +20699,8 @@ function attachViewHandlers(){
   });
   document.querySelectorAll('[data-action="liberar-um-rep"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
-      const r = (state.recebimentosDinheiroRep||[]).find(x=>x.id===btn.dataset.id);
+      const forma = btn.dataset.forma;
+      const r = filaRecebimentoPorForma(forma).find(x=>x.id===btn.dataset.id);
       if(!r) return;
       abrirLiberarValoresModal([r], `Pedido N° ${r.numero||'—'} — ${r.clienteNome}`);
     });
@@ -20545,7 +20708,7 @@ function attachViewHandlers(){
   document.querySelectorAll('[data-action="liberar-tudo-rep"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const nomeRep = btn.dataset.rep;
-      const pendentesRep = (state.recebimentosDinheiroRep||[]).filter(r=>!r.conferido && (r.representanteNome||'Sem representante')===nomeRep);
+      const pendentesRep = todasFilasRecebimentoRep().filter(r=>!r.conferido && (r.representanteNome||'Sem representante')===nomeRep);
       abrirLiberarValoresModal(pendentesRep, nomeRep);
     });
   });
@@ -24392,7 +24555,7 @@ function gerarDescontosBonificacoesPDF(pedidosComDesconto, pedidosBonificados, l
 
 function gerarAReceberRepresentantePDF(filtroRep){
   if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
-  let pendentes = (state.recebimentosDinheiroRep||[]).filter(r=>!r.conferido);
+  let pendentes = todasFilasRecebimentoRep().filter(r=>!r.conferido);
   if(filtroRep) pendentes = pendentes.filter(r=>(r.representanteNome||'Sem representante')===filtroRep);
   if(!pendentes.length){ showToast('Nada pendente pra gerar PDF'); return; }
   const porRep = {};
@@ -24484,7 +24647,7 @@ function abrirLiberarValoresModal(itens, tituloContexto){
         lanc.status = 'recebido';
         lanc.contaId = contaId;
         lanc.dataPagamento = data;
-        lanc.formaRecebimento = 'dinheiro';
+        lanc.formaRecebimento = r.forma || 'dinheiro';
         liberados++;
       } else {
         jaResolvidos++;
