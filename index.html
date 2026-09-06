@@ -6234,10 +6234,10 @@ function viewCartoes(){
 
     <div class="panel" style="margin-bottom:16px;">
       <div class="panel-head"><h2>Utilização dos cartões</h2></div>
-      <div class="panel-body">
-        <div style="font-size:22px;font-weight:800;margin-bottom:8px;">${usoPctGeral}% utilizado</div>
+      <div class="panel-body" style="padding:18px 20px;">
+        <div style="font-size:22px;font-weight:800;margin-bottom:10px;">${usoPctGeral}% utilizado</div>
         <div class="limit-bar" style="height:14px;"><div class="limit-bar-fill" style="width:${usoPctGeral}%;background:${usoPctGeral>=85?'var(--danger)':usoPctGeral>=60?'var(--warn)':'var(--success)'};"></div></div>
-        <div class="limit-info" style="margin-top:8px;"><span>Limite utilizado: ${brl(limiteTotal-limiteDisponivelTotal)}</span><span>Limite disponível: ${brl(limiteDisponivelTotal)}</span></div>
+        <div class="limit-info" style="margin-top:10px;"><span>Limite utilizado: ${brl(limiteTotal-limiteDisponivelTotal)}</span><span>Limite disponível: ${brl(limiteDisponivelTotal)}</span></div>
       </div>
     </div>
 
