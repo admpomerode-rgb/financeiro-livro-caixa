@@ -6896,6 +6896,7 @@ function viewRelatorios(){
     { id:'orcamento_anual', icone:'📆', nome:'Orçamento Anual', desc:'Orçado x realizado do ano inteiro, com acompanhamento por trimestre' , cat:'Planejamento, Metas e Decisões' },
     { id:'descontos_bonificacoes', icone:'🏷️', nome:'Descontos e Bonificações', desc:'Pedidos com desconto aplicado e pedidos de bonificação, vindos do VK Industrial' , cat:'Vendas, Clientes e Comercial' },
   ];
+  cards.forEach((c,i)=>{ c.numero = i+1; });
   const categoriasOrdem = ['Visão Geral e Diagnóstico','Caixa e Liquidez','Vendas, Clientes e Comercial','Custos, Despesas e Fornecedores','Produtos e Margem','Cartões e Dívidas','Investimentos e Patrimônio','Crescimento e Projeções','Planejamento, Metas e Decisões','Impostos e Calendários','Ferramentas, Simuladores e Automações'];
   const iconeCategoria = { 'Visão Geral e Diagnóstico':'🧭','Caixa e Liquidez':'💰','Vendas, Clientes e Comercial':'🤝','Custos, Despesas e Fornecedores':'📉','Produtos e Margem':'🍪','Cartões e Dívidas':'💳','Investimentos e Patrimônio':'📈','Crescimento e Projeções':'🚀','Planejamento, Metas e Decisões':'🎯','Impostos e Calendários':'🧾','Ferramentas, Simuladores e Automações':'🧮' };
   relatoriosCardsAtivos = cards;
@@ -6903,7 +6904,7 @@ function viewRelatorios(){
     <div class="topbar">
       <div><h1>Central de Relatórios</h1><p>${cards.length} relatórios, organizados por categoria</p></div>
     </div>
-    <div class="field"><input type="text" id="relatoriosBusca" placeholder="Buscar relatório..."></div>
+    <div class="field"><input type="text" id="relatoriosBusca" placeholder="Buscar por nome ou número..."></div>
     <div id="relatoriosGrid">${renderRelatoriosGridHTML(cards, categoriasOrdem, iconeCategoria, '')}</div>
   `;
 }
@@ -6913,7 +6914,7 @@ function relatorioItemHTML(c){
     <div class="more-item" ${c.viewDireta ? `data-goto="${c.viewDireta}"` : `data-action="abrir-relatorio" data-relatorio="${c.id}"`} style="flex-direction:row;text-align:left;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;">
       <span style="font-size:22px;flex-shrink:0;">${c.icone}</span>
       <div style="min-width:0;">
-        <div style="font-weight:600;font-size:13px;">${c.nome}</div>
+        <div style="font-weight:600;font-size:13px;"><span class="mono" style="color:var(--text-soft);font-weight:400;">#${c.numero}</span> ${c.nome}</div>
         <div style="font-size:11px;color:var(--text-soft);margin-top:2px;line-height:1.35;">${c.desc}</div>
       </div>
     </div>`;
@@ -6922,7 +6923,7 @@ function relatorioItemHTML(c){
 function renderRelatoriosGridHTML(cards, categoriasOrdem, iconeCategoria, filtro){
   filtro = (filtro||'').trim().toLowerCase();
   if(filtro){
-    const filtrados = cards.filter(c=>c.nome.toLowerCase().includes(filtro) || c.desc.toLowerCase().includes(filtro));
+    const filtrados = cards.filter(c=>c.nome.toLowerCase().includes(filtro) || c.desc.toLowerCase().includes(filtro) || String(c.numero)===filtro.replace('#',''));
     if(!filtrados.length) return `<div class="empty">Nada encontrado pra "${escapeHTML(filtro)}".</div>`;
     return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px;">${filtrados.map(relatorioItemHTML).join('')}</div>`;
   }
@@ -6930,7 +6931,7 @@ function renderRelatoriosGridHTML(cards, categoriasOrdem, iconeCategoria, filtro
     const itensCat = cards.filter(c=>c.cat===cat);
     if(!itensCat.length) return '';
     return `
-      <details class="panel" style="margin-bottom:10px;" open>
+      <details class="panel" style="margin-bottom:10px;">
         <summary style="padding:14px 18px;cursor:pointer;font-weight:600;font-size:14px;list-style:none;display:flex;align-items:center;gap:8px;">
           <span>${iconeCategoria[cat]||'📁'}</span> ${escapeHTML(cat)} <span style="color:var(--text-soft);font-weight:400;font-size:12px;">(${itensCat.length})</span>
         </summary>
