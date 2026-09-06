@@ -935,7 +935,6 @@ function aplicarMigracoes(s){
   if(!s.vkDivergencias) s.vkDivergencias = [];
   if(!s.vkDivergenciasEstoque) s.vkDivergenciasEstoque = [];
   if(!s.vkAprovacoes) s.vkAprovacoes = [];
-  if(!s.mesesFechados) s.mesesFechados = [];
   if(!s.socios) s.socios = [];
   if(!s.oportunidadesVenda) s.oportunidadesVenda = [];
   if(!s.estoqueInsumos) s.estoqueInsumos = [];
@@ -1987,7 +1986,7 @@ async function sincronizarPedidosVK(){
         if(existente.vendedorId!==vendedorId || existente.vendedorNome!==vendedorNome){
           existente.vendedorId = vendedorId; existente.vendedorNome = vendedorNome;
         }
-        const mudou = existente.valor!==p.valorTotal || existente.fornecedor!==nomeContraparte || existente.dataVencimento!==vencimentoNovo || existente.observacao!==observacaoNova || (existente.descontoConcedido||0)!==descontoConcedido;
+        const mudou = Math.abs(existente.valor-p.valorTotal)>0.005 || existente.fornecedor!==nomeContraparte || existente.dataVencimento!==vencimentoNovo || existente.observacao!==observacaoNova || (existente.descontoConcedido||0)!==descontoConcedido;
         if(mudou){
           if(existente.status==='pendente'){
             existente.valor = p.valorTotal;
@@ -2015,7 +2014,7 @@ async function sincronizarPedidosVK(){
         if(emAprovacao.vendedorId!==vendedorId || emAprovacao.vendedorNome!==vendedorNome){
           emAprovacao.vendedorId = vendedorId; emAprovacao.vendedorNome = vendedorNome;
         }
-        const mudouAprov = emAprovacao.valor!==p.valorTotal || emAprovacao.contraparte!==nomeContraparte || emAprovacao.dataVencimento!==vencimentoNovo || emAprovacao.observacao!==observacaoNova || (emAprovacao.descontoConcedido||0)!==descontoConcedido || !!emAprovacao.vendaDireta!==ehVendaDireta || !!emAprovacao.pagamentoJaRealizado!==pagamentoJaRealizado;
+        const mudouAprov = Math.abs(emAprovacao.valor-p.valorTotal)>0.005 || emAprovacao.contraparte!==nomeContraparte || emAprovacao.dataVencimento!==vencimentoNovo || emAprovacao.observacao!==observacaoNova || (emAprovacao.descontoConcedido||0)!==descontoConcedido || !!emAprovacao.vendaDireta!==ehVendaDireta || !!emAprovacao.pagamentoJaRealizado!==pagamentoJaRealizado;
         if(mudouAprov){
           emAprovacao.valor = p.valorTotal;
           emAprovacao.contraparte = nomeContraparte;
@@ -2599,7 +2598,7 @@ async function sincronizarEntradasEstoqueVK(){
 
       if(existente){
         jaImportados++;
-        const mudou = existente.valor!==montada.valor || existente.fornecedor!==montada.fornecedorNome || existente.dataVencimento!==(e.data||existente.dataVencimento) || existente.observacao!==montada.observacao || existente.semNF!==!!e.semNF;
+        const mudou = Math.abs(existente.valor-montada.valor)>0.005 || existente.fornecedor!==montada.fornecedorNome || existente.dataVencimento!==(e.data||existente.dataVencimento) || existente.observacao!==montada.observacao || existente.semNF!==!!e.semNF;
         if(mudou){
           if(existente.status==='pendente'){
             existente.valor = montada.valor;
@@ -2620,7 +2619,7 @@ async function sincronizarEntradasEstoqueVK(){
 
       if(emAprovacao){
         jaImportados++;
-        const mudouAprov = emAprovacao.valor!==montada.valor || emAprovacao.contraparte!==montada.fornecedorNome || emAprovacao.dataVencimento!==(e.data||emAprovacao.dataVencimento) || emAprovacao.observacao!==montada.observacao || emAprovacao.semNF!==!!e.semNF || (emAprovacao.numeroNF||null)!==(montada.numeroNF||null) || !emAprovacao.itens || emAprovacao.itens.length!==montada.itens.length;
+        const mudouAprov = Math.abs(emAprovacao.valor-montada.valor)>0.005 || emAprovacao.contraparte!==montada.fornecedorNome || emAprovacao.dataVencimento!==(e.data||emAprovacao.dataVencimento) || emAprovacao.observacao!==montada.observacao || emAprovacao.semNF!==!!e.semNF || (emAprovacao.numeroNF||null)!==(montada.numeroNF||null) || !emAprovacao.itens || emAprovacao.itens.length!==montada.itens.length;
         if(mudouAprov){
           emAprovacao.valor = montada.valor;
           emAprovacao.contraparte = montada.fornecedorNome;
@@ -3105,34 +3104,15 @@ function alertasInteligentesHTML(){
   `;
 }
 
-function streakMesesFechados(){
-  const fechados = new Set((state.mesesFechados||[]).map(m=>m.mes));
-  let streak = 0;
-  let d = new Date();
-  d.setDate(1); d.setMonth(d.getMonth()-1); // começa no mês anterior ao atual (mês atual normalmente ainda não fechou)
-  while(true){
-    const ref = d.toISOString().slice(0,7);
-    if(fechados.has(ref)){ streak++; d.setMonth(d.getMonth()-1); } else break;
-  }
-  return streak;
-}
-
 function mesNavHTML(){
   const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
   const nomeMes = new Date(anoM, mesM-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
   const ehMesAtual = mesGlobalRef === todayISO().slice(0,7);
-  const fechado = (state.mesesFechados||[]).find(m=>m.mes===mesGlobalRef);
-  const streak = streakMesesFechados();
   return `
     <div class="mes-nav">
       <button type="button" id="btnMesAnterior" title="Mês anterior">‹</button>
       <span class="mes-nav-label">${nomeMes}${ehMesAtual ? ' <span class="mes-nav-tag">atual</span>' : ''}</span>
       <button type="button" id="btnMesProximo" title="Próximo mês">›</button>
-      ${!ehMesAtual ? (fechado
-        ? `<span style="font-size:11.5px;color:var(--success);font-weight:600;margin-left:10px;" title="Fechado em ${new Date(fechado.fechadoEm).toLocaleDateString('pt-BR')}">✓ Mês fechado</span>`
-        : `<button type="button" id="btnFecharMes" style="font-size:11.5px;margin-left:10px;background:none;border:1px solid var(--line);border-radius:6px;padding:3px 8px;cursor:pointer;color:var(--text-soft);">Marcar mês como fechado</button>`
-      ) : ''}
-      ${streak>=2 ? `<span style="font-size:11.5px;color:var(--warn);font-weight:600;margin-left:10px;" title="Meses seguidos fechados/conferidos">🔥 ${streak} meses seguidos</span>` : ''}
     </div>
   `;
 }
@@ -5482,12 +5462,6 @@ function viewContas(){
   else if(ordenacaoContas==='menor') listaExibida.sort((a,b)=>saldoConta(a.id)-saldoConta(b.id));
   // 'manual' mantém a ordem já salva em state.contas (drag-to-reorder)
 
-  // Alerta de contas parecidas (mesmo banco + mesmo tipo) — pode ser cadastro duplicado por engano
-  const chaveDup = c => `${c.banco||''}|${c.tipo}`;
-  const contagem = {};
-  ativas.forEach(c=>{ const k=chaveDup(c); contagem[k]=(contagem[k]||0)+1; });
-  const possivelDuplicada = c => c.banco && contagem[chaveDup(c)]>1;
-
   const hoje = todayISO();
   const em90dias = new Date(); em90dias.setDate(em90dias.getDate()-90);
   const em90ISO = em90dias.toISOString().slice(0,10);
@@ -5541,7 +5515,6 @@ function viewContas(){
           ${abaixoDoMinimo ? `<div class="note" style="border-color:var(--warn);margin:8px 0 0;padding:6px 10px;font-size:11px;">⚠️ Abaixo do mínimo configurado (${brl(c.saldoMinimoAlerta)})</div>` : ''}
           ${parada && ultimaMov ? `<div class="note" style="margin:8px 0 0;padding:6px 10px;font-size:11px;">💤 Sem movimentação há mais de 90 dias</div>` : ''}
           ${!ultimaMov ? `<div class="note" style="margin:8px 0 0;padding:6px 10px;font-size:11px;">💤 Nenhuma movimentação registrada ainda</div>` : ''}
-          ${possivelDuplicada(c) ? `<div class="note" style="border-color:var(--warn);margin:8px 0 0;padding:6px 10px;font-size:11px;">⚠️ Outra conta com mesmo banco/tipo — confira se não é duplicada</div>` : ''}
           ` : ''}
           <div class="conta-card-footer" style="display:flex;gap:8px;margin-top:12px;">
             <button class="btn ghost sm" data-action="ver-extrato" data-id="${c.id}" style="flex:1;">Ver extrato</button>
@@ -6214,6 +6187,11 @@ function parseNotaCorretagem(linhas){
   // confundir com CEP, datas, ou o titulo de uma secao sem valor (ex: "Corretagem / Despesas").
   const valorNaLinhaContendo = (regexRotulo)=>{
     for(const linha of linhas){
+      // Linhas de tabela de taxa são curtas (ex: "ISS 0,00"). Texto de rodapé/disclaimer costuma
+      // ser bem mais longo e às vezes menciona "ISS" de passagem com um número qualquer por perto
+      // (ex: referência legal) — isso já causou falso positivo de R$4,00 de ISS em toda nota
+      // importada, mesmo quando a corretora não cobra ISS nenhum. Ignorar linhas longas resolve.
+      if(linha.length>80) continue;
       if(regexRotulo.test(linha)){
         const nums = linha.match(/[\d.]+,\d{2}/g);
         if(nums && nums.length) return numBR(nums[nums.length-1]) || 0;
@@ -6298,6 +6276,7 @@ function parseNotaCorretagem(linhas){
     emolumentos: valorNaLinhaContendo(/emolumentos/i),
     iss: valorNaLinhaContendo(/\biss\b/i),
     irrf: valorNaLinhaContendo(/i\.?r\.?r\.?f\.?/i),
+    transferenciaAtivos: valorNaLinhaContendo(/taxa de transfer[êe]ncia de ativos/i),
     outras: valorNaLinhaContendo(/\boutr[ao]s\b/i)
   };
   const liquido = valorNaLinhaContendo(/l[ií]quido\s+para/i);
@@ -6643,7 +6622,7 @@ function viewInvestimentos(){
           const ops = (n.operacoes||[]).filter(o=>o.ticker && numBR(String(o.quantidade))>0 && numBR(String(o.preco))>0);
           const totalOps = ops.reduce((s,o)=>s+numBR(String(o.quantidade))*numBR(String(o.preco)),0);
           const tx = n.taxas||{};
-          const totalTx = (tx.corretagem||0)+(tx.liquidacao||0)+(tx.emolumentos||0)+(tx.registro||0)+(tx.iss||0)+(tx.irrf||0)+(tx.outras||0);
+          const totalTx = (tx.corretagem||0)+(tx.liquidacao||0)+(tx.emolumentos||0)+(tx.registro||0)+(tx.iss||0)+(tx.irrf||0)+(tx.transferenciaAtivos||0)+(tx.outras||0);
           return `
           <div class="ledger-row compact" data-action="revisar-nota" data-id="${n.id}" style="cursor:pointer;grid-template-columns:12px 1fr auto auto;">
             <span class="dot pendente"></span>
@@ -6913,7 +6892,7 @@ function viewRelatorios(){
     { id:'pe_produto', icone:'⚖️', nome:'Ponto de Equilíbrio por Produto', desc:'Quantas unidades de cada produto são necessárias pra cobrir o custo fixo alocado' , cat:'Produtos e Margem' },
     { id:'metas_comerciais', icone:'🎯', nome:'Metas Comerciais', desc:'Progresso de cada vendedor em relação à meta mensal cadastrada' , cat:'Vendas, Clientes e Comercial' },
     { id:'fixo_variavel_tempo', icone:'📊', nome:'Custo Fixo vs Variável no Tempo', desc:'Como a proporção entre custo fixo e variável mudou nos últimos 12 meses' , cat:'Custos, Despesas e Fornecedores' },
-    { id:'onde_dinheiro', icone:'🧭', nome:'Onde Meu Dinheiro Está', desc:'Foto única do patrimônio — saldo em contas, investimentos, a receber e ativos' , cat:'Visão Geral e Diagnóstico' },
+    { id:'onde_dinheiro', icone:'🧭', nome:'Onde Está o Dinheiro da Empresa', desc:'Foto única do patrimônio — saldo em contas, investimentos, a receber e ativos' , cat:'Visão Geral e Diagnóstico' },
     { id:'health_score', icone:'❤️', nome:'Saúde da Empresa', desc:'Gráfico de tendência dos últimos 12 meses (0 a 100), mostrando o que está puxando o resultado pra cima ou pra baixo' , cat:'Visão Geral e Diagnóstico' },
     { id:'eficiencia_cobranca', icone:'⏱️', nome:'Eficiência de Cobrança', desc:'Prazo médio entre vencimento e recebimento de fato, e ranking de quem mais atrasa' , cat:'Vendas, Clientes e Comercial' },
     { id:'variacao_preco_insumos', icone:'📈', nome:'Variação de Preço de Insumos', desc:'Como o valor pago pelos insumos mudou ao longo das entradas de estoque já registradas' , cat:'Custos, Despesas e Fornecedores' },
@@ -7162,7 +7141,7 @@ function bindRelatoriosGridWiring(){
 const RELATORIOS_NOMES = {
   gerencial:'Dashboard Gerencial', executivo:'Dashboard Executivo', dre:'DRE', balanco:'Balanço Patrimonial', mei:'Declaração MEI', indicadores:'Indicadores Financeiros',
   produto:'Rentabilidade por Produto', investimentos:'Relatório de Investimentos', liquidez:'Índices de Liquidez', aging:'Aging — Vencidos por Faixa', dfc:'DFC — Fluxo de Caixa', cartoes:'Cartões de Crédito',
-  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio', yoy:'Comparativo Ano a Ano', sazonalidade:'Análise de Sazonalidade', calendario_vencimentos:'Calendário de Vencimentos', carga_tributaria:'Carga Tributária', simulador_preco:'Simulador de Preço', formas_pagamento:'Formas de Pagamento', rentabilidade_cliente:'Rentabilidade por Cliente', pe_produto:'Ponto de Equilíbrio por Produto', metas_comerciais:'Metas Comerciais', fixo_variavel_tempo:'Custo Fixo vs Variável no Tempo', onde_dinheiro:'Onde Meu Dinheiro Está', health_score:'Saúde da Empresa', eficiencia_cobranca:'Eficiência de Cobrança', variacao_preco_insumos:'Variação de Preço de Insumos', concentracao_clientes:'Concentração de Risco de Clientes', volume_margem_produto:'Ranking Volume x Margem por Produto', saude_cadastros:'Saúde dos Cadastros', projecao_comissoes:'Projeção de Comissões a Pagar', fcl:'Fluxo de Caixa Livre', payback:'Payback de Investimento', cvl_multiproduto:'Análise Custo-Volume-Lucro', dmpl:'Mutações do Patrimônio Líquido', provisoes:'Provisões (Férias/13º)', fluxo_centro_custo:'Fluxo de Caixa por Centro de Custo', conciliacao_saldo:'Conciliação de Saldo por Conta', taxa_conversao_funil:'Taxa de Conversão do Funil', novos_vs_recorrentes:'Novos Clientes vs. Recorrentes', taxa_recompra:'Taxa de Recompra', ltv_cac:'LTV e Relação LTV/CAC', abc_estoque:'Curva ABC de Estoque', estoque_abaixo_minimo:'Estoque Abaixo do Mínimo', obsolescencia_estoque:'Obsolescência de Estoque', comparativo_preco_fornecedores:'Comparativo de Preço entre Fornecedores', calendario_obrigacoes:'Calendário de Obrigações Acessórias', manutencao_consolidada:'Manutenção Preventiva Consolidada', vida_util_remanescente:'Vida Útil Remanescente', roi_ativo:'Custo e Valor Atual por Ativo', alocacao_ativos:'Alocação de Ativos', divergencias:'Divergências e Exceções', posicao_bancaria:'Posição Bancária Consolidada', taxas_bancarias:'Taxas e Tarifas Bancárias', amortizacao_emprestimos:'Amortização de Empréstimos', seguros_ativos:'Seguros de Ativos', preco_tabela_praticado:'Preço de Tabela vs. VK', limite_credito:'Limite de Crédito Disponível', multas_penalidades:'Multas e Penalidades', central_inteligencia:'Central de Inteligência Financeira', central_alertas:'Central de Alertas', calendario_financeiro:'Calendário Financeiro', central_cliente:'Central do Cliente', centro_comando:'Centro de Comando', fluxo_caixa_diario:'Fluxo de Caixa Diário', receitas_categoria:'Receitas por Categoria', margem_mensal:'Margem Mensal', ticket_medio_evolutivo:'Ticket Médio Evolutivo', vendas_canceladas:'Vendas Canceladas', comprometimento_futuro:'Comprometimento Futuro', parcelamentos:'Parcelamentos', receita_cliente_tempo:'Receita por Cliente ao Longo do Tempo', clientes_perdidos_risco:'Clientes Perdidos e em Risco', compras_periodo:'Compras por Período', evolucao_custos:'Evolução dos Custos', inflacao_interna:'Inflação Interna da Empresa', lucro_cliente:'Lucro por Cliente', capital_giro:'Capital de Giro', endividamento_vencimento:'Endividamento por Vencimento', super_relatorio_anual:'Super Relatório Anual', despesas_centro_custo:'Despesas por Centro de Custo', crescimento_clientes:'Crescimento de Clientes', dependencia_financeira:'Dependência Financeira', lucro_canal:'Lucro por Canal', obrigacoes_futuras:'Obrigações Futuras', evolucao_patrimonial:'Evolução Patrimonial', giro_caixa:'Giro de Caixa', dependencia_capital_terceiros:'Dependência de Capital de Terceiros', ncg:'Necessidade de Capital de Giro (NCG)', caixa_minimo:'Caixa Mínimo Recomendado', custo_financeiro_vendas:'Custo Financeiro das Vendas', vendas_parceladas:'Vendas Parceladas', prazo_recebimento_vendas:'Prazo de Recebimento das Vendas', desembolso_financeiro:'Desembolso Financeiro', compromissos_semana:'Compromissos por Semana', risco_caixa_data:'Risco de Caixa por Data', rentabilidade_forma_pagamento:'Rentabilidade por Forma de Pagamento', custo_real_parcelamento:'Custo Real do Parcelamento', evolucao_poder_compra:'Evolução do Poder de Compra', vazamentos_financeiros:'Vazamentos Financeiros', custo_por_mil_receita:'Custo por R$1.000 de Receita', dependencia_poucas_operacoes:'Dependência de Poucas Operações', decisoes_financeiras:'Decisões Financeiras', diagnostico_automatico:'Diagnóstico Automático do Mês', para_onde_foi_dinheiro:'Para Onde Foi o Dinheiro?', causas_variacao_lucro:'Causas da Variação do Lucro', eficiencia_dinheiro:'Eficiência do Dinheiro', movimentacoes_sem_classificacao:'Movimentações Sem Classificação', dados_inconsistentes:'Dados Inconsistentes', suspeitos_duplicidade:'Lançamentos Suspeitos de Duplicidade', custo_efetivo_conta:'Custo Efetivo por Conta Bancária', rentabilidade_saldo_parado:'Rentabilidade do Saldo Parado', dinheiro_transitorio:'Dinheiro Transitório', simulador_decisao_compra:'Simulador de Decisão de Compra', simulador_antecipacao:'Simulador de Antecipação', reversoes_financeiras:'Reversões Financeiras', oque_faria_se_fosse_dono:'O Que Eu Faria Se Fosse o Dono?', linha_tempo_financeira:'Linha do Tempo Financeira', efeito_domino_financeiro:'Efeito Dominó Financeiro', resultado_sem_maiores_clientes:'Resultado sem os 10 Maiores Clientes', resultado_sem_maior_despesa:'Resultado sem a Maior Despesa', lucro_de_verdade:'Lucro de Verdade', caixa_parece_livre:'Caixa que Parece Livre', tempo_recuperar_prejuizo:'Quanto Tempo pra Recuperar um Prejuízo?', custo_inadimplencia_lucro:'Custo da Inadimplência no Lucro', risco_aumento_fornecedor:'Risco de Aumento de Fornecedor', custo_oculto_fornecedores:'Custo Oculto dos Fornecedores', cliente_trabalho_pouco_resultado:'Cliente que Dá Trabalho e Pouco Resultado', cliente_mais_valioso:'Cliente Mais Valioso', despesas_crescem_mais_receita:'Despesas que Crescem Mais que a Receita', simulador_crescimento:'Simulador de Crescimento', limite_crescimento_seguro:'Limite de Crescimento Seguro', crescimento_da_prejuizo:'Crescimento que Dá Prejuízo', qual_crescimento_vale_pena:'Qual Crescimento Vale a Pena?', simulador_custos_subirem:'E se meus custos subirem?', indice_previsibilidade:'Índice de Previsibilidade Financeira', qualidade_receita:'Qualidade da Receita', mapa_margem_perdida:'Mapa de Margem Perdida', preco_minimo_seguro:'Preço Mínimo Seguro', distancia_prejuizo:'Distância até o Prejuízo', distancia_caixa_critico:'Distância até o Caixa Crítico', meta_caixa_reverso:'Meta de Caixa Reverso', retorno_sobre_crescimento:'Retorno sobre Crescimento', eficiencia_receita_incremental:'Eficiência da Receita Incremental', diluicao_margem:'Análise de Diluição de Margem', alavancagem_operacional:'Análise de Alavancagem Operacional', mapa_decisoes_pendentes:'Mapa de Decisões Pendentes', detector_tendencia:'Detector de Tendência', saude_por_area:'Saúde por Área', margem_ponto_seguranca:'Margem e Ponto de Segurança', indice_geral_gestao:'Índice Geral de Gestão Financeira', cofres_virtuais:'Cofres Virtuais', dna_financeiro:'DNA Financeiro da Empresa', automacoes_inteligentes:'Automações Inteligentes', central_negociacao:'Central de Negociação', laboratorio_financeiro:'Laboratório Financeiro', linha_tempo_manual:'Linha do Tempo da Empresa', foto_financeira:'Foto Financeira', maquina_tempo_passado:'Máquina do Tempo Financeira', saldo_medio_pico_vale:'Saldo Médio, Pico e Vale de Caixa', movimentacoes_alto_valor:'Movimentações de Alto Valor', pontualidade_pagamento:'Pontualidade e Prazo Real de Pagamento', pontualidade_recebimento:'Pontualidade e Prazo Real de Recebimento', contas_reprogramadas:'Contas Reprogramadas', contas_pagas_antecipadamente:'Contas Pagas Antecipadamente', custo_atraso_pagamentos:'Custo do Atraso em Pagamentos', rentabilidade_conta_bancaria:'Rentabilidade por Conta Bancária', cliente_caro_atender:'Cliente Mais Caro de Atender', clientes_mais_pontuais:'Clientes Mais Pontuais', clientes_mais_problematicos:'Clientes Mais Problemáticos', evolucao_individual_cliente:'Evolução Individual do Cliente', clientes_aumentaram_reduziram:'Clientes: Aumentaram vs Reduziram Compras', ranking_fornecedores:'Ranking de Fornecedores', evolucao_preco_fornecedor:'Evolução de Preço por Fornecedor', custo_real_cartoes:'Custo Real dos Cartões', cartao_utilizacao_limite:'Cartão: Utilização e Concentração do Limite', parcelas_futuras_cartao:'Parcelas Futuras por Cartão', velocidade_crescimento:'Velocidade de Crescimento', crescimento_sem_caixa:'Crescimento sem Caixa', oportunidades_perdidas:'Oportunidades Perdidas', indicadores_em_mudanca:'Indicadores em Mudança', onde_esta_drenando:'O Que Está Drenando Meu Dinheiro?', onde_esta_ganhando:'Onde Estou Ganhando Dinheiro?', onde_esta_perdendo:'Onde Estou Perdendo Dinheiro?'
+  abc_clientes:'Curva ABC de Clientes', abc_despesas:'Curva ABC de Despesas', abc_fornecedores:'Auditoria de Fornecedores', inadimplencia_cac:'Inadimplência e CAC', canal_venda:'Receita por Canal de Venda', breakeven:'Ponto de Equilíbrio', valuation:'Valuation Estimado', mensal:'Super Relatório Mensal', previsao:'Previsão de Saldo Futuro', stress:'Cenário de Stress', socios:'Split entre Sócios', orcamento_anual:'Orçamento Anual', descontos_bonificacoes:'Descontos e Bonificações', rolling_forecast:'Rolling Forecast 12 Meses', centro_lucro:'Centro de Lucro / Unidade de Negócio', yoy:'Comparativo Ano a Ano', sazonalidade:'Análise de Sazonalidade', calendario_vencimentos:'Calendário de Vencimentos', carga_tributaria:'Carga Tributária', simulador_preco:'Simulador de Preço', formas_pagamento:'Formas de Pagamento', rentabilidade_cliente:'Rentabilidade por Cliente', pe_produto:'Ponto de Equilíbrio por Produto', metas_comerciais:'Metas Comerciais', fixo_variavel_tempo:'Custo Fixo vs Variável no Tempo', onde_dinheiro:'Onde Está o Dinheiro da Empresa', health_score:'Saúde da Empresa', eficiencia_cobranca:'Eficiência de Cobrança', variacao_preco_insumos:'Variação de Preço de Insumos', concentracao_clientes:'Concentração de Risco de Clientes', volume_margem_produto:'Ranking Volume x Margem por Produto', saude_cadastros:'Saúde dos Cadastros', projecao_comissoes:'Projeção de Comissões a Pagar', fcl:'Fluxo de Caixa Livre', payback:'Payback de Investimento', cvl_multiproduto:'Análise Custo-Volume-Lucro', dmpl:'Mutações do Patrimônio Líquido', provisoes:'Provisões (Férias/13º)', fluxo_centro_custo:'Fluxo de Caixa por Centro de Custo', conciliacao_saldo:'Conciliação de Saldo por Conta', taxa_conversao_funil:'Taxa de Conversão do Funil', novos_vs_recorrentes:'Novos Clientes vs. Recorrentes', taxa_recompra:'Taxa de Recompra', ltv_cac:'LTV e Relação LTV/CAC', abc_estoque:'Curva ABC de Estoque', estoque_abaixo_minimo:'Estoque Abaixo do Mínimo', obsolescencia_estoque:'Obsolescência de Estoque', comparativo_preco_fornecedores:'Comparativo de Preço entre Fornecedores', calendario_obrigacoes:'Calendário de Obrigações Acessórias', manutencao_consolidada:'Manutenção Preventiva Consolidada', vida_util_remanescente:'Vida Útil Remanescente', roi_ativo:'Custo e Valor Atual por Ativo', alocacao_ativos:'Alocação de Ativos', divergencias:'Divergências e Exceções', posicao_bancaria:'Posição Bancária Consolidada', taxas_bancarias:'Taxas e Tarifas Bancárias', amortizacao_emprestimos:'Amortização de Empréstimos', seguros_ativos:'Seguros de Ativos', preco_tabela_praticado:'Preço de Tabela vs. VK', limite_credito:'Limite de Crédito Disponível', multas_penalidades:'Multas e Penalidades', central_inteligencia:'Central de Inteligência Financeira', central_alertas:'Central de Alertas', calendario_financeiro:'Calendário Financeiro', central_cliente:'Central do Cliente', centro_comando:'Centro de Comando', fluxo_caixa_diario:'Fluxo de Caixa Diário', receitas_categoria:'Receitas por Categoria', margem_mensal:'Margem Mensal', ticket_medio_evolutivo:'Ticket Médio Evolutivo', vendas_canceladas:'Vendas Canceladas', comprometimento_futuro:'Comprometimento Futuro', parcelamentos:'Parcelamentos', receita_cliente_tempo:'Receita por Cliente ao Longo do Tempo', clientes_perdidos_risco:'Clientes Perdidos e em Risco', compras_periodo:'Compras por Período', evolucao_custos:'Evolução dos Custos', inflacao_interna:'Inflação Interna da Empresa', lucro_cliente:'Lucro por Cliente', capital_giro:'Capital de Giro', endividamento_vencimento:'Endividamento por Vencimento', super_relatorio_anual:'Super Relatório Anual', despesas_centro_custo:'Despesas por Centro de Custo', crescimento_clientes:'Crescimento de Clientes', dependencia_financeira:'Dependência Financeira', lucro_canal:'Lucro por Canal', obrigacoes_futuras:'Obrigações Futuras', evolucao_patrimonial:'Evolução Patrimonial', giro_caixa:'Giro de Caixa', dependencia_capital_terceiros:'Dependência de Capital de Terceiros', ncg:'Necessidade de Capital de Giro (NCG)', caixa_minimo:'Caixa Mínimo Recomendado', custo_financeiro_vendas:'Custo Financeiro das Vendas', vendas_parceladas:'Vendas Parceladas', prazo_recebimento_vendas:'Prazo de Recebimento das Vendas', desembolso_financeiro:'Desembolso Financeiro', compromissos_semana:'Compromissos por Semana', risco_caixa_data:'Risco de Caixa por Data', rentabilidade_forma_pagamento:'Rentabilidade por Forma de Pagamento', custo_real_parcelamento:'Custo Real do Parcelamento', evolucao_poder_compra:'Evolução do Poder de Compra', vazamentos_financeiros:'Vazamentos Financeiros', custo_por_mil_receita:'Custo por R$1.000 de Receita', dependencia_poucas_operacoes:'Dependência de Poucas Operações', decisoes_financeiras:'Decisões Financeiras', diagnostico_automatico:'Diagnóstico Automático do Mês', para_onde_foi_dinheiro:'Para Onde Foi o Dinheiro?', causas_variacao_lucro:'Causas da Variação do Lucro', eficiencia_dinheiro:'Eficiência do Dinheiro', movimentacoes_sem_classificacao:'Movimentações Sem Classificação', dados_inconsistentes:'Dados Inconsistentes', suspeitos_duplicidade:'Lançamentos Suspeitos de Duplicidade', custo_efetivo_conta:'Custo Efetivo por Conta Bancária', rentabilidade_saldo_parado:'Rentabilidade do Saldo Parado', dinheiro_transitorio:'Dinheiro Transitório', simulador_decisao_compra:'Simulador de Decisão de Compra', simulador_antecipacao:'Simulador de Antecipação', reversoes_financeiras:'Reversões Financeiras', oque_faria_se_fosse_dono:'O Que Eu Faria Se Fosse o Dono?', linha_tempo_financeira:'Linha do Tempo Financeira', efeito_domino_financeiro:'Efeito Dominó Financeiro', resultado_sem_maiores_clientes:'Resultado sem os 10 Maiores Clientes', resultado_sem_maior_despesa:'Resultado sem a Maior Despesa', lucro_de_verdade:'Lucro de Verdade', caixa_parece_livre:'Caixa que Parece Livre', tempo_recuperar_prejuizo:'Quanto Tempo pra Recuperar um Prejuízo?', custo_inadimplencia_lucro:'Custo da Inadimplência no Lucro', risco_aumento_fornecedor:'Risco de Aumento de Fornecedor', custo_oculto_fornecedores:'Custo Oculto dos Fornecedores', cliente_trabalho_pouco_resultado:'Cliente que Dá Trabalho e Pouco Resultado', cliente_mais_valioso:'Cliente Mais Valioso', despesas_crescem_mais_receita:'Despesas que Crescem Mais que a Receita', simulador_crescimento:'Simulador de Crescimento', limite_crescimento_seguro:'Limite de Crescimento Seguro', crescimento_da_prejuizo:'Crescimento que Dá Prejuízo', qual_crescimento_vale_pena:'Qual Crescimento Vale a Pena?', simulador_custos_subirem:'E se meus custos subirem?', indice_previsibilidade:'Índice de Previsibilidade Financeira', qualidade_receita:'Qualidade da Receita', mapa_margem_perdida:'Mapa de Margem Perdida', preco_minimo_seguro:'Preço Mínimo Seguro', distancia_prejuizo:'Distância até o Prejuízo', distancia_caixa_critico:'Distância até o Caixa Crítico', meta_caixa_reverso:'Meta de Caixa Reverso', retorno_sobre_crescimento:'Retorno sobre Crescimento', eficiencia_receita_incremental:'Eficiência da Receita Incremental', diluicao_margem:'Análise de Diluição de Margem', alavancagem_operacional:'Análise de Alavancagem Operacional', mapa_decisoes_pendentes:'Mapa de Decisões Pendentes', detector_tendencia:'Detector de Tendência', saude_por_area:'Saúde por Área', margem_ponto_seguranca:'Margem e Ponto de Segurança', indice_geral_gestao:'Índice Geral de Gestão Financeira', cofres_virtuais:'Cofres Virtuais', dna_financeiro:'DNA Financeiro da Empresa', automacoes_inteligentes:'Automações Inteligentes', central_negociacao:'Central de Negociação', laboratorio_financeiro:'Laboratório Financeiro', linha_tempo_manual:'Linha do Tempo da Empresa', foto_financeira:'Foto Financeira', maquina_tempo_passado:'Máquina do Tempo Financeira', saldo_medio_pico_vale:'Saldo Médio, Pico e Vale de Caixa', movimentacoes_alto_valor:'Movimentações de Alto Valor', pontualidade_pagamento:'Pontualidade e Prazo Real de Pagamento', pontualidade_recebimento:'Pontualidade e Prazo Real de Recebimento', contas_reprogramadas:'Contas Reprogramadas', contas_pagas_antecipadamente:'Contas Pagas Antecipadamente', custo_atraso_pagamentos:'Custo do Atraso em Pagamentos', rentabilidade_conta_bancaria:'Rentabilidade por Conta Bancária', cliente_caro_atender:'Cliente Mais Caro de Atender', clientes_mais_pontuais:'Clientes Mais Pontuais', clientes_mais_problematicos:'Clientes Mais Problemáticos', evolucao_individual_cliente:'Evolução Individual do Cliente', clientes_aumentaram_reduziram:'Clientes: Aumentaram vs Reduziram Compras', ranking_fornecedores:'Ranking de Fornecedores', evolucao_preco_fornecedor:'Evolução de Preço por Fornecedor', custo_real_cartoes:'Custo Real dos Cartões', cartao_utilizacao_limite:'Cartão: Utilização e Concentração do Limite', parcelas_futuras_cartao:'Parcelas Futuras por Cartão', velocidade_crescimento:'Velocidade de Crescimento', crescimento_sem_caixa:'Crescimento sem Caixa', oportunidades_perdidas:'Oportunidades Perdidas', indicadores_em_mudanca:'Indicadores em Mudança', onde_esta_drenando:'O Que Está Drenando Meu Dinheiro?', onde_esta_ganhando:'Onde Estou Ganhando Dinheiro?', onde_esta_perdendo:'Onde Estou Perdendo Dinheiro?'
 };
 
 function viewRelatorioDetalhe(){
@@ -14852,7 +14831,6 @@ function viewAtivosPatrimoniais(){
     if(a.seguroVigenciaFim && a.seguroVigenciaFim>=hoje && a.seguroVigenciaFim<=em60ISO) avisos.push({ tipo:'seguro', texto:'Seguro vence em breve' });
     if((a.manutencoes||[]).some(m=>m.proximaData && !m.concluida && m.proximaData<=em60ISO)) avisos.push({ tipo:'manutencao', texto:'Manutenção pendente' });
     if(d.totalmenteDepreciado) avisos.push({ tipo:'depreciado', texto:'Totalmente depreciado' });
-    if(!a.fotos?.length || !a.notaFiscal) avisos.push({ tipo:'incompleto', texto:'Cadastro incompleto' });
     return avisos;
   };
 
@@ -14987,7 +14965,6 @@ function atualizarAtivosListaConteudo(){
     if(a.seguroVigenciaFim && a.seguroVigenciaFim>=hoje && a.seguroVigenciaFim<=em60ISO) avisos.push({ tipo:'seguro', texto:'Seguro vence em breve' });
     if((a.manutencoes||[]).some(m=>m.proximaData && !m.concluida && m.proximaData<=em60ISO)) avisos.push({ tipo:'manutencao', texto:'Manutenção pendente' });
     if(d.totalmenteDepreciado) avisos.push({ tipo:'depreciado', texto:'Totalmente depreciado' });
-    if(!a.fotos?.length || !a.notaFiscal) avisos.push({ tipo:'incompleto', texto:'Cadastro incompleto' });
     return avisos;
   };
   let lista = ativosPatrimoniaisAba==='baixados' ? [...ativosBaixados] : [...ativosVivos];
@@ -16493,7 +16470,7 @@ function openAprovarOrcamentoModal(o, respostaAtual){
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
     <h3>Aprovar Orçamento N° ${o.numero}</h3>
-    <div class="note" style="margin-top:0;">Preenche os dados da compra que vai ser feita — isso volta pro Livro de Processos.</div>
+    <div class="note" style="margin-top:0;">Preenche os dados da compra que vai ser feita.${o.processoOrcamentoId ? ' Isso volta pro Livro de Processos.' : ''}</div>
     <div class="field"><label>Loja / fornecedor</label><input type="text" id="apvLoja" placeholder="Ex: Casa do Forneiro Ltda"></div>
     <div class="field"><label>Descrição</label><input type="text" id="apvDescricao" placeholder="O que vai ser comprado"></div>
     <div class="field-row">
@@ -16531,6 +16508,8 @@ async function decidirOrcamentoProcesso(id, decisao, extras){
   if(decisao === 'aprovado' && extras.detalhesCompra) orc.detalhesCompra = extras.detalhesCompra;
   persist(); render();
   showToast(`Orçamento N° ${orc.numero} ${decisao === 'aprovado' ? 'aprovado' : 'recusado'}`);
+
+  if(!orc.processoOrcamentoId) return; // orçamento manual, sem vínculo externo — nada pra avisar
 
   const cfg = state.processosConfig;
   if(!cfg.firebaseConfig || !cfg.email || !cfg.senha){
@@ -16649,6 +16628,68 @@ function viewProcessosConfig(){
   `;
 }
 
+// Orçamento manual — mesma estrutura de um orçamento vindo do Livro de Processos, mas criado
+// direto aqui, sem passar pelo outro sistema. processoOrcamentoId fica null de propósito: é
+// isso que sinaliza pros handlers de aprovar/recusar/adiar que não há nada externo pra avisar.
+function openNovoOrcamentoManualModal(){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Novo orçamento manual</h3>
+    <div class="note" style="margin-top:0;">Não fica vinculado a nenhum processo do Livro de Processos — é só uma forma de registrar e decidir um orçamento direto por aqui.</div>
+    <div class="field"><label>Título / referência (opcional)</label><input type="text" id="orcManualTitulo" placeholder="Ex: Reforma da sala 2"></div>
+    <div class="field"><label>Descrição do pedido (opcional)</label><textarea id="orcManualDescricao" style="min-height:60px;"></textarea></div>
+    <div class="dash-section-label">Itens</div>
+    <div id="orcManualItensWrap"></div>
+    <button class="btn ghost sm" id="btnOrcManualAddItem" style="margin-top:8px;">+ Adicionar item</button>
+    <div class="field" style="margin-top:14px;"><label>Link do Drive/documento (opcional)</label><input type="text" id="orcManualDriveLink" placeholder="https://..."></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarOrcamentoManual">Criar</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+
+  const linhaItemHTML = ()=>`
+    <div class="field-row orc-manual-item-row" style="align-items:center;">
+      <div class="field" style="flex:2;"><input type="text" class="orc-manual-item-desc" placeholder="Descrição do item"></div>
+      <div class="field" style="flex:1;"><input type="text" inputmode="decimal" class="orc-manual-item-valor" placeholder="Valor (R$)"></div>
+      <button class="icon-btn" data-action="remover-item-orc-manual" title="Remover">✕</button>
+    </div>`;
+  const itensWrap = document.getElementById('orcManualItensWrap');
+  const addLinha = ()=>{ itensWrap.insertAdjacentHTML('beforeend', linhaItemHTML()); wireLinhas(); };
+  const wireLinhas = ()=>{
+    itensWrap.querySelectorAll('[data-action="remover-item-orc-manual"]').forEach(btn=>{
+      btn.onclick = ()=>{ if(itensWrap.children.length>1) btn.closest('.orc-manual-item-row').remove(); };
+    });
+  };
+  addLinha();
+  document.getElementById('btnOrcManualAddItem').addEventListener('click', addLinha);
+
+  document.getElementById('btnSalvarOrcamentoManual').addEventListener('click', ()=>{
+    const linhas = [...itensWrap.querySelectorAll('.orc-manual-item-row')];
+    const itens = linhas.map(l=>({
+      descricao: l.querySelector('.orc-manual-item-desc').value.trim(),
+      valor: numBR(l.querySelector('.orc-manual-item-valor').value) || 0,
+      quantidade: 1, valorUnitario: numBR(l.querySelector('.orc-manual-item-valor').value) || 0, link: null
+    })).filter(it=>it.descricao && it.valor>0);
+    if(!itens.length){ showToast('Adicione ao menos um item com descrição e valor'); return; }
+    const valorTotal = itens.reduce((s,it)=>s+it.valor,0);
+    if(!state.orcamentosProcessos) state.orcamentosProcessos = [];
+    if(!state.orcamentosProcessosContador) state.orcamentosProcessosContador = 0;
+    state.orcamentosProcessosContador++;
+    state.orcamentosProcessos.push({
+      id: uid(), processoOrcamentoId: null, processoId: null,
+      processoTitulo: document.getElementById('orcManualTitulo').value.trim() || 'Orçamento manual',
+      numero: state.orcamentosProcessosContador, itens, valorTotal,
+      descricaoPedido: document.getElementById('orcManualDescricao').value.trim() || null,
+      driveLink: document.getElementById('orcManualDriveLink').value.trim() || null,
+      status: 'pendente', criadoEm: new Date().toISOString(), decididoEm: null
+    });
+    persist(); closeModal(); render();
+    showToast('Orçamento manual criado');
+  });
+}
+
 function viewOrcamentosProcessos(){
   const todos = state.orcamentosProcessos||[];
   const pendentes = todos.filter(o=>o.status==='pendente').sort((a,b)=>a.numero-b.numero);
@@ -16661,6 +16702,7 @@ function viewOrcamentosProcessos(){
         <h1 style="margin-top:6px;">Orçamentos e Compras</h1>
         <p>Orçamentos pedidos dentro de um processo (e as compras que eles geram), aguardando aprovação, decisão ou revisão</p>
       </div>
+      <button class="btn" id="btnNovoOrcamentoManual">+ Novo orçamento manual</button>
     </div>
     <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:16px;">
       <div class="card saldo"><div class="label">Aguardando decisão</div><div class="value mono">${pendentes.length}</div></div>
@@ -16743,46 +16785,13 @@ function viewVK(){
     <div class="panel">
       <div class="panel-head"><h2>Sincronização</h2></div>
       <div class="panel-body" style="padding:0;">
+        <div style="padding:12px 18px 4px;font-size:11.5px;font-weight:700;color:var(--text-soft);text-transform:uppercase;letter-spacing:0.3px;">Vendas e recebimentos</div>
         <div class="vk-sync-row">
           <div>
             <div class="vk-status-label">Pedidos (contas a receber)</div>
             <div class="vk-status-sub">${cfg.ultimaSincronizacao ? 'Última: '+new Date(cfg.ultimaSincronizacao).toLocaleString('pt-BR') : 'Ainda não sincronizado'} · ${totalImportados} importado(s)</div>
           </div>
-          <button class="btn" id="btnSincronizarVK">⟳ Sincronizar pedidos</button>
-        </div>
-        <div class="vk-sync-row">
-          <div>
-            <div class="vk-status-label">Ativos e Ordens de Serviço</div>
-            <div class="vk-status-sub">${cfg.ultimaSincronizacaoAtivos ? 'Última: '+new Date(cfg.ultimaSincronizacaoAtivos).toLocaleString('pt-BR') : 'Ainda não sincronizado'} · ${state.ativosPatrimoniais.filter(a=>a.vkAtivoId).length} ativo(s), ${state.ativosPatrimoniais.reduce((s,a)=>s+(a.manutencoes||[]).filter(m=>m.vkOsId).length,0)} OS</div>
-          </div>
-          <button class="btn" id="btnSincronizarAtivosVK">⟳ Sincronizar ativos/OS</button>
-        </div>
-        <div class="vk-sync-row">
-          <div>
-            <div class="vk-status-label">Entradas de estoque (contas a pagar)</div>
-            <div class="vk-status-sub">${cfg.ultimaSincronizacaoEstoque ? 'Última: '+new Date(cfg.ultimaSincronizacaoEstoque).toLocaleString('pt-BR') : 'Ainda não sincronizado'} · ${state.lancamentos.filter(l=>l.origem==='vk-estoque').length} importada(s)</div>
-          </div>
-          <button class="btn" id="btnSincronizarEstoqueVK">⟳ Sincronizar estoque</button>
-        </div>
-        <div class="vk-sync-row">
-          <div>
-            <div class="vk-status-label">Estoque de insumos (valor pro Balanço Patrimonial)</div>
-            <div class="vk-status-sub">${cfg.ultimaSincronizacaoEstoqueInsumos ? 'Última: '+new Date(cfg.ultimaSincronizacaoEstoqueInsumos).toLocaleString('pt-BR') : 'Ainda não sincronizado'} · ${(state.estoqueInsumos||[]).length} insumo(s) · valor total ${brl(totalEstoqueInsumos())}</div>
-          </div>
-          <div style="display:flex;gap:8px;">
-            <button class="btn ghost" data-goto="estoque-insumos">Ver estoque</button>
-            <button class="btn" id="btnSincronizarEstoqueInsumosVK">⟳ Sincronizar</button>
-          </div>
-        </div>
-        <div class="vk-sync-row">
-          <div>
-            <div class="vk-status-label">Recomendações de compra (previsão de caixa)</div>
-            <div class="vk-status-sub">${cfg.ultimaSincronizacaoRecomendacoes ? 'Última: '+new Date(cfg.ultimaSincronizacaoRecomendacoes).toLocaleString('pt-BR') : 'Ainda não sincronizado'} · ${(state.previsoesGastoFuturo||[]).filter(p=>p.origem==='vk' && !p.convertida).length} previsão(ões) ativa(s) vinda(s) do VK</div>
-          </div>
-          <div style="display:flex;gap:8px;">
-            <button class="btn ghost" data-action="ver-previsao-relatorio">Ver previsões</button>
-            <button class="btn" id="btnSincronizarRecomendacoesVKTopo">⟳ Sincronizar</button>
-          </div>
+          <button class="btn" id="btnSincronizarVK">Sincronizar pedidos</button>
         </div>
         <div class="vk-sync-row">
           <div>
@@ -16798,12 +16807,50 @@ function viewVK(){
           </div>
           <button class="btn ghost" data-goto="avisos-pendentes-vk">Revisar</button>
         </div>
+
+        <div style="padding:16px 18px 4px;font-size:11.5px;font-weight:700;color:var(--text-soft);text-transform:uppercase;letter-spacing:0.3px;border-top:1px solid var(--line);">Compras e estoque</div>
+        <div class="vk-sync-row">
+          <div>
+            <div class="vk-status-label">Entradas de estoque (contas a pagar)</div>
+            <div class="vk-status-sub">${cfg.ultimaSincronizacaoEstoque ? 'Última: '+new Date(cfg.ultimaSincronizacaoEstoque).toLocaleString('pt-BR') : 'Ainda não sincronizado'} · ${state.lancamentos.filter(l=>l.origem==='vk-estoque').length} importada(s)</div>
+          </div>
+          <button class="btn" id="btnSincronizarEstoqueVK">Sincronizar estoque</button>
+        </div>
+        <div class="vk-sync-row">
+          <div>
+            <div class="vk-status-label">Estoque de insumos (valor pro Balanço Patrimonial)</div>
+            <div class="vk-status-sub">${cfg.ultimaSincronizacaoEstoqueInsumos ? 'Última: '+new Date(cfg.ultimaSincronizacaoEstoqueInsumos).toLocaleString('pt-BR') : 'Ainda não sincronizado'} · ${(state.estoqueInsumos||[]).length} insumo(s) · valor total ${brl(totalEstoqueInsumos())}</div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn ghost" data-goto="estoque-insumos">Ver estoque</button>
+            <button class="btn" id="btnSincronizarEstoqueInsumosVK">Sincronizar</button>
+          </div>
+        </div>
+        <div class="vk-sync-row">
+          <div>
+            <div class="vk-status-label">Recomendações de compra (previsão de caixa)</div>
+            <div class="vk-status-sub">${cfg.ultimaSincronizacaoRecomendacoes ? 'Última: '+new Date(cfg.ultimaSincronizacaoRecomendacoes).toLocaleString('pt-BR') : 'Ainda não sincronizado'} · ${(state.previsoesGastoFuturo||[]).filter(p=>p.origem==='vk' && !p.convertida).length} previsão(ões) ativa(s) vinda(s) do VK</div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn ghost" data-action="ver-previsao-relatorio">Ver previsões</button>
+            <button class="btn" id="btnSincronizarRecomendacoesVKTopo">Sincronizar</button>
+          </div>
+        </div>
         <div class="vk-sync-row">
           <div>
             <div class="vk-status-label">Custos e margem de produtos</div>
             <div class="vk-status-sub">${cfg.ultimaSincronizacaoCustosProdutos ? 'Última: '+new Date(cfg.ultimaSincronizacaoCustosProdutos).toLocaleString('pt-BR') : 'Ainda não sincronizado'} · ${(state.custosProdutosVK||[]).length} produto(s)</div>
           </div>
           <button class="btn ghost" data-goto="custos-margem-produtos">Ver custos</button>
+        </div>
+
+        <div style="padding:16px 18px 4px;font-size:11.5px;font-weight:700;color:var(--text-soft);text-transform:uppercase;letter-spacing:0.3px;border-top:1px solid var(--line);">Ativos e ordens de serviço</div>
+        <div class="vk-sync-row">
+          <div>
+            <div class="vk-status-label">Ativos e Ordens de Serviço</div>
+            <div class="vk-status-sub">${cfg.ultimaSincronizacaoAtivos ? 'Última: '+new Date(cfg.ultimaSincronizacaoAtivos).toLocaleString('pt-BR') : 'Ainda não sincronizado'} · ${state.ativosPatrimoniais.filter(a=>a.vkAtivoId).length} ativo(s), ${state.ativosPatrimoniais.reduce((s,a)=>s+(a.manutencoes||[]).filter(m=>m.vkOsId).length,0)} OS</div>
+          </div>
+          <button class="btn" id="btnSincronizarAtivosVK">Sincronizar ativos/OS</button>
         </div>
       </div>
     </div>
@@ -18084,7 +18131,7 @@ function attachViewHandlers(){
     mesGlobalRef = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
     render();
   });
-  document.getElementById('btnFecharMes')?.addEventListener('click', ()=>openChecklistFechamentoModal(mesGlobalRef));
+
 
   document.getElementById('btnToggleSaldos')?.addEventListener('click', (e)=>{
     saldosOcultos = !saldosOcultos;
@@ -20606,6 +20653,7 @@ function attachViewHandlers(){
     btnSincronizarProcessos.disabled = true;
     sincronizarProcessos();
   });
+  document.getElementById('btnNovoOrcamentoManual')?.addEventListener('click', ()=>openNovoOrcamentoManualModal());
   document.querySelectorAll('[data-action="aprovar-orcamento-processo"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const o = (state.orcamentosProcessos||[]).find(x=>x.id===btn.dataset.id);
@@ -20636,6 +20684,7 @@ function attachViewHandlers(){
       if(resposta.trim()) o.resposta = resposta.trim();
       persist(); render();
       showToast('Orçamento marcado como adiado — continua pendente');
+      if(!o.processoOrcamentoId) return; // orçamento manual, sem vínculo externo — nada pra avisar
       const cfg = state.processosConfig;
       if(!cfg.firebaseConfig || !cfg.email || !cfg.senha) return;
       try{
@@ -22213,72 +22262,6 @@ function openSalvarCenarioLabModal(){
   });
 }
 
-// Calcula o quanto o mês está "pronto" pra fechar — reaproveita os mesmos critérios já usados em
-// Movimentações Sem Classificação / Dados Inconsistentes / Suspeitos de Duplicidade, mas filtrando
-// só pro mês em questão. É só um checklist informativo — não bloqueia nada.
-function calcularProntidaoFechamento(mesRef){
-  const [anoM,mesM] = mesRef.split('-').map(Number);
-  const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
-  const lancamentosDoMes = state.lancamentos.filter(l=>l.origem!=='transferencia' && ((l.dataVencimento>=de && l.dataVencimento<=ate) || (l.dataPagamento>=de && l.dataPagamento<=ate)));
-  const itens = [];
-
-  const semCategoria = lancamentosDoMes.filter(l=>!l.categoria);
-  itens.push({ nome:'Lançamentos sem categoria', ok:semCategoria.length===0, detalhe: semCategoria.length>0 ? `${semCategoria.length} lançamento(s)` : null });
-
-  const hoje = todayISO();
-  const pendentesVencidas = lancamentosDoMes.filter(l=>l.status==='pendente' && l.dataVencimento<=(ate<hoje?ate:hoje));
-  itens.push({ nome:'Contas pendentes já vencidas dentro do mês', ok:pendentesVencidas.length===0, detalhe: pendentesVencidas.length>0 ? `${pendentesVencidas.length} conta(s)` : null });
-
-  const valoresInvalidos = lancamentosDoMes.filter(l=>l.valor<=0 || ((l.status==='pago'||l.status==='recebido') && !l.dataPagamento));
-  itens.push({ nome:'Sem valores inconsistentes', ok:valoresInvalidos.length===0, detalhe: valoresInvalidos.length>0 ? `${valoresInvalidos.length} lançamento(s)` : null });
-
-  const grupos = []; const usados = new Set();
-  for(let i=0;i<lancamentosDoMes.length;i++){
-    if(usados.has(lancamentosDoMes[i].id)) continue;
-    const l1 = lancamentosDoMes[i]; const parecidos=[l1];
-    for(let j=i+1;j<lancamentosDoMes.length;j++){
-      const l2 = lancamentosDoMes[j]; if(usados.has(l2.id)) continue;
-      if(l1.tipo===l2.tipo && Math.abs(l1.valor-l2.valor)<0.01 && l1.dataVencimento===l2.dataVencimento && (l1.fornecedor||'')===(l2.fornecedor||'')){ parecidos.push(l2); usados.add(l2.id); }
-    }
-    if(parecidos.length>1){ grupos.push(parecidos); usados.add(l1.id); }
-  }
-  itens.push({ nome:'Sem possíveis duplicidades', ok:grupos.length===0, detalhe: grupos.length>0 ? `${grupos.length} grupo(s) parecido(s)` : null });
-
-  const recorrenciasAtivas = (state.recorrencias||[]).filter(r=>r.ativo);
-  const recorrenciasNaoGeradas = recorrenciasAtivas.filter(r=>!state.lancamentos.some(l=>l.recorrenciaId===r.id && l.dataVencimento>=de && l.dataVencimento<=ate));
-  itens.push({ nome:'Lançamentos recorrentes já gerados', ok:recorrenciasNaoGeradas.length===0, detalhe: recorrenciasNaoGeradas.length>0 ? `${recorrenciasNaoGeradas.length} recorrência(s) sem lançamento` : null });
-
-  const pctPronto = Math.round(itens.filter(i=>i.ok).length/itens.length*100);
-  return { itens, pctPronto };
-}
-
-function openChecklistFechamentoModal(mesRef){
-  const { itens, pctPronto } = calcularProntidaoFechamento(mesRef);
-  const modal = document.getElementById('modalContent');
-  modal.innerHTML = `
-    <h3>Fechar ${competenciaLabel(mesRef)}</h3>
-    <div style="text-align:center;margin:14px 0;">
-      <div style="font-size:32px;font-weight:800;color:${pctPronto===100?'var(--success)':pctPronto>=70?'var(--warn)':'var(--danger)'};">${pctPronto}%</div>
-      <div style="font-size:12px;color:var(--text-soft);">pronto para fechamento</div>
-    </div>
-    <div style="margin-bottom:16px;">
-      ${itens.map(i=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px;"><span>${i.ok?'✅':'⚠️'} ${i.nome}</span>${i.detalhe?`<span style="color:var(--text-soft);font-size:11px;">${i.detalhe}</span>`:''}</div>`).join('')}
-    </div>
-    <div class="note" style="margin-top:0;">Fechar o mês é só um lembrete visual — não bloqueia nem impede novos lançamentos ou edições nesse mês depois.</div>
-    <div class="modal-actions">
-      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
-      <button class="btn" id="btnConfirmarFecharMes">✅ Fechar mesmo assim</button>
-    </div>`;
-  document.getElementById('modalOverlay').classList.add('open');
-  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  document.getElementById('btnConfirmarFecharMes').addEventListener('click', ()=>{
-    if(!state.mesesFechados) state.mesesFechados = [];
-    state.mesesFechados.push({ mes: mesRef, fechadoEm: new Date().toISOString(), pctProntoNoFechamento: pctPronto });
-    persist(); closeModal(); render();
-    showToast('Mês marcado como fechado');
-  });
-}
-
 function openNovoMarcoModal(){
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
@@ -23321,7 +23304,10 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
         <div class="field"><label>ISS</label><input type="text" inputmode="decimal" id="notaTxIss"></div>
         <div class="field"><label>IRRF</label><input type="text" inputmode="decimal" id="notaTxIrrf"></div>
       </div>
-      <div class="field"><label>Outras taxas</label><input type="text" inputmode="decimal" id="notaTxOutras"></div>
+      <div class="field-row">
+        <div class="field"><label>Taxa de transferência de ativos</label><input type="text" inputmode="decimal" id="notaTxTransferenciaAtivos"></div>
+        <div class="field"><label>Outras taxas</label><input type="text" inputmode="decimal" id="notaTxOutras"></div>
+      </div>
       <div class="note" style="margin-top:0;">Ao publicar, os custos entram automaticamente nas categorias <strong>Taxa de Liquidação</strong>, <strong>Emolumentos</strong> e <strong>Tarifas Diversas B3</strong> (subcategorias de Investimentos).</div>
 
       <div class="field"><label>Valor líquido da nota (R$) — o que efetivamente sai/entra da conta</label><input type="text" inputmode="decimal" id="notaLiquido"></div>
@@ -23530,6 +23516,7 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
       registro: numBR(document.getElementById('notaTxRegistro').value) || 0,
       iss: numBR(document.getElementById('notaTxIss').value) || 0,
       irrf: numBR(document.getElementById('notaTxIrrf').value) || 0,
+      transferenciaAtivos: numBR(document.getElementById('notaTxTransferenciaAtivos').value) || 0,
       outras: numBR(document.getElementById('notaTxOutras').value) || 0
     },
     liquido: numBR(document.getElementById('notaLiquido').value) || 0,
@@ -23550,6 +23537,7 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     document.getElementById('notaTxRegistro').value = t.registro || 0;
     document.getElementById('notaTxIss').value = t.iss || 0;
     document.getElementById('notaTxIrrf').value = t.irrf || 0;
+    document.getElementById('notaTxTransferenciaAtivos').value = t.transferenciaAtivos || 0;
     document.getElementById('notaTxOutras').value = t.outras || 0;
     document.getElementById('notaLiquido').value = notaEmRevisao.liquido || 0;
     document.getElementById('notaGanhoPerda').value = notaEmRevisao.ganhoPerdaCapital || 0;
@@ -23604,6 +23592,7 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
         document.getElementById('notaTxRegistro').value = dados.taxas.registro || 0;
         document.getElementById('notaTxIss').value = dados.taxas.iss || 0;
         document.getElementById('notaTxIrrf').value = dados.taxas.irrf || 0;
+        document.getElementById('notaTxTransferenciaAtivos').value = dados.taxas.transferenciaAtivos || 0;
         document.getElementById('notaTxOutras').value = dados.taxas.outras || 0;
         document.getElementById('notaLiquido').value = dados.liquido || 0;
       }catch(e){
@@ -23630,7 +23619,7 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
       document.getElementById('notaNumero').value = '';
       document.getElementById('notaData').value = '';
       document.getElementById('notaDataDebito').value = '';
-      ['notaTxCorretagem','notaTxLiquidacao','notaTxEmolumentos','notaTxRegistro','notaTxIss','notaTxIrrf','notaTxOutras','notaLiquido'].forEach(idc=>{ const el = document.getElementById(idc); if(el) el.value = 0; });
+      ['notaTxCorretagem','notaTxLiquidacao','notaTxEmolumentos','notaTxRegistro','notaTxIss','notaTxIrrf','notaTxTransferenciaAtivos','notaTxOutras','notaLiquido'].forEach(idc=>{ const el = document.getElementById(idc); if(el) el.value = 0; });
       pintarOperacoes();
     }
     persist();
@@ -23676,9 +23665,10 @@ function publicarNotaCorretagem(nota){
   const taxaEmolumentos = t.emolumentos || 0;
   const taxaRegistro = t.registro || 0;
   const taxaIss = t.iss || 0;
+  const taxaTransferenciaAtivos = t.transferenciaAtivos || 0;
   const taxaOutras = t.outras || 0;
   const irrf = t.irrf || 0;
-  const taxasTotal = taxaCorretagem + taxaLiquidacao + taxaEmolumentos + taxaRegistro + taxaIss + taxaOutras;
+  const taxasTotal = taxaCorretagem + taxaLiquidacao + taxaEmolumentos + taxaRegistro + taxaIss + taxaTransferenciaAtivos + taxaOutras;
   const contaBancariaId = nota.contaBancariaId || (state.contas[0] && state.contas[0].id);
 
   const jaDebitou = dataDebito <= todayISO();
@@ -23793,13 +23783,14 @@ function publicarNotaCorretagem(nota){
         descricao: `Emolumentos — nota de corretagem${corretora ? ' — '+corretora : ''}${sufixoNota}`,
         valor: Math.round(taxaEmolumentos*100)/100, observacao: `${numeroNota?`Nota N° ${numeroNota} · `:''}Emolumentos: ${brl(taxaEmolumentos)}` });
     }
-    const tarifasDiversas = Math.round((taxaCorretagem + taxaRegistro + taxaIss + taxaOutras + irrf)*100)/100;
+    const tarifasDiversas = Math.round((taxaCorretagem + taxaRegistro + taxaIss + taxaTransferenciaAtivos + taxaOutras + irrf)*100)/100;
     if(tarifasDiversas>0){
       const partes = [];
       if(numeroNota) partes.push(`Nota N° ${numeroNota}`);
       if(taxaCorretagem) partes.push(`Corretagem: ${brl(taxaCorretagem)}`);
       if(taxaRegistro) partes.push(`Registro: ${brl(taxaRegistro)}`);
       if(taxaIss) partes.push(`ISS: ${brl(taxaIss)}`);
+      if(taxaTransferenciaAtivos) partes.push(`Transferência de ativos: ${brl(taxaTransferenciaAtivos)}`);
       if(taxaOutras) partes.push(`Outras: ${brl(taxaOutras)}`);
       if(irrf) partes.push(`IRRF: ${brl(irrf)}`);
       state.lancamentos.push({ ...baseCusto, id: uid(), categoria:'Investimentos / Tarifas Diversas B3',
