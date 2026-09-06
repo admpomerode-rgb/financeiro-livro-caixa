@@ -1081,6 +1081,7 @@ function executarDesfazer(){
 /* ---------------- Navegação ---------------- */
 let currentView = 'dashboard';
 let relatoriosCardsAtivos = [];
+let cartoesFiltroAtivo = '';
 let extratoContaId = null;
 let extratoBuscaTermo = '';
 let extratoModoBusca = 'conta';
@@ -1703,6 +1704,36 @@ function competenciasDoCartao(cartaoId){
   const set = new Set(state.comprasCartao.filter(p=>p.cartaoId===cartaoId).map(p=>p.competencia));
   set.add(competenciaAtual(state.cartoes.find(c=>c.id===cartaoId)));
   return [...set].sort();
+}
+// Mesma lógica de dataVencimentoFatura, mas pra achar quando a fatura de uma competência FECHOU —
+// é sempre o dia de fechamento do cartão, no mês anterior ao mês de referência da competência.
+function dataFechamentoFatura(cartao, competencia){
+  const compAnterior = addMonthsComp(competencia, -1);
+  const [y,m] = compAnterior.split('-').map(Number);
+  const dia = String(Math.min(cartao.diaFechamento, 28)).padStart(2,'0');
+  return `${y}-${String(m).padStart(2,'0')}-${dia}`;
+}
+// Parcelas futuras de TODOS os cartões — só entram compras cuja competência ainda não chegou (ainda
+// não é a fatura atual nem uma já fechada), agrupadas pela compra original (grupoId).
+function parcelasFuturasTodosCartoes(){
+  const porGrupo = {};
+  state.comprasCartao.forEach(p=>{
+    const cartao = state.cartoes.find(c=>c.id===p.cartaoId);
+    if(!cartao) return;
+    if(p.competencia<=competenciaAtual(cartao)) return;
+    const chave = p.grupoId || p.id;
+    if(!porGrupo[chave]) porGrupo[chave] = { descricao:p.descricao, cartaoNome:cartao.nome, valorParcela:p.valor, parcelasRestantes:0, totalFuturo:0 };
+    porGrupo[chave].parcelasRestantes++;
+    porGrupo[chave].totalFuturo += p.valor;
+  });
+  return Object.values(porGrupo).sort((a,b)=>b.totalFuturo-a.totalFuturo);
+}
+// Projeção das próximas N faturas (calendário, não por cartão) — soma o que JÁ está confirmado
+// (parcelas com competência futura já gravadas em cada compra) em todos os cartões.
+function proximasFaturasProjecao(n){
+  const hoje = new Date();
+  const meses = Array.from({length:n},(_,i)=>{ const d = new Date(hoje.getFullYear(), hoje.getMonth()+1+i, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  return meses.map(comp=>({ comp, total: state.cartoes.reduce((s,c)=>s+totalCompetencia(c.id,comp),0) }));
 }
 
 /* --- Investimentos --- */
@@ -5840,10 +5871,143 @@ function viewExtrato(contaId){
 }
 
 function viewCartoes(){
+  const cartoes = state.cartoes;
+  const hoje = todayISO();
+
+  // ---- Visão Geral: agregados reais de todos os cartões (nada fictício) ----
+  let faturaAtualTotal = 0, limiteTotal = 0, limiteDisponivelTotal = 0, totalAPagarTotal = 0;
+  let proximoVencimento = null, proximoVencimentoCartao = null;
+  const dadosPorCartao = cartoes.map(c=>{
+    const comp = competenciaAtual(c);
+    const faturaAtual = totalCompetencia(c.id, comp);
+    const disponivel = limiteDisponivel(c);
+    const usoPct = c.limite>0 ? Math.min(100, Math.round(((c.limite-disponivel)/c.limite)*100)) : 0;
+    const vencimento = dataVencimentoFatura(c, comp);
+    const fechamento = dataFechamentoFatura(c, comp);
+    const aPagarCartao = dividaCartaoAberta(c.id);
+    faturaAtualTotal += faturaAtual;
+    limiteTotal += c.limite||0;
+    limiteDisponivelTotal += disponivel;
+    totalAPagarTotal += aPagarCartao;
+    if(aPagarCartao>0.004 && (!proximoVencimento || vencimento<proximoVencimento)){
+      proximoVencimento = vencimento; proximoVencimentoCartao = c.nome;
+    }
+    return { cartao:c, comp, faturaAtual, disponivel, usoPct, vencimento, fechamento, aPagarCartao };
+  });
+  const usoPctGeral = limiteTotal>0 ? Math.round(((limiteTotal-limiteDisponivelTotal)/limiteTotal)*100) : 0;
+
+  // ---- Filtro (seção 15) — só afeta a lista "Meus Cartões" e o comparativo, pra manter os
+  // indicadores gerais sempre representando a empresa toda ----
+  const dadosFiltrados = cartoesFiltroAtivo ? dadosPorCartao.filter(d=>d.cartao.id===cartoesFiltroAtivo) : dadosPorCartao;
+
+  // ---- Lançamentos pendentes de classificação (seção 7) — faturas importadas em PDF ainda não
+  // revisadas/publicadas. Não existe outro estado de "sem categoria" possível pro sistema, já que
+  // toda compra lançada manualmente exige categoria no formulário. ----
+  const itensPendentesClassificacao = (state.faturasPendentes||[]).reduce((acc,f)=>{
+    (f.itens||[]).forEach(it=>{ acc.qtd++; acc.valor += numBR(String(it.valor))||0; });
+    return acc;
+  }, { qtd:0, valor:0 });
+
+  // ---- Parcelamentos futuros (seção 8) e Compromissos futuros dos cartões (seção 12) — mesma base
+  // de dado, já que "quanto vou ter que desembolsar com cartão no futuro" É o comprometimento futuro ----
+  const parcelasFuturas = parcelasFuturasTodosCartoes();
+  const comprometimentoFuturo = parcelasFuturas.reduce((s,p)=>s+p.totalFuturo,0);
+
+  // ---- Próximas faturas — 6 meses (seção 9) ----
+  const proximasFaturas = proximasFaturasProjecao(6);
+  const maxProximaFatura = Math.max(1, ...proximasFaturas.map(p=>p.total));
+
+  // ---- Crescimento da fatura (usado nos Alertas e na Saúde) — compara a competência atual de cada
+  // cartão com a competência anterior, só quando ambas tiverem movimento ----
+  let cartaoComCrescimentoRelevante = null, maiorCrescimentoPct = 0;
+  dadosPorCartao.forEach(d=>{
+    const compAnterior = addMonthsComp(d.comp, -1);
+    const totalAnterior = totalCompetencia(d.cartao.id, compAnterior);
+    if(totalAnterior>0.004){
+      const varPct = (d.faturaAtual-totalAnterior)/totalAnterior*100;
+      if(varPct>=20 && varPct>maiorCrescimentoPct){ maiorCrescimentoPct = varPct; cartaoComCrescimentoRelevante = d.cartao.nome; }
+    }
+  });
+
+  // ---- Alertas (seção 11) — só entra na lista quando a condição realmente bate, nada artificial ----
+  const alertas = [];
+  dadosPorCartao.forEach(d=>{
+    if(d.usoPct>=85) alertas.push({ icone:'🔴', texto:`"${d.cartao.nome}" está com ${d.usoPct}% do limite utilizado.` });
+    if(d.aPagarCartao>0.004){
+      const diasParaVencer = Math.round((new Date(d.vencimento)-new Date(hoje))/86400000);
+      if(diasParaVencer<0) alertas.push({ icone:'🔴', texto:`Fatura de "${d.cartao.nome}" venceu há ${Math.abs(diasParaVencer)} dia(s) e ainda não foi paga.` });
+      else if(diasParaVencer<=5) alertas.push({ icone:'🟡', texto:`Fatura de "${d.cartao.nome}" vence em ${diasParaVencer===0?'hoje':diasParaVencer+' dia(s)'}.` });
+    }
+  });
+  if(cartaoComCrescimentoRelevante) alertas.push({ icone:'🟡', texto:`A fatura de "${cartaoComCrescimentoRelevante}" cresceu ${maiorCrescimentoPct.toFixed(0)}% em relação ao mês anterior.` });
+  if(comprometimentoFuturo>0 && limiteTotal>0 && comprometimentoFuturo>limiteTotal*0.5) alertas.push({ icone:'🟡', texto:`Os parcelamentos futuros já somam ${brl(comprometimentoFuturo)} — mais da metade do limite total dos cartões.` });
+  if(itensPendentesClassificacao.qtd>0) alertas.push({ icone:'🟡', texto:`${itensPendentesClassificacao.qtd} lançamento(s) de fatura importada ainda aguardando revisão e categorização.` });
+  if(limiteTotal>0 && limiteDisponivelTotal<limiteTotal*0.1) alertas.push({ icone:'🔴', texto:`Limite disponível total muito baixo — só ${brl(limiteDisponivelTotal)} de ${brl(limiteTotal)}.` });
+
+  // ---- Saúde dos cartões (seção 13) — regra objetiva, sem inventar critério ----
+  const temFaturaVencida = dadosPorCartao.some(d=>d.aPagarCartao>0.004 && d.vencimento<hoje);
+  let saudeCartoes, saudeCor;
+  if(temFaturaVencida || usoPctGeral>=90){ saudeCartoes = 'Crítico'; saudeCor = 'var(--danger)'; }
+  else if(usoPctGeral>=70 || cartaoComCrescimentoRelevante || itensPendentesClassificacao.qtd>0){ saudeCartoes = 'Atenção'; saudeCor = 'var(--warn)'; }
+  else { saudeCartoes = 'Saudável'; saudeCor = 'var(--success)'; }
+
+  // ---- Recomendações (seção 14) — só aparecem quando o dado que as justifica existe ----
+  const recomendacoes = [];
+  if(cartaoComCrescimentoRelevante) recomendacoes.push(`A utilização de "${cartaoComCrescimentoRelevante}" aumentou em relação ao mês anterior — revise os compromissos parcelados antes de assumir novas compras nele.`);
+  if(cartoes.length>1){
+    const maiorFatura = [...dadosPorCartao].sort((a,b)=>b.faturaAtual-a.faturaAtual)[0];
+    if(maiorFatura && faturaAtualTotal>0 && maiorFatura.faturaAtual/faturaAtualTotal>=0.7){
+      recomendacoes.push(`Existe concentração elevada de despesas em um único cartão — "${maiorFatura.cartao.nome}" responde por ${Math.round(maiorFatura.faturaAtual/faturaAtualTotal*100)}% da fatura total do mês.`);
+    }
+  }
+  if(comprometimentoFuturo>0 && limiteDisponivelTotal>0 && comprometimentoFuturo>limiteDisponivelTotal){
+    recomendacoes.push(`Os parcelamentos futuros (${brl(comprometimentoFuturo)}) já superam o limite disponível hoje (${brl(limiteDisponivelTotal)}) — vale cautela antes de novos parcelamentos.`);
+  }
+
   return `
     <div class="topbar">
-      <div><h1>Cartões de Crédito</h1><p>Cadastro de cartões, compras parceladas e controle de fatura</p></div>
+      <div><h1>Cartões de Crédito</h1><p>Controle de limites, faturas, parcelamentos e compromissos futuros</p></div>
     </div>
+
+    ${!cartoes.length ? `
+    <div class="conta-cards">
+      <div class="add-conta-card" id="btnNovoCartao">+ Adicionar cartão</div>
+    </div>` : `
+
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:16px;">
+      <div class="card saldo"><div class="label">Fatura atual</div><div class="value mono">${brl(faturaAtualTotal)}</div></div>
+      <div class="card"><div class="label">Total a pagar</div><div class="value mono" style="color:var(--danger);">${brl(totalAPagarTotal)}</div></div>
+      <div class="card"><div class="label">Limite total</div><div class="value mono">${brl(limiteTotal)}</div></div>
+      <div class="card"><div class="label">Limite disponível</div><div class="value mono" style="color:var(--success);">${brl(limiteDisponivelTotal)}</div></div>
+      <div class="card"><div class="label">Utilização</div><div class="value mono">${usoPctGeral}%</div></div>
+      <div class="card"><div class="label">Próximo vencimento</div><div class="value mono" style="font-size:15px;">${proximoVencimento?fmtDate(proximoVencimento):'—'}</div>${proximoVencimentoCartao?`<div class="cat">${escapeHTML(proximoVencimentoCartao)}</div>`:''}</div>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-head"><h2>Utilização dos cartões</h2></div>
+      <div class="panel-body">
+        <div style="font-size:22px;font-weight:800;margin-bottom:8px;">${usoPctGeral}% utilizado</div>
+        <div class="limit-bar" style="height:14px;"><div class="limit-bar-fill" style="width:${usoPctGeral}%;background:${usoPctGeral>=85?'var(--danger)':usoPctGeral>=60?'var(--warn)':'var(--success)'};"></div></div>
+        <div class="limit-info" style="margin-top:8px;"><span>Limite utilizado: ${brl(limiteTotal-limiteDisponivelTotal)}</span><span>Limite disponível: ${brl(limiteDisponivelTotal)}</span></div>
+      </div>
+    </div>
+
+    ${alertas.length ? `
+    <div class="panel" style="margin-bottom:16px;border-left:3px solid var(--warn);">
+      <div class="panel-head"><h2>⚠️ Alertas dos cartões</h2></div>
+      <div class="panel-body" style="padding:0;">
+        ${alertas.map(a=>`<div class="ledger-row compact" style="grid-template-columns:auto 1fr;">${a.icone} <span>${a.texto}</span></div>`).join('')}
+      </div>
+    </div>` : ''}
+
+    ${cartoes.length>1 ? `
+    <div class="report-controls" style="margin-bottom:12px;">
+      <select id="cartoesFiltroSelect">
+        <option value="">Todos os cartões</option>
+        ${cartoes.map(c=>`<option value="${c.id}" ${cartoesFiltroAtivo===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}
+      </select>
+    </div>` : ''}
+
     ${(state.faturasPendentes||[]).length ? `
     <div class="panel" style="margin-bottom:16px;border-left:3px solid var(--warn);">
       <div class="panel-head"><h2>📋 Faturas aguardando revisão (${state.faturasPendentes.length})</h2></div>
@@ -5864,12 +6028,11 @@ function viewCartoes(){
         }).join('')}
       </div>
     </div>` : ''}
+
+    <div class="dash-section-label">Meus cartões</div>
     <div class="conta-cards">
-      ${state.cartoes.map(c=>{
-        const comp = competenciaAtual(c);
-        const faturaAtual = totalCompetencia(c.id, comp);
-        const disponivel = limiteDisponivel(c);
-        const usoPct = c.limite>0 ? Math.min(100, Math.round(((c.limite-disponivel)/c.limite)*100)) : 0;
+      ${dadosFiltrados.map(d=>{
+        const c = d.cartao;
         return `
         <div class="cartao-card" style="--accent-c:${c.cor}">
           <div class="dropdown-wrap card-menu-wrap">
@@ -5886,20 +6049,102 @@ function viewCartoes(){
               <div class="banco">${escapeHTML(c.bandeira)}${c.banco ? ' · '+escapeHTML(c.banco) : ''}</div>
             </div>
           </div>
-          <div class="fatura-label">Fatura atual (${competenciaLabel(comp)})</div>
-          <div class="fatura-valor mono">${brl(faturaAtual)}</div>
-          <div class="limit-bar"><div class="limit-bar-fill" style="width:${usoPct}%"></div></div>
-          <div class="limit-info"><span>Disponível: ${brl(disponivel)}</span><span>Limite: ${brl(c.limite)}</span></div>
+          <div class="fatura-label">Fatura atual (${competenciaLabel(d.comp)})</div>
+          <div class="fatura-valor mono">${brl(d.faturaAtual)}</div>
+          <div class="limit-bar"><div class="limit-bar-fill" style="width:${d.usoPct}%;background:${d.usoPct>=85?'var(--danger)':d.usoPct>=60?'var(--warn)':'var(--blue-accent)'};"></div></div>
+          <div class="limit-info"><span>Disponível: ${brl(d.disponivel)}</span><span>Limite: ${brl(c.limite)}</span></div>
+          <div class="limit-info" style="margin-top:2px;"><span>Fecha: ${fmtDate(d.fechamento)}</span><span>Vence: ${fmtDate(d.vencimento)}</span></div>
           <div class="cartao-actions-row">
             <button class="btn" data-action="lancar-compra" data-id="${c.id}">+ Lançar compra</button>
             <button class="btn ghost" data-action="ver-fatura" data-id="${c.id}">Ver fatura</button>
+          </div>
+          <div class="cartao-actions-row" style="margin-top:8px;">
+            <button class="btn ghost sm" data-action="historico-cartao" data-id="${c.id}">Histórico</button>
+            <button class="btn ghost sm" data-action="configurar-cartao" data-id="${c.id}">Configurar</button>
           </div>
           <button class="btn ghost sm" data-action="importar-fatura" data-id="${c.id}" style="width:100%;margin-top:8px;">📄 Importar fatura (PDF)</button>
         </div>
       `;}).join('')}
       <div class="add-conta-card" id="btnNovoCartao">+ Adicionar cartão</div>
     </div>
-    ${!state.cartoes.length ? '' : `<div class="note" style="margin-top:0;">O valor da fatura já aparece em Contas a Pagar assim que a primeira despesa é lançada, crescendo junto com o mês — "Fechar fatura" só oficializa o valor final e define o vencimento certo.</div>`}
+    <div class="note" style="margin-top:0;">O valor da fatura já aparece em Contas a Pagar assim que a primeira despesa é lançada, crescendo junto com o mês — "Fechar fatura" só oficializa o valor final e define o vencimento certo.</div>
+
+    ${itensPendentesClassificacao.qtd>0 ? `
+    <div class="dash-section-label">Lançamentos pendentes de classificação</div>
+    <div class="panel" style="margin-bottom:16px;cursor:pointer;" data-action="ver-faturas-pendentes">
+      <div class="panel-body" style="padding:18px 20px;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-size:22px;font-weight:800;color:var(--warn);">${brl(itensPendentesClassificacao.valor)}</div>
+          <div style="font-size:12px;color:var(--text-soft);">${itensPendentesClassificacao.qtd} lançamento(s) em faturas importadas aguardando revisão</div>
+        </div>
+        <span style="color:var(--blue-accent);font-size:20px;">›</span>
+      </div>
+    </div>` : ''}
+
+    ${parcelasFuturas.length ? `
+    <div class="dash-section-label">Parcelamentos futuros</div>
+    <div class="panel" style="margin-bottom:8px;">
+      <div class="ledger-row head"><span>Compra</span><span>Cartão</span><span>Valor da parcela</span><span>Parcelas restantes</span><span>Total futuro</span></div>
+      <div class="panel-body" style="padding:0;">
+        ${parcelasFuturas.slice(0,25).map(p=>`
+          <div class="ledger-row compact" style="grid-template-columns:1.5fr 1fr auto auto auto;">
+            <span style="font-size:12.5px;">${escapeHTML(p.descricao)}</span>
+            <span style="font-size:12px;color:var(--text-soft);">${escapeHTML(p.cartaoNome)}</span>
+            <span class="mono" style="font-size:12.5px;">${brl(p.valorParcela)}</span>
+            <span class="mono" style="font-size:12.5px;">${p.parcelasRestantes}</span>
+            <span class="mono" style="font-size:12.5px;font-weight:600;">${brl(p.totalFuturo)}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+    <div class="cards" style="grid-template-columns:1fr;margin-bottom:16px;">
+      <div class="card saldo"><div class="label">Comprometimento futuro (compromissos futuros dos cartões)</div><div class="value mono">${brl(comprometimentoFuturo)}</div></div>
+    </div>` : ''}
+
+    <div class="dash-section-label">Previsão das próximas faturas</div>
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-body" style="padding:18px 8px 8px;">
+        <div style="display:flex;align-items:flex-end;gap:10px;height:120px;">
+          ${proximasFaturas.map(p=>`
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;">
+              <span class="mono" style="font-size:10px;color:var(--text-soft);margin-bottom:4px;">${p.total>0?brl(p.total).replace('R$ ',''):''}</span>
+              <div style="width:100%;max-width:40px;background:var(--blue-accent);opacity:${p.total>0?1:0.15};border-radius:4px 4px 0 0;height:${Math.max(3,Math.round(p.total/maxProximaFatura*90))}px;"></div>
+              <span style="font-size:10.5px;color:var(--text-soft);margin-top:4px;">${competenciaLabel(p.comp).split('/')[0].slice(0,3)}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+
+    ${cartoes.length>1 ? `
+    <div class="dash-section-label">Utilização por cartão</div>
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-body" style="padding:14px 18px;">
+        ${[...dadosPorCartao].sort((a,b)=>b.usoPct-a.usoPct).map(d=>`
+          <div style="margin-bottom:14px;">
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px;"><span style="font-weight:600;">${escapeHTML(d.cartao.nome)}</span><span class="mono">${d.usoPct}% · disponível ${brl(d.disponivel)} de ${brl(d.cartao.limite)}</span></div>
+            <div class="limit-bar"><div class="limit-bar-fill" style="width:${d.usoPct}%;background:${d.usoPct>=85?'var(--danger)':d.usoPct>=60?'var(--warn)':'var(--blue-accent)'};"></div></div>
+          </div>
+        `).join('')}
+      </div>
+    </div>` : ''}
+
+    <div class="dash-section-label">Saúde dos cartões</div>
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-body" style="padding:20px;text-align:center;">
+        <div style="font-size:26px;font-weight:800;color:${saudeCor};">${saudeCartoes}</div>
+        <div style="font-size:12px;color:var(--text-soft);margin-top:6px;">Utilização média ${usoPctGeral}% · maior utilização ${Math.max(0,...dadosPorCartao.map(d=>d.usoPct))}% · limite disponível ${brl(limiteDisponivelTotal)} · parcelamentos futuros ${brl(comprometimentoFuturo)}</div>
+      </div>
+    </div>
+
+    ${recomendacoes.length ? `
+    <div class="dash-section-label">Recomendações</div>
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-body" style="padding:0;">
+        ${recomendacoes.map(r=>`<div class="ledger-row compact" style="grid-template-columns:1fr;">💡 ${r}</div>`).join('')}
+      </div>
+    </div>` : ''}
+    `}
   `;
 }
 
@@ -20310,6 +20555,26 @@ function attachViewHandlers(){
       currentView = 'fatura';
       render();
     });
+  });
+  document.querySelectorAll('[data-action="historico-cartao"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      // "Histórico" abre a mesma fatura — o comparativo de meses e categorias já fica logo no topo
+      // dela, dentro de "📊 Comparativo e categorias desse cartão" (historicoCartaoHTML).
+      faturaCartaoId = btn.dataset.id;
+      faturaCompetenciaAtual = null;
+      currentView = 'fatura';
+      render();
+    });
+  });
+  document.querySelectorAll('[data-action="configurar-cartao"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openCartaoModal(state.cartoes.find(c=>c.id===btn.dataset.id)));
+  });
+  document.getElementById('cartoesFiltroSelect')?.addEventListener('change', (e)=>{
+    cartoesFiltroAtivo = e.target.value;
+    render();
+  });
+  document.querySelector('[data-action="ver-faturas-pendentes"]')?.addEventListener('click', ()=>{
+    document.querySelector('[data-action="revisar-fatura"]')?.scrollIntoView({ behavior:'smooth', block:'center' });
   });
   const btnVoltarCartoes = document.getElementById('btnVoltarCartoes');
   if(btnVoltarCartoes) btnVoltarCartoes.addEventListener('click', ()=>{
