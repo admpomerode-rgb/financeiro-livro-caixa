@@ -1546,6 +1546,7 @@ function render(){
   else if(currentView==='central-decisao') main.innerHTML = viewCentralDecisao();
   else if(currentView==='assistente') main.innerHTML = viewAssistente();
   else if(currentView==='veiculos') main.innerHTML = viewVeiculos();
+  else if(currentView==='veiculos-visao-geral') main.innerHTML = viewVeiculosVisaoGeral();
   else if(currentView==='navegacao-objetivo') main.innerHTML = viewNavegacaoObjetivo();
   attachViewHandlers();
   atualizarBadgesBottomNav();
@@ -2875,6 +2876,131 @@ function viewVeiculos(){
   return viewVeiculoDetalhe(veiculoSelecionadoId);
 }
 
+// "Meus Carros — Visão Geral" — reúne Comparação entre Veículos, Ranking de Custo, Dashboard Geral
+// da frota e Alertas Gerais numa tela só. Só faz sentido mostrar quando há mais de 1 veículo.
+function viewVeiculosVisaoGeral(){
+  const veiculos = state.veiculos;
+  const porVeiculo = veiculos.map(v=>{
+    const todos = todosRegistrosVeiculo(v.id);
+    const custoTotal = todos.filter(r=>['abastecimento','despesa','servico'].includes(r.tipoRegistro)).reduce((s,r)=>s+r.valor,0);
+    const combustivel = todos.filter(r=>r.tipoRegistro==='abastecimento').reduce((s,r)=>s+r.valor,0);
+    const manutencao = todos.filter(r=>r.tipoRegistro==='servico').reduce((s,r)=>s+r.valor,0);
+    const receita = todos.filter(r=>r.tipoRegistro==='receita').reduce((s,r)=>s+r.valor,0);
+    const kms = todos.filter(r=>r.km>0).map(r=>r.km);
+    const distancia = kms.length>1 ? Math.max(...kms)-Math.min(...kms) : 0;
+    const custoPorKm = distancia>0 ? custoTotal/distancia : null;
+    const consumo = calcularConsumoVeiculo(v.id);
+    return { v, custoTotal, combustivel, manutencao, receita, resultado:receita-custoTotal, distancia, custoPorKm, consumoMedio:consumo.mediaGeral, km:kmAtualVeiculo(v.id) };
+  });
+
+  const custoTotalFrota = porVeiculo.reduce((s,p)=>s+p.custoTotal,0);
+  const combustivelFrota = porVeiculo.reduce((s,p)=>s+p.combustivel,0);
+  const manutencaoFrota = porVeiculo.reduce((s,p)=>s+p.manutencao,0);
+  const receitaFrota = porVeiculo.reduce((s,p)=>s+p.receita,0);
+  const distanciaFrota = porVeiculo.reduce((s,p)=>s+p.distancia,0);
+  const custoMedioPorKmFrota = distanciaFrota>0 ? custoTotalFrota/distanciaFrota : null;
+  const resultadoFrota = receitaFrota-custoTotalFrota;
+
+  const comCusto = porVeiculo.filter(p=>p.custoTotal>0);
+  const ranking = [...comCusto].sort((a,b)=>b.custoTotal-a.custoTotal);
+  const maisCaro = ranking[0];
+  const maisEconomico = [...comCusto].sort((a,b)=>a.custoTotal-b.custoTotal)[0];
+  const maiorCustoPorKm = [...porVeiculo].filter(p=>p.custoPorKm!==null).sort((a,b)=>b.custoPorKm-a.custoPorKm)[0];
+  const maiorCombustivel = [...porVeiculo].filter(p=>p.combustivel>0).sort((a,b)=>b.combustivel-a.combustivel)[0];
+  const maiorManutencao = [...porVeiculo].filter(p=>p.manutencao>0).sort((a,b)=>b.manutencao-a.manutencao)[0];
+  const maiorReceita = [...porVeiculo].filter(p=>p.receita>0).sort((a,b)=>b.receita-a.receita)[0];
+  const melhorResultado = [...porVeiculo].filter(p=>p.receita>0).sort((a,b)=>b.resultado-a.resultado)[0];
+
+  // Análise gerencial — só entra observação quando o dado realmente sustenta
+  const analise = [];
+  if(maisCaro && custoTotalFrota>0) analise.push(`"${maisCaro.v.nome}" representa ${Math.round(maisCaro.custoTotal/custoTotalFrota*100)}% dos custos totais dos veículos.`);
+  porVeiculo.forEach(p=>{
+    const alerta = alertaConsumoVeiculo(p.v.id);
+    if(alerta && !alerta.subiu) analise.push(`O consumo de "${p.v.nome}" caiu de ${alerta.mediaAnterior.toFixed(1)} para ${alerta.mediaRecente.toFixed(1)} km/L.`);
+  });
+
+  // Alertas gerais — reaproveita a mesma lógica de compromissos próximos já usada na aba Geral
+  const alertasGerais = [];
+  porVeiculo.forEach(p=>{
+    const lembretes = state.veiculoLembretes.filter(l=>l.veiculoId===p.v.id && l.ativo!==false);
+    const todosV = todosRegistrosVeiculo(p.v.id).filter(r=>r.km>0);
+    let kmPorDia = null;
+    if(todosV.length>1){
+      const datas = todosV.map(r=>r.data).sort();
+      const distHist = Math.max(...todosV.map(r=>r.km))-Math.min(...todosV.map(r=>r.km));
+      const diasHist = Math.max(1, Math.round((new Date(datas[datas.length-1])-new Date(datas[0]))/86400000));
+      if(distHist>0) kmPorDia = distHist/diasHist;
+    }
+    lembretes.forEach(l=>{
+      let diasEstimados = null;
+      if(l.tipo==='data') diasEstimados = Math.round((new Date(l.dataAlvo)-new Date(todayISO()))/86400000);
+      else if(kmPorDia>0) diasEstimados = (l.kmAlvo-p.km)/kmPorDia;
+      if(diasEstimados!==null && diasEstimados<=15) alertasGerais.push({ texto:`${p.v.nome}: ${l.descricao} — ${diasEstimados<=0?'venceu':`em ~${Math.round(diasEstimados)} dia(s)`}`, critico:diasEstimados<=0 });
+    });
+    if(p.custoPorKm!==null && custoMedioPorKmFrota>0 && p.custoPorKm>custoMedioPorKmFrota*1.4) alertasGerais.push({ texto:`Custo por km de "${p.v.nome}" está bem acima da média da frota.`, critico:false });
+  });
+
+  return `
+    <div class="topbar">
+      <div><h1>Meus Carros — Visão Geral</h1><p>Comparativo, ranking de custo e alertas de toda a frota</p></div>
+    </div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:14px;">
+      <div class="card saldo"><div class="label">Total de veículos</div><div class="value mono">${veiculos.length}</div></div>
+      <div class="card"><div class="label">Custo total</div><div class="value mono" style="color:var(--danger);">${brl(custoTotalFrota)}</div></div>
+      <div class="card"><div class="label">Combustível</div><div class="value mono">${brl(combustivelFrota)}</div></div>
+      <div class="card"><div class="label">Manutenção</div><div class="value mono">${brl(manutencaoFrota)}</div></div>
+      <div class="card"><div class="label">Custo médio por km</div><div class="value mono" style="${custoMedioPorKmFrota===null?'font-size:12.5px;color:var(--text-soft);':''}">${custoMedioPorKmFrota!==null?brl(custoMedioPorKmFrota)+'/km':'Dados insuficientes'}</div></div>
+      ${receitaFrota>0 ? `<div class="card"><div class="label">Receita</div><div class="value mono" style="color:var(--success);">${brl(receitaFrota)}</div></div>
+      <div class="card"><div class="label">Resultado</div><div class="value mono" style="color:${resultadoFrota>=0?'var(--success)':'var(--danger)'};">${brl(resultadoFrota)}</div></div>` : ''}
+    </div>
+
+    ${alertasGerais.length ? `
+    <div class="dash-section-label">Alertas</div>
+    <div class="panel" style="margin-bottom:14px;border-left:3px solid var(--warn);"><div class="panel-body" style="padding:0;">
+      ${alertasGerais.map(a=>`<div class="ledger-row compact" style="grid-template-columns:auto 1fr;">${a.critico?'🔴':'🟡'} <span style="font-size:12.5px;">${a.texto}</span></div>`).join('')}
+    </div></div>` : ''}
+
+    <div class="dash-section-label">Comparativo de veículos</div>
+    <div class="panel" style="margin-bottom:14px;overflow-x:auto;">
+      <div class="ledger-row head" style="grid-template-columns:1.2fr 90px 100px 90px 100px 100px 90px;min-width:640px;">
+        <span>Veículo</span><span>Km</span><span>Custo</span><span>Custo/km</span><span>Combustível</span><span>Manutenção</span><span>Resultado</span>
+      </div>
+      <div style="min-width:640px;">
+        ${porVeiculo.map(p=>`
+          <div class="ledger-row compact" data-action="ir-veiculo" data-id="${p.v.id}" style="cursor:pointer;grid-template-columns:1.2fr 90px 100px 90px 100px 100px 90px;">
+            <span style="font-size:12.5px;font-weight:600;">${escapeHTML(p.v.nome)}</span>
+            <span class="mono" style="font-size:11.5px;">${p.km.toLocaleString('pt-BR')}</span>
+            <span class="mono" style="font-size:11.5px;">${brl(p.custoTotal)}</span>
+            <span class="mono" style="font-size:11.5px;">${p.custoPorKm!==null?brl(p.custoPorKm):'—'}</span>
+            <span class="mono" style="font-size:11.5px;">${brl(p.combustivel)}</span>
+            <span class="mono" style="font-size:11.5px;">${brl(p.manutencao)}</span>
+            <span class="mono" style="font-size:11.5px;color:${p.resultado>=0?'var(--success)':'var(--danger)'};">${p.receita>0?brl(p.resultado):'—'}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    ${ranking.length ? `
+    <div class="dash-section-label">Ranking de custo</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:14px 18px;">
+      ${ranking.map(p=>{
+        const pct = custoTotalFrota>0 ? p.custoTotal/custoTotalFrota*100 : 0;
+        return `
+        <div style="margin-bottom:12px;">
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px;"><span style="font-weight:600;">${escapeHTML(p.v.nome)}</span><span class="mono">${brl(p.custoTotal)} · ${pct.toFixed(0)}%</span></div>
+          <div class="limit-bar"><div class="limit-bar-fill" style="width:${pct}%;background:var(--blue-accent);"></div></div>
+        </div>`;
+      }).join('')}
+    </div></div>` : ''}
+
+    ${analise.length ? `
+    <div class="dash-section-label">🧠 Análise gerencial</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+      ${analise.map(a=>`<div class="ledger-row compact" style="grid-template-columns:1fr;">${a}</div>`).join('')}
+    </div></div>` : ''}
+  `;
+}
+
 function viewVeiculoDetalhe(veiculoId){
   const v = state.veiculos.find(x=>x.id===veiculoId);
   if(!v) return viewVeiculos();
@@ -2896,6 +3022,7 @@ function viewVeiculoDetalhe(veiculoId){
           <div style="font-size:11.5px;color:var(--text-soft);">${escapeHTML(v.marca||'')} ${escapeHTML(v.modelo||'')}${v.placa?' · '+escapeHTML(v.placa):''} · ${km.toLocaleString('pt-BR')} km</div>
         </div>
       </div>
+      ${state.veiculos.length>1 ? `<button class="btn ghost sm" data-action="ir-visao-geral-veiculos" title="Comparar todos os veículos">📊</button>` : ''}
       <button class="btn ghost sm" data-action="editar-veiculo" data-id="${v.id}">✎</button>
     </div>
     <div class="toggle-row" id="veiculoTabsRow" style="overflow-x:auto;flex-wrap:nowrap;width:auto;-webkit-overflow-scrolling:touch;">
@@ -2927,6 +3054,21 @@ function renderVeiculoTabConteudo(v){
   return '';
 }
 
+// Compara o consumo médio recente (últimos 3 pares tanque-cheio) com a média histórica anterior —
+// só dispara quando existem pares suficientes dos dois lados, pra não comparar com base fraca.
+function alertaConsumoVeiculo(veiculoId){
+  const consumo = calcularConsumoVeiculo(veiculoId);
+  if(consumo.pares.length<4) return null;
+  const recentes = consumo.pares.slice(-3);
+  const anteriores = consumo.pares.slice(0,-3);
+  if(!anteriores.length) return null;
+  const mediaRecente = recentes.reduce((s,p)=>s+p.kmRodado,0)/recentes.reduce((s,p)=>s+p.litros,0);
+  const mediaAnterior = anteriores.reduce((s,p)=>s+p.kmRodado,0)/anteriores.reduce((s,p)=>s+p.litros,0);
+  const varPct = (mediaRecente-mediaAnterior)/mediaAnterior*100;
+  if(Math.abs(varPct)<15) return null;
+  return { mediaRecente, mediaAnterior, subiu: varPct>0 };
+}
+
 function renderVeiculoGeral(v){
   const todos = todosRegistrosVeiculo(v.id);
   if(!todos.length) return `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum registro ainda. Toque no + pra adicionar abastecimento, despesa, receita ou serviço.</div></div>`;
@@ -2934,12 +3076,19 @@ function renderVeiculoGeral(v){
   const datas = todos.map(r=>r.data).sort();
   const deData = datas[0], ateData = datas[datas.length-1];
   const dias = Math.max(1, Math.round((new Date(ateData)-new Date(deData))/86400000));
+  const km = kmAtualVeiculo(v.id);
 
   const custoTotal = todos.filter(r=>['abastecimento','despesa','servico'].includes(r.tipoRegistro)).reduce((s,r)=>s+(r.valor||0),0);
   const receitaTotal = todos.filter(r=>r.tipoRegistro==='receita').reduce((s,r)=>s+(r.valor||0),0);
-  const saldoTotal = receitaTotal - custoTotal;
+  const resultado = receitaTotal - custoTotal;
   const kms = todos.filter(r=>r.km>0).map(r=>r.km);
   const distanciaTotal = kms.length>1 ? Math.max(...kms)-Math.min(...kms) : 0;
+  const custoPorKm = distanciaTotal>0 ? custoTotal/distanciaTotal : null;
+  const consumo = calcularConsumoVeiculo(v.id);
+  const qtdAbastecimento = todos.filter(r=>r.tipoRegistro==='abastecimento').length;
+  const qtdServico = todos.filter(r=>r.tipoRegistro==='servico').length;
+  const qtdDespesa = todos.filter(r=>r.tipoRegistro==='despesa').length;
+  const alertaConsumo = alertaConsumoVeiculo(v.id);
 
   const porCategoria = {};
   todos.filter(r=>r.tipoRegistro==='abastecimento').forEach(r=>{ porCategoria['Abastecimento']=(porCategoria['Abastecimento']||0)+r.valor; });
@@ -2960,17 +3109,44 @@ function renderVeiculoGeral(v){
   });
   const mesesOrdenados = Object.keys(porMes).sort().slice(-6);
 
+  // Compromissos futuros (prévia) — lembretes de km/data e documentos vencendo, os mais próximos.
+  // Pra ordenar km e dias juntos de forma justa, converte km restante em dias estimados usando a
+  // média de km/dia já calculada acima (distanciaTotal/dias) — nunca compara km com dias direto.
+  const kmPorDiaPreview = distanciaTotal>0 ? distanciaTotal/dias : null;
+  const lembretesVeiculo = state.veiculoLembretes.filter(l=>l.veiculoId===v.id && l.ativo!==false);
+  const compromissosPreview = lembretesVeiculo.map(l=>{
+    if(l.tipo==='km'){
+      const faltamKm = l.kmAlvo-km;
+      return { texto:l.descricao, faltam:faltamKm, unidade:'km', diasEstimados: kmPorDiaPreview>0 ? faltamKm/kmPorDiaPreview : null };
+    }
+    const faltamDias = Math.round((new Date(l.dataAlvo)-new Date(todayISO()))/86400000);
+    return { texto:l.descricao, faltam:faltamDias, unidade:'dias', diasEstimados:faltamDias };
+  }).filter(c=>c.diasEstimados!==null && c.diasEstimados<=30).sort((a,b)=>a.diasEstimados-b.diasEstimados).slice(0,3);
+
   return `
     <div class="note" style="margin-top:0;">${todos.length} registro(s) · ${fmtDate(deData)} – ${fmtDate(ateData)}</div>
-    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:14px;">
-      <div class="card saldo"><div class="label">Saldo</div><div class="value mono" style="color:${saldoTotal>=0?'var(--success)':'var(--danger)'};">${brl(saldoTotal)}</div><div class="cat">${brl(saldoTotal/dias)}/dia</div></div>
-      <div class="card"><div class="label">Distância</div><div class="value mono">${distanciaTotal.toLocaleString('pt-BR')} km</div><div class="cat">${(distanciaTotal/dias).toFixed(0)} km/dia</div></div>
-      <div class="card"><div class="label">Custo</div><div class="value mono" style="color:var(--danger);">${brl(custoTotal)}</div><div class="cat">${distanciaTotal>0?brl(custoTotal/distanciaTotal)+'/km':'—'}</div></div>
-      <div class="card"><div class="label">Receita</div><div class="value mono" style="color:var(--success);">${brl(receitaTotal)}</div><div class="cat">${distanciaTotal>0?brl(receitaTotal/distanciaTotal)+'/km':'—'}</div></div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:10px;">
+      <div class="card saldo"><div class="label">Quilometragem atual</div><div class="value mono">${km.toLocaleString('pt-BR')} km</div></div>
+      <div class="card"><div class="label">Custo total</div><div class="value mono" style="color:var(--danger);">${brl(custoTotal)}</div></div>
+      ${receitaTotal>0 ? `<div class="card"><div class="label">Receita total</div><div class="value mono" style="color:var(--success);">${brl(receitaTotal)}</div></div>
+      <div class="card"><div class="label">Resultado</div><div class="value mono" style="color:${resultado>=0?'var(--success)':'var(--danger)'};">${brl(resultado)}</div></div>` : ''}
+      <div class="card"><div class="label">Custo por km</div><div class="value mono" style="${custoPorKm===null?'font-size:12.5px;color:var(--text-soft);':''}">${custoPorKm!==null?brl(custoPorKm)+'/km':'Dados insuficientes'}</div></div>
+      <div class="card"><div class="label">Consumo médio</div><div class="value mono" style="${consumo.mediaGeral===null?'font-size:12.5px;color:var(--text-soft);':''}">${consumo.mediaGeral!==null?consumo.mediaGeral.toFixed(2)+' km/L':'Dados insuficientes'}</div></div>
     </div>
-    ${dadosDonut.length ? `<div class="dash-section-label">Comparativo de gastos</div><div class="panel"><div class="panel-body" style="padding:14px 18px;">${svgPizza(dadosDonut, true)}</div></div>` : ''}
+    <div class="cards" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px;">
+      <div class="card"><div class="label">Abastecimentos</div><div class="value mono">${qtdAbastecimento}</div></div>
+      <div class="card"><div class="label">Serviços</div><div class="value mono">${qtdServico}</div></div>
+      <div class="card"><div class="label">Despesas</div><div class="value mono">${qtdDespesa}</div></div>
+    </div>
+    ${alertaConsumo ? `<div class="note" style="border-color:${alertaConsumo.subiu?'var(--success)':'var(--warn)'};margin-bottom:14px;">${alertaConsumo.subiu?'✓':'⚠️'} Atenção: o consumo deste veículo ${alertaConsumo.subiu?'melhorou':'caiu'} de ${alertaConsumo.mediaAnterior.toFixed(1)} km/L para ${alertaConsumo.mediaRecente.toFixed(1)} km/L.</div>` : ''}
+    ${compromissosPreview.length ? `
+    <div class="dash-section-label">Próximos compromissos</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+      ${compromissosPreview.map(c=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span style="font-size:12.5px;">${escapeHTML(c.texto)}</span><span style="font-size:11.5px;font-weight:600;color:${c.faltam<=0?'var(--danger)':'var(--warn)'};">${c.faltam<=0?'venceu':`em ${c.faltam} ${c.unidade}`}</span></div>`).join('')}
+    </div></div>` : ''}
+    ${dadosDonut.length ? `<div class="dash-section-label">Onde o veículo está consumindo dinheiro</div><div class="panel"><div class="panel-body" style="padding:14px 18px;">${svgPizza(dadosDonut, true)}</div></div>` : ''}
     ${pontosOdometro.length>1 ? `<div class="dash-section-label">Odômetro</div><div class="panel"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">${svgLinhasMultiplas([{nome:'Km', valores:pontosOdometro.map(p=>p.km)}], pontosOdometro.map(p=>fmtDateCurta(p.data)))}</div></div>` : ''}
-    ${mesesOrdenados.length ? `<div class="dash-section-label">Gastos mensais</div><div class="panel"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">${svgLinhasMultiplas([
+    ${mesesOrdenados.length ? `<div class="dash-section-label">Evolução dos custos</div><div class="panel"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">${svgLinhasMultiplas([
       { nome:'Abastecimento', valores:mesesOrdenados.map(m=>porMes[m].abastecimento) },
       { nome:'Despesa', valores:mesesOrdenados.map(m=>porMes[m].despesa) },
       { nome:'Serviço', valores:mesesOrdenados.map(m=>porMes[m].servico) },
@@ -3048,16 +3224,49 @@ function renderVeiculoAbastecimento(v){
   `;
 }
 
-// Despesa, Receita e Serviço têm exatamente o mesmo formato de tela (lista + total), só muda a
-// fonte de dados e a cor — por isso uma função só reaproveitada pelas 3 abas.
+// Despesa, Receita e Serviço compartilham o formato base (lista + total), mas Serviço e Receita
+// ganham estatísticas extras específicas — por isso os blocos condicionais abaixo, em vez de
+// duplicar a função inteira 3 vezes.
 function renderVeiculoRegistrosSimples(v, tipoRegistro){
   const mapaArray = { despesa: state.veiculoDespesas, receita: state.veiculoReceitas, servico: state.veiculoServicos };
   const mapaCor = { despesa: 'var(--danger)', receita: 'var(--success)', servico: 'var(--warn)' };
   const mapaAction = { despesa: 'nova-despesa-veiculo', receita: 'nova-receita-veiculo', servico: 'novo-servico-veiculo' };
   const lista = mapaArray[tipoRegistro].filter(r=>r.veiculoId===v.id).sort((a,b)=>b.data.localeCompare(a.data));
   const total = lista.reduce((s,r)=>s+r.valor,0);
+
+  let statsExtras = '';
+  if(tipoRegistro==='servico' && lista.length){
+    const ultima = lista[0];
+    const maisCara = [...lista].sort((a,b)=>b.valor-a.valor)[0];
+    const porAno = {};
+    lista.forEach(r=>{ const ano=r.data.slice(0,4); porAno[ano]=(porAno[ano]||0)+r.valor; });
+    statsExtras = `
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:14px;">
+        <div class="card"><div class="label">Última manutenção</div><div class="value mono" style="font-size:14px;">${fmtDate(ultima.data)}</div><div class="cat">${ultima.km>0?ultima.km.toLocaleString('pt-BR')+' km':''}</div></div>
+        <div class="card"><div class="label">Manutenção mais cara</div><div class="value mono" style="font-size:14px;">${brl(maisCara.valor)}</div><div class="cat">${escapeHTML(maisCara.descricao)}</div></div>
+        <div class="card"><div class="label">Valor médio</div><div class="value mono">${brl(total/lista.length)}</div></div>
+      </div>
+      <div class="dash-section-label">Manutenções por ano</div>
+      <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+        ${Object.entries(porAno).sort((a,b)=>b[0].localeCompare(a[0])).map(([ano,v2])=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span>${ano}</span><span class="mono" style="font-weight:600;">${brl(v2)}</span></div>`).join('')}
+      </div></div>
+    `;
+  }
+  if(tipoRegistro==='receita' && lista.length){
+    const custoTotal = todosRegistrosVeiculo(v.id).filter(r=>['abastecimento','despesa','servico'].includes(r.tipoRegistro)).reduce((s,r)=>s+r.valor,0);
+    const resultado = total - custoTotal;
+    const margem = total>0 ? (resultado/total*100) : null;
+    statsExtras = `
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:14px;">
+        <div class="card"><div class="label">Custos totais do veículo</div><div class="value mono" style="color:var(--danger);">${brl(custoTotal)}</div></div>
+        <div class="card saldo"><div class="label">Resultado do veículo</div><div class="value mono" style="color:${resultado>=0?'var(--success)':'var(--danger)'};">${brl(resultado)}</div>${margem!==null?`<div class="cat">Margem: ${margem.toFixed(1)}%</div>`:''}</div>
+      </div>
+    `;
+  }
+
   return `
     <div class="cards" style="margin-bottom:14px;"><div class="card"><div class="label">Total</div><div class="value mono" style="color:${mapaCor[tipoRegistro]};">${brl(total)}</div></div></div>
+    ${statsExtras}
     <div class="report-controls"><button class="btn" data-action="${mapaAction[tipoRegistro]}" data-id="${v.id}">+ Adicionar</button></div>
     ${!lista.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum registro ainda.</div></div>` : `
     <div class="panel"><div class="panel-body" style="padding:0;">
@@ -3091,21 +3300,53 @@ function renderVeiculoHistorico(v){
 }
 
 function renderVeiculoLembretes(v){
-  const lembretes = state.veiculoLembretes.filter(l=>l.veiculoId===v.id);
+  const lembretes = state.veiculoLembretes.filter(l=>l.veiculoId===v.id && l.ativo!==false);
   const km = kmAtualVeiculo(v.id);
+  // Pra ordenar lembretes de km e de data juntos por urgência, precisa de uma unidade comum —
+  // converte "faltam X km" em "dias estimados" usando a média real de km rodado por dia desse
+  // veículo. Sem essa conversão, comparar km com dias diretamente dá uma ordem sem sentido.
+  const todos = todosRegistrosVeiculo(v.id).filter(r=>r.km>0);
+  let kmPorDia = null;
+  if(todos.length>1){
+    const datas = todos.map(r=>r.data).sort();
+    const kms = todos.map(r=>r.km);
+    const diasHist = Math.max(1, Math.round((new Date(datas[datas.length-1])-new Date(datas[0]))/86400000));
+    const distHist = Math.max(...kms)-Math.min(...kms);
+    if(distHist>0) kmPorDia = distHist/diasHist;
+  }
+  const comInfo = lembretes.map(l=>{
+    const faltamKm = l.tipo==='km' ? l.kmAlvo-km : null;
+    const faltamDias = l.tipo==='data' ? Math.round((new Date(l.dataAlvo)-new Date(todayISO()))/86400000) : null;
+    const diasEstimados = l.tipo==='km' ? (kmPorDia>0 ? faltamKm/kmPorDia : null) : faltamDias;
+    return { ...l, faltamKm, faltamDias, diasEstimados };
+  }).sort((a,b)=>{
+    if(a.diasEstimados===null && b.diasEstimados===null) return 0;
+    if(a.diasEstimados===null) return 1;
+    if(b.diasEstimados===null) return -1;
+    return a.diasEstimados-b.diasEstimados;
+  });
+  const comValor = comInfo.filter(l=>l.valor>0);
+
   return `
     <div class="report-controls"><button class="btn" data-action="novo-lembrete-veiculo" data-id="${v.id}">+ Novo lembrete</button></div>
+    ${comValor.length ? `
+    <div class="dash-section-label">Próximos custos previstos</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+      ${comValor.map(l=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;">
+          <span style="font-size:12.5px;">${escapeHTML(l.descricao)} — ${l.tipo==='km' ? `previsto para ${l.kmAlvo.toLocaleString('pt-BR')} km` : `vencimento em ${fmtDate(l.dataAlvo)}`}</span>
+          <span class="mono" style="font-weight:600;">${brl(l.valor)}</span>
+        </div>
+      `).join('')}
+    </div></div>` : ''}
     ${!lembretes.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum lembrete configurado.</div></div>` : `
+    <div class="dash-section-label">Todos os lembretes</div>
     <div class="panel"><div class="panel-body" style="padding:0;">
-      ${lembretes.map(l=>{
-        const faltamKm = l.tipo==='km' ? l.kmAlvo-km : null;
-        const faltamDias = l.tipo==='data' ? Math.round((new Date(l.dataAlvo)-new Date(todayISO()))/86400000) : null;
-        return `
+      ${comInfo.map(l=>`
         <div class="ledger-row compact" data-action="editar-lembrete-veiculo" data-id="${l.id}" style="cursor:pointer;grid-template-columns:1fr auto;">
-          <div class="desc-cell"><div>${escapeHTML(l.descricao)}</div><div class="cat">${l.tipo==='km' ? `${l.kmAlvo.toLocaleString('pt-BR')} km` : fmtDate(l.dataAlvo)}</div></div>
-          <span class="mono" style="font-weight:600;color:${(faltamKm!==null&&faltamKm<=0)||(faltamDias!==null&&faltamDias<=0)?'var(--danger)':'var(--warn)'};">${faltamKm!==null?`em ${faltamKm} km`:`em ${faltamDias} dia(s)`}</span>
-        </div>`;
-      }).join('')}
+          <div class="desc-cell"><div>${escapeHTML(l.descricao)}${l.categoria?` <span style="color:var(--text-soft);font-size:10.5px;">· ${escapeHTML(l.categoria)}</span>`:''}</div><div class="cat">${l.tipo==='km' ? `${l.kmAlvo.toLocaleString('pt-BR')} km` : fmtDate(l.dataAlvo)}${l.valor>0?' · '+brl(l.valor):''}</div></div>
+          <span class="mono" style="font-weight:600;color:${(l.faltamKm!==null&&l.faltamKm<=0)||(l.faltamDias!==null&&l.faltamDias<=0)?'var(--danger)':'var(--warn)'};">${l.faltamKm!==null?`em ${l.faltamKm.toLocaleString('pt-BR')} km`:`em ${l.faltamDias} dia(s)`}</span>
+        </div>`).join('')}
     </div></div>`}
   `;
 }
@@ -18918,6 +19159,18 @@ function attachViewHandlers(){
       else openVeiculoRegistroModal(v.id, tipo);
     });
   });
+  document.querySelector('[data-action="ir-visao-geral-veiculos"]')?.addEventListener('click', ()=>{
+    currentView = 'veiculos-visao-geral';
+    render();
+  });
+  document.querySelectorAll('[data-action="ir-veiculo"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      veiculoSelecionadoId = btn.dataset.id;
+      veiculoTabAtiva = 'geral';
+      currentView = 'veiculos';
+      render();
+    });
+  });
   if(currentView==='conciliacao'){
     document.getElementById('btnVoltarConciliacao')?.addEventListener('click', ()=>{
       currentView = 'configuracoes';
@@ -23973,16 +24226,22 @@ function openLeituraModal(veiculoId, existing){
 
 function openLembreteVeiculoModal(veiculoId, existing){
   const isEdit = !!existing;
+  const categorias = ['Troca de óleo','Revisão','Pneus','Freios','Correia','Alinhamento','Documentação','IPVA','Licenciamento','Seguro','Outros'];
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
     <h3>${isEdit?'Editar lembrete':'Novo lembrete'}</h3>
     <div class="field"><label>Descrição</label><input type="text" id="lbDescricao" value="${existing?escapeHTML(existing.descricao):''}" placeholder="Ex: Próxima troca de óleo"></div>
+    <div class="field"><label>Categoria (opcional)</label><select id="lbCategoria">
+      <option value="">Nenhuma</option>
+      ${categorias.map(c=>`<option value="${c}" ${existing?.categoria===c?'selected':''}>${c}</option>`).join('')}
+    </select></div>
     <div class="field"><label>Tipo</label><select id="lbTipo">
       <option value="km" ${(!existing||existing.tipo==='km')?'selected':''}>Por quilometragem</option>
       <option value="data" ${existing?.tipo==='data'?'selected':''}>Por data</option>
     </select></div>
     <div class="field" id="lbKmWrap" style="display:${!existing||existing.tipo==='km'?'block':'none'};"><label>Km alvo</label><input type="text" inputmode="numeric" id="lbKmAlvo" value="${existing?.kmAlvo||''}" placeholder="Ex: 60000"></div>
     <div class="field" id="lbDataWrap" style="display:${existing?.tipo==='data'?'block':'none'};"><label>Data alvo</label><input type="date" id="lbDataAlvo" value="${existing?.dataAlvo||''}"></div>
+    <div class="field"><label>Valor previsto (opcional — aparece em "Próximos custos previstos")</label><input type="text" inputmode="decimal" id="lbValor" value="${existing?.valor||''}" placeholder="0,00"></div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       ${isEdit ? `<button class="btn ghost" id="btnExcluirLembreteVeiculo" style="color:var(--danger);">Excluir</button>` : ''}
@@ -24003,12 +24262,14 @@ function openLembreteVeiculoModal(veiculoId, existing){
     const descricao = document.getElementById('lbDescricao').value.trim();
     const tipo = document.getElementById('lbTipo').value;
     if(!descricao){ showToast('Descreva o lembrete'); return; }
+    const categoria = document.getElementById('lbCategoria').value || null;
+    const valor = numBR(document.getElementById('lbValor').value) || 0;
     const kmAlvo = tipo==='km' ? numBR(document.getElementById('lbKmAlvo').value) : null;
     const dataAlvo = tipo==='data' ? document.getElementById('lbDataAlvo').value : null;
     if(tipo==='km' && !(kmAlvo>0)){ showToast('Preencha o km alvo'); return; }
     if(tipo==='data' && !dataAlvo){ showToast('Preencha a data alvo'); return; }
-    if(isEdit){ Object.assign(existing, { descricao, tipo, kmAlvo, dataAlvo }); }
-    else { state.veiculoLembretes.push({ id:uid(), veiculoId, descricao, tipo, kmAlvo, dataAlvo, ativo:true }); }
+    if(isEdit){ Object.assign(existing, { descricao, categoria, tipo, kmAlvo, dataAlvo, valor }); }
+    else { state.veiculoLembretes.push({ id:uid(), veiculoId, descricao, categoria, tipo, kmAlvo, dataAlvo, valor, ativo:true }); }
     persist(); closeModal(); render();
     showToast(isEdit?'Lembrete atualizado':'Lembrete criado');
   });
