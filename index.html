@@ -17577,7 +17577,7 @@ function viewOrcamentosProcessos(){
     <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:16px;">
       <div class="card saldo"><div class="label">Aguardando decisão</div><div class="value mono">${pendentes.length}</div></div>
       <div class="card"><div class="label">Valor total pendente</div><div class="value mono">${brl(pendentes.reduce((s,o)=>s+o.valorTotal,0))}</div></div>
-      <div class="card"><div class="label">Compras pendentes de cadastro em Ativos</div><div class="value mono">${comprasPendentes.length}</div></div>
+      <div class="card"><div class="label">Compras p/ cadastrar em Ativos</div><div class="value mono">${comprasPendentes.length}</div></div>
     </div>
     ${comprasPendentes.length ? `
     <div class="panel" style="margin-bottom:14px;">
@@ -17595,35 +17595,46 @@ function viewOrcamentosProcessos(){
       </div>
     </div>` : ''}
     ${pendentes.length ? pendentes.map(o=>`
-      <div class="panel" style="margin-bottom:14px;">
+      <div class="panel" style="margin-bottom:14px;overflow:hidden;">
         <div class="panel-head">
-          <h2>Orçamento N° ${o.numero}${o.processoTitulo?' — '+escapeHTML(o.processoTitulo):''}${o.adiado ? ' <span style="color:var(--warn);font-size:12px;">⏳ Adiado</span>' : ''}</h2>
-          <span class="mono" style="font-weight:700;">${brl(o.valorTotal)}</span>
+          <h2>Orçamento N° ${o.numero}${o.processoTitulo?' — '+escapeHTML(o.processoTitulo):''}${o.adiado ? ' <span style="color:var(--warn);font-size:12px;font-weight:600;">⏳ Adiado</span>' : ''}</h2>
+          <span class="mono" style="font-weight:700;font-size:15px;">${brl(o.valorTotal)}</span>
         </div>
-        ${o.descricaoPedido ? `<div class="note" style="margin:0 20px 10px;">${escapeHTML(o.descricaoPedido)}</div>` : ''}
-        ${o.driveLink ? `<div style="padding:0 20px 10px;"><a href="${escapeHTML(o.driveLink)}" target="_blank" rel="noreferrer" style="font-size:12.5px;">📎 Ver documento/fotos no Google Drive</a></div>` : ''}
-        <div class="panel-body" style="padding:0;">
+
+        ${o.descricaoPedido || o.driveLink ? `
+        <div style="padding:14px 20px;background:var(--bone);border-bottom:1px solid var(--line);">
+          <div style="font-size:10.5px;font-weight:700;color:var(--text-soft);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:6px;">Descrição do pedido</div>
+          ${o.descricaoPedido ? `<div style="font-size:13px;line-height:1.5;">${escapeHTML(o.descricaoPedido)}</div>` : ''}
+          ${o.driveLink ? `<a href="${escapeHTML(o.driveLink)}" target="_blank" rel="noreferrer" style="font-size:12.5px;display:inline-block;margin-top:${o.descricaoPedido?'8px':'0'};">📎 Ver documento/fotos no Google Drive</a>` : ''}
+        </div>` : ''}
+
+        <div style="padding:14px 20px 4px;font-size:10.5px;font-weight:700;color:var(--text-soft);text-transform:uppercase;letter-spacing:0.3px;">Itens</div>
+        <div class="panel-body" style="padding:0 0 4px;">
           ${o.itens.length ? o.itens.map(it=>`
             <div class="ledger-row compact" style="grid-template-columns:1fr auto;">
               <span style="font-size:12.5px;">${escapeHTML(it.descricao)}${it.link ? ` — <a href="${escapeHTML(it.link)}" target="_blank" rel="noreferrer">link</a>` : ''}</span>
               <span class="mono" style="font-size:12.5px;">${brl(it.valor)}</span>
             </div>
-          `).join('') : `<div class="empty">Sem itens detalhados.</div>`}
+          `).join('') : `<div class="empty" style="padding:14px 20px;">Sem itens detalhados.</div>`}
         </div>
-        <div style="padding:14px 20px 0;">
-          <textarea id="resposta-${o.id}" placeholder="Resposta / observação (opcional)" style="width:100%;min-height:52px;resize:vertical;"></textarea>
-        </div>
-        <div style="padding:10px 20px 20px;display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn ghost" data-action="recusar-orcamento-processo" data-id="${o.id}" style="color:var(--danger);border-color:#F3C6C2;">✕ Recusar</button>
-          <button class="btn ghost" data-action="adiar-orcamento-processo" data-id="${o.id}">⏳ Adiar</button>
-          <button class="btn" data-action="aprovar-orcamento-processo" data-id="${o.id}">✓ Aprovar</button>
+
+        <div style="padding:14px 20px;border-top:1px solid var(--line);">
+          <div class="field" style="margin-bottom:12px;">
+            <label>Resposta / observação (opcional)</label>
+            <textarea id="resposta-${o.id}" placeholder="Ex: aprovado com desconto, aguardando segunda cotação..." style="min-height:60px;resize:vertical;"></textarea>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn" data-action="aprovar-orcamento-processo" data-id="${o.id}" style="flex:1;min-width:120px;">✓ Aprovar</button>
+            <button class="btn ghost" data-action="adiar-orcamento-processo" data-id="${o.id}" style="flex:1;min-width:100px;">⏳ Adiar</button>
+            <button class="btn ghost" data-action="recusar-orcamento-processo" data-id="${o.id}" style="flex:1;min-width:100px;color:var(--danger);border-color:#F3C6C2;">✕ Recusar</button>
+          </div>
         </div>
       </div>
     `).join('') : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum orçamento aguardando decisão no momento.</div></div>`}
     ${decididos.length ? `
-    <details class="panel-details">
+    <details class="panel-details" style="margin-bottom:14px;">
       <summary>Já decididos (${decididos.length})</summary>
-      <div class="panel-body">
+      <div class="panel-body" style="padding:0;">
         ${decididos.slice(0,50).map(o=>`
           <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
             <div class="desc-cell">
@@ -17636,7 +17647,7 @@ function viewOrcamentosProcessos(){
         `).join('')}
       </div>
     </details>` : ''}
-    <div class="note" style="margin-top:0;">Ao aprovar ou recusar, o Livro de Processos é avisado automaticamente — a decisão aparece de volta no processo lá.</div>
+    <div class="note" style="margin-top:0;">💡 Ao aprovar ou recusar, o Livro de Processos é avisado automaticamente — a decisão aparece de volta no processo lá.</div>
   `;
 }
 
