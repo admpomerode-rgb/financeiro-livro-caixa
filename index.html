@@ -960,6 +960,7 @@ function aplicarMigracoes(s){
   if(!s.veiculoServicos) s.veiculoServicos = [];
   if(!s.veiculoLeituras) s.veiculoLeituras = [];
   if(!s.veiculoLembretes) s.veiculoLembretes = [];
+  if(!s.historicoAtualizacoesInvestimento) s.historicoAtualizacoesInvestimento = [];
   if(!s.cofresVirtuais) s.cofresVirtuais = [
     { nome:'Operacional', pct:50 }, { nome:'Impostos', pct:15 }, { nome:'Emergência', pct:15 },
     { nome:'Investimentos', pct:10 }, { nome:'Distribuição aos Sócios', pct:10 },
@@ -1837,48 +1838,129 @@ function custoInvestidoHistorico(contaId, dias){
 function rotuloTipoAtivo(a){
   return { acao:'Ação (B3)', fii:'FII', cripto:'Criptomoeda', rendafixa:'Renda Fixa', interno:'Investimento na Empresa' }[a.tipoAtivo] || a.tipoAtivo;
 }
-async function atualizarCotacoes(){
-  const acoesFii = state.ativosInvestimento.filter(a=>(a.tipoAtivo==='acao'||a.tipoAtivo==='fii') && a.ticker);
-  const criptos = state.ativosInvestimento.filter(a=>a.tipoAtivo==='cripto' && a.criptoId);
-  if(!acoesFii.length && !criptos.length){ showToast('Nenhum ativo de renda variável cadastrado para atualizar'); return; }
-  let ok=0, falhas=0;
-  if(acoesFii.length){
-    const tickers = [...new Set(acoesFii.map(a=>a.ticker.toUpperCase()))].join(',');
-    try{
-      const resp = await fetch(`https://brapi.dev/api/quote/${tickers}`);
-      const data = await resp.json();
-      if(data && data.results){
-        data.results.forEach(r=>{
-          state.ativosInvestimento.forEach(a=>{
-            if((a.tipoAtivo==='acao'||a.tipoAtivo==='fii') && a.ticker && a.ticker.toUpperCase()===r.symbol && r.regularMarketPrice){
-              a.precoAtual = r.regularMarketPrice;
-              a.dataUltimaCotacao = new Date().toISOString();
-              ok++;
-            }
-          });
-        });
-      } else { falhas += acoesFii.length; }
-    }catch(e){ falhas += acoesFii.length; }
-  }
-  if(criptos.length){
-    const ids = [...new Set(criptos.map(a=>a.criptoId))].join(',');
-    try{
-      const resp = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=brl`);
-      const data = await resp.json();
-      criptos.forEach(a=>{
-        if(data && data[a.criptoId] && data[a.criptoId].brl){
-          a.precoAtual = data[a.criptoId].brl;
-          a.dataUltimaCotacao = new Date().toISOString();
-          ok++;
-        } else { falhas++; }
-      });
-    }catch(e){ falhas += criptos.length; }
-  }
-  persist();
-  render();
-  if(ok>0 && falhas===0) showToast(`${ok} cotação(ões) atualizada(s)`);
-  else if(ok>0 && falhas>0) showToast(`${ok} atualizadas, ${falhas} não encontradas/indisponíveis`);
-  else showToast('Não foi possível buscar cotações agora — confira a internet ou os tickers');
+// A função de busca automática de cotação (brapi.dev/CoinGecko) foi removida daqui de propósito —
+// a nova regra da Central de Investimentos é que TODA atualização de valor é manual, feita pelo
+// usuário. Nenhum código deve buscar preço externo e alterar a posição sozinho.
+
+// Registra uma atualização manual de posição — nunca sobrescreve silenciosamente, sempre grava o
+// valor anterior no histórico, pra dar pra reconstruir a evolução da carteira depois.
+function registrarAtualizacaoManual(itemTipo, itemId, itemNome, valorAnterior, valorNovo, dataPosicao, observacao){
+  state.historicoAtualizacoesInvestimento.push({
+    id: uid(), itemTipo, itemId, itemNome,
+    data: dataPosicao, dataRegistro: new Date().toISOString(),
+    valorAnterior, valorNovo, diferenca: valorNovo-valorAnterior,
+    percentual: valorAnterior>0 ? ((valorNovo-valorAnterior)/valorAnterior*100) : null,
+    observacao: observacao || null
+  });
+}
+// Status da atualização — usa a periodicidade que o usuário definiu (padrão mensal). Sem data de
+// posição nenhuma, é sempre "pendente" — nunca finge que está em dia.
+function statusAtualizacaoItem(dataUltimaAtualizacao, periodicidade){
+  if(!dataUltimaAtualizacao) return 'pendente';
+  periodicidade = periodicidade || 'mensal';
+  const diasLimite = { semanal:7, quinzenal:15, mensal:30, trimestral:90, semestral:180, anual:365 }[periodicidade];
+  if(!diasLimite) return 'atualizado';
+  const dias = (new Date(todayISO())-new Date(dataUltimaAtualizacao.slice(0,10)))/86400000;
+  if(dias > diasLimite) return 'pendente';
+  if(dias > diasLimite*0.8) return 'atencao';
+  return 'atualizado';
+}
+function rotuloStatusAtualizacao(status){
+  return { atualizado:'✓ Atualizado', atencao:'🟡 Atenção', pendente:'🔴 Posição pendente de atualização' }[status] || status;
+}
+
+// Lista tudo que pode ser atualizado manualmente: ativos de mercado (ação/FII/cripto), ativos
+// manuais/internos, e subcontas com valor manual. Renda fixa sem valorAtualManual já se calcula
+// sozinha pela taxa contratada — só entra na lista se o usuário quiser sobrepor esse cálculo.
+function itensAtualizaveisInvestimento(){
+  const idsContasAtivas = new Set(state.contasInvestimento.filter(c=>!c.arquivada).map(c=>c.id));
+  const ativos = state.ativosInvestimento.filter(a=>!a.resgatado && idsContasAtivas.has(a.contaId)).map(a=>({
+    itemTipo:'ativo', id:a.id, nome:a.nome||a.ticker||'Ativo',
+    valorAtual: a.tipoAtivo==='rendafixa' ? (a.valorAtualManual ?? null) : (a.tipoAtivo==='interno'||a.manual ? (a.valorAtualManual??a.valorAplicado) : (a.precoAtual??a.precoMedio??null)),
+    ehPreco: !(a.tipoAtivo==='interno'||a.manual||a.tipoAtivo==='rendafixa'),
+    dataUltimaAtualizacao: a.dataUltimaCotacao || null,
+    periodicidade: a.periodicidadeAtualizacao || 'mensal',
+    calculoAutomatico: a.tipoAtivo==='rendafixa' && a.valorAtualManual==null
+  }));
+  const subManuais = state.subcontasInvestimento.filter(s=>s.valorManual!=null && idsContasAtivas.has(s.contaId)).map(s=>({
+    itemTipo:'subconta', id:s.id, nome:s.nome+' (subconta)',
+    valorAtual: s.valorManual, ehPreco:false,
+    dataUltimaAtualizacao: s.dataUltimaAtualizacao || null,
+    periodicidade: s.periodicidadeAtualizacao || 'mensal',
+    calculoAutomatico: false
+  }));
+  return [...ativos, ...subManuais];
+}
+
+function openCentralAtualizacaoModal(){
+  const itens = itensAtualizaveisInvestimento();
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Atualizar posições</h3>
+    <div class="note" style="margin-top:0;">Informe o novo valor de cada posição que você quer atualizar. Deixe em branco o que não mudou — só o que for preenchido é salvo. Isso não busca nada na internet.</div>
+    <div class="field"><label>Data desta posição</label><input type="date" id="atlzDataPosicao" value="${todayISO()}"></div>
+    <div id="atlzListaItens" style="max-height:50vh;overflow-y:auto;margin-top:10px;">
+      ${itens.map(it=>`
+        <div class="field-row" style="align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:10px;">
+          <div style="flex:1.4;min-width:0;">
+            <div style="font-size:12.5px;font-weight:600;">${escapeHTML(it.nome)}</div>
+            <div style="font-size:11px;color:var(--text-soft);">${it.valorAtual!=null ? (it.ehPreco?'Preço atual: '+brl(it.valorAtual):'Valor atual: '+brl(it.valorAtual)) : 'Sem valor registrado ainda'}${it.calculoAutomatico?' · calculado pela taxa contratada':''}</div>
+          </div>
+          <div class="field" style="flex:1;margin:0;">
+            <input type="text" inputmode="decimal" class="atlz-novo-valor" data-tipo="${it.itemTipo}" data-id="${it.id}" data-nome="${escapeHTML(it.nome)}" data-anterior="${it.valorAtual??0}" placeholder="${it.ehPreco?'Novo preço':'Novo valor'}">
+          </div>
+        </div>
+      `).join('') || `<div class="empty">Nenhuma posição pra atualizar — cadastre um ativo primeiro.</div>`}
+    </div>
+    <div class="field"><label>Observação (opcional, vale pra todas as atualizações desta vez)</label><input type="text" id="atlzObservacao" placeholder='Ex: "Extrato da corretora", "Informe mensal"'></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarAtualizacoes">Salvar atualizações</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarAtualizacoes').addEventListener('click', ()=>{
+    const dataPosicao = document.getElementById('atlzDataPosicao').value || todayISO();
+    const observacao = document.getElementById('atlzObservacao').value.trim();
+    const campos = [...document.querySelectorAll('.atlz-novo-valor')].filter(inp=>inp.value.trim()!=='');
+    if(!campos.length){ showToast('Preencha ao menos um novo valor'); return; }
+
+    // Proteção contra erro de digitação (seção 57/99) — só pergunta se alguma variação for grande
+    const variacoesGrandes = campos.map(inp=>{
+      const novo = numBR(inp.value);
+      const anterior = numBR(inp.dataset.anterior);
+      const pct = anterior>0 ? Math.abs((novo-anterior)/anterior*100) : 0;
+      return { nome:inp.dataset.nome, anterior, novo, pct };
+    }).filter(v=>v.pct>=50);
+    if(variacoesGrandes.length){
+      const lista = variacoesGrandes.map(v=>`"${v.nome}": ${brl(v.anterior)} → ${brl(v.novo)} (${v.pct.toFixed(0)}%)`).join('\n');
+      if(!confirm(`Essas atualizações representam uma variação bem grande em relação à posição anterior:\n\n${lista}\n\nConfirma mesmo assim?`)) return;
+    }
+
+    let qtd = 0;
+    campos.forEach(inp=>{
+      const tipo = inp.dataset.tipo, id = inp.dataset.id;
+      const novo = numBR(inp.value);
+      if(isNaN(novo) || novo<0) return;
+      const anterior = numBR(inp.dataset.anterior);
+      if(tipo==='ativo'){
+        const a = state.ativosInvestimento.find(x=>x.id===id);
+        if(!a) return;
+        if(a.tipoAtivo==='interno' || a.manual || a.tipoAtivo==='rendafixa') a.valorAtualManual = novo;
+        else { a.precoAtual = novo; }
+        a.dataUltimaCotacao = new Date().toISOString();
+      } else {
+        const s = state.subcontasInvestimento.find(x=>x.id===id);
+        if(!s) return;
+        s.valorManual = novo;
+        s.dataUltimaAtualizacao = new Date().toISOString();
+      }
+      registrarAtualizacaoManual(tipo, id, inp.dataset.nome, anterior, novo, dataPosicao, observacao);
+      qtd++;
+    });
+    persist(); closeModal(); render();
+    showToast(`${qtd} posição(ões) atualizada(s)`);
+  });
 }
 
 /* --- Integração VK Industrial --- */
@@ -7728,7 +7810,7 @@ function viewInvestimentos(){
       <div><h1>Investimentos</h1><p>Carteira de aplicações — renda fixa e renda variável</p></div>
       <div class="topbar-actions-stack">
         <button class="btn ghost" id="btnImportarNota">📄 Importar nota (PDF)</button>
-        <button class="btn ghost" id="btnAtualizarCotacoes">⟳ Atualizar cotações</button>
+        <button class="btn" id="btnAtualizarPosicoes">🔄 Atualizar posições</button>
         <button class="btn ghost" id="btnExportarInvestimentosPDF">📄 Exportar posição</button>
         <button class="btn ghost" id="btnMetaInvestimento">🎯 Definir meta</button>
       </div>
@@ -7757,7 +7839,7 @@ function viewInvestimentos(){
         ${piores.length ? piores.map(a=>`<div style="display:flex;justify-content:space-between;padding:5px 0;"><span>${escapeHTML(a.nome)}</span><span class="mono" style="color:${a.pct<0?'var(--danger)':'var(--success)'};font-weight:600;">${a.pct>=0?'+':''}${a.pct.toFixed(1)}%</span></div>`).join('') : '<div class="empty">Sem dados suficientes.</div>'}
       </div></div>
     </div>` : ''}
-    ${contasComCotacaoAtrasada.length ? `<div class="note" style="border-color:var(--warn);">⚠️ ${contasComCotacaoAtrasada.map(c=>`${escapeHTML(c.nome)} (${c.qtd} ativo(s))`).join(', ')} com cotação desatualizada há mais de 7 dias — clique em "Atualizar cotações".</div>` : ''}
+    ${contasComCotacaoAtrasada.length ? `<div class="note" style="border-color:var(--warn);">⚠️ ${contasComCotacaoAtrasada.map(c=>`${escapeHTML(c.nome)} (${c.qtd} ativo(s))`).join(', ')} com posição pendente de atualização há mais de 7 dias — clique em "Atualizar posições".</div>` : ''}
     ${notasAntigas.length ? `<div class="note" style="border-color:var(--warn);">⚠️ ${notasAntigas.length} nota(s) de corretagem parada(s) há mais de 15 dias sem revisar — role a lista abaixo pra dar uma olhada.</div>` : ''}
     ${(()=>{ const orfaos = ativosOrfaosInvestimento(); return orfaos.length ? `
     <div class="panel" style="margin-bottom:16px;border-left:3px solid var(--danger);">
@@ -21954,13 +22036,8 @@ function attachViewHandlers(){
       showToast('Subconta órfã excluída');
     });
   });
-  const btnAtualizarCotacoes = document.getElementById('btnAtualizarCotacoes');
-  if(btnAtualizarCotacoes) btnAtualizarCotacoes.addEventListener('click', ()=>{
-    btnAtualizarCotacoes.textContent = 'Atualizando...';
-    btnAtualizarCotacoes.disabled = true;
-    atualizarCotacoes().finally(()=>{});
-  });
   document.getElementById('btnImportarNota')?.addEventListener('click', ()=>openImportarNotaModal());
+  document.getElementById('btnAtualizarPosicoes')?.addEventListener('click', ()=>openCentralAtualizacaoModal());
   document.querySelectorAll('[data-action="revisar-nota"]').forEach(row=>{
     row.addEventListener('click', ()=>openImportarNotaModal(null, row.dataset.id));
   });
