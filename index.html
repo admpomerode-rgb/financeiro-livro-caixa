@@ -963,6 +963,7 @@ function aplicarMigracoes(s){
   if(!s.veiculoServicos) s.veiculoServicos = [];
   if(!s.veiculoLeituras) s.veiculoLeituras = [];
   if(!s.veiculoLembretes) s.veiculoLembretes = [];
+  if(!s.veiculoDocumentos) s.veiculoDocumentos = [];
   if(!s.historicoAtualizacoesInvestimento) s.historicoAtualizacoesInvestimento = [];
   if(!s.capexProjetos) s.capexProjetos = [];
   if(!s.retiradas) s.retiradas = [];
@@ -3341,7 +3342,7 @@ function viewVeiculoDetalhe(veiculoId){
     { id:'geral', nome:'Geral' }, { id:'abastecimento', nome:'Abastecimento' },
     { id:'despesa', nome:'Despesa' }, { id:'receita', nome:'Receita' },
     { id:'servico', nome:'Serviço' }, { id:'historico', nome:'Histórico' },
-    { id:'lembretes', nome:'Lembretes' },
+    { id:'documentos', nome:'Documentos' }, { id:'lembretes', nome:'Lembretes' },
   ];
   return `
     <div class="topbar">
@@ -3355,6 +3356,7 @@ function viewVeiculoDetalhe(veiculoId){
         </div>
       </div>
       ${state.veiculos.length>1 ? `<button class="btn ghost sm" data-action="ir-visao-geral-veiculos" title="Comparar todos os veículos">📊</button>` : ''}
+      <button class="btn ghost sm" id="btnNovoVeiculoTopo" title="Adicionar veículo">+ Veículo</button>
       <button class="btn ghost sm" data-action="editar-veiculo" data-id="${v.id}">✎</button>
     </div>
     <div class="toggle-row" id="veiculoTabsRow" style="overflow-x:auto;flex-wrap:nowrap;width:auto;-webkit-overflow-scrolling:touch;">
@@ -3382,6 +3384,7 @@ function renderVeiculoTabConteudo(v){
   if(veiculoTabAtiva==='receita') return renderVeiculoRegistrosSimples(v,'receita');
   if(veiculoTabAtiva==='servico') return renderVeiculoRegistrosSimples(v,'servico');
   if(veiculoTabAtiva==='historico') return renderVeiculoHistorico(v);
+  if(veiculoTabAtiva==='documentos') return renderVeiculoDocumentos(v);
   if(veiculoTabAtiva==='lembretes') return renderVeiculoLembretes(v);
   return '';
 }
@@ -3475,6 +3478,14 @@ function renderVeiculoGeral(v){
     <div class="dash-section-label">Próximos compromissos</div>
     <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
       ${compromissosPreview.map(c=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span style="font-size:12.5px;">${escapeHTML(c.texto)}</span><span style="font-size:11.5px;font-weight:600;color:${c.faltam<=0?'var(--danger)':'var(--warn)'};">${c.faltam<=0?'venceu':`em ${c.faltam} ${c.unidade}`}</span></div>`).join('')}
+    </div></div>` : ''}
+    ${v.valorAquisicao>0 ? `
+    <div class="dash-section-label">Valor do veículo</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:14px 18px;">
+      <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line);"><span style="font-size:12.5px;">Valor de aquisição</span><span class="mono" style="font-weight:600;">${brl(v.valorAquisicao)}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:6px 0;${v.status==='Vendido'?'border-bottom:1px solid var(--line);':''}"><span style="font-size:12.5px;">Valor atual estimado</span><span class="mono" style="font-weight:600;${!v.valorAtualEstimado?'color:var(--text-soft);font-size:11.5px;':''}">${v.valorAtualEstimado>0?brl(v.valorAtualEstimado):'Valor atual não informado'}</span></div>
+      ${v.valorAtualEstimado>0 ? `<div style="display:flex;justify-content:space-between;padding:6px 0;${v.status==='Vendido'?'border-bottom:1px solid var(--line);':''}"><span style="font-size:12.5px;">Depreciação informada</span><span class="mono" style="font-weight:600;color:var(--danger);">${brl(v.valorAquisicao-v.valorAtualEstimado)}</span></div>` : ''}
+      ${v.status==='Vendido' && v.valorVenda>0 ? `<div style="display:flex;justify-content:space-between;padding:6px 0;"><span style="font-size:12.5px;">Valor de venda${v.dataVenda?' ('+fmtDate(v.dataVenda)+')':''}</span><span class="mono" style="font-weight:600;color:var(--success);">${brl(v.valorVenda)}</span></div>` : ''}
     </div></div>` : ''}
     ${dadosDonut.length ? `<div class="dash-section-label">Onde o veículo está consumindo dinheiro</div><div class="panel"><div class="panel-body" style="padding:14px 18px;">${svgPizza(dadosDonut, true)}</div></div>` : ''}
     ${pontosOdometro.length>1 ? `<div class="dash-section-label">Odômetro</div><div class="panel"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">${svgLinhasMultiplas([{nome:'Km', valores:pontosOdometro.map(p=>p.km)}], pontosOdometro.map(p=>fmtDateCurta(p.data)))}</div></div>` : ''}
@@ -3629,6 +3640,75 @@ function renderVeiculoHistorico(v){
       `).join('')}
     </div></div>
   `;
+}
+
+const TIPOS_DOCUMENTO_VEICULO = ['CRLV','IPVA','Licenciamento','Seguro','Inspeção','Multa','Outro'];
+// Status de vencimento — mesmo critério de "dias até vencer" já usado em Contratos e Ativos
+// Patrimoniais (seguroVigenciaFim), pra manter consistência de terminologia no sistema todo.
+function statusVencimentoDocumento(dataVencimento){
+  if(!dataVencimento) return null;
+  const dias = Math.floor((new Date(dataVencimento)-new Date(todayISO()))/86400000);
+  if(dias<0) return 'vencido';
+  if(dias<=30) return 'vence_em_breve';
+  return 'em_dia';
+}
+function renderVeiculoDocumentos(v){
+  const docs = state.veiculoDocumentos.filter(d=>d.veiculoId===v.id).map(d=>({ ...d, statusVenc: statusVencimentoDocumento(d.vencimento) }))
+    .sort((a,b)=>{
+      const ordem = { vencido:0, vence_em_breve:1, em_dia:2, null:3 };
+      return (ordem[a.statusVenc]??3) - (ordem[b.statusVenc]??3);
+    });
+  const icones = { vencido:'🔴', vence_em_breve:'🟠', em_dia:'🟢' };
+  const rotulos = { vencido:'Vencido', vence_em_breve:'Vence em breve', em_dia:'Em dia' };
+  return `
+    <div class="report-controls"><button class="btn" data-action="novo-documento-veiculo" data-id="${v.id}">+ Adicionar documento</button></div>
+    ${!docs.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum documento registrado ainda.</div></div>` : `
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${docs.map(d=>`
+        <div class="ledger-row compact" data-action="editar-documento-veiculo" data-id="${d.id}" style="cursor:pointer;grid-template-columns:auto 1fr auto;">
+          <span>${d.statusVenc?icones[d.statusVenc]:'📄'}</span>
+          <div class="desc-cell"><div>${escapeHTML(d.tipo)}${d.descricao?' — '+escapeHTML(d.descricao):''}</div><div class="cat">${d.vencimento?'Vence '+fmtDate(d.vencimento):'Sem vencimento'}${d.valor>0?' · '+brl(d.valor):''}</div></div>
+          <span style="font-size:11px;font-weight:600;color:${d.statusVenc==='vencido'?'var(--danger)':d.statusVenc==='vence_em_breve'?'var(--warn)':'var(--success)'};">${d.statusVenc?rotulos[d.statusVenc]:''}</span>
+        </div>
+      `).join('')}
+    </div></div>`}
+  `;
+}
+function openDocumentoVeiculoModal(veiculoId, existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit?'Editar documento':'Novo documento'}</h3>
+    <div class="field"><label>Tipo</label><select id="dvTipo">${TIPOS_DOCUMENTO_VEICULO.map(t=>`<option ${existing?.tipo===t?'selected':''}>${t}</option>`).join('')}</select></div>
+    <div class="field"><label>Descrição (opcional)</label><input type="text" id="dvDescricao" value="${existing?escapeHTML(existing.descricao||''):''}" placeholder="Ex: Apólice 12345, Seguradora X"></div>
+    <div class="field-row">
+      <div class="field"><label>Vencimento (opcional)</label><input type="date" id="dvVencimento" value="${existing?.vencimento||''}"></div>
+      <div class="field"><label>Valor (opcional)</label><input type="text" inputmode="decimal" id="dvValor" value="${existing?.valor||''}" placeholder="0,00"></div>
+    </div>
+    <div class="field"><label>Observação (opcional)</label><textarea id="dvObservacao" style="min-height:50px;">${existing?escapeHTML(existing.observacao||''):''}</textarea></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      ${isEdit ? `<button class="btn ghost" id="btnExcluirDocumentoVeiculo" style="color:var(--danger);">Excluir</button>` : ''}
+      <button class="btn" id="btnSalvarDocumentoVeiculo">${isEdit?'Salvar':'Adicionar'}</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnExcluirDocumentoVeiculo')?.addEventListener('click', ()=>{
+    if(!confirm('Excluir esse documento?')) return;
+    state.veiculoDocumentos = state.veiculoDocumentos.filter(d=>d.id!==existing.id);
+    persist(); closeModal(); render();
+  });
+  document.getElementById('btnSalvarDocumentoVeiculo').addEventListener('click', ()=>{
+    const dados = {
+      tipo: document.getElementById('dvTipo').value, descricao: document.getElementById('dvDescricao').value.trim(),
+      vencimento: document.getElementById('dvVencimento').value || null, valor: numBR(document.getElementById('dvValor').value) || 0,
+      observacao: document.getElementById('dvObservacao').value.trim()
+    };
+    if(isEdit){ Object.assign(existing, dados); }
+    else { state.veiculoDocumentos.push({ id:uid(), veiculoId, ...dados }); }
+    persist(); closeModal(); render();
+    showToast(isEdit?'Documento atualizado':'Documento adicionado');
+  });
 }
 
 function renderVeiculoLembretes(v){
@@ -20409,6 +20489,16 @@ function attachViewHandlers(){
   // algum trecho mais abaixo (de outra tela) lançar um erro, o restante da função para de executar
   // — colocando aqui, o botão flutuante e as abas do veículo continuam funcionando de qualquer jeito.
   document.getElementById('btnNovoVeiculo')?.addEventListener('click', ()=>openVeiculoModal());
+  document.getElementById('btnNovoVeiculoTopo')?.addEventListener('click', ()=>openVeiculoModal());
+  document.querySelectorAll('[data-action="novo-documento-veiculo"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openDocumentoVeiculoModal(btn.dataset.id));
+  });
+  document.querySelectorAll('[data-action="editar-documento-veiculo"]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const doc = state.veiculoDocumentos.find(d=>d.id===el.dataset.id);
+      if(doc) openDocumentoVeiculoModal(doc.veiculoId, doc);
+    });
+  });
   document.getElementById('veiculoSelectAtivo')?.addEventListener('change', (e)=>{
     veiculoSelecionadoId = e.target.value;
     veiculoTabAtiva = 'geral';
@@ -25338,6 +25428,16 @@ function levantarPendencias(){
     else if(dias<=30) pendencias.push({ chave:`seguro-${a.id}`, prioridade:'media', texto:`Seguro de "${a.nome}" vence em ${dias} dia(s)`, view:'ativos', icone:'🛡️' });
   });
 
+  // Documentos de veículos (IPVA, licenciamento, seguro, etc.) vencidos/vencendo
+  state.veiculoDocumentos.filter(d=>d.vencimento).forEach(d=>{
+    const veiculo = state.veiculos.find(v=>v.id===d.veiculoId);
+    if(!veiculo) return;
+    const dias = Math.floor((new Date(d.vencimento)-new Date(hoje))/86400000);
+    const nomeDoc = `${d.tipo}${d.descricao?' — '+d.descricao:''} de "${veiculo.nome}"`;
+    if(dias<0) pendencias.push({ chave:`doc-veiculo-${d.id}`, prioridade:'alta', texto:`${nomeDoc} venceu há ${Math.abs(dias)} dia(s)`, view:'veiculos', icone:'📄' });
+    else if(dias<=30) pendencias.push({ chave:`doc-veiculo-${d.id}`, prioridade:'media', texto:`${nomeDoc} vence em ${dias} dia(s)`, view:'veiculos', icone:'📄' });
+  });
+
   // Projetos de CAPEX atrasados
   state.capexProjetos.filter(p=>p.dataPrevista && p.dataPrevista<hoje && !['Concluído','Cancelado'].includes(p.status)).forEach(p=>{
     pendencias.push({ chave:`capex-${p.id}`, prioridade:'media', texto:`Projeto de CAPEX "${p.nome}" está com execução atrasada`, view:'capex', icone:'🏗️' });
@@ -25863,6 +25963,9 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
 function openVeiculoModal(existing){
   const isEdit = !!existing;
   const modal = document.getElementById('modalContent');
+  const UTILIZACOES = ['Particular','Empresa','Misto','Trabalho','Entrega','Representação','Viagem','Outro'];
+  const COMBUSTIVEIS = ['Gasolina','Etanol','Diesel','Flex','GNV','Elétrico','Híbrido','Outro'];
+  const STATUS_VEICULO = ['Ativo','Em manutenção','Vendido','Inativo'];
   modal.innerHTML = `
     <h3>${isEdit ? 'Editar veículo' : 'Novo veículo'}</h3>
     <div class="field"><label>Apelido</label><input type="text" id="vcNome" value="${existing?escapeHTML(existing.nome):''}" placeholder="Ex: Celta Vermelho"></div>
@@ -25871,10 +25974,48 @@ function openVeiculoModal(existing){
       <div class="field"><label>Modelo</label><input type="text" id="vcModelo" value="${existing?escapeHTML(existing.modelo||''):''}" placeholder="Ex: Celta"></div>
     </div>
     <div class="field-row">
+      <div class="field"><label>Versão (opcional)</label><input type="text" id="vcVersao" value="${existing?escapeHTML(existing.versao||''):''}"></div>
+      <div class="field"><label>Ano (opcional)</label><input type="text" inputmode="numeric" id="vcAno" value="${existing?.ano||''}" placeholder="Ex: 2020"></div>
+      <div class="field"><label>Cor (opcional)</label><input type="text" id="vcCor" value="${existing?escapeHTML(existing.cor||''):''}"></div>
+    </div>
+    <div class="field-row">
       <div class="field"><label>Placa (opcional)</label><input type="text" id="vcPlaca" value="${existing?escapeHTML(existing.placa||''):''}"></div>
       <div class="field"><label>Km inicial/atual</label><input type="text" inputmode="numeric" id="vcKmInicial" value="${existing?existing.kmInicial||'':''}" placeholder="Ex: 53326"></div>
     </div>
+    <div class="field-row">
+      <div class="field"><label>RENAVAM (opcional)</label><input type="text" id="vcRenavam" value="${existing?escapeHTML(existing.renavam||''):''}"></div>
+      <div class="field"><label>Chassi (opcional)</label><input type="text" id="vcChassi" value="${existing?escapeHTML(existing.chassi||''):''}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Utilização</label><select id="vcUtilizacao"><option value="">Não informado</option>${UTILIZACOES.map(u=>`<option ${existing?.utilizacao===u?'selected':''}>${u}</option>`).join('')}</select></div>
+      <div class="field"><label>Combustível</label><select id="vcCombustivel"><option value="">Não informado</option>${COMBUSTIVEIS.map(c=>`<option ${existing?.combustivel===c?'selected':''}>${c}</option>`).join('')}</select></div>
+    </div>
+    <div class="field"><label>Status</label><select id="vcStatus">${STATUS_VEICULO.map(s=>`<option ${(existing?existing.status===s:s==='Ativo')?'selected':''}>${s}</option>`).join('')}</select></div>
+    <div id="vcVendaWrap" style="display:${existing?.status==='Vendido'?'block':'none'};">
+      <div class="dash-section-label" style="margin-top:4px;">Dados da venda</div>
+      <div class="field-row">
+        <div class="field"><label>Data da venda</label><input type="date" id="vcDataVenda" value="${existing?.dataVenda||''}"></div>
+        <div class="field"><label>Valor de venda</label><input type="text" inputmode="decimal" id="vcValorVenda" value="${existing?.valorVenda||''}" placeholder="0,00"></div>
+      </div>
+      <div class="field"><label>Comprador (opcional)</label><input type="text" id="vcComprador" value="${existing?escapeHTML(existing.comprador||''):''}"></div>
+    </div>
     <div class="field"><label>Capacidade do tanque em litros (opcional — usado só pra estimar autonomia)</label><input type="text" inputmode="decimal" id="vcCapacidadeTanque" value="${existing?existing.capacidadeTanque||'':''}" placeholder="Ex: 50"></div>
+    <div class="dash-section-label" style="margin-top:4px;">Informações financeiras (opcional)</div>
+    <div class="field-row">
+      <div class="field"><label>Valor de aquisição</label><input type="text" inputmode="decimal" id="vcValorAquisicao" value="${existing?.valorAquisicao||''}" placeholder="0,00"></div>
+      <div class="field"><label>Data de aquisição</label><input type="date" id="vcDataAquisicao" value="${existing?.dataAquisicao||''}"></div>
+    </div>
+    <div class="field"><label>Valor atual estimado</label><input type="text" inputmode="decimal" id="vcValorAtual" value="${existing?.valorAtualEstimado||''}" placeholder="0,00"></div>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin:6px 0;">
+      <input type="checkbox" id="vcFinanciado" style="width:17px;height:17px;" ${existing?.financiado?'checked':''}>
+      Financiado
+    </label>
+    <div class="field-row" id="vcFinanciadoWrap" style="display:${existing?.financiado?'flex':'none'};">
+      <div class="field"><label>Valor financiado</label><input type="text" inputmode="decimal" id="vcValorFinanciado" value="${existing?.valorFinanciado||''}" placeholder="0,00"></div>
+      <div class="field"><label>Parcela</label><input type="text" inputmode="decimal" id="vcParcelaFinanciamento" value="${existing?.parcelaFinanciamento||''}" placeholder="0,00"></div>
+      <div class="field"><label>Qtd. parcelas</label><input type="text" inputmode="numeric" id="vcQtdParcelasFinanciamento" value="${existing?.qtdParcelasFinanciamento||''}"></div>
+    </div>
+    <div class="field"><label>Seguro anual (opcional)</label><input type="text" inputmode="decimal" id="vcSeguroAnual" value="${existing?.seguroAnual||''}" placeholder="0,00"></div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       ${isEdit ? `<button class="btn ghost" id="btnExcluirVeiculo" style="color:var(--danger);">Excluir</button>` : ''}
@@ -25882,6 +26023,12 @@ function openVeiculoModal(existing){
     </div>`;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('vcFinanciado').addEventListener('change', (e)=>{
+    document.getElementById('vcFinanciadoWrap').style.display = e.target.checked?'flex':'none';
+  });
+  document.getElementById('vcStatus').addEventListener('change', (e)=>{
+    document.getElementById('vcVendaWrap').style.display = e.target.value==='Vendido'?'block':'none';
+  });
   document.getElementById('btnExcluirVeiculo')?.addEventListener('click', ()=>{
     if(!confirm(`Excluir "${existing.nome}"? Os abastecimentos/despesas/receitas/serviços já registrados continuam no histórico financeiro, só deixam de aparecer agrupados nesse veículo.`)) return;
     state.veiculos = state.veiculos.filter(v=>v.id!==existing.id);
@@ -25894,9 +26041,28 @@ function openVeiculoModal(existing){
     const dados = {
       nome, marca: document.getElementById('vcMarca').value.trim(),
       modelo: document.getElementById('vcModelo').value.trim(),
+      versao: document.getElementById('vcVersao').value.trim(),
+      ano: numBR(document.getElementById('vcAno').value) || null,
+      cor: document.getElementById('vcCor').value.trim(),
       placa: document.getElementById('vcPlaca').value.trim(),
       kmInicial: numBR(document.getElementById('vcKmInicial').value) || 0,
+      renavam: document.getElementById('vcRenavam').value.trim(),
+      chassi: document.getElementById('vcChassi').value.trim(),
+      utilizacao: document.getElementById('vcUtilizacao').value,
+      combustivel: document.getElementById('vcCombustivel').value,
+      status: document.getElementById('vcStatus').value,
       capacidadeTanque: numBR(document.getElementById('vcCapacidadeTanque').value) || null,
+      valorAquisicao: numBR(document.getElementById('vcValorAquisicao').value) || null,
+      dataAquisicao: document.getElementById('vcDataAquisicao').value || null,
+      valorAtualEstimado: numBR(document.getElementById('vcValorAtual').value) || null,
+      financiado: document.getElementById('vcFinanciado').checked,
+      valorFinanciado: numBR(document.getElementById('vcValorFinanciado').value) || null,
+      parcelaFinanciamento: numBR(document.getElementById('vcParcelaFinanciamento').value) || null,
+      qtdParcelasFinanciamento: numBR(document.getElementById('vcQtdParcelasFinanciamento').value) || null,
+      seguroAnual: numBR(document.getElementById('vcSeguroAnual').value) || null,
+      dataVenda: document.getElementById('vcStatus').value==='Vendido' ? (document.getElementById('vcDataVenda').value||null) : null,
+      valorVenda: document.getElementById('vcStatus').value==='Vendido' ? (numBR(document.getElementById('vcValorVenda').value)||null) : null,
+      comprador: document.getElementById('vcStatus').value==='Vendido' ? document.getElementById('vcComprador').value.trim() : '',
     };
     if(isEdit){ Object.assign(existing, dados); }
     else { const id = uid(); state.veiculos.push({ id, ...dados }); veiculoSelecionadoId = id; }
