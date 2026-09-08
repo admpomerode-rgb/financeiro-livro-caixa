@@ -967,6 +967,10 @@ function aplicarMigracoes(s){
   if(!s.capexProjetos) s.capexProjetos = [];
   if(!s.retiradas) s.retiradas = [];
   if(!s.projetosFinanceiros) s.projetosFinanceiros = [];
+  if(!s.pendenciasDispensadas) s.pendenciasDispensadas = [];
+  if(!s.notasDiarias) s.notasDiarias = {};
+  if(!s.checklistFimExpediente) s.checklistFimExpediente = {};
+  if(!s.dashboardWidgetsOcultos) s.dashboardWidgetsOcultos = [];
   if(!s.cofresVirtuais) s.cofresVirtuais = [
     { nome:'Operacional', pct:50 }, { nome:'Impostos', pct:15 }, { nome:'Emergência', pct:15 },
     { nome:'Investimentos', pct:10 }, { nome:'Distribuição aos Sócios', pct:10 },
@@ -4468,6 +4472,182 @@ function painelHojeHTML(){
 }
 
 // Card de Qualidade dos Dados — 1 número, linka pros relatórios que já detalham o problema
+// "3 coisas mais importantes hoje" — puxa direto da Central de Pendências, já ordenada por
+// prioridade. Não é decoração: cada item leva direto pro módulo, e dá pra dispensar quem já resolveu.
+function top3PendenciasHTML(){
+  const pendencias = levantarPendencias().slice(0,3);
+  if(!pendencias.length) return `
+    <div class="dash-section-label">O que precisa da sua atenção</div>
+    <div class="panel" style="margin-bottom:12px;"><div class="panel-body" style="padding:16px 18px;text-align:center;color:var(--success);font-weight:600;font-size:13px;">✓ Nada pendente agora</div></div>`;
+  const corPrioridade = { critica:'var(--danger)', alta:'var(--warn)', media:'var(--blue-accent)', baixa:'var(--text-soft)' };
+  return `
+    <div class="dash-section-label" style="display:flex;justify-content:space-between;align-items:center;">
+      <span>O que precisa da sua atenção</span>
+      <span style="font-size:11px;color:var(--blue-accent);cursor:pointer;" data-goto="pendencias">Ver todas ›</span>
+    </div>
+    <div class="panel" style="margin-bottom:12px;"><div class="panel-body" style="padding:0;">
+      ${pendencias.map(item=>`
+        <div class="ledger-row compact" style="grid-template-columns:4px auto 1fr auto;">
+          <span style="background:${corPrioridade[item.prioridade]};align-self:stretch;border-radius:2px;"></span>
+          <span data-goto="${item.view}" style="cursor:pointer;">${item.icone}</span>
+          <span data-goto="${item.view}" style="cursor:pointer;font-size:12.5px;">${escapeHTML(item.texto)}</span>
+          <button class="icon-btn" data-action="dispensar-pendencia" data-chave="${escapeHTML(item.chave)}" title="Já resolvi">✕</button>
+        </div>
+      `).join('')}
+    </div></div>`;
+}
+
+// Semáforo por área — verde/amarelo/vermelho num relance, cada um clicável. Reaproveita cálculos
+// já existentes (projeção de saldo, orçamento por categoria) em vez de inventar um segundo critério.
+function semaforoAreasHTML(){
+  const hoje = todayISO();
+  const saldoBaixo = projecaoSaldoBaixo(30);
+  const corCaixa = saldoBaixo.ficaNegativo ? 'critico' : (saldoBaixo.saldoAtual>0 && saldoBaixo.minSaldo < saldoBaixo.saldoAtual*0.2) ? 'atencao' : 'ok';
+
+  const pagarAtrasadas = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento<hoje).length;
+  const pagarVencendoEm7 = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento>=hoje && l.dataVencimento<=addDiasISO(hoje,7)).length;
+  const corPagar = pagarAtrasadas>0 ? 'critico' : pagarVencendoEm7>0 ? 'atencao' : 'ok';
+
+  const investPendentes = itensAtualizaveisInvestimento().map(it=>statusAtualizacaoItem(it.dataUltimaAtualizacao, it.periodicidade)).filter(s=>s==='pendente').length;
+  const corInvest = investPendentes>=3 ? 'atencao' : investPendentes>0 ? 'atencao' : 'ok';
+
+  const orc = state.orcamentoCategorias||{};
+  const alertaPct = state.orcamentoAlertaPct||{};
+  const mesRef = mesGlobalRef;
+  let orcamentoEstourado = 0, orcamentoAlertando = 0;
+  Object.keys(orc).forEach(cat=>{
+    if(!(orc[cat]>0)) return;
+    const realizado = totalCategoriaTipoNoPeriodo(cat, 'saida', `${mesRef}-01`, hoje);
+    const pct = realizado/orc[cat]*100;
+    if(pct>=100) orcamentoEstourado++;
+    else if(pct>=(alertaPct[cat]||80)) orcamentoAlertando++;
+  });
+  const corOrcamento = orcamentoEstourado>0 ? 'critico' : orcamentoAlertando>0 ? 'atencao' : (Object.keys(orc).length ? 'ok' : null);
+
+  const cores = { ok:'var(--success)', atencao:'var(--warn)', critico:'var(--danger)' };
+  const areas = [
+    { nome:'Caixa', status:corCaixa, relatorio:'previsao', detalhe: corCaixa==='critico'?'Vai ficar negativo':corCaixa==='atencao'?'Fica apertado em breve':'Sob controle' },
+    { nome:'Contas a Pagar', status:corPagar, view:'pagar', detalhe: pagarAtrasadas>0?`${pagarAtrasadas} atrasada(s)`:pagarVencendoEm7>0?`${pagarVencendoEm7} vencendo em 7 dias`:'Em dia' },
+    { nome:'Investimentos', status:corInvest, view:'investimentos', detalhe: investPendentes>0?`${investPendentes} desatualizado(s)`:'Atualizados' },
+    { nome:'Orçamento', status:corOrcamento||'ok', view:'orcamento', detalhe: orcamentoEstourado>0?`${orcamentoEstourado} categoria(s) estourada(s)`:orcamentoAlertando>0?`${orcamentoAlertando} perto do limite`:Object.keys(orc).length?'Dentro do planejado':'Sem orçamento definido' },
+  ];
+  return `
+    <div class="dash-section-label">Semáforo por área</div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:12px;">
+      ${areas.map(a=>`
+        <div class="panel" ${a.relatorio?`data-ir-relatorio="${a.relatorio}"`:`data-goto="${a.view}"`} style="cursor:pointer;">
+          <div class="panel-body" style="padding:12px 14px;">
+            <div style="display:flex;align-items:center;gap:6px;"><span style="width:9px;height:9px;border-radius:50%;background:${cores[a.status]};flex-shrink:0;"></span><span style="font-size:12px;font-weight:600;">${a.nome}</span></div>
+            <div style="font-size:10.5px;color:var(--text-soft);margin-top:4px;">${a.detalhe}</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>`;
+}
+
+// "Posso gastar hoje?" — resposta direta, reaproveitando o mesmo cálculo de caixa livre já usado
+// na Central de Retiradas e na Central de Decisão (não cria um segundo critério).
+function possoGastarHojeHTML(){
+  const caixaLivre = calcularCaixaLivreAssistente();
+  return `
+    <div class="panel" style="margin-bottom:12px;">
+      <div class="panel-body" style="padding:14px 18px;">
+        <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">💬 Posso gastar quanto hoje?</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="text" inputmode="decimal" id="possoGastarValor" placeholder="Digite um valor..." style="flex:1;border:1px solid var(--line);border-radius:7px;padding:8px 10px;font-size:13px;">
+          <button class="btn sm" id="btnPossoGastarChecar">Checar</button>
+        </div>
+        <div id="possoGastarResposta" style="margin-top:8px;font-size:12px;color:var(--text-soft);">Disponível pra decisão hoje: <strong class="mono" style="color:var(--ink);">${brl(caixaLivre)}</strong></div>
+      </div>
+    </div>`;
+}
+
+// Preview dos próximos 7 dias — não é o calendário inteiro, só o essencial pra já ir se planejando.
+function preview7DiasHTML(){
+  const hoje = todayISO();
+  const em7 = addDiasISO(hoje,7);
+  const eventos = state.lancamentos.filter(l=>l.origem!=='transferencia' && l.status==='pendente' && l.dataVencimento>hoje && l.dataVencimento<=em7);
+  if(!eventos.length) return '';
+  const porDia = {};
+  eventos.forEach(l=>{ if(!porDia[l.dataVencimento]) porDia[l.dataVencimento]={entrada:0,saida:0}; porDia[l.dataVencimento][l.tipo==='entrada'?'entrada':'saida'] += valorEmAberto(l); });
+  const dias = Object.keys(porDia).sort();
+  return `
+    <div class="dash-section-label">Próximos 7 dias</div>
+    <div class="panel" style="margin-bottom:12px;"><div class="panel-body" style="padding:0;">
+      ${dias.map(d=>`
+        <div class="ledger-row compact" data-ir-relatorio="calendario_financeiro" style="cursor:pointer;grid-template-columns:auto 1fr auto;">
+          <span class="mono" style="font-size:11px;color:var(--text-soft);">${fmtDateCurta(d)}</span>
+          <span style="font-size:12px;">${new Date(d).toLocaleDateString('pt-BR',{weekday:'short'})}</span>
+          <span style="font-size:11.5px;">${porDia[d].saida>0?`<span class="mono" style="color:var(--danger);">-${brl(porDia[d].saida)}</span>`:''}${porDia[d].entrada>0?` <span class="mono" style="color:var(--success);">+${brl(porDia[d].entrada)}</span>`:''}</span>
+        </div>
+      `).join('')}
+    </div></div>`;
+}
+
+// Nota rápida do dia — texto livre por data, pra registrar contexto ("hoje decidimos segurar a
+// compra da máquina") e conseguir olhar pra trás depois.
+function notaDiariaHTML(){
+  const hoje = todayISO();
+  const nota = state.notasDiarias[hoje] || '';
+  return `
+    <div class="panel" style="margin-bottom:12px;">
+      <div class="panel-body" style="padding:14px 18px;">
+        <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">📝 Nota do dia</div>
+        <textarea id="notaDiariaInput" placeholder="Algo importante pra lembrar sobre hoje..." style="width:100%;min-height:50px;border:1px solid var(--line);border-radius:7px;padding:8px 10px;font-size:12.5px;">${escapeHTML(nota)}</textarea>
+      </div>
+    </div>`;
+}
+
+// Resumo do dia em texto pronto pra copiar/mandar pro contador ou sócio — não é mais um painel
+// pra olhar, é algo que sai do sistema e vira mensagem de verdade.
+function montarResumoDiaTexto(){
+  const hoje = todayISO();
+  const t = totaisPorMesRef(hoje.slice(0,7));
+  const pend = pendentesResumo();
+  const entraHoje = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento===hoje).reduce((s,l)=>s+l.valor,0);
+  const saiHoje = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento===hoje).reduce((s,l)=>s+l.valor,0);
+  const venceHojeQtd = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento===hoje).length;
+  const pendCriticas = levantarPendencias().filter(p=>p.prioridade==='critica').length;
+  const linhas = [
+    `Resumo do dia — ${fmtDate(hoje)}`,
+    ``,
+    `Caixa: ${brl(t.saldoAtual)}`,
+    `Entrou hoje: ${brl(entraHoje)} · Saiu hoje: ${brl(saiHoje)}`,
+    `Contas a pagar em aberto: ${brl(pend.aPagar)} · A receber: ${brl(pend.aReceber)}`,
+    `Vencendo hoje: ${venceHojeQtd} conta(s)`,
+    pendCriticas>0 ? `⚠️ ${pendCriticas} pendência(s) crítica(s) precisando de atenção` : `✓ Nenhuma pendência crítica`,
+  ];
+  return linhas.join('\n');
+}
+function resumoDiaCopiarHTML(){
+  return `
+    <div class="panel" style="margin-bottom:12px;cursor:pointer;" id="btnCopiarResumoDia">
+      <div class="panel-body" style="padding:12px 18px;display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:12.5px;font-weight:600;">📋 Resumo do dia (copiar e mandar)</span>
+        <span style="color:var(--blue-accent);font-size:12px;font-weight:600;">Copiar ›</span>
+      </div>
+    </div>`;
+}
+
+// Checklist de fim de expediente — itens fixos, marcados por dia (reinicia amanhã).
+const CHECKLIST_FIM_EXPEDIENTE_ITENS = ['Conferir bancos', 'Conferir cartões', 'Conferir contas a pagar', 'Conferir contas a receber', 'Tudo lançado do dia'];
+function checklistFimExpedienteHTML(){
+  const hoje = todayISO();
+  const marcados = state.checklistFimExpediente[hoje] || [];
+  const feitos = CHECKLIST_FIM_EXPEDIENTE_ITENS.filter(i=>marcados.includes(i)).length;
+  return `
+    <div class="dash-section-label">Checklist de fim de expediente</div>
+    <div class="panel" style="margin-bottom:12px;"><div class="panel-body" style="padding:12px 18px;">
+      ${CHECKLIST_FIM_EXPEDIENTE_ITENS.map(item=>`
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:12.5px;cursor:pointer;">
+          <input type="checkbox" class="checklist-fim-item" data-item="${escapeHTML(item)}" ${marcados.includes(item)?'checked':''} style="width:17px;height:17px;">
+          <span style="${marcados.includes(item)?'text-decoration:line-through;color:var(--text-soft);':''}">${escapeHTML(item)}</span>
+        </label>
+      `).join('')}
+      <div style="font-size:10.5px;color:var(--text-soft);margin-top:6px;">${feitos} de ${CHECKLIST_FIM_EXPEDIENTE_ITENS.length} concluído(s) hoje</div>
+    </div></div>`;
+}
+
 function cardQualidadeDadosHTML(){
   const semCategoria = state.lancamentos.filter(l=>!l.categoria && l.origem!=='transferencia').length;
   const totalLancamentos = state.lancamentos.filter(l=>l.origem!=='transferencia').length;
@@ -4647,6 +4827,13 @@ function viewDashboard(){
     </div>
 
     ${painelHojeHTML()}
+    ${top3PendenciasHTML()}
+    ${semaforoAreasHTML()}
+    ${modoSimples ? '' : possoGastarHojeHTML()}
+    ${modoSimples ? '' : preview7DiasHTML()}
+    ${modoSimples ? '' : notaDiariaHTML()}
+    ${modoSimples ? '' : resumoDiaCopiarHTML()}
+    ${modoSimples ? '' : checklistFimExpedienteHTML()}
     ${ponteCaixaHTML(t)}
     ${cardQualidadeDadosHTML()}
 
@@ -20068,6 +20255,58 @@ function attachViewHandlers(){
   document.querySelectorAll('[data-action="editar-projeto-financeiro"]').forEach(el=>{
     el.addEventListener('click', ()=>openProjetoFinanceiroModal(state.projetosFinanceiros.find(p=>p.id===el.dataset.id)));
   });
+  document.querySelectorAll('[data-action="dispensar-pendencia"]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      if(!state.pendenciasDispensadas) state.pendenciasDispensadas = [];
+      state.pendenciasDispensadas.push(btn.dataset.chave);
+      persist(); render();
+    });
+  });
+  document.querySelectorAll('[data-action="pendencia-quitar-rapido"]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      abrirQuitarModal(btn.dataset.id);
+    });
+  });
+  document.getElementById('btnPossoGastarChecar')?.addEventListener('click', ()=>{
+    const valor = numBR(document.getElementById('possoGastarValor').value);
+    const resp = document.getElementById('possoGastarResposta');
+    if(isNaN(valor) || valor<=0){ resp.innerHTML = 'Digite um valor válido.'; return; }
+    const caixaLivre = calcularCaixaLivreAssistente();
+    const sobra = caixaLivre - valor;
+    const pctImpacto = caixaLivre>0 ? (valor/caixaLivre*100) : 100;
+    const ok = sobra>=0 && pctImpacto<=70;
+    resp.innerHTML = `${ok?'<span style="color:var(--success);font-weight:600;">🟢 Sim, dá</span>':'<span style="color:var(--danger);font-weight:600;">🔴 Cuidado</span>'} — representa ${pctImpacto.toFixed(0)}% do disponível (${brl(caixaLivre)}). Sobraria ${brl(sobra)}${sobra<0?' (ficaria negativo)':''}.`;
+  });
+  document.getElementById('notaDiariaInput')?.addEventListener('change', (e)=>{
+    if(!state.notasDiarias) state.notasDiarias = {};
+    const hoje = todayISO();
+    if(e.target.value.trim()) state.notasDiarias[hoje] = e.target.value;
+    else delete state.notasDiarias[hoje];
+    persist();
+  });
+  document.getElementById('btnCopiarResumoDia')?.addEventListener('click', ()=>{
+    const texto = montarResumoDiaTexto();
+    if(navigator.clipboard){
+      navigator.clipboard.writeText(texto).then(()=>showToast('Resumo copiado — cole onde quiser')).catch(()=>{
+        const modal = document.getElementById('modalContent');
+        modal.innerHTML = `<h3>Resumo do dia</h3><textarea style="width:100%;min-height:180px;font-size:12.5px;">${escapeHTML(texto)}</textarea><div class="modal-actions"><button class="btn ghost" id="btnCancelarModal">Fechar</button></div>`;
+        document.getElementById('modalOverlay').classList.add('open');
+        document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+      });
+    }
+  });
+  document.querySelectorAll('.checklist-fim-item').forEach(chk=>{
+    chk.addEventListener('change', ()=>{
+      const hoje = todayISO();
+      if(!state.checklistFimExpediente[hoje]) state.checklistFimExpediente[hoje] = [];
+      const item = chk.dataset.item;
+      if(chk.checked){ if(!state.checklistFimExpediente[hoje].includes(item)) state.checklistFimExpediente[hoje].push(item); }
+      else { state.checklistFimExpediente[hoje] = state.checklistFimExpediente[hoje].filter(i=>i!==item); }
+      persist(); render();
+    });
+  });
   // Wiring do módulo "Meus Carros" fica logo no início de propósito: essa função é gigante e, se
   // algum trecho mais abaixo (de outra tela) lançar um erro, o restante da função para de executar
   // — colocando aqui, o botão flutuante e as abas do veículo continuam funcionando de qualquer jeito.
@@ -24698,48 +24937,48 @@ function levantarPendencias(){
 
   // Contas a pagar vencidas
   const pagarVencidas = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento<hoje);
-  pagarVencidas.forEach(l=>pendencias.push({ prioridade:'critica', texto:`Conta vencida: "${l.descricao}" — ${brl(valorEmAberto(l))}, venceu ${fmtDate(l.dataVencimento)}`, view:'pagar', icone:'💸' }));
+  pagarVencidas.forEach(l=>pendencias.push({ chave:`pagar-${l.id}`, prioridade:'critica', texto:`Conta vencida: "${l.descricao}" — ${brl(valorEmAberto(l))}, venceu ${fmtDate(l.dataVencimento)}`, view:'pagar', icone:'💸', acaoRapida:{ tipo:'quitar', id:l.id } }));
 
   // Contas a receber atrasadas
   const receberAtrasadas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento<hoje);
-  if(receberAtrasadas.length) pendencias.push({ prioridade:'critica', texto:`${receberAtrasadas.length} recebimento(s) atrasado(s), total ${brl(receberAtrasadas.reduce((s,l)=>s+valorEmAberto(l),0))}`, view:'receber', icone:'📥' });
+  if(receberAtrasadas.length) pendencias.push({ chave:'receber-atrasadas', prioridade:'critica', texto:`${receberAtrasadas.length} recebimento(s) atrasado(s), total ${brl(receberAtrasadas.reduce((s,l)=>s+valorEmAberto(l),0))}`, view:'receber', icone:'📥' });
 
   // Aprovações VK Industrial
-  if((state.vkAprovacoes||[]).length) pendencias.push({ prioridade:'alta', texto:`${state.vkAprovacoes.length} item(ns) aguardando aprovação da integração VK Industrial`, view:'vk-aprovacoes', icone:'📋' });
+  if((state.vkAprovacoes||[]).length) pendencias.push({ chave:'vk-aprovacoes', prioridade:'alta', texto:`${state.vkAprovacoes.length} item(ns) aguardando aprovação da integração VK Industrial`, view:'vk-aprovacoes', icone:'📋' });
 
   // Faturas de cartão importadas aguardando revisão
-  if((state.faturasPendentes||[]).length) pendencias.push({ prioridade:'alta', texto:`${state.faturasPendentes.length} fatura(s) de cartão aguardando revisão`, view:'cartoes', icone:'💳' });
+  if((state.faturasPendentes||[]).length) pendencias.push({ chave:'faturas-pendentes', prioridade:'alta', texto:`${state.faturasPendentes.length} fatura(s) de cartão aguardando revisão`, view:'cartoes', icone:'💳' });
 
   // Compras pendentes de cadastro em Ativos Patrimoniais
-  if((state.comprasProcessosPendentes||[]).length) pendencias.push({ prioridade:'media', texto:`${state.comprasProcessosPendentes.length} compra(s) pendente(s) de cadastro em Ativos Patrimoniais`, view:'ativos', icone:'📦' });
+  if((state.comprasProcessosPendentes||[]).length) pendencias.push({ chave:'compras-processos-pendentes', prioridade:'media', texto:`${state.comprasProcessosPendentes.length} compra(s) pendente(s) de cadastro em Ativos Patrimoniais`, view:'ativos', icone:'📦' });
 
   // Orçamentos de processo aguardando decisão
   const orcPendentes = (state.orcamentosProcessos||[]).filter(o=>o.status==='pendente');
-  if(orcPendentes.length) pendencias.push({ prioridade:'media', texto:`${orcPendentes.length} orçamento(s) aguardando decisão (Orçamentos e Compras)`, view:'orcamentos-processos', icone:'📋' });
+  if(orcPendentes.length) pendencias.push({ chave:'orcamentos-pendentes', prioridade:'media', texto:`${orcPendentes.length} orçamento(s) aguardando decisão (Orçamentos e Compras)`, view:'orcamentos-processos', icone:'📋' });
 
   // Investimentos com posição pendente de atualização
   const investPendentes = itensAtualizaveisInvestimento().map(it=>({ ...it, status: statusAtualizacaoItem(it.dataUltimaAtualizacao, it.periodicidade) })).filter(it=>it.status==='pendente');
-  if(investPendentes.length) pendencias.push({ prioridade:'media', texto:`${investPendentes.length} posição(ões) de investimento com atualização pendente`, view:'investimentos', icone:'📈' });
+  if(investPendentes.length) pendencias.push({ chave:'investimentos-pendentes', prioridade:'media', texto:`${investPendentes.length} posição(ões) de investimento com atualização pendente`, view:'investimentos', icone:'📈' });
 
   // Contratos vencidos/vencendo
   (state.contratos||[]).forEach(c=>{
     if(!c.dataVencimento) return;
     const dias = Math.floor((new Date(c.dataVencimento)-new Date(hoje))/86400000);
-    if(dias<0) pendencias.push({ prioridade:'critica', texto:`Contrato "${c.nome}" venceu há ${Math.abs(dias)} dia(s)`, view:'contratos', icone:'📄' });
-    else if(dias<=7) pendencias.push({ prioridade:'alta', texto:`Contrato "${c.nome}" vence em ${dias} dia(s)`, view:'contratos', icone:'📄' });
-    else if(dias<=30) pendencias.push({ prioridade:'media', texto:`Contrato "${c.nome}" vence em ${dias} dia(s)`, view:'contratos', icone:'📄' });
+    if(dias<0) pendencias.push({ chave:`contrato-${c.id}`, prioridade:'critica', texto:`Contrato "${c.nome}" venceu há ${Math.abs(dias)} dia(s)`, view:'contratos', icone:'📄' });
+    else if(dias<=7) pendencias.push({ chave:`contrato-${c.id}`, prioridade:'alta', texto:`Contrato "${c.nome}" vence em ${dias} dia(s)`, view:'contratos', icone:'📄' });
+    else if(dias<=30) pendencias.push({ chave:`contrato-${c.id}`, prioridade:'media', texto:`Contrato "${c.nome}" vence em ${dias} dia(s)`, view:'contratos', icone:'📄' });
   });
 
   // Seguro de ativo patrimonial vencido/vencendo
   state.ativosPatrimoniais.filter(a=>!a.baixa && a.seguroVigenciaFim).forEach(a=>{
     const dias = Math.floor((new Date(a.seguroVigenciaFim)-new Date(hoje))/86400000);
-    if(dias<0) pendencias.push({ prioridade:'alta', texto:`Seguro de "${a.nome}" venceu há ${Math.abs(dias)} dia(s)`, view:'ativos', icone:'🛡️' });
-    else if(dias<=30) pendencias.push({ prioridade:'media', texto:`Seguro de "${a.nome}" vence em ${dias} dia(s)`, view:'ativos', icone:'🛡️' });
+    if(dias<0) pendencias.push({ chave:`seguro-${a.id}`, prioridade:'alta', texto:`Seguro de "${a.nome}" venceu há ${Math.abs(dias)} dia(s)`, view:'ativos', icone:'🛡️' });
+    else if(dias<=30) pendencias.push({ chave:`seguro-${a.id}`, prioridade:'media', texto:`Seguro de "${a.nome}" vence em ${dias} dia(s)`, view:'ativos', icone:'🛡️' });
   });
 
   // Projetos de CAPEX atrasados
   state.capexProjetos.filter(p=>p.dataPrevista && p.dataPrevista<hoje && !['Concluído','Cancelado'].includes(p.status)).forEach(p=>{
-    pendencias.push({ prioridade:'media', texto:`Projeto de CAPEX "${p.nome}" está com execução atrasada`, view:'capex', icone:'🏗️' });
+    pendencias.push({ chave:`capex-${p.id}`, prioridade:'media', texto:`Projeto de CAPEX "${p.nome}" está com execução atrasada`, view:'capex', icone:'🏗️' });
   });
 
   // Faturas de cartão vencidas e não pagas
@@ -24747,12 +24986,13 @@ function levantarPendencias(){
     const comp = competenciaAtual(c);
     if(faturaStatus(c.id, comp)==='fechada'){
       const venc = dataVencimentoFatura(c, comp);
-      if(venc<hoje) pendencias.push({ prioridade:'critica', texto:`Fatura do cartão "${c.nome}" venceu e ainda não foi paga`, view:'cartoes', icone:'💳' });
+      if(venc<hoje) pendencias.push({ chave:`fatura-cartao-${c.id}-${comp}`, prioridade:'critica', texto:`Fatura do cartão "${c.nome}" venceu e ainda não foi paga`, view:'cartoes', icone:'💳' });
     }
   });
 
+  const dispensadas = new Set(state.pendenciasDispensadas||[]);
   const ordemPrioridade = { critica:0, alta:1, media:2, baixa:3 };
-  return pendencias.sort((a,b)=>ordemPrioridade[a.prioridade]-ordemPrioridade[b.prioridade]);
+  return pendencias.filter(p=>!dispensadas.has(p.chave)).sort((a,b)=>ordemPrioridade[a.prioridade]-ordemPrioridade[b.prioridade]);
 }
 
 function viewCentralPendencias(){
@@ -24775,10 +25015,11 @@ function viewCentralPendencias(){
       <div class="dash-section-label">${rotuloPrioridade[p]}</div>
       <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
         ${grupos[p].map(item=>`
-          <div class="ledger-row compact" data-goto="${item.view}" style="cursor:pointer;grid-template-columns:auto 1fr auto;">
-            <span>${item.icone}</span>
-            <span style="font-size:12.5px;">${escapeHTML(item.texto)}</span>
-            <span style="color:var(--blue-accent);font-size:16px;">›</span>
+          <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto auto;">
+            <span data-goto="${item.view}" style="cursor:pointer;">${item.icone}</span>
+            <span data-goto="${item.view}" style="cursor:pointer;font-size:12.5px;">${escapeHTML(item.texto)}</span>
+            ${item.acaoRapida?.tipo==='quitar' ? `<button class="btn ghost sm" data-action="pendencia-quitar-rapido" data-id="${item.acaoRapida.id}">💸 Pagar</button>` : ''}
+            <button class="icon-btn" data-action="dispensar-pendencia" data-chave="${escapeHTML(item.chave)}" title="Já resolvi / dispensar">✕</button>
           </div>
         `).join('')}
       </div></div>
@@ -26901,6 +27142,11 @@ function openEscolherContaInvestirModal(){
   });
 }
 
+function addDiasISO(isoDate, dias){
+  const d = new Date(isoDate);
+  d.setDate(d.getDate()+dias);
+  return d.toISOString().slice(0,10);
+}
 function addDiasUteis(isoDate, dias){
   const d = new Date((isoDate||todayISO())+'T12:00:00');
   let n = 0;
