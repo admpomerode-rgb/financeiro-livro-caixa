@@ -1552,6 +1552,8 @@ function render(){
   else if(currentView==='veiculos') main.innerHTML = viewVeiculos();
   else if(currentView==='veiculos-visao-geral') main.innerHTML = viewVeiculosVisaoGeral();
   else if(currentView==='capex') main.innerHTML = viewCapex();
+  else if(currentView==='relatorios-investimentos') main.innerHTML = viewRelatoriosInvestimentos();
+  else if(currentView==='relatorios-capex') main.innerHTML = viewRelatoriosCapex();
   else if(currentView==='navegacao-objetivo') main.innerHTML = viewNavegacaoObjetivo();
   attachViewHandlers();
   atualizarBadgesBottomNav();
@@ -1966,6 +1968,184 @@ function openCentralAtualizacaoModal(){
     showToast(`${qtd} posição(ões) atualizada(s)`);
   });
 }
+
+/* ====================== RELATÓRIOS DE INVESTIMENTOS ====================== */
+// Consolida os 12 relatórios pedidos numa tela só, organizados por seção — reaproveita 100% as
+// funções já existentes (valorAtivo, custoAtivo, totalInvestimentos, custoInvestidoEmData,
+// historicoAtualizacoesInvestimento, itensAtualizaveisInvestimento) em vez de recalcular tudo de novo.
+function viewRelatoriosInvestimentos(){
+  const idsContasAtivas = new Set(state.contasInvestimento.filter(c=>!c.arquivada).map(c=>c.id));
+  const ativosAtivos = state.ativosInvestimento.filter(a=>!a.resgatado && idsContasAtivas.has(a.contaId));
+  const ativosEncerrados = state.ativosInvestimento.filter(a=>a.resgatado);
+  const hoje = todayISO();
+
+  // 1. Posição da carteira
+  const patrimonio = totalInvestimentos(), capital = custoTotalInvestimentos(), resultado = patrimonio-capital;
+  const rentabilidade = capital>0 ? (resultado/capital*100) : null;
+  const datasPosicao = ativosAtivos.map(a=>a.dataUltimaCotacao||a.dataAplicacao).filter(Boolean);
+  const posicoesEmDatasDiferentes = new Set(datasPosicao.map(d=>d.slice(0,10))).size>1;
+
+  // 8. Concentração (instituição/classe/ativo)
+  const porInstituicao = {}, porClasse = {};
+  ativosAtivos.forEach(a=>{
+    const conta = state.contasInvestimento.find(c=>c.id===a.contaId);
+    const inst = conta?.nome || 'Sem conta';
+    porInstituicao[inst] = (porInstituicao[inst]||0) + valorAtivo(a);
+    const classe = a.tipoAtivo==='rendafixa'?'Renda Fixa':a.tipoAtivo==='interno'?'Na Empresa':'Renda Variável';
+    porClasse[classe] = (porClasse[classe]||0) + valorAtivo(a);
+  });
+  const maioresPosicoes = [...ativosAtivos].map(a=>({ nome:a.nome||a.ticker||'Ativo', valor:valorAtivo(a), resultado:valorAtivo(a)-custoAtivo(a) })).sort((a,b)=>b.valor-a.valor).slice(0,5);
+  const top3pct = patrimonio>0 ? maioresPosicoes.slice(0,3).reduce((s,a)=>s+a.valor,0)/patrimonio*100 : 0;
+
+  // 10. Maiores resultados (ganhos e perdas)
+  const comResultado = ativosAtivos.filter(a=>custoAtivo(a)>0).map(a=>({ nome:a.nome||a.ticker||'Ativo', resultado:valorAtivo(a)-custoAtivo(a), pct:(valorAtivo(a)-custoAtivo(a))/custoAtivo(a)*100 }));
+  const maioresGanhos = [...comResultado].filter(a=>a.resultado>0).sort((a,b)=>b.resultado-a.resultado).slice(0,5);
+  const maioresPerdas = [...comResultado].filter(a=>a.resultado<0).sort((a,b)=>a.resultado-b.resultado).slice(0,5);
+
+  // 4/5. Aportes e Resgates (últimos 12 meses)
+  const de12m = new Date(); de12m.setFullYear(de12m.getFullYear()-1);
+  const de12mISO = de12m.toISOString().slice(0,10);
+  const aportesRecentes = state.ativosInvestimento.filter(a=>a.dataAplicacao>=de12mISO).sort((a,b)=>b.dataAplicacao.localeCompare(a.dataAplicacao));
+  const resgatesRecentes = ativosEncerrados.filter(a=>a.dataResgate>=de12mISO).sort((a,b)=>b.dataResgate.localeCompare(a.dataResgate));
+  const totalAportado12m = aportesRecentes.reduce((s,a)=>s+(a.valorAplicado||0),0);
+  const totalResgatado12m = resgatesRecentes.reduce((s,a)=>s+(a.valorResgatado||0),0);
+
+  // 6. Atualizações manuais (histórico)
+  const historicoRecente = [...(state.historicoAtualizacoesInvestimento||[])].sort((a,b)=>b.dataRegistro.localeCompare(a.dataRegistro)).slice(0,30);
+
+  // 7. Posições pendentes
+  const itensAtualizacao = itensAtualizaveisInvestimento().map(it=>({ ...it, status: statusAtualizacaoItem(it.dataUltimaAtualizacao, it.periodicidade) }));
+  const pendentes = itensAtualizacao.filter(it=>it.status==='pendente');
+
+  // 9. Visão anual (mês a mês, aportes/resgates rastreáveis com precisão)
+  const mesesAno = Array.from({length:12},(_,i)=>{ const d=new Date(); d.setMonth(d.getMonth()-11+i); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const visaoAnual = mesesAno.map(m=>{
+    const de = `${m}-01`, ate = `${m}-31`;
+    const aportesM = state.ativosInvestimento.filter(a=>a.dataAplicacao>=de && a.dataAplicacao<=ate).reduce((s,a)=>s+(a.valorAplicado||0),0);
+    const resgatesM = ativosEncerrados.filter(a=>a.dataResgate>=de && a.dataResgate<=ate).reduce((s,a)=>s+(a.valorResgatado||0),0);
+    return { mes:m, aportes:aportesM, resgates:resgatesM };
+  });
+
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="investimentos">← Investimentos</span>
+        <h1 style="margin-top:6px;">Relatórios de Investimentos</h1>
+        <p>Posição, evolução, rentabilidade, concentração e histórico da carteira</p>
+      </div>
+    </div>
+
+    <div class="dash-section-label">1. Posição da carteira</div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:8px;">
+      <div class="card saldo"><div class="label">Patrimônio investido</div><div class="value mono">${brl(patrimonio)}</div></div>
+      <div class="card"><div class="label">Capital investido</div><div class="value mono">${brl(capital)}</div></div>
+      <div class="card"><div class="label">Resultado</div><div class="value mono" style="color:${resultado>=0?'var(--success)':'var(--danger)'};">${brl(resultado)}</div></div>
+      <div class="card"><div class="label">Rentabilidade</div><div class="value mono" style="${rentabilidade===null?'font-size:12.5px;color:var(--text-soft);':''}">${rentabilidade!==null?rentabilidade.toFixed(2)+'%':'Sem dados suficientes'}</div></div>
+    </div>
+    ${posicoesEmDatasDiferentes ? `<div class="note" style="margin-top:0;">⚠️ Carteira com atualizações em datas diferentes — cada ativo mostra sua própria última posição.</div>` : ''}
+
+    <div class="dash-section-label">3. Rentabilidade por instituição e classe</div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;margin-bottom:8px;">
+      <div class="panel"><div class="panel-head"><h2>Por instituição</h2></div><div class="panel-body" style="padding:0;">
+        ${Object.keys(porInstituicao).sort().map(inst=>{
+          const ativosInst = ativosAtivos.filter(a=>(state.contasInvestimento.find(c=>c.id===a.contaId)?.nome||'Sem conta')===inst);
+          const custoInst = ativosInst.reduce((s,a)=>s+custoAtivo(a),0);
+          const valorInst = ativosInst.reduce((s,a)=>s+valorAtivo(a),0);
+          const pctInst = custoInst>0 ? (valorInst-custoInst)/custoInst*100 : null;
+          return `<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span style="font-size:12px;">${escapeHTML(inst)}</span><span class="mono" style="font-size:11.5px;color:${pctInst===null?'var(--text-soft)':pctInst>=0?'var(--success)':'var(--danger)'};">${pctInst!==null?(pctInst>=0?'+':'')+pctInst.toFixed(1)+'%':'Sem variação registrada'}</span></div>`;
+        }).join('') || '<div class="empty">Sem dados.</div>'}
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>Por classe</h2></div><div class="panel-body" style="padding:0;">
+        ${Object.keys(porClasse).sort().map(classe=>{
+          const ativosClasse = ativosAtivos.filter(a=>(a.tipoAtivo==='rendafixa'?'Renda Fixa':a.tipoAtivo==='interno'?'Na Empresa':'Renda Variável')===classe);
+          const custoClasse = ativosClasse.reduce((s,a)=>s+custoAtivo(a),0);
+          const valorClasse = ativosClasse.reduce((s,a)=>s+valorAtivo(a),0);
+          const pctClasse = custoClasse>0 ? (valorClasse-custoClasse)/custoClasse*100 : null;
+          return `<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span style="font-size:12px;">${escapeHTML(classe)}</span><span class="mono" style="font-size:11.5px;color:${pctClasse===null?'var(--text-soft)':pctClasse>=0?'var(--success)':'var(--danger)'};">${pctClasse!==null?(pctClasse>=0?'+':'')+pctClasse.toFixed(1)+'%':'Sem variação registrada'}</span></div>`;
+        }).join('') || '<div class="empty">Sem dados.</div>'}
+      </div></div>
+    </div>
+    <div class="note" style="margin-top:0;">Rentabilidade acumulada desde o custo registrado (não realizada) — separada por instituição e classe.</div>
+
+    <div class="dash-section-label">8. Concentração da carteira</div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;margin-bottom:8px;">
+      <div class="panel"><div class="panel-head"><h2>Por instituição</h2></div><div class="panel-body" style="padding:0;">
+        ${Object.entries(porInstituicao).sort((a,b)=>b[1]-a[1]).map(([nome,v])=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto auto;"><span style="font-size:12px;">${escapeHTML(nome)}</span><span class="mono" style="font-size:11.5px;">${brl(v)}</span><span class="mono" style="font-size:11px;color:var(--text-soft);">${patrimonio>0?(v/patrimonio*100).toFixed(0):0}%</span></div>`).join('') || '<div class="empty">Sem dados.</div>'}
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>Por classe</h2></div><div class="panel-body" style="padding:0;">
+        ${Object.entries(porClasse).sort((a,b)=>b[1]-a[1]).map(([nome,v])=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto auto;"><span style="font-size:12px;">${escapeHTML(nome)}</span><span class="mono" style="font-size:11.5px;">${brl(v)}</span><span class="mono" style="font-size:11px;color:var(--text-soft);">${patrimonio>0?(v/patrimonio*100).toFixed(0):0}%</span></div>`).join('') || '<div class="empty">Sem dados.</div>'}
+      </div></div>
+    </div>
+    <div class="panel" style="margin-bottom:8px;"><div class="panel-head"><h2>Maiores posições</h2></div><div class="panel-body" style="padding:0;">
+      ${maioresPosicoes.map((a,i)=>`<div class="ledger-row compact" style="grid-template-columns:20px 1fr auto auto;"><span class="mono" style="color:var(--text-soft);">${i+1}º</span><span style="font-size:12.5px;">${escapeHTML(a.nome)}</span><span class="mono" style="font-size:11.5px;">${brl(a.valor)}</span><span class="mono" style="font-size:11px;color:var(--text-soft);">${patrimonio>0?(a.valor/patrimonio*100).toFixed(0):0}%</span></div>`).join('') || '<div class="empty">Sem dados.</div>'}
+    </div></div>
+    ${maioresPosicoes.length>=3 ? `<div class="note" style="margin-top:0;">Os 3 maiores investimentos representam ${top3pct.toFixed(0)}% da carteira.</div>` : ''}
+
+    <div class="dash-section-label">10. Maiores resultados</div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;margin-bottom:8px;">
+      <div class="panel"><div class="panel-head"><h2>📈 Maiores ganhos</h2></div><div class="panel-body" style="padding:0;">
+        ${maioresGanhos.map(a=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span style="font-size:12px;">${escapeHTML(a.nome)}</span><span class="mono" style="font-size:11.5px;color:var(--success);font-weight:600;">+${brl(a.resultado)} (${a.pct.toFixed(1)}%)</span></div>`).join('') || '<div class="empty">Nenhum.</div>'}
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>📉 Maiores perdas</h2></div><div class="panel-body" style="padding:0;">
+        ${maioresPerdas.map(a=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span style="font-size:12px;">${escapeHTML(a.nome)}</span><span class="mono" style="font-size:11.5px;color:var(--danger);font-weight:600;">${brl(a.resultado)} (${a.pct.toFixed(1)}%)</span></div>`).join('') || '<div class="empty">Nenhuma.</div>'}
+      </div></div>
+    </div>
+
+    <div class="dash-section-label">4/5. Aportes e Resgates — últimos 12 meses</div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;margin-bottom:8px;">
+      <div class="card"><div class="label">Total aportado</div><div class="value mono">${brl(totalAportado12m)}</div></div>
+      <div class="card"><div class="label">Total resgatado</div><div class="value mono">${brl(totalResgatado12m)}</div></div>
+    </div>
+    <div class="panel" style="margin-bottom:8px;"><div class="panel-head"><h2>Aportes recentes</h2></div><div class="panel-body" style="padding:0;">
+      ${aportesRecentes.slice(0,15).map(a=>`<div class="ledger-row compact" style="grid-template-columns:auto 1fr auto;"><span class="mono" style="font-size:11px;color:var(--text-soft);">${fmtDate(a.dataAplicacao)}</span><span style="font-size:12px;">${escapeHTML(a.nome||a.ticker||'Ativo')}</span><span class="mono" style="font-size:11.5px;">${brl(a.valorAplicado||0)}</span></div>`).join('') || '<div class="empty">Nenhum aporte no período.</div>'}
+    </div></div>
+    <div class="panel" style="margin-bottom:8px;"><div class="panel-head"><h2>Resgates recentes</h2></div><div class="panel-body" style="padding:0;">
+      ${resgatesRecentes.slice(0,15).map(a=>`<div class="ledger-row compact" style="grid-template-columns:auto 1fr auto auto;"><span class="mono" style="font-size:11px;color:var(--text-soft);">${fmtDate(a.dataResgate)}</span><span style="font-size:12px;">${escapeHTML(a.nome||a.ticker||'Ativo')}</span><span class="mono" style="font-size:11.5px;">${brl(a.valorResgatado||0)}</span><span class="mono" style="font-size:11px;color:${a.rendimentoResgate>=0?'var(--success)':'var(--danger)'};">${a.rendimentoResgate>=0?'+':''}${brl(a.rendimentoResgate||0)}</span></div>`).join('') || '<div class="empty">Nenhum resgate no período.</div>'}
+    </div></div>
+
+    <div class="dash-section-label">11. Investimentos encerrados</div>
+    <div class="panel" style="margin-bottom:8px;"><div class="panel-body" style="padding:0;">
+      ${ativosEncerrados.slice().sort((a,b)=>(b.dataResgate||'').localeCompare(a.dataResgate||'')).slice(0,15).map(a=>{
+        const custo = custoAtivo(a); const pct = custo>0 ? (a.rendimentoResgate/custo*100) : null;
+        return `<div class="ledger-row compact" style="grid-template-columns:1fr auto auto;"><div class="desc-cell"><div>${escapeHTML(a.nome||a.ticker||'Ativo')}</div><div class="cat">${fmtDate(a.dataResgate)} · custo ${brl(custo)}</div></div><span class="mono" style="font-size:11.5px;">${brl(a.valorResgatado||0)}</span><span class="mono" style="font-size:11px;color:${a.rendimentoResgate>=0?'var(--success)':'var(--danger)'};">${pct!==null?pct.toFixed(1)+'%':'—'}</span></div>`;
+      }).join('') || '<div class="empty">Nenhum investimento encerrado ainda.</div>'}
+    </div></div>
+
+    <div class="dash-section-label">7. Posições pendentes de atualização</div>
+    <div class="panel" style="margin-bottom:8px;">${pendentes.length ? `<div class="panel-body" style="padding:0;">
+      ${pendentes.map(it=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span style="font-size:12.5px;">${escapeHTML(it.nome)}</span><span style="font-size:11px;color:var(--danger);font-weight:600;">${it.dataUltimaAtualizacao?'Última: '+fmtDate(it.dataUltimaAtualizacao.slice(0,10)):'Nunca atualizado'}</span></div>`).join('')}
+    </div>` : `<div class="empty" style="padding:30px 20px;">Tudo atualizado dentro da periodicidade. 🎉</div>`}</div>
+
+    <div class="dash-section-label">6. Histórico de atualizações manuais</div>
+    <div class="panel" style="margin-bottom:8px;">${historicoRecente.length ? `<div class="panel-body" style="padding:0;">
+      ${historicoRecente.map(h=>`
+        <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto;">
+          <span class="mono" style="font-size:11px;color:var(--text-soft);">${fmtDate(h.data)}</span>
+          <div class="desc-cell"><div>${escapeHTML(h.itemNome)}</div><div class="cat">${brl(h.valorAnterior)} → ${brl(h.valorNovo)}${h.observacao?' · '+escapeHTML(h.observacao):''}</div></div>
+          <span class="mono" style="font-size:11.5px;font-weight:600;color:${h.diferenca>=0?'var(--success)':'var(--danger)'};">${h.diferenca>=0?'+':''}${brl(h.diferenca)}${h.percentual!==null?` (${h.percentual>=0?'+':''}${h.percentual.toFixed(1)}%)`:''}</span>
+        </div>
+      `).join('')}
+    </div>` : `<div class="empty" style="padding:30px 20px;">Nenhuma atualização manual registrada ainda.</div>`}</div>
+
+    <div class="dash-section-label">9. Valorização × Aportes</div>
+    <div class="panel" style="margin-bottom:8px;"><div class="panel-body" style="padding:14px 18px;">
+      <div class="note" style="margin-top:0;">O crescimento do patrimônio tem duas origens diferentes: dinheiro novo que você colocou (aporte) e valorização do que já estava investido. Aporte aumenta capital e patrimônio igualmente — não gera resultado. Só a valorização gera resultado.</div>
+      <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);"><span style="font-size:12.5px;">Aportado (últimos 12 meses)</span><span class="mono" style="font-weight:600;">${brl(totalAportado12m)}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);"><span style="font-size:12.5px;">Resgatado (últimos 12 meses)</span><span class="mono" style="font-weight:600;">${brl(totalResgatado12m)}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:8px 0;"><span style="font-size:12.5px;">Resultado acumulado total (valorização)</span><span class="mono" style="font-weight:600;color:${resultado>=0?'var(--success)':'var(--danger)'};">${brl(resultado)}</span></div>
+    </div></div>
+
+    <div class="dash-section-label">12. Visão anual — aportes e resgates por mês</div>
+    <div class="panel" style="margin-bottom:8px;"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">
+      ${svgLinhasMultiplas([
+        { nome:'Aportes', valores:visaoAnual.map(v=>v.aportes) },
+        { nome:'Resgates', valores:visaoAnual.map(v=>v.resgates) },
+      ], visaoAnual.map(v=>competenciaLabel(v.mes)))}
+    </div></div>
+    <div class="note" style="margin-top:0;">Aportes e resgates são reconstituídos com precisão total pelas datas registradas. Já a valorização de mercado dia a dia não é reconstituível retroativamente — o histórico de atualizações manuais (acima) é exato a partir do momento em que cada atualização foi registrada.</div>
+  `;
+}
+/* ====================== FIM RELATÓRIOS DE INVESTIMENTOS ====================== */
 
 /* --- Integração VK Industrial --- */
 let vkFirebaseApp = null;
@@ -7817,6 +7997,7 @@ function viewInvestimentos(){
         <button class="btn" id="btnAtualizarPosicoes">🔄 Atualizar posições</button>
         <button class="btn ghost" id="btnExportarInvestimentosPDF">📄 Exportar posição</button>
         <button class="btn ghost" id="btnMetaInvestimento">🎯 Definir meta</button>
+        <button class="btn ghost" id="btnRelatoriosInvestimentos">📊 Relatórios</button>
       </div>
     </div>
     <div class="cards cards-3">
@@ -16143,6 +16324,7 @@ function viewCapex(){
     <div class="report-controls" style="margin-top:6px;">
       <button class="btn ghost sm" data-action="ir-capex-depreciacao">📉 CAPEX × Depreciação</button>
       <button class="btn ghost sm" data-action="ir-capex-fcl">💵 CAPEX × Fluxo de Caixa Livre</button>
+      <button class="btn ghost sm" data-action="ir-relatorios-capex">📊 Mais relatórios</button>
     </div>
   `;
 }
@@ -16253,6 +16435,93 @@ function openProjetoCapexModal(existing){
 }
 
 /* ====================== FIM CENTRAL DE CAPEX ====================== */
+
+// Relatórios de CAPEX restantes (Planejado x Realizado, por Projeto, por Categoria, por Ano,
+// Comprometido, Pago, Ativos Gerados, Projetos em Andamento) — os outros 2 (Depreciação e FCL)
+// já existem como modais próprios, reaproveitando cálculos já existentes no sistema.
+function viewRelatoriosCapex(){
+  const linhas = state.capexProjetos.map(p=>{
+    const realizado = capexRealizadoProjeto(p.id);
+    const pago = capexPagoProjeto(p.id);
+    const comprometido = p.comprometido||0;
+    const disponivel = (p.orcamento||0) - realizado - comprometido;
+    return { ...p, realizado, pago, comprometido, disponivel };
+  });
+  const emAndamento = linhas.filter(l=>!['Concluído','Cancelado'].includes(l.status));
+
+  const porCategoria = {};
+  linhas.forEach(l=>{ if(!porCategoria[l.categoria]) porCategoria[l.categoria] = { orcado:0, realizado:0 }; porCategoria[l.categoria].orcado += (l.orcamento||0); porCategoria[l.categoria].realizado += l.realizado; });
+
+  const porAno = {};
+  state.ativosPatrimoniais.filter(a=>a.capexProjetoId).forEach(a=>{
+    const ano = a.dataAquisicao.slice(0,4);
+    porAno[ano] = (porAno[ano]||0) + a.valorAquisicao;
+  });
+
+  const comComprometido = linhas.filter(l=>l.comprometido>0);
+  const comPago = linhas.filter(l=>l.pago>0);
+  const ativosGerados = state.ativosPatrimoniais.filter(a=>a.capexProjetoId);
+
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="capex">← Central de CAPEX</span>
+        <h1 style="margin-top:6px;">Relatórios de CAPEX</h1>
+        <p>Planejado, realizado, comprometido, pago e por categoria/ano/projeto</p>
+      </div>
+    </div>
+
+    <div class="dash-section-label">Planejado × Realizado × Comprometido — por projeto</div>
+    <div class="panel" style="margin-bottom:8px;overflow-x:auto;">
+      <div class="ledger-row head" style="grid-template-columns:1.3fr 100px 100px 100px 100px;min-width:560px;"><span>Projeto</span><span>Orçado</span><span>Realizado</span><span>Comprometido</span><span>Disponível</span></div>
+      <div style="min-width:560px;">
+        ${linhas.length ? linhas.map(l=>`
+          <div class="ledger-row compact" style="grid-template-columns:1.3fr 100px 100px 100px 100px;">
+            <span style="font-size:12px;">${escapeHTML(l.nome)}</span>
+            <span class="mono" style="font-size:11.5px;">${l.orcamento>0?brl(l.orcamento):'—'}</span>
+            <span class="mono" style="font-size:11.5px;">${brl(l.realizado)}</span>
+            <span class="mono" style="font-size:11.5px;">${l.comprometido>0?brl(l.comprometido):'—'}</span>
+            <span class="mono" style="font-size:11.5px;color:${l.disponivel<0?'var(--danger)':'inherit'};">${l.orcamento>0?brl(l.disponivel):'—'}</span>
+          </div>
+        `).join('') : `<div class="empty">Nenhum projeto cadastrado.</div>`}
+      </div>
+    </div>
+
+    <div class="dash-section-label">CAPEX por categoria</div>
+    <div class="panel" style="margin-bottom:8px;"><div class="panel-body" style="padding:0;">
+      ${Object.entries(porCategoria).filter(([,v])=>v.orcado>0||v.realizado>0).sort((a,b)=>b[1].realizado-a[1].realizado).map(([cat,v])=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;"><span style="font-size:12.5px;">${escapeHTML(cat)}</span><span class="mono" style="font-size:11.5px;color:var(--text-soft);">de ${v.orcado>0?brl(v.orcado):'—'}</span><span class="mono" style="font-size:11.5px;font-weight:600;">${brl(v.realizado)}</span></div>
+      `).join('') || '<div class="empty">Sem dados.</div>'}
+    </div></div>
+
+    <div class="dash-section-label">CAPEX por ano</div>
+    <div class="panel" style="margin-bottom:8px;"><div class="panel-body" style="padding:0;">
+      ${Object.entries(porAno).sort((a,b)=>b[0].localeCompare(a[0])).map(([ano,v])=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span>${ano}</span><span class="mono" style="font-weight:600;">${brl(v)}</span></div>`).join('') || '<div class="empty">Nenhum ativo vinculado a projeto de CAPEX ainda.</div>'}
+    </div></div>
+
+    <div class="cards" style="grid-template-columns:1fr 1fr;margin-bottom:8px;">
+      <div class="panel"><div class="panel-head"><h2>CAPEX comprometido</h2></div><div class="panel-body" style="padding:0;">
+        ${comComprometido.length ? comComprometido.map(l=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span style="font-size:12px;">${escapeHTML(l.nome)}</span><span class="mono" style="font-size:11.5px;font-weight:600;">${brl(l.comprometido)}</span></div>`).join('') : '<div class="empty">Nenhum valor comprometido.</div>'}
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>CAPEX pago</h2></div><div class="panel-body" style="padding:0;">
+        ${comPago.length ? comPago.map(l=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span style="font-size:12px;">${escapeHTML(l.nome)}</span><span class="mono" style="font-size:11.5px;font-weight:600;">${brl(l.pago)}</span></div>`).join('') : '<div class="empty">Nenhum pagamento vinculado ainda.</div>'}
+      </div></div>
+    </div>
+
+    <div class="dash-section-label">Ativos gerados por CAPEX</div>
+    <div class="panel" style="margin-bottom:8px;"><div class="panel-body" style="padding:0;">
+      ${ativosGerados.length ? ativosGerados.map(a=>{
+        const projeto = state.capexProjetos.find(p=>p.id===a.capexProjetoId);
+        return `<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><div class="desc-cell"><div>${escapeHTML(a.nome)}</div><div class="cat">${escapeHTML(projeto?.nome||'Projeto removido')} · ${fmtDate(a.dataAquisicao)}</div></div><span class="mono" style="font-weight:600;">${brl(a.valorAquisicao)}</span></div>`;
+      }).join('') : '<div class="empty">Nenhum ativo vinculado a projeto de CAPEX ainda.</div>'}
+    </div></div>
+
+    <div class="dash-section-label">Projetos em andamento</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${emAndamento.length ? emAndamento.map(l=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto auto;"><span style="font-size:12px;">${escapeHTML(l.nome)}</span><span style="font-size:11px;font-weight:600;color:${corStatusCapex(l.status)};">${l.status}</span><span class="mono" style="font-size:11.5px;">${l.dataPrevista?fmtDate(l.dataPrevista):'—'}</span></div>`).join('') : '<div class="empty">Nenhum projeto em andamento.</div>'}
+    </div></div>
+  `;
+}
 
 function calcDepreciacao(a){
   const valorResidual = a.valorResidual || 0;
@@ -19604,6 +19873,7 @@ function attachViewHandlers(){
     });
   });
   document.getElementById('btnNovoProjetoCapex')?.addEventListener('click', ()=>openProjetoCapexModal());
+  document.querySelector('[data-action="ir-relatorios-capex"]')?.addEventListener('click', ()=>{ currentView='relatorios-capex'; render(); });
   document.querySelectorAll('[data-action="editar-projeto-capex"]').forEach(el=>{
     el.addEventListener('click', ()=>openProjetoCapexModal(state.capexProjetos.find(p=>p.id===el.dataset.id)));
   });
@@ -22289,6 +22559,7 @@ function attachViewHandlers(){
   });
   document.getElementById('btnImportarNota')?.addEventListener('click', ()=>openImportarNotaModal());
   document.getElementById('btnAtualizarPosicoes')?.addEventListener('click', ()=>openCentralAtualizacaoModal());
+  document.getElementById('btnRelatoriosInvestimentos')?.addEventListener('click', ()=>{ currentView='relatorios-investimentos'; render(); });
   document.querySelectorAll('[data-action="revisar-nota"]').forEach(row=>{
     row.addEventListener('click', ()=>openImportarNotaModal(null, row.dataset.id));
   });
