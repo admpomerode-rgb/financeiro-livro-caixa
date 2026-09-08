@@ -667,6 +667,8 @@
         <div class="nav-item" data-view="assistente" title="Perguntar ao Livro Caixa"><span class="nav-dot"></span><span class="nav-abbr">PA</span><span class="nav-label">Perguntar ao Livro Caixa</span></div>
         <div class="nav-item" data-view="veiculos" title="Meus Carros"><span class="nav-dot"></span><span class="nav-abbr">MC</span><span class="nav-label">Meus Carros</span></div>
         <div class="nav-item" data-view="capex" title="Central de CAPEX"><span class="nav-dot"></span><span class="nav-abbr">CX</span><span class="nav-label">Central de CAPEX</span></div>
+        <div class="nav-item" data-view="retiradas" title="Central de Retiradas"><span class="nav-dot"></span><span class="nav-abbr">RT</span><span class="nav-label">Central de Retiradas</span></div>
+        <div class="nav-item" data-view="projetos-financeiros" title="Central de Projetos"><span class="nav-dot"></span><span class="nav-abbr">PJ</span><span class="nav-label">Central de Projetos</span></div>
         <div class="nav-item" data-view="navegacao-objetivo" title="O Que Você Quer Fazer?"><span class="nav-dot"></span><span class="nav-abbr">OB</span><span class="nav-label">O Que Você Quer Fazer?</span></div>
         <div class="nav-item" data-view="orcamento" title="Orçamento e Planejamento"><span class="nav-dot"></span><span class="nav-abbr">OR</span><span class="nav-label">Orçamento e Planejamento</span></div>
         <div class="nav-item" data-view="simulacao" title="Simulação &quot;E Se&quot;"><span class="nav-dot"></span><span class="nav-abbr">SE</span><span class="nav-label">Simulação "E Se"</span></div>
@@ -963,6 +965,8 @@ function aplicarMigracoes(s){
   if(!s.veiculoLembretes) s.veiculoLembretes = [];
   if(!s.historicoAtualizacoesInvestimento) s.historicoAtualizacoesInvestimento = [];
   if(!s.capexProjetos) s.capexProjetos = [];
+  if(!s.retiradas) s.retiradas = [];
+  if(!s.projetosFinanceiros) s.projetosFinanceiros = [];
   if(!s.cofresVirtuais) s.cofresVirtuais = [
     { nome:'Operacional', pct:50 }, { nome:'Impostos', pct:15 }, { nome:'Emergência', pct:15 },
     { nome:'Investimentos', pct:10 }, { nome:'Distribuição aos Sócios', pct:10 },
@@ -1410,6 +1414,8 @@ function moreItensDef(){
     { view:'assistente', icone:'💬', nome:'Perguntar ao Livro Caixa', grupo:'Análise' },
     { view:'veiculos', icone:'🚗', nome:'Meus Carros', grupo:'Operacional' },
     { view:'capex', icone:'🏗️', nome:'Central de CAPEX', grupo:'Operacional' },
+    { view:'retiradas', icone:'💸', nome:'Central de Retiradas', grupo:'Operacional' },
+    { view:'projetos-financeiros', icone:'📁', nome:'Central de Projetos', grupo:'Operacional' },
     { view:'navegacao-objetivo', icone:'🧭', nome:'O Que Você Quer Fazer?', grupo:'Análise' },
     { view:'orcamento', icone:'🗂️', nome:'Orçamento e Planejamento', grupo:'Análise' },
     { view:'simulacao', icone:'🔮', nome:'Simulação "E Se"', grupo:'Análise' },
@@ -1554,6 +1560,8 @@ function render(){
   else if(currentView==='capex') main.innerHTML = viewCapex();
   else if(currentView==='relatorios-investimentos') main.innerHTML = viewRelatoriosInvestimentos();
   else if(currentView==='relatorios-capex') main.innerHTML = viewRelatoriosCapex();
+  else if(currentView==='retiradas') main.innerHTML = viewRetiradas();
+  else if(currentView==='projetos-financeiros') main.innerHTML = viewProjetosFinanceiros();
   else if(currentView==='navegacao-objetivo') main.innerHTML = viewNavegacaoObjetivo();
   attachViewHandlers();
   atualizarBadgesBottomNav();
@@ -19800,6 +19808,14 @@ async function preencherEstatisticasCodigo(){
 function attachViewHandlers(){
   if(currentView!==selecaoViewOrigem){ selecaoLancIds.clear(); selecaoViewOrigem = currentView; }
   atualizarSelecaoUI();
+  document.getElementById('btnNovaRetirada')?.addEventListener('click', ()=>openRetiradaModal());
+  document.querySelectorAll('[data-action="editar-retirada"]').forEach(el=>{
+    el.addEventListener('click', ()=>openRetiradaModal(state.retiradas.find(r=>r.id===el.dataset.id)));
+  });
+  document.getElementById('btnNovoProjetoFinanceiro')?.addEventListener('click', ()=>openProjetoFinanceiroModal());
+  document.querySelectorAll('[data-action="editar-projeto-financeiro"]').forEach(el=>{
+    el.addEventListener('click', ()=>openProjetoFinanceiroModal(state.projetosFinanceiros.find(p=>p.id===el.dataset.id)));
+  });
   // Wiring do módulo "Meus Carros" fica logo no início de propósito: essa função é gigante e, se
   // algum trecho mais abaixo (de outra tela) lançar um erro, o restante da função para de executar
   // — colocando aqui, o botão flutuante e as abas do veículo continuam funcionando de qualquer jeito.
@@ -24509,6 +24525,238 @@ function viewContratos(){
     </div>
   `;
 }
+
+/* ====================== CENTRAL DE RETIRADAS ====================== */
+// Cada retirada cria um lançamento REAL (mesmo padrão já usado em Veículos e Ativos Patrimoniais)
+// — não é um registro paralelo. O campo `proLabore` que já existia em lançamentos continua
+// funcionando normalmente; aqui só organizamos e damos contexto (sócio, tipo) a esses lançamentos.
+function viewRetiradas(){
+  const t = totaisPorMesRef(mesGlobalRef);
+  const hoje = todayISO();
+  const anoAtual = mesGlobalRef.slice(0,4);
+  const retiradasDoMes = state.retiradas.filter(r=>r.data>=t.de && r.data<=t.ateMes);
+  const retiradasDoAno = state.retiradas.filter(r=>r.data.slice(0,4)===anoAtual);
+  const totalMes = retiradasDoMes.reduce((s,r)=>s+r.valor,0);
+  const totalAno = retiradasDoAno.reduce((s,r)=>s+r.valor,0);
+  const caixaLivre = calcularCaixaLivreAssistente();
+
+  const porTipo = {};
+  retiradasDoAno.forEach(r=>{ porTipo[r.tipo] = (porTipo[r.tipo]||0)+r.valor; });
+  const porSocio = {};
+  retiradasDoAno.forEach(r=>{ const nome = state.socios.find(s=>s.id===r.socioId)?.nome || 'Sem sócio vinculado'; porSocio[nome] = (porSocio[nome]||0)+r.valor; });
+
+  const rotuloTipo = { 'pro-labore':'Pró-labore', 'retirada':'Retirada', 'distribuicao':'Distribuição de lucros', 'antecipacao':'Antecipação' };
+
+  return `
+    <div class="topbar">
+      <div><h1>Central de Retiradas</h1><p>Pró-labore, retiradas, distribuição de lucros e antecipações</p></div>
+      <button class="btn" id="btnNovaRetirada">+ Nova retirada</button>
+    </div>
+    ${mesNavHTML()}
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:14px;">
+      <div class="card"><div class="label">Retirado no mês</div><div class="value mono">${brl(totalMes)}</div></div>
+      <div class="card"><div class="label">Retirado no ano</div><div class="value mono">${brl(totalAno)}</div></div>
+      <div class="card saldo"><div class="label">Disponível pra decisão hoje</div><div class="value mono" style="color:${caixaLivre>0?'var(--success)':'var(--warn)'};">${brl(caixaLivre)}</div></div>
+    </div>
+    <div class="note" style="margin-top:0;">"Disponível pra decisão hoje" já desconta compromissos dos próximos 30 dias e faturas de cartão em aberto — é o mesmo cálculo usado na Central de Decisão, pra você ver o impacto real de uma nova retirada no caixa.</div>
+
+    ${Object.keys(porTipo).length ? `
+    <div class="dash-section-label">Por tipo (este ano)</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+      ${Object.entries(porTipo).sort((a,b)=>b[1]-a[1]).map(([tipo,v])=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span style="font-size:12.5px;">${rotuloTipo[tipo]||tipo}</span><span class="mono" style="font-weight:600;">${brl(v)}</span></div>`).join('')}
+    </div></div>` : ''}
+
+    ${state.socios.length && Object.keys(porSocio).length ? `
+    <div class="dash-section-label">Por sócio (este ano)</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+      ${Object.entries(porSocio).sort((a,b)=>b[1]-a[1]).map(([nome,v])=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span style="font-size:12.5px;">${escapeHTML(nome)}</span><span class="mono" style="font-weight:600;">${brl(v)}</span></div>`).join('')}
+    </div></div>` : ''}
+
+    <div class="dash-section-label">Histórico</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${state.retiradas.length ? [...state.retiradas].sort((a,b)=>b.data.localeCompare(a.data)).slice(0,40).map(r=>{
+        const socio = state.socios.find(s=>s.id===r.socioId);
+        return `
+        <div class="ledger-row compact" data-action="editar-retirada" data-id="${r.id}" style="cursor:pointer;grid-template-columns:auto 1fr auto;">
+          <span class="mono" style="font-size:11px;color:var(--text-soft);">${fmtDate(r.data)}</span>
+          <div class="desc-cell"><div>${rotuloTipo[r.tipo]||r.tipo}${socio?' — '+escapeHTML(socio.nome):''}</div><div class="cat">${r.observacao?escapeHTML(r.observacao):''}</div></div>
+          <span class="mono" style="font-weight:600;color:var(--danger);">${brl(r.valor)}</span>
+        </div>`;
+      }).join('') : `<div class="empty" style="padding:40px 20px;">Nenhuma retirada registrada ainda.</div>`}
+    </div></div>
+  `;
+}
+
+function openRetiradaModal(existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit?'Editar retirada':'Nova retirada'}</h3>
+    <div class="field-row">
+      <div class="field"><label>Tipo</label><select id="rtTipo">
+        <option value="pro-labore" ${(!existing||existing.tipo==='pro-labore')?'selected':''}>Pró-labore</option>
+        <option value="retirada" ${existing?.tipo==='retirada'?'selected':''}>Retirada</option>
+        <option value="distribuicao" ${existing?.tipo==='distribuicao'?'selected':''}>Distribuição de lucros</option>
+        <option value="antecipacao" ${existing?.tipo==='antecipacao'?'selected':''}>Antecipação</option>
+      </select></div>
+      <div class="field"><label>Data</label><input type="date" id="rtData" value="${existing?existing.data:todayISO()}"></div>
+    </div>
+    ${state.socios.length ? `<div class="field"><label>Sócio (opcional)</label><select id="rtSocio">
+      <option value="">Nenhum</option>
+      ${state.socios.map(s=>`<option value="${s.id}" ${existing?.socioId===s.id?'selected':''}>${escapeHTML(s.nome)}</option>`).join('')}
+    </select></div>` : ''}
+    <div class="field-row">
+      <div class="field"><label>Valor (R$)</label><input type="text" inputmode="decimal" id="rtValor" value="${existing?existing.valor:''}" placeholder="0,00"></div>
+      <div class="field"><label>Conta</label><select id="rtConta">${state.contas.map(c=>`<option value="${c.id}" ${existing?.contaId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+    </div>
+    <div class="field"><label>Observação (opcional)</label><input type="text" id="rtObservacao" value="${existing?escapeHTML(existing.observacao||''):''}"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      ${isEdit ? `<button class="btn ghost" id="btnExcluirRetirada" style="color:var(--danger);">Excluir</button>` : ''}
+      <button class="btn" id="btnSalvarRetirada">${isEdit?'Salvar':'Registrar'}</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnExcluirRetirada')?.addEventListener('click', ()=>{
+    if(!confirm('Excluir essa retirada? Isso também remove o lançamento financeiro vinculado a ela.')) return;
+    if(existing.lancamentoId) excluirLancamentoVeiculo(existing.lancamentoId);
+    state.retiradas = state.retiradas.filter(r=>r.id!==existing.id);
+    persist(); closeModal(); render();
+    showToast('Retirada excluída');
+  });
+  document.getElementById('btnSalvarRetirada').addEventListener('click', ()=>{
+    const tipo = document.getElementById('rtTipo').value;
+    const data = document.getElementById('rtData').value;
+    const socioId = document.getElementById('rtSocio')?.value || null;
+    const valor = numBR(document.getElementById('rtValor').value);
+    const contaId = document.getElementById('rtConta').value;
+    const observacao = document.getElementById('rtObservacao').value.trim();
+    if(!data || isNaN(valor) || valor<=0){ showToast('Preencha a data e o valor'); return; }
+    const rotuloTipo = { 'pro-labore':'Pró-labore', 'retirada':'Retirada', 'distribuicao':'Distribuição de lucros', 'antecipacao':'Antecipação' };
+    const socio = state.socios.find(s=>s.id===socioId);
+    const descricao = `${rotuloTipo[tipo]}${socio?' — '+socio.nome:''}`;
+    if(isEdit){
+      Object.assign(existing, { tipo, data, socioId, valor, contaId, observacao });
+      if(existing.lancamentoId) atualizarLancamentoVeiculo(existing.lancamentoId, { descricao, categoria:'Pró-labore/Retiradas', valor, contaId, data, status:'pago', tipo:'saida' });
+    } else {
+      const lancamentoId = criarLancamentoVeiculo({ tipo:'saida', veiculoId:null, descricao, categoria:'Pró-labore/Retiradas', valor, contaId, data, status:'pago' });
+      const l = state.lancamentos.find(x=>x.id===lancamentoId);
+      if(l){ l.origem = 'manual'; l.proLabore = tipo==='pro-labore'; delete l.veiculoId; }
+      state.retiradas.push({ id:uid(), tipo, data, socioId, valor, contaId, observacao, lancamentoId });
+    }
+    persist(); closeModal(); render();
+    showToast(isEdit?'Retirada atualizada':'Retirada registrada');
+  });
+}
+/* ====================== FIM CENTRAL DE RETIRADAS ====================== */
+
+/* ====================== CENTRAL DE PROJETOS ====================== */
+// Um "projeto financeiro" aqui é uma camada de apresentação sobre o campo `centroCusto` que já
+// existe em cada lançamento — não cria uma segunda forma de agrupar dinheiro. Cadastrar um projeto
+// só dá contexto (orçamento, responsável, prazo, status) a um centro de custo que você já usa.
+function receitaProjetoFinanceiro(centroCusto, de, ate){
+  return state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.centroCusto===centroCusto && (!de||l.dataPagamento>=de) && (!ate||l.dataPagamento<=ate)).reduce((s,l)=>s+l.valor,0);
+}
+function despesaProjetoFinanceiro(centroCusto, de, ate){
+  return state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.categoria!=='Ativos Patrimoniais' && l.centroCusto===centroCusto && (!de||l.dataPagamento>=de) && (!ate||l.dataPagamento<=ate)).reduce((s,l)=>s+l.valor,0);
+}
+function capexProjetoFinanceiro(centroCusto, de, ate){
+  return state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.categoria==='Ativos Patrimoniais' && l.centroCusto===centroCusto && (!de||l.dataPagamento>=de) && (!ate||l.dataPagamento<=ate)).reduce((s,l)=>s+l.valor,0);
+}
+function comprometidoProjetoFinanceiro(centroCusto){
+  return state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.centroCusto===centroCusto).reduce((s,l)=>s+valorEmAberto(l),0);
+}
+
+function viewProjetosFinanceiros(){
+  const linhas = state.projetosFinanceiros.map(p=>{
+    const receita = receitaProjetoFinanceiro(p.centroCusto);
+    const despesa = despesaProjetoFinanceiro(p.centroCusto);
+    const capex = capexProjetoFinanceiro(p.centroCusto);
+    const comprometido = comprometidoProjetoFinanceiro(p.centroCusto);
+    const custoTotal = despesa+capex;
+    const resultado = receita-custoTotal;
+    const margem = receita>0 ? (resultado/receita*100) : null;
+    const saldo = p.orcamento>0 ? p.orcamento-custoTotal-comprometido : null;
+    return { ...p, receita, despesa, capex, comprometido, custoTotal, resultado, margem, saldo };
+  });
+  return `
+    <div class="topbar">
+      <div><h1>Central de Projetos</h1><p>Gestão financeira de projetos — usa o centro de custo já existente em cada lançamento</p></div>
+      <button class="btn" id="btnNovoProjetoFinanceiro">+ Novo projeto</button>
+    </div>
+    ${!linhas.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum projeto cadastrado ainda.</div></div>` : linhas.map(p=>`
+      <div class="panel" style="margin-bottom:12px;">
+        <div class="panel-body" style="padding:14px 18px;cursor:pointer;" data-action="editar-projeto-financeiro" data-id="${p.id}">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;">
+            <span style="font-weight:600;font-size:13.5px;">${escapeHTML(p.nome)}</span>
+            <span style="font-size:11px;font-weight:600;color:${p.status==='Concluído'?'var(--success)':p.status==='Cancelado'?'var(--danger)':'var(--blue-accent)'};">${escapeHTML(p.status)}</span>
+          </div>
+          <div style="font-size:11px;color:var(--text-soft);margin-bottom:8px;">Centro de custo: ${escapeHTML(p.centroCusto)}${p.responsavel?' · '+escapeHTML(p.responsavel):''}${p.prazo?' · prazo '+fmtDate(p.prazo):''}</div>
+          <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;">
+            <div><div style="font-size:10px;color:var(--text-soft);">Orçamento</div><div class="mono" style="font-size:12.5px;font-weight:600;">${p.orcamento>0?brl(p.orcamento):'—'}</div></div>
+            <div><div style="font-size:10px;color:var(--text-soft);">Realizado</div><div class="mono" style="font-size:12.5px;font-weight:600;">${brl(p.custoTotal)}</div></div>
+            <div><div style="font-size:10px;color:var(--text-soft);">Comprometido</div><div class="mono" style="font-size:12.5px;font-weight:600;">${p.comprometido>0?brl(p.comprometido):'—'}</div></div>
+            <div><div style="font-size:10px;color:var(--text-soft);">Saldo</div><div class="mono" style="font-size:12.5px;font-weight:600;color:${p.saldo!==null&&p.saldo<0?'var(--danger)':'inherit'};">${p.saldo!==null?brl(p.saldo):'—'}</div></div>
+          </div>
+          ${p.receita>0 ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);display:flex;justify-content:space-between;font-size:11.5px;"><span>Receita: ${brl(p.receita)} · Custo: ${brl(p.custoTotal)}</span><span style="font-weight:600;color:${p.resultado>=0?'var(--success)':'var(--danger)'};">Resultado: ${brl(p.resultado)}${p.margem!==null?` (${p.margem.toFixed(1)}%)`:''}</span></div>` : ''}
+        </div>
+      </div>
+    `).join('')}
+  `;
+}
+
+function openProjetoFinanceiroModal(existing){
+  const isEdit = !!existing;
+  const centrosExistentes = [...new Set(state.lancamentos.map(l=>l.centroCusto).filter(Boolean))];
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit?'Editar projeto':'Novo projeto'}</h3>
+    <div class="field"><label>Nome do projeto</label><input type="text" id="pfNome" value="${existing?escapeHTML(existing.nome):''}" placeholder="Ex: Reforma da loja 2"></div>
+    <div class="field">
+      <label>Centro de custo (vincula os lançamentos já existentes com esse centro)</label>
+      <input type="text" id="pfCentroCusto" list="pfCentrosLista" value="${existing?escapeHTML(existing.centroCusto):''}" placeholder="Escolha um já usado ou digite um novo">
+      <datalist id="pfCentrosLista">${centrosExistentes.map(c=>`<option value="${escapeHTML(c)}">`).join('')}</datalist>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Responsável (opcional)</label><input type="text" id="pfResponsavel" value="${existing?escapeHTML(existing.responsavel||''):''}"></div>
+      <div class="field"><label>Prazo (opcional)</label><input type="date" id="pfPrazo" value="${existing?.prazo||''}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Orçamento (R$, opcional)</label><input type="text" inputmode="decimal" id="pfOrcamento" value="${existing?.orcamento||''}" placeholder="0,00"></div>
+      <div class="field"><label>Status</label><select id="pfStatus">
+        ${['Planejado','Em andamento','Concluído','Cancelado'].map(s=>`<option ${(existing?existing.status===s:s==='Planejado')?'selected':''}>${s}</option>`).join('')}
+      </select></div>
+    </div>
+    <div class="note" style="margin-top:0;">Pra um lançamento entrar nesse projeto, escolha o mesmo centro de custo ao criar/editar ele — não precisa fazer nada extra aqui.</div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      ${isEdit ? `<button class="btn ghost" id="btnExcluirProjetoFinanceiro" style="color:var(--danger);">Excluir</button>` : ''}
+      <button class="btn" id="btnSalvarProjetoFinanceiro">${isEdit?'Salvar':'Criar projeto'}</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnExcluirProjetoFinanceiro')?.addEventListener('click', ()=>{
+    if(!confirm(`Excluir o projeto "${existing.nome}"? Os lançamentos com esse centro de custo continuam intactos, só perdem essa "etiqueta" de projeto.`)) return;
+    state.projetosFinanceiros = state.projetosFinanceiros.filter(p=>p.id!==existing.id);
+    persist(); closeModal(); render();
+    showToast('Projeto excluído');
+  });
+  document.getElementById('btnSalvarProjetoFinanceiro').addEventListener('click', ()=>{
+    const nome = document.getElementById('pfNome').value.trim();
+    const centroCusto = document.getElementById('pfCentroCusto').value.trim();
+    if(!nome || !centroCusto){ showToast('Preencha o nome e o centro de custo'); return; }
+    const dados = {
+      nome, centroCusto, responsavel: document.getElementById('pfResponsavel').value.trim(),
+      prazo: document.getElementById('pfPrazo').value || null, orcamento: numBR(document.getElementById('pfOrcamento').value) || 0,
+      status: document.getElementById('pfStatus').value
+    };
+    if(isEdit){ Object.assign(existing, dados); }
+    else { state.projetosFinanceiros.push({ id:uid(), ...dados, criadoEm:new Date().toISOString() }); }
+    persist(); closeModal(); render();
+    showToast(isEdit?'Projeto atualizado':'Projeto criado');
+  });
+}
+/* ====================== FIM CENTRAL DE PROJETOS ====================== */
 
 function openContratoModal(existing){
   const isEdit = !!existing;
