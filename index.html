@@ -5196,6 +5196,17 @@ function previstoCategoriaNoPeriodo(categoria, tipo, de, ateReal, ateMes){
   const pendente = state.lancamentos.filter(l=>l.categoria===categoria && l.tipo===tipo && l.status==='pendente' && l.dataVencimento>=de && l.dataVencimento<=ateMes).reduce((s,l)=>s+valorEmAberto(l),0);
   return realizado + pendente;
 }
+// Projeção por RITMO — diferente de "comprometido" (que é só o que já está lançado/pendente).
+// Extrapola o ritmo diário de gasto/recebimento já realizado até o fim do período, mas nunca projeta
+// menos do que já está comprometido (pendências já lançadas), já que aquilo é praticamente certo.
+function projetarCategoriaAteFimPeriodo(categoria, tipo, de, ateReal, ateMes){
+  const comprometido = previstoCategoriaNoPeriodo(categoria, tipo, de, ateReal, ateMes);
+  const realizado = totalCategoriaTipoNoPeriodo(categoria, tipo, de, ateReal);
+  const diasDecorridos = Math.max(1, Math.round((new Date(ateReal)-new Date(de))/86400000)+1);
+  const diasTotais = Math.max(diasDecorridos, Math.round((new Date(ateMes)-new Date(de))/86400000)+1);
+  const extrapolacaoPorRitmo = (realizado/diasDecorridos)*diasTotais;
+  return Math.max(comprometido, extrapolacaoPorRitmo);
+}
 
 function viewOrcamentoPlanejamento(){
   const categoriasDespesa = todasCategoriasFlat('saida');
@@ -5204,83 +5215,192 @@ function viewOrcamentoPlanejamento(){
   const alertaPct = state.orcamentoAlertaPct || {};
   const proj = state.projecaoReceitaCategorias || {};
 
-  const totalProjetadoReceita = Object.values(proj).reduce((a,b)=>a+b,0);
-  const totalOrcadoDespesa = Object.values(orc).reduce((a,b)=>a+b,0);
-  const lucroProjetado = totalProjetadoReceita - totalOrcadoDespesa;
-
   const t = totaisPorMesRef(mesGlobalRef);
   const hoje = todayISO();
   const mesAtualRef = hoje.slice(0,7);
   const ateReal = mesGlobalRef === mesAtualRef ? hoje : (mesGlobalRef < mesAtualRef ? t.ateMes : t.de);
+  const mesJaEncerrado = mesGlobalRef < mesAtualRef;
 
-  const categoriasOrcadas = Object.keys(orc).filter(cat=>orc[cat]>0);
-  const linhasOrcamento = categoriasOrcadas.map(cat=>{
+  // ---- Escopo do PLANEJAMENTO: só entram categorias que o usuário realmente definiu um valor
+  // (orçamento de despesa ou projeção de receita). Categorias com movimento mas sem planejamento
+  // ficam de fora do cálculo de resultado planejado/projetado — aparecem à parte, na seção
+  // "Categorias sem planejamento" — pra nunca misturar o que foi decidido com o que só aconteceu. ----
+  const categoriasReceitaPlanejadas = categoriasReceita.filter(c=>proj[c]>0);
+  const categoriasDespesaPlanejadas = Object.keys(orc).filter(c=>orc[c]>0);
+
+  const linhasReceita = categoriasReceitaPlanejadas.map(cat=>{
+    const planejado = proj[cat];
+    const realizado = totalCategoriaTipoNoPeriodo(cat, 'entrada', t.de, ateReal);
+    const projetado = projetarCategoriaAteFimPeriodo(cat, 'entrada', t.de, ateReal, t.ateMes);
+    const atingimento = planejado>0 ? Math.round(realizado/planejado*100) : 0;
+    const diasDecorridos = Math.max(1, Math.round((new Date(ateReal)-new Date(t.de))/86400000)+1);
+    const diasTotais = Math.round((new Date(t.ateMes)-new Date(t.de))/86400000)+1;
+    const ritmoEsperadoPct = Math.round(diasDecorridos/diasTotais*100);
+    return { cat, planejado, realizado, projetado, atingimento, ritmoEsperadoPct, diferenca: realizado-Math.round(planejado*diasDecorridos/diasTotais) };
+  });
+  const receitaPlanejadaTotal = linhasReceita.reduce((s,l)=>s+l.planejado,0);
+  const receitaRealizadaTotal = linhasReceita.reduce((s,l)=>s+l.realizado,0);
+  const receitaProjetadaTotal = linhasReceita.reduce((s,l)=>s+l.projetado,0);
+
+  const linhasOrcamento = categoriasDespesaPlanejadas.map(cat=>{
     const realizado = totalCategoriaTipoNoPeriodo(cat, 'saida', t.de, ateReal);
-    const previsto = previstoCategoriaNoPeriodo(cat, 'saida', t.de, ateReal, t.ateMes);
+    const comprometido = previstoCategoriaNoPeriodo(cat, 'saida', t.de, ateReal, t.ateMes);
+    const projetado = projetarCategoriaAteFimPeriodo(cat, 'saida', t.de, ateReal, t.ateMes);
     const orcado = orc[cat];
     const pctRealizado = orcado>0 ? Math.round(realizado/orcado*100) : 0;
-    const pctPrevisto = orcado>0 ? Math.round(previsto/orcado*100) : 0;
+    const pctProjetado = orcado>0 ? Math.round(projetado/orcado*100) : 0;
     const limite = alertaPct[cat] || 80;
     const estourou = pctRealizado>=100;
-    const alertou = pctPrevisto>=limite;
-    return { cat, realizado, previsto, orcado, pctRealizado, pctPrevisto, limite, estourou, alertou };
-  }).sort((a,b)=>b.pctPrevisto-a.pctPrevisto);
+    const projetaEstourar = !estourou && pctProjetado>=100;
+    const alertou = pctProjetado>=limite;
+    return { cat, realizado, comprometido, projetado, orcado, pctRealizado, pctProjetado, limite, estourou, projetaEstourar, alertou, saldo:orcado-realizado, saldoProjetado:orcado-projetado, desvio:projetado-orcado };
+  }).sort((a,b)=>b.pctProjetado-a.pctProjetado);
 
-  const alertasAtivos = linhasOrcamento.filter(l=>l.alertou);
-  const categoriasDisponiveis = categoriasDespesa.filter(c=>!categoriasOrcadas.includes(c));
+  const totalOrcadoDespesa = linhasOrcamento.reduce((s,l)=>s+l.orcado,0);
   const totalRealizadoOrcado = linhasOrcamento.reduce((s,l)=>s+l.realizado,0);
-  const totalPrevistoOrcado = linhasOrcamento.reduce((s,l)=>s+l.previsto,0);
-  const pctRealizadoGeral = totalOrcadoDespesa>0 ? Math.round(totalRealizadoOrcado/totalOrcadoDespesa*100) : 0;
-  const pctPrevistoGeral = totalOrcadoDespesa>0 ? Math.round(totalPrevistoOrcado/totalOrcadoDespesa*100) : 0;
+  const totalProjetadoOrcado = linhasOrcamento.reduce((s,l)=>s+l.projetado,0);
 
-  const linhasComparacao = [
-    ...categoriasReceita.map(cat=>({cat, tipo:'entrada', planejado:proj[cat]||0})),
-  ].filter(x=>x.planejado>0);
+  const resultadoPlanejado = receitaPlanejadaTotal - totalOrcadoDespesa;
+  const resultadoRealizado = receitaRealizadaTotal - totalRealizadoOrcado;
+  const resultadoProjetado = receitaProjetadaTotal - totalProjetadoOrcado;
+  const temPlanejamento = receitaPlanejadaTotal>0 || totalOrcadoDespesa>0;
+
+  // ---- Saúde do Orçamento (seção 7) — regra objetiva, sem classificação aleatória ----
+  const categoriasEstouradas = linhasOrcamento.filter(l=>l.estourou);
+  const categoriasProjetamEstourar = linhasOrcamento.filter(l=>l.projetaEstourar);
+  const resultadoProjetadoAbaixo = resultadoPlanejado>0 && resultadoProjetado < resultadoPlanejado*0.8;
+  let saudeOrcamento = 'Dentro do planejado', saudeCor = 'var(--success)';
+  if(!temPlanejamento){ saudeOrcamento = 'Sem planejamento definido'; saudeCor = 'var(--text-soft)'; }
+  else if(categoriasEstouradas.length>0 || (resultadoPlanejado>0 && resultadoProjetado<0)){ saudeOrcamento = 'Fora do planejado'; saudeCor = 'var(--danger)'; }
+  else if(categoriasProjetamEstourar.length>0 || resultadoProjetadoAbaixo){ saudeOrcamento = 'Atenção'; saudeCor = 'var(--warn)'; }
+
+  // ---- Alertas Inteligentes (seção 18) — cada um só entra com dado real que sustente ----
+  const alertasInteligentes = [];
+  categoriasEstouradas.forEach(l=>alertasInteligentes.push({ tipo:'🚨', texto:`A categoria "${l.cat}" já ultrapassou o orçamento (${l.pctRealizado}%).` }));
+  categoriasProjetamEstourar.forEach(l=>alertasInteligentes.push({ tipo:'⚠️', texto:`Mantido o ritmo atual, "${l.cat}" deverá terminar em ${l.pctProjetado}% do orçamento.` }));
+  linhasOrcamento.filter(l=>!l.estourou && !l.projetaEstourar && l.pctProjetado>=l.limite).forEach(l=>alertasInteligentes.push({ tipo:'🟡', texto:`"${l.cat}" já atingiu ${l.pctProjetado}% do orçamento (limite configurado: ${l.limite}%).` }));
+  linhasReceita.filter(l=>l.atingimento < l.ritmoEsperadoPct-15).forEach(l=>alertasInteligentes.push({ tipo:'📉', texto:`A receita de "${l.cat}" está abaixo do ritmo necessário (${l.atingimento}% realizado, esperado ~${l.ritmoEsperadoPct}% pra essa altura do mês).` }));
+  if(resultadoPlanejado>0 && resultadoProjetado < resultadoPlanejado) alertasInteligentes.push({ tipo:'⚠️', texto:`O aumento das despesas está reduzindo o resultado projetado (${brl(resultadoProjetado)} de um planejado de ${brl(resultadoPlanejado)}).` });
+  if(totalOrcadoDespesa>0 && receitaPlanejadaTotal>0 && totalOrcadoDespesa>receitaPlanejadaTotal) alertasInteligentes.push({ tipo:'🚨', texto:`O orçamento de despesas (${brl(totalOrcadoDespesa)}) está maior que a receita planejada (${brl(receitaPlanejadaTotal)}).` });
+
+  // Categorias com movimento relevante mas sem planejamento (seção 68) — últimos 3 meses
+  const [anoM3,mesM3] = mesGlobalRef.split('-').map(Number);
+  const de3m = `${anoM3}-${String(Math.max(1,mesM3-2)).padStart(2,'0')}-01`;
+  const gastosPorCategoriaSemOrc = {};
+  categoriasDespesa.filter(c=>!orc[c]).forEach(cat=>{
+    const v = totalCategoriaTipoNoPeriodo(cat, 'saida', de3m, ateReal);
+    if(v>0) gastosPorCategoriaSemOrc[cat] = v;
+  });
+  const categoriasSemPlanejamento = Object.entries(gastosPorCategoriaSemOrc).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  if(categoriasSemPlanejamento.length) alertasInteligentes.push({ tipo:'ℹ️', texto:`Existem ${categoriasSemPlanejamento.length} categoria(s) com movimentação relevante sem orçamento definido.` });
+
+  // ---- Ranking de Desvios (seção 19) — desvio = projetado - orçado, separado em favorável/desfavorável ----
+  const desviosOrdenados = [...linhasOrcamento].filter(l=>Math.abs(l.desvio)>0.01).sort((a,b)=>Math.abs(b.desvio)-Math.abs(a.desvio));
+  const desviosDesfavoraveis = desviosOrdenados.filter(l=>l.desvio>0).slice(0,6);
+  const desviosFavoraveis = desviosOrdenados.filter(l=>l.desvio<0).slice(0,6);
+
+  // ---- Evolução mensal (seção 21) — últimos 6 meses realizado, reaproveitando totalCategoriaTipoNoPeriodo por mês inteiro ----
+  const mesesEvolucao = Array.from({length:6},(_,i)=>{ const [ay,am]=mesGlobalRef.split('-').map(Number); const d=new Date(ay,am-1-5+i,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const evolucaoDados = mesesEvolucao.map(m=>{
+    const [ay,am] = m.split('-').map(Number);
+    const deM = `${m}-01`, ateM = `${m}-${String(new Date(ay,am,0).getDate()).padStart(2,'0')}`;
+    const receitaM = categoriasReceitaPlanejadas.reduce((s,c)=>s+totalCategoriaTipoNoPeriodo(c,'entrada',deM,ateM),0);
+    const despesaM = categoriasDespesaPlanejadas.reduce((s,c)=>s+totalCategoriaTipoNoPeriodo(c,'saida',deM,ateM),0);
+    return { mes:m, receita:receitaM, despesa:despesaM, resultado:receitaM-despesaM };
+  });
+
+  const categoriasDisponiveis = categoriasDespesa.filter(c=>!categoriasDespesaPlanejadas.includes(c));
 
   return `
     <div class="topbar">
-      <div><h1>Orçamento e Planejamento</h1><p>Metas de faturamento e orçamento de despesas por categoria, comparados ao mês selecionado</p></div>
+      <div><h1>Orçamento e Planejamento</h1><p>Planeje, acompanhe e antecipe o resultado financeiro da empresa</p></div>
     </div>
 
     ${mesNavHTML()}
 
-    <div class="cards" style="grid-template-columns:1fr 1fr 1fr;">
-      <div class="card"><div class="label">📈 Receita Projetada/mês</div><div class="value mono pos">${vm(brl(totalProjetadoReceita))}</div></div>
-      <div class="card"><div class="label">📉 Despesa Orçada/mês</div><div class="value mono neg">${vm(brl(totalOrcadoDespesa))}</div></div>
-      <div class="card"><div class="label">💰 Lucro Projetado/mês</div><div class="value mono ${lucroProjetado>=0?'pos':'neg'}">${vm(brl(lucroProjetado))}</div></div>
+    ${!temPlanejamento ? `
+    <div class="panel"><div class="empty" style="padding:50px 20px;">
+      <div style="font-size:16px;font-weight:700;margin-bottom:8px;">Comece seu planejamento</div>
+      <div style="font-size:13px;color:var(--text-soft);max-width:420px;margin:0 auto 16px;">Defina quanto pretende receber e quanto pretende gastar para acompanhar seu desempenho durante o período.</div>
+      <button class="btn" id="btnAdicionarOrcamento">+ Criar planejamento</button>
+    </div></div>
+    ` : `
+
+    <div class="dash-section-label">Visão executiva</div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:10px;">
+      <div class="card"><div class="label">Receita planejada</div><div class="value mono">${brl(receitaPlanejadaTotal)}</div></div>
+      <div class="card"><div class="label">Receita realizada</div><div class="value mono" style="color:var(--success);">${brl(receitaRealizadaTotal)}</div></div>
+      <div class="card"><div class="label">Receita projetada</div><div class="value mono">${brl(receitaProjetadaTotal)}</div></div>
+      <div class="card"><div class="label">Despesa planejada</div><div class="value mono">${brl(totalOrcadoDespesa)}</div></div>
+      <div class="card"><div class="label">Despesa realizada</div><div class="value mono" style="color:var(--danger);">${brl(totalRealizadoOrcado)}</div></div>
+      <div class="card"><div class="label">Despesa projetada</div><div class="value mono">${brl(totalProjetadoOrcado)}</div></div>
+    </div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;margin-bottom:14px;">
+      <div class="card saldo"><div class="label">Resultado planejado</div><div class="value mono" style="color:${resultadoPlanejado>=0?'var(--success)':'var(--danger)'};">${brl(resultadoPlanejado)}</div></div>
+      <div class="card saldo"><div class="label">Resultado projetado</div><div class="value mono" style="color:${resultadoProjetado>=0?'var(--success)':'var(--danger)'};">${brl(resultadoProjetado)}</div></div>
     </div>
 
-    ${linhasOrcamento.length ? `
-    <div class="panel" style="margin-bottom:16px;">
-      <div class="panel-head"><h2>📊 Orçado x Realizado x Previsto — ${competenciaLabel(mesGlobalRef)}</h2></div>
-      <div class="panel-body" style="padding:16px 20px;">
-        <div class="cards" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:12px;">
-          <div class="card"><div class="label">Orçado (todas as categorias)</div><div class="value mono">${vm(brl(totalOrcadoDespesa))}</div></div>
-          <div class="card"><div class="label">Realizado até hoje</div><div class="value mono" style="color:${pctRealizadoGeral>=100?'var(--danger)':'var(--ink)'};">${vm(brl(totalRealizadoOrcado))} <span style="font-size:11px;color:var(--text-soft);">(${pctRealizadoGeral}%)</span></div></div>
-          <div class="card"><div class="label">Previsto até o fim do mês</div><div class="value mono" style="color:${pctPrevistoGeral>=100?'var(--danger)':pctPrevistoGeral>=80?'var(--warn)':'var(--success)'};">${vm(brl(totalPrevistoOrcado))} <span style="font-size:11px;color:var(--text-soft);">(${pctPrevistoGeral}%)</span></div></div>
-        </div>
-        <div style="background:var(--bone);border-radius:6px;height:10px;overflow:hidden;">
-          <div style="width:${Math.min(100,pctPrevistoGeral)}%;height:100%;background:${pctPrevistoGeral>=100?'var(--danger)':pctPrevistoGeral>=80?'var(--warn)':'var(--success)'};"></div>
-        </div>
-        <div class="note" style="margin-top:8px;">Soma de todas as categorias que você colocou no orçamento — dá a visão geral de quanto já foi gasto e quanto se projeta gastar até o fim do mês, comparado com o total orçado.</div>
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="panel-head"><h2>Saúde do orçamento</h2></div>
+      <div class="panel-body" style="padding:20px;text-align:center;">
+        <div style="font-size:24px;font-weight:800;color:${saudeCor};">${saudeOrcamento}</div>
+        ${resultadoPlanejado!==0 ? `<div style="font-size:12px;color:var(--text-soft);margin-top:6px;">${resultadoProjetado>=resultadoPlanejado ? `Resultado projetado ${brl(resultadoProjetado-resultadoPlanejado)} acima do planejado.` : `Resultado projetado ${brl(resultadoPlanejado-resultadoProjetado)} abaixo do planejado.`}</div>` : ''}
       </div>
-    </div>` : ''}
+    </div>
 
-    ${alertasAtivos.length ? `
-    <div class="panel" style="margin-bottom:16px;border-left:3px solid var(--warn);">
-      <div class="panel-head"><h2>🔔 Alertas de Orçamento (${competenciaLabel(mesGlobalRef)})</h2></div>
-      <div class="panel-body" style="padding:12px 20px;">
-        ${alertasAtivos.map(l=>`
-          <div style="padding:6px 0;font-size:12.5px;display:flex;justify-content:space-between;align-items:center;">
-            <span>${l.estourou ? '🚨' : '⚠️'} <strong>${escapeHTML(l.cat)}</strong> ${l.estourou ? 'já estourou o orçamento' : `já passou de ${l.limite}% do orçado (limite que você definiu)`}</span>
-            <span class="mono" style="color:${l.estourou?'var(--danger)':'var(--warn)'};font-weight:600;">${l.pctPrevisto}%</span>
+    <div class="dash-section-label">Resultado do período</div>
+    <div class="panel" style="margin-bottom:14px;overflow-x:auto;">
+      <div class="ledger-row head" style="grid-template-columns:1fr 100px 100px 100px 90px;min-width:520px;"><span>Indicador</span><span>Planejado</span><span>Realizado</span><span>Projetado</span><span>Variação</span></div>
+      <div style="min-width:520px;">
+        ${[
+          { nome:'Receita', pl:receitaPlanejadaTotal, re:receitaRealizadaTotal, pr:receitaProjetadaTotal, corBase:'padrao' },
+          { nome:'Despesa', pl:totalOrcadoDespesa, re:totalRealizadoOrcado, pr:totalProjetadoOrcado, corBase:'invertido' },
+          { nome:'Resultado', pl:resultadoPlanejado, re:resultadoRealizado, pr:resultadoProjetado, corBase:'padrao' },
+        ].map(r=>{
+          const varPct = r.pl!==0 ? Math.round((r.pr-r.pl)/Math.abs(r.pl)*100) : 0;
+          const bom = r.corBase==='padrao' ? varPct>=0 : varPct<=0;
+          return `<div class="ledger-row compact" style="grid-template-columns:1fr 100px 100px 100px 90px;">
+            <span style="font-weight:600;font-size:12.5px;">${r.nome}</span>
+            <span class="mono" style="font-size:12px;">${brl(r.pl)}</span>
+            <span class="mono" style="font-size:12px;">${brl(r.re)}</span>
+            <span class="mono" style="font-size:12px;">${brl(r.pr)}</span>
+            <span class="mono" style="font-size:12px;font-weight:600;color:${varPct===0?'inherit':bom?'var(--success)':'var(--danger)'};">${varPct>=0?'+':''}${varPct}%</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    ${linhasReceita.length ? `
+    <div class="dash-section-label">Planejamento de Receitas</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:6px 20px;">
+      ${linhasReceita.map(l=>`
+        <div style="padding:12px 0;border-bottom:1px solid var(--line);">
+          <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin-bottom:6px;"><span>${escapeHTML(l.cat)}</span><span class="mono">${l.atingimento}%</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--text-soft);margin-bottom:5px;">
+            <span>Realizado: ${brl(l.realizado)} · Projetado: ${brl(l.projetado)}</span><span>Planejado: ${brl(l.planejado)}</span>
           </div>
-        `).join('')}
-      </div>
-    </div>` : ''}
+          <div style="background:var(--bone);border-radius:6px;height:7px;overflow:hidden;">
+            <div style="width:${Math.min(100,l.atingimento)}%;height:100%;background:${l.atingimento>=100?'var(--success)':l.atingimento<l.ritmoEsperadoPct-15?'var(--danger)':'var(--blue-accent)'};"></div>
+          </div>
+          <div style="font-size:10.5px;color:var(--text-soft);margin-top:3px;">${l.atingimento>=100?`Já atingiu ${l.atingimento}% do planejado.`:l.atingimento<l.ritmoEsperadoPct-15?`Abaixo do ritmo esperado pra essa altura do mês (~${l.ritmoEsperadoPct}%).`:`No ritmo esperado (~${l.ritmoEsperadoPct}% do mês já passou).`}</div>
+        </div>
+      `).join('')}
+    </div></div>` : ''}
 
-    <div class="panel" style="margin-bottom:16px;">
-      <div class="panel-head"><h2>📉 Orçamento de Despesas por Categoria</h2><button class="btn sm" id="btnAdicionarOrcamento">+ Adicionar categoria</button></div>
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="panel-head"><h2>Definir receita planejada por categoria</h2></div>
+      <div class="panel-body" style="padding:6px 20px;">
+        ${categoriasReceita.length ? categoriasReceita.map(cat=>`
+          <div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);">
+            <div style="flex:1;font-size:13px;">${escapeHTML(cat)}</div>
+            <input type="text" inputmode="decimal" class="projecao-receita-input" data-cat="${escapeHTML(cat)}" value="${proj[cat]||''}" placeholder="0,00" style="width:110px;font-size:12.5px;padding:6px 8px;">
+          </div>
+        `).join('') : `<div class="empty">Nenhuma categoria de receita cadastrada ainda — crie em Categorias.</div>`}
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="panel-head"><h2>Planejamento de Despesas</h2><button class="btn sm" id="btnAdicionarOrcamento">+ Adicionar categoria</button></div>
       <div class="panel-body" style="padding:6px 20px;">
         ${linhasOrcamento.length ? linhasOrcamento.map(l=>`
           <div style="padding:12px 0;border-bottom:1px solid var(--line);">
@@ -5293,51 +5413,54 @@ function viewOrcamentoPlanejamento(){
                 <button class="icon-btn" data-action="remover-orcamento" data-cat="${escapeHTML(l.cat)}" title="Remover do orçamento">✕</button>
               </div>
             </div>
-            <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-soft);margin-bottom:5px;">
-              <span>Realizado: <strong class="mono" style="color:var(--ink);">${vm(brl(l.realizado))}</strong> · Previsto: <strong class="mono" style="color:var(--ink);">${vm(brl(l.previsto))}</strong></span>
-              <span class="mono">de ${vm(brl(l.orcado))}</span>
+            <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--text-soft);margin-bottom:5px;flex-wrap:wrap;gap:4px;">
+              <span>Realizado: <strong class="mono" style="color:var(--ink);">${brl(l.realizado)}</strong> · Comprometido: <strong class="mono" style="color:var(--ink);">${brl(l.comprometido)}</strong> · Projetado: <strong class="mono" style="color:var(--ink);">${brl(l.projetado)}</strong></span>
+              <span class="mono">de ${brl(l.orcado)}</span>
             </div>
-            <div style="background:var(--bone);border-radius:6px;height:8px;overflow:hidden;position:relative;">
-              <div style="width:${Math.min(100,l.pctPrevisto)}%;height:100%;background:${l.estourou?'var(--danger)':l.alertou?'var(--warn)':'var(--success)'};"></div>
+            <div style="background:var(--bone);border-radius:6px;height:8px;overflow:hidden;">
+              <div style="width:${Math.min(100,l.pctProjetado)}%;height:100%;background:${l.estourou?'var(--danger)':l.alertou?'var(--warn)':'var(--success)'};"></div>
             </div>
-            <div style="font-size:10.5px;color:var(--text-soft);margin-top:3px;text-align:right;">${l.pctRealizado}% realizado · ${l.pctPrevisto}% previsto até o fim do mês</div>
+            <div style="font-size:10.5px;color:var(--text-soft);margin-top:3px;text-align:right;">${l.pctRealizado}% realizado · ${l.pctProjetado}% projetado até o fim do mês${l.saldoProjetado<0?` · Projeção de estouro: ${brl(-l.saldoProjetado)}`:` · Saldo: ${brl(l.saldo)}`}</div>
           </div>
-        `).join('') : `<div class="empty">Nenhuma categoria no orçamento ainda. Clique em "+ Adicionar categoria" pra escolher quais acompanhar.</div>`}
+        `).join('') : `<div class="empty">Nenhuma categoria no orçamento ainda.</div>`}
       </div>
     </div>
 
-    <div class="panel" style="margin-bottom:16px;">
-      <div class="panel-head"><h2>📈 Projeção de Faturamento — Receitas</h2></div>
-      <div class="panel-body" style="padding:6px 20px;">
-        ${categoriasReceita.length ? categoriasReceita.map(cat=>`
-          <div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);">
-            <div style="flex:1;font-size:13px;">${escapeHTML(cat)}</div>
-            <input type="text" inputmode="decimal" class="projecao-receita-input" data-cat="${escapeHTML(cat)}" value="${proj[cat]||''}" placeholder="0,00" style="width:110px;font-size:12.5px;padding:6px 8px;">
-          </div>
-        `).join('') : `<div class="empty">Nenhuma categoria de receita cadastrada ainda — crie em Categorias.</div>`}
-      </div>
-    </div>
+    ${categoriasSemPlanejamento.length ? `
+    <div class="dash-section-label">Categorias ainda não planejadas</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+      ${categoriasSemPlanejamento.map(([cat,v])=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span style="font-size:12.5px;">${escapeHTML(cat)}</span><span class="mono" style="font-weight:600;">${brl(v)}</span></div>`).join('')}
+    </div></div>
+    <div class="note" style="margin-top:0;">Gasto nos últimos 3 meses — vale considerar orçar essas categorias pra ter controle completo.</div>` : ''}
 
-    ${linhasComparacao.length ? `
-    <div class="dash-section-label">Metas de receita — comparação com o mês selecionado</div>
-    <div class="panel">
-      <div class="panel-body" style="padding:16px 20px;">
-        ${linhasComparacao.map(x=>{
-          const realizado = totalCategoriaTipoNoPeriodo(x.cat, x.tipo, t.de, ateReal);
-          const pct = x.planejado>0 ? Math.round(realizado/x.planejado*100) : 0;
-          return `
-          <div style="margin-bottom:14px;">
-            <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;">
-              <span>${escapeHTML(x.cat)} <span style="color:var(--text-soft);">(receita)</span></span>
-              <span class="mono">${vm(brl(realizado))} / ${vm(brl(x.planejado))} (${pct}%)</span>
-            </div>
-            <div style="background:var(--bone);border-radius:6px;height:7px;overflow:hidden;">
-              <div style="width:${Math.min(100,pct)}%;height:100%;background:var(--blue-accent);"></div>
-            </div>
-          </div>`;
-        }).join('')}
-      </div>
-    </div>` : ''}
+    ${alertasInteligentes.length ? `
+    <div class="dash-section-label">Alertas do planejamento</div>
+    <div class="panel" style="margin-bottom:14px;border-left:3px solid var(--warn);"><div class="panel-body" style="padding:0;">
+      ${alertasInteligentes.map(a=>`<div class="ledger-row compact" style="grid-template-columns:auto 1fr;">${a.tipo} <span style="font-size:12.5px;">${a.texto}</span></div>`).join('')}
+    </div></div>` : ''}
+
+    ${(desviosDesfavoraveis.length || desviosFavoraveis.length) ? `
+    <div class="dash-section-label">Maiores desvios do planejamento</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:14px 20px;">
+      ${desviosDesfavoraveis.length ? `<div style="font-size:11px;font-weight:700;color:var(--text-soft);text-transform:uppercase;margin-bottom:6px;">Desfavoráveis</div>${desviosDesfavoraveis.map(l=>`<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12.5px;"><span>${escapeHTML(l.cat)}</span><span class="mono" style="color:var(--danger);font-weight:600;">+${brl(l.desvio)}</span></div>`).join('')}` : ''}
+      ${desviosFavoraveis.length ? `<div style="font-size:11px;font-weight:700;color:var(--text-soft);text-transform:uppercase;margin:12px 0 6px;">Favoráveis</div>${desviosFavoraveis.map(l=>`<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12.5px;"><span>${escapeHTML(l.cat)}</span><span class="mono" style="color:var(--success);font-weight:600;">${brl(l.desvio)}</span></div>`).join('')}` : ''}
+    </div></div>` : ''}
+
+    <div class="dash-section-label">Evolução do planejamento</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">
+      ${svgLinhasMultiplas([
+        { nome:'Receita', valores:evolucaoDados.map(e=>e.receita) },
+        { nome:'Despesa', valores:evolucaoDados.map(e=>e.despesa) },
+        { nome:'Resultado', valores:evolucaoDados.map(e=>e.resultado) },
+      ], evolucaoDados.map(e=>competenciaLabel(e.mes)))}
+    </div></div>
+
+    <div class="report-controls" style="gap:8px;flex-wrap:wrap;">
+      <button class="btn ghost sm" data-action="ir-orcamento-anual">📅 Orçamento Anual</button>
+      <button class="btn ghost sm" data-action="ir-simulacao-e-se">🎲 Simulação "E Se"</button>
+      <button class="btn ghost sm" data-goto="relatorios">📊 Relatórios</button>
+    </div>
+    `}
   `;
 }
 
@@ -20404,6 +20527,15 @@ function attachViewHandlers(){
       persist(); render();
       showToast('Limite de alerta atualizado');
     });
+  });
+  document.querySelector('[data-action="ir-orcamento-anual"]')?.addEventListener('click', ()=>{
+    relatorioAtivo = 'orcamento_anual';
+    currentView = 'relatorio-detalhe';
+    render();
+  });
+  document.querySelector('[data-action="ir-simulacao-e-se"]')?.addEventListener('click', ()=>{
+    currentView = 'simulacao';
+    render();
   });
   document.querySelectorAll('[data-action="remover-orcamento"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
