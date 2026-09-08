@@ -664,11 +664,11 @@
         <div class="nav-item" data-view="relatorios" title="Relatórios"><span class="nav-dot"></span><span class="nav-abbr">RL</span><span class="nav-label">Relatórios</span></div>
         <div class="nav-item" data-view="busca-global" title="Busca Global"><span class="nav-dot"></span><span class="nav-abbr">BG</span><span class="nav-label">Busca Global</span></div>
         <div class="nav-item" data-view="central-decisao" title="Central de Decisão"><span class="nav-dot"></span><span class="nav-abbr">CD</span><span class="nav-label">Central de Decisão</span></div>
-        <div class="nav-item" data-view="assistente" title="Perguntar ao Livro Caixa"><span class="nav-dot"></span><span class="nav-abbr">PA</span><span class="nav-label">Perguntar ao Livro Caixa</span></div>
         <div class="nav-item" data-view="veiculos" title="Meus Carros"><span class="nav-dot"></span><span class="nav-abbr">MC</span><span class="nav-label">Meus Carros</span></div>
         <div class="nav-item" data-view="capex" title="Central de CAPEX"><span class="nav-dot"></span><span class="nav-abbr">CX</span><span class="nav-label">Central de CAPEX</span></div>
         <div class="nav-item" data-view="retiradas" title="Central de Retiradas"><span class="nav-dot"></span><span class="nav-abbr">RT</span><span class="nav-label">Central de Retiradas</span></div>
         <div class="nav-item" data-view="projetos-financeiros" title="Central de Projetos"><span class="nav-dot"></span><span class="nav-abbr">PJ</span><span class="nav-label">Central de Projetos</span></div>
+        <div class="nav-item" data-view="pendencias" title="Central de Pendências"><span class="nav-dot"></span><span class="nav-abbr">PD</span><span class="nav-label">Central de Pendências</span></div>
         <div class="nav-item" data-view="navegacao-objetivo" title="O Que Você Quer Fazer?"><span class="nav-dot"></span><span class="nav-abbr">OB</span><span class="nav-label">O Que Você Quer Fazer?</span></div>
         <div class="nav-item" data-view="orcamento" title="Orçamento e Planejamento"><span class="nav-dot"></span><span class="nav-abbr">OR</span><span class="nav-label">Orçamento e Planejamento</span></div>
         <div class="nav-item" data-view="simulacao" title="Simulação &quot;E Se&quot;"><span class="nav-dot"></span><span class="nav-abbr">SE</span><span class="nav-label">Simulação "E Se"</span></div>
@@ -1411,11 +1411,11 @@ function moreItensDef(){
     { view:'relatorios', icone:'📊', nome:'Relatórios', grupo:'Análise' },
     { view:'busca-global', icone:'🔍', nome:'Busca Global', grupo:'Análise' },
     { view:'central-decisao', icone:'🧭', nome:'Central de Decisão', grupo:'Análise' },
-    { view:'assistente', icone:'💬', nome:'Perguntar ao Livro Caixa', grupo:'Análise' },
     { view:'veiculos', icone:'🚗', nome:'Meus Carros', grupo:'Operacional' },
     { view:'capex', icone:'🏗️', nome:'Central de CAPEX', grupo:'Operacional' },
     { view:'retiradas', icone:'💸', nome:'Central de Retiradas', grupo:'Operacional' },
     { view:'projetos-financeiros', icone:'📁', nome:'Central de Projetos', grupo:'Operacional' },
+    { view:'pendencias', icone:'🔔', nome:'Central de Pendências', grupo:'Análise', badge:()=>state.lancamentos.filter(l=>l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento<todayISO()).length },
     { view:'navegacao-objetivo', icone:'🧭', nome:'O Que Você Quer Fazer?', grupo:'Análise' },
     { view:'orcamento', icone:'🗂️', nome:'Orçamento e Planejamento', grupo:'Análise' },
     { view:'simulacao', icone:'🔮', nome:'Simulação "E Se"', grupo:'Análise' },
@@ -1554,7 +1554,6 @@ function render(){
   else if(currentView==='configuracao-detalhe') main.innerHTML = viewConfiguracaoDetalhe();
   else if(currentView==='busca-global') main.innerHTML = viewBuscaGlobal();
   else if(currentView==='central-decisao') main.innerHTML = viewCentralDecisao();
-  else if(currentView==='assistente') main.innerHTML = viewAssistente();
   else if(currentView==='veiculos') main.innerHTML = viewVeiculos();
   else if(currentView==='veiculos-visao-geral') main.innerHTML = viewVeiculosVisaoGeral();
   else if(currentView==='capex') main.innerHTML = viewCapex();
@@ -1562,6 +1561,7 @@ function render(){
   else if(currentView==='relatorios-capex') main.innerHTML = viewRelatoriosCapex();
   else if(currentView==='retiradas') main.innerHTML = viewRetiradas();
   else if(currentView==='projetos-financeiros') main.innerHTML = viewProjetosFinanceiros();
+  else if(currentView==='pendencias') main.innerHTML = viewCentralPendencias();
   else if(currentView==='navegacao-objetivo') main.innerHTML = viewNavegacaoObjetivo();
   attachViewHandlers();
   atualizarBadgesBottomNav();
@@ -1990,6 +1990,7 @@ function viewRelatoriosInvestimentos(){
   // 1. Posição da carteira
   const patrimonio = totalInvestimentos(), capital = custoTotalInvestimentos(), resultado = patrimonio-capital;
   const rentabilidade = capital>0 ? (resultado/capital*100) : null;
+  const xirr = xirrCarteiraInvestimentos();
   const datasPosicao = ativosAtivos.map(a=>a.dataUltimaCotacao||a.dataAplicacao).filter(Boolean);
   const posicoesEmDatasDiferentes = new Set(datasPosicao.map(d=>d.slice(0,10))).size>1;
 
@@ -2049,7 +2050,9 @@ function viewRelatoriosInvestimentos(){
       <div class="card"><div class="label">Capital investido</div><div class="value mono">${brl(capital)}</div></div>
       <div class="card"><div class="label">Resultado</div><div class="value mono" style="color:${resultado>=0?'var(--success)':'var(--danger)'};">${brl(resultado)}</div></div>
       <div class="card"><div class="label">Rentabilidade</div><div class="value mono" style="${rentabilidade===null?'font-size:12.5px;color:var(--text-soft);':''}">${rentabilidade!==null?rentabilidade.toFixed(2)+'%':'Sem dados suficientes'}</div></div>
+      <div class="card"><div class="label">TIR/XIRR anualizada</div><div class="value mono" style="${xirr===null?'font-size:12.5px;color:var(--text-soft);':''}">${xirr!==null?xirr.toFixed(2)+'%':'Sem dados suficientes'}</div></div>
     </div>
+    <div class="note" style="margin-top:0;">Rentabilidade acumulada é simples (resultado ÷ capital). TIR/XIRR considera as datas reais de cada aporte e resgate, dando a taxa de retorno anualizada de verdade — mais precisa quando há aportes em momentos diferentes.</div>
     ${posicoesEmDatasDiferentes ? `<div class="note" style="margin-top:0;">⚠️ Carteira com atualizações em datas diferentes — cada ativo mostra sua própria última posição.</div>` : ''}
 
     <div class="dash-section-label">3. Rentabilidade por instituição e classe</div>
@@ -2152,6 +2155,48 @@ function viewRelatoriosInvestimentos(){
     </div></div>
     <div class="note" style="margin-top:0;">Aportes e resgates são reconstituídos com precisão total pelas datas registradas. Já a valorização de mercado dia a dia não é reconstituível retroativamente — o histórico de atualizações manuais (acima) é exato a partir do momento em que cada atualização foi registrada.</div>
   `;
+}
+// XIRR — retorno anualizado considerando as DATAS REAIS de cada aporte/resgate (não uniformes),
+// diferente de uma rentabilidade simples. Não tem fórmula fechada — resolve por Newton-Raphson,
+// com busca binária como reforço se não convergir. fluxos = [{data, valor}], valor negativo = saiu
+// do bolso (aporte), valor positivo = voltou (resgate ou valor atual, como se fosse resgatado hoje).
+function calcularXIRR(fluxos){
+  if(fluxos.length<2) return null;
+  const temPositivo = fluxos.some(f=>f.valor>0), temNegativo = fluxos.some(f=>f.valor<0);
+  if(!temPositivo || !temNegativo) return null;
+  const dataBase = fluxos[0].data;
+  const anos = fluxos.map(f=>(new Date(f.data)-new Date(dataBase))/(365*86400000));
+  const vpl = (taxa)=>fluxos.reduce((s,f,i)=>s+f.valor/Math.pow(1+taxa, anos[i]), 0);
+  const vplDerivada = (taxa)=>fluxos.reduce((s,f,i)=>s-anos[i]*f.valor/Math.pow(1+taxa, anos[i]+1), 0);
+
+  let taxa = 0.1;
+  for(let i=0;i<100;i++){
+    const v = vpl(taxa), d = vplDerivada(taxa);
+    if(Math.abs(d)<1e-10) break;
+    const novaTaxa = taxa - v/d;
+    if(Math.abs(novaTaxa-taxa)<1e-7) return novaTaxa*100;
+    taxa = novaTaxa;
+    if(taxa<-0.99) taxa = -0.99;
+  }
+  // Newton-Raphson não convergiu (comum com fluxos muito irregulares) — tenta busca binária
+  let lo=-0.99, hi=10;
+  if(vpl(lo)*vpl(hi)>0) return null;
+  for(let i=0;i<200;i++){
+    const meio = (lo+hi)/2;
+    if(vpl(lo)*vpl(meio)<=0) hi = meio; else lo = meio;
+  }
+  return ((lo+hi)/2)*100;
+}
+function xirrCarteiraInvestimentos(){
+  const fluxos = [];
+  state.ativosInvestimento.forEach(a=>{
+    if(a.dataAplicacao && a.valorAplicado>0) fluxos.push({ data:a.dataAplicacao, valor:-a.valorAplicado });
+    if(a.resgatado && a.dataResgate && a.valorResgatado>0) fluxos.push({ data:a.dataResgate, valor:a.valorResgatado });
+  });
+  const patrimonioAtual = totalInvestimentos();
+  if(patrimonioAtual>0) fluxos.push({ data:todayISO(), valor:patrimonioAtual });
+  fluxos.sort((a,b)=>a.data.localeCompare(b.data));
+  return calcularXIRR(fluxos);
 }
 /* ====================== FIM RELATÓRIOS DE INVESTIMENTOS ====================== */
 
@@ -21230,20 +21275,6 @@ function attachViewHandlers(){
   document.getElementById('btnNovaMeta')?.addEventListener('click', ()=>openMetaModal());
   document.getElementById('btnEditarMetasFinanceiras')?.addEventListener('click', ()=>openMetasFinanceirasModal());
   document.getElementById('btnNovaDecisaoFinanceira')?.addEventListener('click', ()=>openNovaDecisaoModal());
-  const assistentePergunta = document.getElementById('assistentePergunta');
-  const executarPerguntaAssistente = (texto)=>{
-    if(!texto || !texto.trim()) return;
-    const resposta = responderPerguntaAssistente(texto);
-    document.getElementById('assistenteResposta').innerHTML = `<div class="note" style="margin-top:0;">${resposta.texto}</div>`;
-  };
-  document.getElementById('btnPerguntarAssistente')?.addEventListener('click', ()=>executarPerguntaAssistente(assistentePergunta.value));
-  assistentePergunta?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') executarPerguntaAssistente(assistentePergunta.value); });
-  document.querySelectorAll('[data-action="perguntar-sugestao"]').forEach(el=>{
-    el.addEventListener('click', ()=>{
-      if(assistentePergunta) assistentePergunta.value = el.dataset.pergunta;
-      executarPerguntaAssistente(el.dataset.pergunta);
-    });
-  });
   document.querySelectorAll('.cofre-nome-input').forEach(inp=>{
     inp.addEventListener('change', ()=>{
       state.cofresVirtuais[inp.dataset.idx].nome = inp.value.trim() || 'Sem nome';
@@ -23485,18 +23516,6 @@ function totalGastoFornecedor(nome){
 }
 
 let buscaGlobalTermo = '';
-// Assistente "Perguntar ao Livro Caixa" — NÃO é uma IA de verdade, é reconhecimento de um
-// conjunto fixo de padrões de pergunta, cada um respondido com os cálculos que já existem no
-// sistema. Isso é dito claramente na tela, pra não prometer mais do que entrega.
-function extrairValorDaPergunta(texto){
-  const m = texto.match(/r?\$?\s*([\d.,]+)\s*(mil|k)?/i);
-  if(!m) return null;
-  let valor = parseFloat(m[1].replace(/\./g,'').replace(',','.'));
-  if(isNaN(valor)) return null;
-  if(m[2]) valor *= 1000;
-  return valor;
-}
-
 function calcularCaixaLivreAssistente(){
   const hoje = todayISO();
   const em30 = new Date(); em30.setDate(em30.getDate()+30);
@@ -23505,65 +23524,6 @@ function calcularCaixaLivreAssistente(){
   const comprometido30d = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento<=em30ISO).reduce((s,l)=>s+valorEmAberto(l),0);
   const cartoesNaoFaturados = state.cartoes.reduce((s,c)=>{ const comp = competenciaAtual(c); return s + (faturaStatus(c.id, comp)==='aberta' ? totalCompetencia(c.id, comp) : 0); }, 0);
   return Math.max(0, saldoContasHoje - comprometido30d - cartoesNaoFaturados);
-}
-
-function responderPerguntaAssistente(pergunta){
-  const p = pergunta.toLowerCase().trim();
-  const hoje = todayISO();
-  const caixaLivre = calcularCaixaLivreAssistente();
-
-  if(/posso gastar|posso comprar|posso investir|posso retirar|se eu (gastar|retirar|comprar|investir)/.test(p)){
-    const valor = extrairValorDaPergunta(p);
-    if(valor===null) return { texto: 'Não consegui identificar o valor na pergunta. Tente algo como "posso gastar R$ 20.000?"' };
-    const sobra = caixaLivre - valor;
-    const pctImpacto = caixaLivre>0 ? (valor/caixaLivre*100) : 100;
-    const ok = sobra>=0 && pctImpacto<=70;
-    return { texto: `${ok?'🟢 Sim — impacto '+(pctImpacto<30?'baixo':'moderado'):'🔴 Cuidado'}. Isso representa ${pctImpacto.toFixed(0)}% do seu dinheiro livre hoje (${brl(caixaLivre)}). Depois dessa operação, sobraria ${brl(sobra)}${sobra<0?' — ou seja, ficaria negativo':''}.` };
-  }
-  if(/quanto (tenho|posso investir|disponível|dinheiro livre)/.test(p) || /disponível para (investir|decisão|gastar)/.test(p)){
-    return { texto: `Você tem ${brl(caixaLivre)} disponíveis pra decisão — isso já descontou o que está comprometido nos próximos 30 dias (contas a pagar pendentes e faturas de cartão em aberto).` };
-  }
-  if(/quanto entrou (hoje|essa semana|esta semana|esse mes|este mes|esse mês|este mês)/.test(p)){
-    let de = hoje;
-    if(/semana/.test(p)){ const d = new Date(); d.setDate(d.getDate()-7); de = d.toISOString().slice(0,10); }
-    else if(/mes|mês/.test(p)){ de = `${hoje.slice(0,7)}-01`; }
-    const total = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento>=de && l.dataPagamento<=hoje).reduce((s,l)=>s+l.valor,0);
-    return { texto: `Entrou ${brl(total)} desde ${fmtDate(de)}.` };
-  }
-  if(/vence (hoje|amanha|amanhã)/.test(p) || /contas.*(vencem|venc).*(hoje|amanha|amanhã)/.test(p)){
-    const dataAlvo = /amanha|amanhã/.test(p) ? (()=>{ const d=new Date(); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); })() : hoje;
-    const contas = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento===dataAlvo);
-    if(!contas.length) return { texto: `Nenhuma conta vence em ${fmtDate(dataAlvo)}.` };
-    return { texto: `${contas.length} conta(s) vence(m) em ${fmtDate(dataAlvo)}, total ${brl(contas.reduce((s,l)=>s+valorEmAberto(l),0))}: ${contas.slice(0,5).map(l=>escapeHTML(l.descricao)).join(', ')}${contas.length>5?'…':''}.` };
-  }
-  if(/preocup|atenção|atencao|problema/.test(p)){
-    const insights = gerarInsightsFinanceiros();
-    const risco = insights.find(i=>i.tipo==='risco') || insights.find(i=>i.tipo==='atencao');
-    if(!risco) return { texto: 'Nada de especial preocupando agora — os indicadores estão dentro do esperado. 🎉' };
-    return { texto: `${risco.tipo==='risco'?'🔴':'🟡'} ${risco.titulo}. ${risco.texto}` };
-  }
-  if(/quanto (preciso|tenho que) fatura/.test(p) && /sobr|lucr/.test(p)){
-    const valorDesejado = extrairValorDaPergunta(p);
-    if(valorDesejado===null) return { texto: 'Não consegui identificar o valor. Tente algo como "quanto preciso faturar pra sobrar R$ 20 mil?"' };
-    const dm = dadosMesGerencial(mesGlobalRef, 'todos');
-    if(dm.margemLiquidaPct<=0) return { texto: `Sua margem líquida atual está em ${dm.margemLiquidaPct.toFixed(1)}% — nesse ritmo, não tem faturamento que baste sem antes melhorar a margem.` };
-    const faturamentoNecessario = valorDesejado/(dm.margemLiquidaPct/100);
-    return { texto: `Pra sobrar ${brl(valorDesejado)}, mantendo a margem atual de ${dm.margemLiquidaPct.toFixed(1)}%, você precisaria faturar aproximadamente ${brl(faturamentoNecessario)}.` };
-  }
-  if(/quanto (preciso|tenho que) guardar/.test(p)){
-    const valorAlvo = extrairValorDaPergunta(p);
-    if(valorAlvo===null) return { texto: 'Não consegui identificar o valor. Tente algo como "quanto preciso guardar por mês pra ter R$ 100 mil?"' };
-    const mesesMatch = p.match(/(\d+)\s*(mes|mês|meses)/);
-    const meses = mesesMatch ? parseInt(mesesMatch[1],10) : 12;
-    const saldoAtual = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
-    const falta = Math.max(0, valorAlvo-saldoAtual);
-    const porMes = falta/meses;
-    return { texto: falta<=0 ? `Você já tem ${brl(saldoAtual)} — já dá pra chegar em ${brl(valorAlvo)}.` : `Faltam ${brl(falta)} pra chegar em ${brl(valorAlvo)}. Em ${meses} mês(es), seria preciso guardar aproximadamente ${brl(porMes)}/mês.` };
-  }
-  if(/parcel/.test(p) && /custa|custo/.test(p)){
-    return { texto: 'Pra simular o custo de um parcelamento com precisão (valor, número de parcelas e juros), use o "Simulador de Decisão de Compra" na Central de Relatórios — ele compara à vista, parcelado e financiado lado a lado.' };
-  }
-  return { texto: 'Não entendi essa pergunta — tente uma das sugestões abaixo. Esse assistente reconhece um conjunto fixo de perguntas, não é uma IA que entende qualquer frase.' };
 }
 
 // Navegação por Objetivo — organiza os recursos já existentes por objetivo, em vez de exigir que
@@ -23610,30 +23570,6 @@ function viewNavegacaoObjetivo(){
         ${o.itens.map(it=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;cursor:pointer;" ${it.rel?`data-ir-relatorio="${it.rel}"`:`data-goto="${it.view}"`}><span>${escapeHTML(it.nome)}</span><span style="color:var(--blue-accent);">→</span></div>`).join('')}
       </div></div>
     `).join('')}
-  `;
-}
-
-function viewAssistente(){
-  const perguntasSugeridas = [
-    'Quanto tenho disponível pra decisão?',
-    'Posso gastar R$ 20.000?',
-    'Quanto entrou essa semana?',
-    'O que vence amanhã?',
-    'O que está preocupando o financeiro?',
-    'Quanto preciso faturar pra sobrar R$ 20 mil?',
-    'Quanto preciso guardar por mês pra ter R$ 100 mil?',
-  ];
-  return `
-    <div class="topbar"><div><h1>Perguntar ao Livro Caixa</h1><p>Reconhece um conjunto fixo de perguntas — não é uma IA que entende qualquer frase, é um assistente com respostas prontas usando os dados do sistema.</p></div></div>
-    <div class="panel"><div class="panel-body" style="padding:18px;">
-      <div class="field"><input type="text" id="assistentePergunta" placeholder="Digite sua pergunta..." style="font-size:14px;"></div>
-      <button class="btn" id="btnPerguntarAssistente" style="margin-top:8px;">Perguntar</button>
-      <div id="assistenteResposta" style="margin-top:16px;"></div>
-    </div></div>
-    <div class="dash-section-label">Sugestões</div>
-    <div class="panel"><div class="panel-body" style="padding:0;">
-      ${perguntasSugeridas.map(p=>`<div class="ledger-row compact" style="grid-template-columns:1fr;cursor:pointer;" data-action="perguntar-sugestao" data-pergunta="${escapeHTML(p)}">${escapeHTML(p)}</div>`).join('')}
-    </div></div>
   `;
 }
 
@@ -24525,6 +24461,105 @@ function viewContratos(){
     </div>
   `;
 }
+
+/* ====================== CENTRAL DE PENDÊNCIAS ====================== */
+// Não cria NENHUM dado novo — só reúne sinais que já existem espalhados pelo sistema (contas
+// vencidas, aprovações, faturas pra revisar, investimentos desatualizados, contratos vencendo,
+// seguros vencendo, etc.) numa lista só, priorizada. Cada item leva de volta pro módulo de origem.
+function levantarPendencias(){
+  const hoje = todayISO();
+  const pendencias = [];
+
+  // Contas a pagar vencidas
+  const pagarVencidas = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento<hoje);
+  pagarVencidas.forEach(l=>pendencias.push({ prioridade:'critica', texto:`Conta vencida: "${l.descricao}" — ${brl(valorEmAberto(l))}, venceu ${fmtDate(l.dataVencimento)}`, view:'pagar', icone:'💸' }));
+
+  // Contas a receber atrasadas
+  const receberAtrasadas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento<hoje);
+  if(receberAtrasadas.length) pendencias.push({ prioridade:'critica', texto:`${receberAtrasadas.length} recebimento(s) atrasado(s), total ${brl(receberAtrasadas.reduce((s,l)=>s+valorEmAberto(l),0))}`, view:'receber', icone:'📥' });
+
+  // Aprovações VK Industrial
+  if((state.vkAprovacoes||[]).length) pendencias.push({ prioridade:'alta', texto:`${state.vkAprovacoes.length} item(ns) aguardando aprovação da integração VK Industrial`, view:'vk-aprovacoes', icone:'📋' });
+
+  // Faturas de cartão importadas aguardando revisão
+  if((state.faturasPendentes||[]).length) pendencias.push({ prioridade:'alta', texto:`${state.faturasPendentes.length} fatura(s) de cartão aguardando revisão`, view:'cartoes', icone:'💳' });
+
+  // Compras pendentes de cadastro em Ativos Patrimoniais
+  if((state.comprasProcessosPendentes||[]).length) pendencias.push({ prioridade:'media', texto:`${state.comprasProcessosPendentes.length} compra(s) pendente(s) de cadastro em Ativos Patrimoniais`, view:'ativos', icone:'📦' });
+
+  // Orçamentos de processo aguardando decisão
+  const orcPendentes = (state.orcamentosProcessos||[]).filter(o=>o.status==='pendente');
+  if(orcPendentes.length) pendencias.push({ prioridade:'media', texto:`${orcPendentes.length} orçamento(s) aguardando decisão (Orçamentos e Compras)`, view:'orcamentos-processos', icone:'📋' });
+
+  // Investimentos com posição pendente de atualização
+  const investPendentes = itensAtualizaveisInvestimento().map(it=>({ ...it, status: statusAtualizacaoItem(it.dataUltimaAtualizacao, it.periodicidade) })).filter(it=>it.status==='pendente');
+  if(investPendentes.length) pendencias.push({ prioridade:'media', texto:`${investPendentes.length} posição(ões) de investimento com atualização pendente`, view:'investimentos', icone:'📈' });
+
+  // Contratos vencidos/vencendo
+  (state.contratos||[]).forEach(c=>{
+    if(!c.dataVencimento) return;
+    const dias = Math.floor((new Date(c.dataVencimento)-new Date(hoje))/86400000);
+    if(dias<0) pendencias.push({ prioridade:'critica', texto:`Contrato "${c.nome}" venceu há ${Math.abs(dias)} dia(s)`, view:'contratos', icone:'📄' });
+    else if(dias<=7) pendencias.push({ prioridade:'alta', texto:`Contrato "${c.nome}" vence em ${dias} dia(s)`, view:'contratos', icone:'📄' });
+    else if(dias<=30) pendencias.push({ prioridade:'media', texto:`Contrato "${c.nome}" vence em ${dias} dia(s)`, view:'contratos', icone:'📄' });
+  });
+
+  // Seguro de ativo patrimonial vencido/vencendo
+  state.ativosPatrimoniais.filter(a=>!a.baixa && a.seguroVigenciaFim).forEach(a=>{
+    const dias = Math.floor((new Date(a.seguroVigenciaFim)-new Date(hoje))/86400000);
+    if(dias<0) pendencias.push({ prioridade:'alta', texto:`Seguro de "${a.nome}" venceu há ${Math.abs(dias)} dia(s)`, view:'ativos', icone:'🛡️' });
+    else if(dias<=30) pendencias.push({ prioridade:'media', texto:`Seguro de "${a.nome}" vence em ${dias} dia(s)`, view:'ativos', icone:'🛡️' });
+  });
+
+  // Projetos de CAPEX atrasados
+  state.capexProjetos.filter(p=>p.dataPrevista && p.dataPrevista<hoje && !['Concluído','Cancelado'].includes(p.status)).forEach(p=>{
+    pendencias.push({ prioridade:'media', texto:`Projeto de CAPEX "${p.nome}" está com execução atrasada`, view:'capex', icone:'🏗️' });
+  });
+
+  // Faturas de cartão vencidas e não pagas
+  state.cartoes.forEach(c=>{
+    const comp = competenciaAtual(c);
+    if(faturaStatus(c.id, comp)==='fechada'){
+      const venc = dataVencimentoFatura(c, comp);
+      if(venc<hoje) pendencias.push({ prioridade:'critica', texto:`Fatura do cartão "${c.nome}" venceu e ainda não foi paga`, view:'cartoes', icone:'💳' });
+    }
+  });
+
+  const ordemPrioridade = { critica:0, alta:1, media:2, baixa:3 };
+  return pendencias.sort((a,b)=>ordemPrioridade[a.prioridade]-ordemPrioridade[b.prioridade]);
+}
+
+function viewCentralPendencias(){
+  const pendencias = levantarPendencias();
+  const rotuloPrioridade = { critica:'🔴 Crítica', alta:'🟠 Alta', media:'🟡 Média', baixa:'⚪ Baixa' };
+  const grupos = { critica:[], alta:[], media:[], baixa:[] };
+  pendencias.forEach(p=>grupos[p.prioridade].push(p));
+
+  return `
+    <div class="topbar">
+      <div><h1>Central de Pendências</h1><p>Tudo que exige alguma ação, reunido de todos os módulos numa lista só</p></div>
+    </div>
+    <div class="cards" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px;">
+      <div class="card"><div class="label">Crítica</div><div class="value mono" style="color:var(--danger);">${grupos.critica.length}</div></div>
+      <div class="card"><div class="label">Alta</div><div class="value mono" style="color:var(--warn);">${grupos.alta.length}</div></div>
+      <div class="card"><div class="label">Média</div><div class="value mono">${grupos.media.length}</div></div>
+      <div class="card"><div class="label">Baixa</div><div class="value mono" style="color:var(--text-soft);">${grupos.baixa.length}</div></div>
+    </div>
+    ${!pendencias.length ? `<div class="panel"><div class="empty" style="padding:50px 20px;">Nenhuma pendência no momento. 🎉</div></div>` : ['critica','alta','media','baixa'].filter(p=>grupos[p].length).map(p=>`
+      <div class="dash-section-label">${rotuloPrioridade[p]}</div>
+      <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+        ${grupos[p].map(item=>`
+          <div class="ledger-row compact" data-goto="${item.view}" style="cursor:pointer;grid-template-columns:auto 1fr auto;">
+            <span>${item.icone}</span>
+            <span style="font-size:12.5px;">${escapeHTML(item.texto)}</span>
+            <span style="color:var(--blue-accent);font-size:16px;">›</span>
+          </div>
+        `).join('')}
+      </div></div>
+    `).join('')}
+  `;
+}
+/* ====================== FIM CENTRAL DE PENDÊNCIAS ====================== */
 
 /* ====================== CENTRAL DE RETIRADAS ====================== */
 // Cada retirada cria um lançamento REAL (mesmo padrão já usado em Veículos e Ativos Patrimoniais)
