@@ -971,6 +971,7 @@ function aplicarMigracoes(s){
   if(!s.notasDiarias) s.notasDiarias = {};
   if(!s.checklistFimExpediente) s.checklistFimExpediente = {};
   if(!s.dashboardWidgetsOcultos) s.dashboardWidgetsOcultos = [];
+  if(!s.acoesFinanceiras) s.acoesFinanceiras = [];
   if(!s.cofresVirtuais) s.cofresVirtuais = [
     { nome:'Operacional', pct:50 }, { nome:'Impostos', pct:15 }, { nome:'Emergência', pct:15 },
     { nome:'Investimentos', pct:10 }, { nome:'Distribuição aos Sócios', pct:10 },
@@ -1566,6 +1567,12 @@ function render(){
   else if(currentView==='relatorios-capex') main.innerHTML = viewRelatoriosCapex();
   else if(currentView==='retiradas') main.innerHTML = viewRetiradas();
   else if(currentView==='projetos-financeiros') main.innerHTML = viewProjetosFinanceiros();
+  else if(currentView==='meta-lucro-reversa') main.innerHTML = viewMetaLucroReversa();
+  else if(currentView==='simulador-economia') main.innerHTML = viewSimuladorEconomia();
+  else if(currentView==='simulador-quitacao') main.innerHTML = viewSimuladorQuitacao();
+  else if(currentView==='checkup-financeiro') main.innerHTML = viewCheckupFinanceiro();
+  else if(currentView==='central-acoes') main.innerHTML = viewCentralAcoes();
+  else if(currentView==='comparador-decisoes') main.innerHTML = viewComparadorDecisoes();
   else if(currentView==='pendencias') main.innerHTML = viewCentralPendencias();
   else if(currentView==='demonstracoes-financeiras') main.innerHTML = viewDemonstracoesFinanceiras();
   else if(currentView==='navegacao-objetivo') main.innerHTML = viewNavegacaoObjetivo();
@@ -20255,6 +20262,97 @@ function attachViewHandlers(){
   document.querySelectorAll('[data-action="editar-projeto-financeiro"]').forEach(el=>{
     el.addEventListener('click', ()=>openProjetoFinanceiroModal(state.projetosFinanceiros.find(p=>p.id===el.dataset.id)));
   });
+  document.getElementById('btnCalcularMetaLucro')?.addEventListener('click', ()=>{
+    const meta = numBR(document.getElementById('metaLucroValor').value);
+    const resultado = document.getElementById('metaLucroResultado');
+    if(isNaN(meta) || meta<=0){ resultado.innerHTML = '<div class="note">Digite um valor de lucro válido.</div>'; return; }
+    const dm = dadosMesGerencial(mesGlobalRef, 'todos');
+    if(dm.margemContribPct===null || dm.margemContribPct<=0){
+      resultado.innerHTML = '<div class="note">Dados insuficientes para calcular com precisão — não há margem de contribuição válida nesse mês.</div>';
+      return;
+    }
+    const receitaNecessaria = (meta + dm.custoFixo) / dm.margemContribPct;
+    resultado.innerHTML = `
+      <div class="cards" style="grid-template-columns:1fr;">
+        <div class="card saldo"><div class="label">Receita necessária no mês</div><div class="value mono">${brl(receitaNecessaria)}</div></div>
+      </div>
+      <div style="margin-top:10px;font-size:12.5px;line-height:1.9;">
+        <div>Por semana (÷4,33): <strong class="mono">${brl(receitaNecessaria/4.33)}</strong></div>
+        <div>Por dia útil (÷22): <strong class="mono">${brl(receitaNecessaria/22)}</strong></div>
+      </div>`;
+  });
+  document.getElementById('btnCalcularSimEconomia')?.addEventListener('click', ()=>{
+    const economiaMes = numBR(document.getElementById('simEconomiaValor').value);
+    const resultado = document.getElementById('simEconomiaResultado');
+    if(isNaN(economiaMes) || economiaMes<=0){ resultado.innerHTML = '<div class="note">Digite um valor de economia válido.</div>'; return; }
+    const dm = dadosMesGerencial(mesGlobalRef, 'todos');
+    const economiaAno = economiaMes*12;
+    const lucroNovo = dm.lucro + economiaMes;
+    const margemNova = dm.receita>0 ? (lucroNovo/dm.receita*100) : null;
+    resultado.innerHTML = `
+      <div class="cards" style="grid-template-columns:1fr 1fr;">
+        <div class="card"><div class="label">Economia anual</div><div class="value mono">${brl(economiaAno)}</div></div>
+        <div class="card"><div class="label">Novo lucro mensal (simulado)</div><div class="value mono" style="color:var(--success);">${brl(lucroNovo)}</div></div>
+      </div>
+      <div style="margin-top:10px;font-size:12.5px;">${margemNova!==null ? `Margem líquida passaria de ${dm.margemLiquidaPct.toFixed(1)}% pra <strong>${margemNova.toFixed(1)}%</strong>` : 'Sem receita no mês pra calcular margem'}</div>
+      <div class="note" style="margin-top:10px;">Simulação — nenhum lançamento real foi alterado.</div>`;
+  });
+  document.getElementById('btnNovaAcaoFinanceira')?.addEventListener('click', ()=>openAcaoFinanceiraModal());
+  document.querySelectorAll('[data-action="editar-acao-financeira"]').forEach(el=>{
+    el.addEventListener('click', ()=>openAcaoFinanceiraModal(state.acoesFinanceiras.find(a=>a.id===el.dataset.id)));
+  });
+  document.getElementById('btnCompararDecisoes')?.addEventListener('click', ()=>{
+    const ler = (letra)=>({
+      nome: document.getElementById(`decisao${letra}Nome`).value.trim() || `Decisão ${letra}`,
+      investimento: numBR(document.getElementById(`decisao${letra}Investimento`).value) || 0,
+      custoMensal: numBR(document.getElementById(`decisao${letra}CustoMensal`).value) || 0,
+      ganhoMensal: numBR(document.getElementById(`decisao${letra}GanhoMensal`).value) || 0,
+      prazo: numBR(document.getElementById(`decisao${letra}Prazo`).value) || 12,
+      risco: document.getElementById(`decisao${letra}Risco`).value,
+    });
+    const a = ler('A'), b = ler('B');
+    const custoTotal = (d)=> d.investimento + d.custoMensal*d.prazo;
+    const resultadoLiquido = (d)=> (d.ganhoMensal*d.prazo) - custoTotal(d);
+    const payback = (d)=>{
+      const fluxoMensalLiquido = d.ganhoMensal - d.custoMensal;
+      if(d.investimento<=0) return 'Sem investimento inicial';
+      if(fluxoMensalLiquido<=0) return 'Não se paga com os dados informados';
+      return `${(d.investimento/fluxoMensalLiquido).toFixed(1)} mês(es)`;
+    };
+    [a,b].forEach(d=>{ d.custoTotalPeriodo = custoTotal(d); d.resultadoLiquido = resultadoLiquido(d); d.payback = payback(d); });
+    const melhor = a.resultadoLiquido>b.resultadoLiquido ? 'A' : b.resultadoLiquido>a.resultadoLiquido ? 'B' : null;
+    document.getElementById('comparadorDecisoesResultado').innerHTML = `
+      <div class="panel"><div class="panel-body" style="padding:0;overflow-x:auto;">
+        <div class="ledger-row head" style="grid-template-columns:1.2fr 1fr 1fr;min-width:480px;"><span>Indicador</span><span>${escapeHTML(a.nome)}</span><span>${escapeHTML(b.nome)}</span></div>
+        <div style="min-width:480px;">
+          <div class="ledger-row compact" style="grid-template-columns:1.2fr 1fr 1fr;"><span>Investimento inicial</span><span class="mono">${brl(a.investimento)}</span><span class="mono">${brl(b.investimento)}</span></div>
+          <div class="ledger-row compact" style="grid-template-columns:1.2fr 1fr 1fr;"><span>Custo total no período</span><span class="mono">${brl(a.custoTotalPeriodo)}</span><span class="mono">${brl(b.custoTotalPeriodo)}</span></div>
+          <div class="ledger-row compact" style="grid-template-columns:1.2fr 1fr 1fr;"><span>Resultado líquido no período</span><span class="mono" style="color:${a.resultadoLiquido>=0?'var(--success)':'var(--danger)'};font-weight:${melhor==='A'?700:400};">${brl(a.resultadoLiquido)}</span><span class="mono" style="color:${b.resultadoLiquido>=0?'var(--success)':'var(--danger)'};font-weight:${melhor==='B'?700:400};">${brl(b.resultadoLiquido)}</span></div>
+          <div class="ledger-row compact" style="grid-template-columns:1.2fr 1fr 1fr;"><span>Payback</span><span style="font-size:12px;">${a.payback}</span><span style="font-size:12px;">${b.payback}</span></div>
+          <div class="ledger-row compact" style="grid-template-columns:1.2fr 1fr 1fr;"><span>Risco percebido</span><span>${a.risco}</span><span>${b.risco}</span></div>
+        </div>
+      </div></div>
+      ${melhor ? `<div class="note" style="margin-top:10px;border-color:var(--success);">No período de ${a.prazo} mês(es) informado, a Decisão ${melhor} tem resultado líquido melhor — mas isso não considera risco nem fatores qualitativos. A decisão final é sua.</div>` : `<div class="note" style="margin-top:10px;">As duas decisões dão o mesmo resultado líquido no período informado.</div>`}
+    `;
+  });
+  document.getElementById('btnCalcularQuitacao')?.addEventListener('click', ()=>{
+    const emp = (state.emprestimos||[]).find(e=>e.id===document.getElementById('quitacaoSelect').value);
+    if(!emp) return;
+    const restantes = emp.numeroParcelas - emp.parcelasPagas;
+    const custoManter = restantes*emp.valorParcela;
+    const saldoDevedor = custoManter;
+    const valorAvistaInput = numBR(document.getElementById('quitacaoValorAvista').value);
+    const valorAvista = (!isNaN(valorAvistaInput) && valorAvistaInput>0) ? valorAvistaInput : saldoDevedor;
+    const economia = custoManter - valorAvista;
+    const resultado = document.getElementById('quitacaoResultado');
+    resultado.innerHTML = `
+      <div class="cards" style="grid-template-columns:1fr 1fr;">
+        <div class="card"><div class="label">Manter (${restantes}x ${brl(emp.valorParcela)})</div><div class="value mono">${brl(custoManter)}</div></div>
+        <div class="card"><div class="label">Quitar à vista agora</div><div class="value mono">${brl(valorAvista)}</div></div>
+      </div>
+      <div style="margin-top:10px;font-size:13px;font-weight:600;color:${economia>0?'var(--success)':economia<0?'var(--danger)':'inherit'};">${economia>0?`Quitar economiza ${brl(economia)}`:economia<0?`Quitar custa ${brl(-economia)} a mais (sem desconto embutido)`:'Sem diferença entre manter e quitar'}</div>
+      <div class="note" style="margin-top:10px;">Considera só o valor nominal das parcelas restantes — não inclui juros futuros de saldo devedor com taxa variável, se houver. Nada é alterado automaticamente.</div>`;
+  });
   document.querySelectorAll('[data-action="dispensar-pendencia"]').forEach(btn=>{
     btn.addEventListener('click', (e)=>{
       e.stopPropagation();
@@ -24037,6 +24135,270 @@ function viewNavegacaoObjetivo(){
     `).join('')}
   `;
 }
+
+/* ====================== FERRAMENTAS DE DECISÃO NOVAS ====================== */
+// Meta de Lucro Reversa — reaproveita dadosMesGerencial() (mesma fonte usada no Ponto de
+// Equilíbrio e Rolling Forecast), não cria um segundo cálculo de margem/custo fixo.
+function viewMetaLucroReversa(){
+  const dm = dadosMesGerencial(mesGlobalRef, 'todos');
+  const temMargemValida = dm.margemContribPct!==null && dm.margemContribPct>0;
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="dashboard">← Dashboard</span>
+        <h1 style="margin-top:6px;">🎯 Meta de Lucro</h1>
+        <p>Informe quanto quer de lucro — calculamos o faturamento necessário, usando a margem de contribuição real do mês selecionado</p>
+      </div>
+    </div>
+    ${mesNavHTML()}
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="panel-body" style="padding:18px;">
+        <div class="field"><label>Quero obter de lucro (R$)</label><input type="text" inputmode="decimal" id="metaLucroValor" placeholder="Ex: 20000"></div>
+        <button class="btn" id="btnCalcularMetaLucro">Calcular</button>
+        <div id="metaLucroResultado" style="margin-top:16px;"></div>
+      </div>
+    </div>
+    <div class="note" style="margin-top:0;">Base do cálculo: custo fixo ${brl(dm.custoFixo)} e margem de contribuição ${temMargemValida?(dm.margemContribPct*100).toFixed(1)+'%':'—'} de ${competenciaLabel(mesGlobalRef)}. ${!temMargemValida?'Não há margem de contribuição válida nesse mês — dados insuficientes pra calcular com precisão.':''}</div>
+  `;
+}
+// Simulador de Economia — puramente hipotético, nunca altera lançamento nenhum.
+function viewSimuladorEconomia(){
+  const dm = dadosMesGerencial(mesGlobalRef, 'todos');
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="dashboard">← Dashboard</span>
+        <h1 style="margin-top:6px;">🧮 "Se eu economizar..."</h1>
+        <p>Simulação — não altera nenhum lançamento real</p>
+      </div>
+    </div>
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="panel-body" style="padding:18px;">
+        <div class="field"><label>Economia mensal (R$)</label><input type="text" inputmode="decimal" id="simEconomiaValor" placeholder="Ex: 3000"></div>
+        <button class="btn" id="btnCalcularSimEconomia">Simular</button>
+        <div id="simEconomiaResultado" style="margin-top:16px;"></div>
+      </div>
+    </div>
+    <div class="note" style="margin-top:0;">Base: resultado de ${competenciaLabel(mesGlobalRef)} — receita ${brl(dm.receita)}, lucro atual ${brl(dm.lucro)}.</div>
+  `;
+}
+// Simulador de Quitação ("Quitar ou Manter?") — usa a estrutura de empréstimos/financiamentos
+// já existente (state.emprestimos), sem duplicar cadastro nenhum.
+function viewSimuladorQuitacao(){
+  const emprestimos = (state.emprestimos||[]).filter(e=>e.parcelasPagas<e.numeroParcelas);
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="dashboard">← Dashboard</span>
+        <h1 style="margin-top:6px;">💳 Quitar ou Manter?</h1>
+        <p>Compara manter pagando as parcelas com quitar à vista agora</p>
+      </div>
+    </div>
+    ${!emprestimos.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum empréstimo/financiamento em aberto cadastrado.</div></div>` : `
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="panel-body" style="padding:18px;">
+        <div class="field"><label>Selecione o compromisso</label><select id="quitacaoSelect">
+          ${emprestimos.map(e=>{
+            const restantes = e.numeroParcelas-e.parcelasPagas;
+            const saldoDevedor = restantes*e.valorParcela;
+            return `<option value="${e.id}">${escapeHTML(e.nome)} — saldo devedor ${brl(saldoDevedor)} (${restantes} parcelas)</option>`;
+          }).join('')}
+        </select></div>
+        <div class="field"><label>Valor pra quitar à vista hoje (opcional — se vazio, negocia um desconto de 0% sobre o saldo devedor)</label><input type="text" inputmode="decimal" id="quitacaoValorAvista" placeholder="0,00"></div>
+        <button class="btn" id="btnCalcularQuitacao">Comparar</button>
+        <div id="quitacaoResultado" style="margin-top:16px;"></div>
+      </div>
+    </div>`}
+  `;
+}
+/* ====================== FIM FERRAMENTAS DE DECISÃO NOVAS ====================== */
+
+/* ====================== CHECK-UP FINANCEIRO ====================== */
+// Reaproveita a MESMA nota 0-100 já calculada em calcularHealthScoreEm (usada no relatório "Saúde
+// da Empresa") — não cria uma segunda pontuação concorrente. O que esse Check-up acrescenta é um
+// percurso guiado por mais dimensões (orçamento, investimentos, qualidade dos dados) que o score
+// de 4 pilares não cobre, cada uma com OK/Atenção/Crítico calculado a partir de dados já existentes.
+function viewCheckupFinanceiro(){
+  const hoje = todayISO();
+  const score = calcularHealthScoreEm(hoje, hoje.slice(0,7));
+  const nivel = score.scoreTotal>=70?'Saudável':score.scoreTotal>=40?'Atenção':'Crítico';
+  const corNivel = score.scoreTotal>=70?'var(--success)':score.scoreTotal>=40?'var(--warn)':'var(--danger)';
+
+  const saldoContas = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+  const aPagarAtrasadas = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento<hoje).length;
+  const aReceberAtrasadas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento<hoje).length;
+  const dm = dadosMesGerencial(hoje.slice(0,7), 'todos');
+  const orc = state.orcamentoCategorias||{};
+  const orcamentoEstourado = Object.keys(orc).filter(cat=>orc[cat]>0 && totalCategoriaTipoNoPeriodo(cat,'saida',`${hoje.slice(0,7)}-01`,hoje)>=orc[cat]).length;
+  const investPendentes = itensAtualizaveisInvestimento().map(it=>statusAtualizacaoItem(it.dataUltimaAtualizacao, it.periodicidade)).filter(s=>s==='pendente').length;
+  const totalAtivoResumo = saldoContas + totalInvestimentos() + totalAtivosPatrimoniais();
+  const totalPassivoResumo = state.lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
+  const patrimonioLiquido = totalAtivoResumo - totalPassivoResumo;
+  const semCategoria = state.lancamentos.filter(l=>!l.categoria && l.origem!=='transferencia').length;
+  const totalLanc = state.lancamentos.filter(l=>l.origem!=='transferencia').length;
+  const pctQualidade = totalLanc>0 ? Math.round((1-semCategoria/totalLanc)*100) : 100;
+
+  const itens = [
+    { nome:'Caixa', status: saldoContas>0?'ok':'critico', detalhe: brl(saldoContas) },
+    { nome:'Liquidez (fôlego de caixa)', status: score.foldegoDias>=30?'ok':score.foldegoDias>=10?'atencao':'critico', detalhe: `${Math.round(score.foldegoDias)} dia(s) de operação sem entrar dinheiro novo` },
+    { nome:'Endividamento', status: score.endividamento<0.5?'ok':score.endividamento<1?'atencao':'critico', detalhe: `${(score.endividamento*100).toFixed(0)}% do caixa comprometido em dívida pendente` },
+    { nome:'Margem líquida', status: score.margemLiquidaPct>=10?'ok':score.margemLiquidaPct>=0?'atencao':'critico', detalhe: `${score.margemLiquidaPct.toFixed(1)}% no mês` },
+    { nome:'Resultado do mês', status: dm.lucro>=0?'ok':'critico', detalhe: brl(dm.lucro) },
+    { nome:'Contas a pagar', status: aPagarAtrasadas===0?'ok':aPagarAtrasadas<=2?'atencao':'critico', detalhe: `${aPagarAtrasadas} atrasada(s)` },
+    { nome:'Contas a receber', status: aReceberAtrasadas===0?'ok':aReceberAtrasadas<=2?'atencao':'critico', detalhe: `${aReceberAtrasadas} atrasada(s)` },
+    { nome:'Orçamento', status: !Object.keys(orc).length?'atencao':orcamentoEstourado===0?'ok':'critico', detalhe: Object.keys(orc).length?`${orcamentoEstourado} categoria(s) estourada(s)`:'Nenhum orçamento definido ainda' },
+    { nome:'Investimentos', status: investPendentes===0?'ok':'atencao', detalhe: `${investPendentes} posição(ões) pendente(s) de atualização` },
+    { nome:'Patrimônio', status: patrimonioLiquido>=0?'ok':'critico', detalhe: brl(patrimonioLiquido) },
+    { nome:'Qualidade dos dados', status: pctQualidade>=90?'ok':pctQualidade>=70?'atencao':'critico', detalhe: `${pctQualidade}% dos lançamentos classificados` },
+  ];
+  const icones = { ok:'✅', atencao:'🟡', critico:'🔴' };
+  const cores = { ok:'var(--success)', atencao:'var(--warn)', critico:'var(--danger)' };
+  const qtdOk = itens.filter(i=>i.status==='ok').length;
+  const qtdAtencao = itens.filter(i=>i.status==='atencao').length;
+  const qtdCritico = itens.filter(i=>i.status==='critico').length;
+
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="dashboard">← Dashboard</span>
+        <h1 style="margin-top:6px;">🩺 Check-up Financeiro</h1>
+        <p>Percorre ${itens.length} pontos essenciais, usando os mesmos dados e a mesma nota de saúde já calculada no sistema</p>
+      </div>
+    </div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:20px;text-align:center;">
+      <div style="font-size:32px;font-weight:800;color:${corNivel};">${score.scoreTotal}/100</div>
+      <div style="font-size:13px;font-weight:600;color:${corNivel};margin-top:2px;">${nivel}</div>
+      <div style="font-size:11px;color:var(--text-soft);margin-top:6px;">Mesma nota do relatório "Saúde da Empresa" — combina margem, fôlego de caixa, atrasos e endividamento</div>
+    </div></div>
+    <div class="cards" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px;">
+      <div class="card"><div class="label">OK</div><div class="value mono" style="color:var(--success);">${qtdOk}</div></div>
+      <div class="card"><div class="label">Atenção</div><div class="value mono" style="color:var(--warn);">${qtdAtencao}</div></div>
+      <div class="card"><div class="label">Crítico</div><div class="value mono" style="color:var(--danger);">${qtdCritico}</div></div>
+    </div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${itens.map(i=>`
+        <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto;">
+          <span>${icones[i.status]}</span>
+          <span style="font-size:12.5px;font-weight:600;">${i.nome}</span>
+          <span style="font-size:11.5px;color:${cores[i.status]};">${i.detalhe}</span>
+        </div>
+      `).join('')}
+    </div></div>
+  `;
+}
+/* ====================== FIM CHECK-UP FINANCEIRO ====================== */
+
+/* ====================== CENTRAL DE AÇÕES ====================== */
+function viewCentralAcoes(){
+  const acoes = state.acoesFinanceiras||[];
+  const grupos = { pendente:[], 'em andamento':[], concluida:[], cancelada:[] };
+  acoes.forEach(a=>{ (grupos[a.status]||grupos.pendente).push(a); });
+  const rotuloStatus = { pendente:'Pendente', 'em andamento':'Em andamento', concluida:'Concluída', cancelada:'Cancelada' };
+  const corPrioridade = { alta:'var(--danger)', media:'var(--warn)', baixa:'var(--text-soft)' };
+  return `
+    <div class="topbar">
+      <div><h1>✅ Minhas Ações</h1><p>Toda recomendação do sistema pode virar uma ação com responsável e prazo</p></div>
+      <button class="btn" id="btnNovaAcaoFinanceira">+ Nova ação</button>
+    </div>
+    ${!acoes.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhuma ação registrada ainda.</div></div>` :
+    ['pendente','em andamento','concluida','cancelada'].filter(st=>grupos[st].length).map(st=>`
+      <div class="dash-section-label">${rotuloStatus[st]} (${grupos[st].length})</div>
+      <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+        ${grupos[st].map(a=>`
+          <div class="ledger-row compact" data-action="editar-acao-financeira" data-id="${a.id}" style="cursor:pointer;grid-template-columns:4px 1fr auto;">
+            <span style="background:${corPrioridade[a.prioridade]};align-self:stretch;border-radius:2px;"></span>
+            <div class="desc-cell"><div>${escapeHTML(a.acao)}</div><div class="cat">${a.responsavel?escapeHTML(a.responsavel)+' · ':''}${a.prazo?'prazo '+fmtDate(a.prazo):'sem prazo'}${a.origemRecomendacao?' · origem: '+escapeHTML(a.origemRecomendacao):''}</div></div>
+            <span style="font-size:11px;color:var(--text-soft);text-transform:capitalize;">${a.prioridade}</span>
+          </div>
+        `).join('')}
+      </div></div>
+    `).join('')}
+  `;
+}
+function openAcaoFinanceiraModal(existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit?'Editar ação':'Nova ação'}</h3>
+    <div class="field"><label>Ação</label><input type="text" id="afAcao" value="${existing?escapeHTML(existing.acao):''}" placeholder="Ex: Renegociar fornecedor X"></div>
+    <div class="field-row">
+      <div class="field"><label>Responsável (opcional)</label><input type="text" id="afResponsavel" value="${existing?escapeHTML(existing.responsavel||''):''}"></div>
+      <div class="field"><label>Prazo (opcional)</label><input type="date" id="afPrazo" value="${existing?.prazo||''}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Prioridade</label><select id="afPrioridade">
+        <option value="media" ${(!existing||existing.prioridade==='media')?'selected':''}>Média</option>
+        <option value="alta" ${existing?.prioridade==='alta'?'selected':''}>Alta</option>
+        <option value="baixa" ${existing?.prioridade==='baixa'?'selected':''}>Baixa</option>
+      </select></div>
+      <div class="field"><label>Status</label><select id="afStatus">
+        <option value="pendente" ${(!existing||existing.status==='pendente')?'selected':''}>Pendente</option>
+        <option value="em andamento" ${existing?.status==='em andamento'?'selected':''}>Em andamento</option>
+        <option value="concluida" ${existing?.status==='concluida'?'selected':''}>Concluída</option>
+        <option value="cancelada" ${existing?.status==='cancelada'?'selected':''}>Cancelada</option>
+      </select></div>
+    </div>
+    <div class="field"><label>Observação (opcional)</label><textarea id="afObservacao" style="min-height:50px;">${existing?escapeHTML(existing.observacao||''):''}</textarea></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      ${isEdit ? `<button class="btn ghost" id="btnExcluirAcaoFinanceira" style="color:var(--danger);">Excluir</button>` : ''}
+      <button class="btn" id="btnSalvarAcaoFinanceira">${isEdit?'Salvar':'Criar'}</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnExcluirAcaoFinanceira')?.addEventListener('click', ()=>{
+    if(!confirm('Excluir essa ação?')) return;
+    state.acoesFinanceiras = state.acoesFinanceiras.filter(a=>a.id!==existing.id);
+    persist(); closeModal(); render();
+  });
+  document.getElementById('btnSalvarAcaoFinanceira').addEventListener('click', ()=>{
+    const acao = document.getElementById('afAcao').value.trim();
+    if(!acao){ showToast('Descreva a ação'); return; }
+    const dados = {
+      acao, responsavel: document.getElementById('afResponsavel').value.trim(),
+      prazo: document.getElementById('afPrazo').value || null, prioridade: document.getElementById('afPrioridade').value,
+      status: document.getElementById('afStatus').value, observacao: document.getElementById('afObservacao').value.trim()
+    };
+    if(isEdit){ Object.assign(existing, dados); }
+    else { state.acoesFinanceiras.push({ id:uid(), ...dados, origemRecomendacao:null, criadoEm:new Date().toISOString() }); }
+    persist(); closeModal(); render();
+    showToast(isEdit?'Ação atualizada':'Ação criada');
+  });
+}
+/* ====================== FIM CENTRAL DE AÇÕES ====================== */
+
+/* ====================== COMPARADOR DE DECISÕES A×B ====================== */
+// Puramente hipotético — não usa nem altera lançamentos reais. Diferente do Laboratório
+// Financeiro (que simula 1 cenário sobre a base real), aqui são 2 alternativas quaisquer,
+// lado a lado, sem relação com os dados existentes.
+function viewComparadorDecisoes(){
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="dashboard">← Dashboard</span>
+        <h1 style="margin-top:6px;">⚖️ Decisão A × Decisão B</h1>
+        <p>Compare duas alternativas hipotéticas — nada aqui altera dados reais</p>
+      </div>
+    </div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;margin-bottom:14px;">
+      ${['A','B'].map(letra=>`
+      <div class="panel">
+        <div class="panel-head"><h2>Decisão ${letra}</h2></div>
+        <div class="panel-body" style="padding:14px 18px;">
+          <div class="field"><label>Nome</label><input type="text" id="decisao${letra}Nome" placeholder="Ex: ${letra==='A'?'Comprar máquina':'Terceirizar'}"></div>
+          <div class="field"><label>Investimento inicial (R$)</label><input type="text" inputmode="decimal" id="decisao${letra}Investimento" placeholder="0,00"></div>
+          <div class="field"><label>Custo mensal (R$)</label><input type="text" inputmode="decimal" id="decisao${letra}CustoMensal" placeholder="0,00"></div>
+          <div class="field"><label>Ganho/economia mensal estimado (R$, opcional)</label><input type="text" inputmode="decimal" id="decisao${letra}GanhoMensal" placeholder="0,00"></div>
+          <div class="field"><label>Prazo considerado (meses)</label><input type="text" inputmode="numeric" id="decisao${letra}Prazo" value="12"></div>
+          <div class="field"><label>Risco percebido</label><select id="decisao${letra}Risco"><option>Baixo</option><option>Médio</option><option>Alto</option></select></div>
+        </div>
+      </div>`).join('')}
+    </div>
+    <button class="btn" id="btnCompararDecisoes">Comparar</button>
+    <div id="comparadorDecisoesResultado" style="margin-top:16px;"></div>
+  `;
+}
+/* ====================== FIM COMPARADOR DE DECISÕES A×B ====================== */
 
 function viewCentralDecisao(){
   const hoje = todayISO();
