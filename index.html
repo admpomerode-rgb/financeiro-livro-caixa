@@ -570,7 +570,7 @@
     .main{padding:18px 14px calc(78px + env(safe-area-inset-bottom));max-width:100%;}
     .bottom-nav{display:flex;}
     .topbar-actions-stack{width:100%;}
-    .topbar-actions-stack .btn{flex:1;min-width:0;}
+    .topbar-actions-stack .btn{flex:1 1 auto;min-width:140px;}
     .cards.cards-3{grid-template-columns:1fr 1fr;}
     .cards.cards-3 .card:last-child{grid-column:1 / -1;}
 
@@ -1382,7 +1382,9 @@ document.getElementById('selTodos').addEventListener('click', ()=>{
 });
 document.getElementById('selMenuBtn').addEventListener('click', (e)=>{
   e.stopPropagation();
-  document.getElementById('selMenuDrop').classList.toggle('open');
+  const menu = document.getElementById('selMenuDrop');
+  menu.classList.toggle('open');
+  ajustarPosicaoDropdown(menu);
 });
 document.addEventListener('click', ()=>document.getElementById('selMenuDrop')?.classList.remove('open'));
 document.addEventListener('click', ()=>{
@@ -21904,7 +21906,9 @@ function attachViewHandlers(){
   document.getElementById('btnAddItemSimulacao')?.addEventListener('click', ()=>openItemSimulacaoModal());
   document.getElementById('btnCenariosProntos')?.addEventListener('click', (e)=>{
     e.stopPropagation();
-    document.getElementById('menuCenariosProntos')?.classList.toggle('open');
+    const menu = document.getElementById('menuCenariosProntos');
+    menu?.classList.toggle('open');
+    if(menu) ajustarPosicaoDropdown(menu);
   });
   document.querySelectorAll('#menuCenariosProntos [data-cenario]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
