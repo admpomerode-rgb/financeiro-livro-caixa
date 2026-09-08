@@ -1266,6 +1266,7 @@ if(typeof window!=='undefined'){
   });
 }
 let categoriaTipoAtivo = 'saida';
+let categoriaBuscaTermo = '';
 let ordenacaoContas = 'manual';
 let modoCompactoContas = false;
 let mostrarContasArquivadas = false;
@@ -17744,6 +17745,53 @@ function gerarFichaPatrimonialPDF(ativo){
   showToast(`Ficha Nº ${numero} gerada`);
 }
 
+// Mesclar = mover TODOS os lançamentos da categoria de origem pra outra, e depois oferecer excluir
+// a origem (que já fica vazia). Reaproveita o mesmo mecanismo de "mover lançamentos" que já existia,
+// só que pré-seleciona tudo e automatiza o passo final.
+function openMesclarCategoriaModal(tipo, catId, catNome){
+  const modal = document.getElementById('modalContent');
+  const outras = listaCategorias(tipo).filter(c=>c.id!==catId);
+  if(!outras.length){ showToast('Não há outra categoria pra mesclar'); return; }
+  modal.innerHTML = `
+    <h3>Mesclar "${escapeHTML(catNome)}"</h3>
+    <div class="note" style="margin-top:0;">Move todos os lançamentos de "${escapeHTML(catNome)}" (e subcategorias) pra outra categoria, e depois exclui "${escapeHTML(catNome)}" — que já fica vazia.</div>
+    <div class="field"><label>Mesclar com</label><select id="mesclarDestino">${outras.map(c=>`<option value="${escapeHTML(c.nome)}">${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarMesclar">Mesclar</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnConfirmarMesclar').addEventListener('click', ()=>{
+    const destino = document.getElementById('mesclarDestino').value;
+    const pertence = l => l.categoria===catNome || (l.categoria||'').startsWith(catNome+' / ');
+    let movidos = 0;
+    state.lancamentos.forEach(l=>{ if(l.tipo===tipo && pertence(l)){ l.categoria = destino; movidos++; } });
+    state.comprasCartao.forEach(p=>{ if(tipo==='saida' && pertence(p)){ p.categoria = destino; movidos++; } });
+    state.categorias[tipo] = state.categorias[tipo].filter(c=>c.id!==catId);
+    registrarLog('Categorias mescladas', `"${catNome}" mesclada em "${destino}" — ${movidos} registro(s) movido(s)`);
+    persist(); closeModal(); render();
+    showToast(`"${catNome}" mesclada em "${destino}" (${movidos} registro(s) movido(s))`);
+  });
+}
+// Duplicar = cria uma categoria nova com a mesma cor/ícone/subcategorias (só a estrutura, sem
+// histórico nenhum) — útil pra criar variações rapidamente sem montar tudo de novo do zero.
+function duplicarCategoria(tipo, catId){
+  const original = listaCategorias(tipo).find(c=>c.id===catId);
+  if(!original) return;
+  let nomeNovo = original.nome + ' (cópia)', i = 2;
+  while(listaCategorias(tipo).some(c=>c.nome===nomeNovo)){ nomeNovo = `${original.nome} (cópia ${i})`; i++; }
+  state.categorias[tipo].push({
+    id: uid(), nome: nomeNovo, cor: original.cor, icone: original.icone,
+    subcategorias: (original.subcategorias||[]).map(s=>({ id:uid(), nome:s.nome })),
+    ehFinanceira: original.ehFinanceira, ehCapital: original.ehCapital,
+    tipoCusto: original.tipoCusto, centroCustoDefault: original.centroCustoDefault,
+    naoOperacional: original.naoOperacional, favorita: false
+  });
+  persist(); render();
+  showToast(`Categoria duplicada como "${nomeNovo}"`);
+}
+
 function openMoverLancamentosModal(tipo, catNome){
   const pertence = l => l.categoria===catNome || (l.categoria||'').startsWith(catNome+' / ');
   const lista = state.lancamentos
@@ -17826,10 +17874,14 @@ function viewCategorias(){
   return `
     <div class="topbar">
       <div><h1>Categorias</h1><p>Organize as categorias e subcategorias usadas nos lançamentos de despesas e receitas</p></div>
+      <button class="btn ghost" id="btnExportarCategoriasPDF">📄 Exportar lista</button>
     </div>
     <div class="toggle-row" id="categoriaToggle">
       <button class="${categoriaTipoAtivo==='saida'?'active':''}" data-tipo="saida">Despesas</button>
       <button class="${categoriaTipoAtivo==='entrada'?'active':''}" data-tipo="entrada">Receitas</button>
+    </div>
+    <div class="field" style="margin:12px 0;">
+      <input type="text" id="categoriaBusca" value="${escapeHTML(categoriaBuscaTermo)}" placeholder="🔎 Buscar categoria ou subcategoria...">
     </div>
     <div id="categoriaPanel"></div>
   `;
@@ -17837,35 +17889,79 @@ function viewCategorias(){
 
 function totalCategoriaTodoHistorico(categoria, tipo){
   const statusOk = tipo==='entrada' ? 'recebido' : 'pago';
-  let total = 0, qtd = 0;
+  let total = 0, qtd = 0, ultimaData = null;
   state.lancamentos.forEach(l=>{
     if(l.tipo!==tipo || l.status!==statusOk) return;
-    if(l.categoria===categoria || l.categoria.startsWith(categoria+' / ')){ total += l.valor; qtd++; }
+    if(l.categoria===categoria || l.categoria.startsWith(categoria+' / ')){
+      total += l.valor; qtd++;
+      if(l.dataPagamento && (!ultimaData || l.dataPagamento>ultimaData)) ultimaData = l.dataPagamento;
+    }
   });
-  return { total, qtd };
+  return { total, qtd, ultimaData };
 }
 function totalSubcategoriaTodoHistorico(categoriaNome, subNome, tipo){
   const full = `${categoriaNome} / ${subNome}`;
   const statusOk = tipo==='entrada' ? 'recebido' : 'pago';
-  let total = 0, qtd = 0;
+  let total = 0, qtd = 0, ultimaData = null;
   state.lancamentos.forEach(l=>{
-    if(l.tipo===tipo && l.status===statusOk && l.categoria===full){ total += l.valor; qtd++; }
+    if(l.tipo===tipo && l.status===statusOk && l.categoria===full){
+      total += l.valor; qtd++;
+      if(l.dataPagamento && (!ultimaData || l.dataPagamento>ultimaData)) ultimaData = l.dataPagamento;
+    }
   });
-  return { total, qtd };
+  return { total, qtd, ultimaData };
+}
+// Compara o mês atual com a média dos 3 meses anteriores — usado pros badges de "sem uso" e
+// "crescendo rápido". Retorna null quando não há histórico suficiente pra comparar de verdade.
+function tendenciaCategoria(categoria, tipo){
+  const statusOk = tipo==='entrada' ? 'recebido' : 'pago';
+  const hoje = todayISO();
+  const mesAtualRef = hoje.slice(0,7);
+  const pertence = l => l.tipo===tipo && l.status===statusOk && (l.categoria===categoria || l.categoria.startsWith(categoria+' / '));
+  const totalNoMes = (mesRef)=>{
+    const [ay,am] = mesRef.split('-').map(Number);
+    const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(ay,am,0).getDate()).padStart(2,'0')}`;
+    return state.lancamentos.filter(l=>pertence(l) && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+  };
+  const atual = totalNoMes(mesAtualRef);
+  const mesesAnteriores = Array.from({length:3},(_,i)=>{ const [ay,am]=mesAtualRef.split('-').map(Number); const d=new Date(ay,am-1-(i+1),1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const totaisAnteriores = mesesAnteriores.map(totalNoMes);
+  const comHistorico = totaisAnteriores.filter(v=>v>0);
+  if(!comHistorico.length) return null;
+  const media = comHistorico.reduce((a,b)=>a+b,0)/comHistorico.length;
+  if(media<=0) return null;
+  return { atual, media, variacaoPct: (atual-media)/media*100 };
 }
 
 function renderCategoriaPanel(tipo){
-  const lista = [...listaCategorias(tipo)].sort((a,b)=>{
+  const termo = categoriaBuscaTermo.trim().toLowerCase();
+  const hoje = todayISO();
+  const orc = state.orcamentoCategorias || {};
+
+  let lista = [...listaCategorias(tipo)];
+  if(termo){
+    lista = lista.filter(c=>c.nome.toLowerCase().includes(termo) || (c.subcategorias||[]).some(s=>s.nome.toLowerCase().includes(termo)));
+  }
+  const totalGeralTipo = listaCategorias(tipo).reduce((s,c)=>s+totalCategoriaTodoHistorico(c.nome, tipo).total, 0);
+
+  lista.sort((a,b)=>{
+    if(!!a.favorita !== !!b.favorita) return a.favorita ? -1 : 1;
     const ta = totalCategoriaTodoHistorico(a.nome, tipo).total;
     const tb = totalCategoriaTodoHistorico(b.nome, tipo).total;
     return tb - ta;
   });
+
   return `
     <div class="panel">
       <div class="panel-head"><h2>Categorias de ${tipo==='entrada'?'receita':'despesa'}</h2><span style="font-size:12px;color:var(--blue-accent);cursor:pointer;" id="btnAbrirExportarExtrato">📄 Exportar extrato</span></div>
       <div class="panel-body" style="padding:14px;">
         ${lista.length ? lista.map(c=>{
           const info = totalCategoriaTodoHistorico(c.nome, tipo);
+          const pctDoTotal = totalGeralTipo>0 ? (info.total/totalGeralTipo*100) : 0;
+          const tendencia = tendenciaCategoria(c.nome, tipo);
+          const mesesSemUso = info.ultimaData ? Math.floor((new Date(hoje)-new Date(info.ultimaData))/(30*86400000)) : null;
+          const orcadoCategoria = tipo==='saida' ? orc[c.nome] : null;
+          const realizadoMes = tipo==='saida' && orcadoCategoria>0 ? totalCategoriaTipoNoPeriodo(c.nome,'saida',`${mesGlobalRef}-01`,hoje) : null;
           const subsOrdenadas = [...(c.subcategorias||[])].sort((a,b)=>{
             const ta = totalSubcategoriaTodoHistorico(c.nome, a.nome, tipo).total;
             const tb = totalSubcategoriaTodoHistorico(c.nome, b.nome, tipo).total;
@@ -17876,13 +17972,28 @@ function renderCategoriaPanel(tipo){
             <div class="categoria-head">
               <span class="cat-dot" style="width:14px;height:14px;border-radius:50%;background:${c.cor||'#3B6FE0'};flex-shrink:0;"></span>
               <div class="categoria-head-nome">
-                <span class="nome" data-action="ver-lancamentos-categoria" data-tipo="${tipo}" data-cat="${escapeHTML(c.nome)}" style="font-size:15px;font-weight:700;">${escapeHTML(c.nome)}</span>
+                <span class="nome" data-action="ver-lancamentos-categoria" data-tipo="${tipo}" data-cat="${escapeHTML(c.nome)}" style="font-size:15px;font-weight:700;">${c.icone?c.icone+' ':''}${escapeHTML(c.nome)}</span>
+                <div style="font-size:10.5px;color:var(--text-soft);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                  <span>${pctDoTotal.toFixed(1)}% do total · ${info.qtd} lançamento(s)</span>
+                  ${tendencia && tendencia.variacaoPct>=50 ? `<span style="color:var(--danger);font-weight:600;">📈 +${tendencia.variacaoPct.toFixed(0)}% vs média</span>` : ''}
+                  ${tendencia && tendencia.variacaoPct<=-50 ? `<span style="color:var(--success);font-weight:600;">📉 ${tendencia.variacaoPct.toFixed(0)}% vs média</span>` : ''}
+                  ${mesesSemUso!==null && mesesSemUso>=3 ? `<span style="color:var(--warn);font-weight:600;">⚠️ sem uso há ${mesesSemUso} meses</span>` : ''}
+                  ${!info.qtd ? `<span style="color:var(--text-soft);">nunca usada</span>` : ''}
+                </div>
+                ${orcadoCategoria>0 ? `
+                <div style="margin-top:5px;max-width:220px;">
+                  <div style="background:var(--bone);border-radius:5px;height:5px;overflow:hidden;"><div style="width:${Math.min(100,realizadoMes/orcadoCategoria*100)}%;height:100%;background:${realizadoMes>=orcadoCategoria?'var(--danger)':'var(--success)'};"></div></div>
+                  <div style="font-size:9.5px;color:var(--text-soft);margin-top:2px;">Orçamento do mês: ${brl(realizadoMes)} de ${brl(orcadoCategoria)}</div>
+                </div>` : ''}
               </div>
               <span class="categoria-total-linha"><span class="mono">${brl(info.total)}</span></span>
+              <button class="icon-btn" data-action="favoritar-categoria" data-tipo="${tipo}" data-id="${c.id}" title="${c.favorita?'Desfavoritar':'Favoritar'}" style="color:${c.favorita?'var(--warn)':'var(--text-soft)'};">${c.favorita?'★':'☆'}</button>
               <div class="dropdown-wrap categoria-menu-wrap">
                 <button class="icon-btn" data-action="toggle-menu-categoria" data-menu-id="cat-${c.id}" title="Mais opções">⋮</button>
                 <div class="dropdown-menu" data-menu-categoria="cat-${c.id}">
                   <button type="button" data-cat-menu="mover" data-tipo="${tipo}" data-cat="${escapeHTML(c.nome)}">⇄ Mover lançamentos</button>
+                  <button type="button" data-cat-menu="mesclar" data-tipo="${tipo}" data-cat="${escapeHTML(c.nome)}" data-id="${c.id}">🔀 Mesclar com outra</button>
+                  <button type="button" data-cat-menu="duplicar" data-tipo="${tipo}" data-id="${c.id}">⧉ Duplicar</button>
                   <button type="button" data-cat-menu="editar" data-tipo="${tipo}" data-id="${c.id}">✎ Editar</button>
                   <button type="button" data-cat-menu="excluir" data-tipo="${tipo}" data-id="${c.id}" style="color:var(--danger);">✕ Excluir</button>
                 </div>
@@ -17911,7 +18022,7 @@ function renderCategoriaPanel(tipo){
               <div class="add-sub-row"><button data-action="nova-subcategoria" data-tipo="${tipo}" data-cat="${c.id}">+ Adicionar subcategoria</button></div>
             </div>
           </div>
-        `;}).join('') : `<div class="empty">Nenhuma categoria cadastrada ainda.</div>`}
+        `;}).join('') : `<div class="empty">${termo ? 'Nenhuma categoria encontrada pra essa busca.' : 'Nenhuma categoria cadastrada ainda.'}</div>`}
       </div>
       <div style="padding:0 14px 16px;"><button class="btn" data-action="nova-categoria" data-tipo="${tipo}">+ Nova categoria</button></div>
     </div>
@@ -21729,6 +21840,10 @@ function attachViewHandlers(){
           } else if(acao==='editar'){
             const cat = listaCategorias(btn.dataset.tipo).find(c=>c.id===btn.dataset.id);
             openCategoriaModal(btn.dataset.tipo, cat);
+          } else if(acao==='mesclar'){
+            openMesclarCategoriaModal(btn.dataset.tipo, btn.dataset.id, btn.dataset.cat);
+          } else if(acao==='duplicar'){
+            duplicarCategoria(btn.dataset.tipo, btn.dataset.id);
           } else if(acao==='excluir'){
             const tipo = btn.dataset.tipo, id = btn.dataset.id;
             const cat = listaCategorias(tipo).find(c=>c.id===id);
@@ -21770,6 +21885,14 @@ function attachViewHandlers(){
       document.querySelectorAll('[data-action="nova-subcategoria"]').forEach(btn=>{
         btn.addEventListener('click', ()=>openSubcategoriaModal(btn.dataset.tipo, btn.dataset.cat));
       });
+      document.querySelectorAll('[data-action="favoritar-categoria"]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const cat = listaCategorias(btn.dataset.tipo).find(c=>c.id===btn.dataset.id);
+          if(!cat) return;
+          cat.favorita = !cat.favorita;
+          persist(); paintCategorias();
+        });
+      });
     };
     var paintCategorias = ()=>{
       document.getElementById('categoriaPanel').innerHTML = renderCategoriaPanel(tipoCatAtivo);
@@ -21783,6 +21906,13 @@ function attachViewHandlers(){
         categoriaTipoAtivo = tipoCatAtivo;
         paintCategorias();
       });
+    });
+    document.getElementById('categoriaBusca')?.addEventListener('input', (e)=>{
+      categoriaBuscaTermo = e.target.value;
+      paintCategorias();
+    });
+    document.getElementById('btnExportarCategoriasPDF')?.addEventListener('click', ()=>{
+      gerarResumoCategoriaPDF(tipoCatAtivo, null, null);
     });
     paintCategorias();
   }
@@ -27448,9 +27578,15 @@ function openCategoriaModal(tipo, existing){
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
     <h3>${isEdit ? 'Editar categoria' : `Nova categoria de ${tipo==='saida'?'despesa':'receita'}`}</h3>
-    <div class="field">
-      <label>Nome da categoria</label>
-      <input type="text" id="catNome" value="${existing ? escapeHTML(existing.nome) : ''}" placeholder="Ex: Insumos">
+    <div class="field-row">
+      <div class="field" style="flex:0 0 90px;">
+        <label>Ícone</label>
+        <input type="text" id="catIcone" value="${existing?escapeHTML(existing.icone||''):''}" placeholder="🍽️" maxlength="4" style="text-align:center;font-size:18px;">
+      </div>
+      <div class="field" style="flex:1;">
+        <label>Nome da categoria</label>
+        <input type="text" id="catNome" value="${existing ? escapeHTML(existing.nome) : ''}" placeholder="Ex: Insumos">
+      </div>
     </div>
     <div class="field">
       <label>Cor</label>
@@ -27458,6 +27594,19 @@ function openCategoriaModal(tipo, existing){
         ${CATEGORIA_CORES.map((cor,i)=>`<span class="cat-cor-swatch ${(!isEdit && i===0) || (isEdit && existing.cor===cor) ? 'selected' : ''}" data-cor="${cor}" style="width:28px;height:28px;border-radius:50%;background:${cor};cursor:pointer;display:inline-block;border:3px solid transparent;"></span>`).join('')}
       </div>
     </div>
+    ${tipo==='saida' ? `
+    <div class="field-row">
+      <div class="field"><label>Tipo de custo</label><select id="catTipoCusto">
+        <option value="">Não classificado</option>
+        <option value="fixa" ${existing?.tipoCusto==='fixa'?'selected':''}>Fixa</option>
+        <option value="variavel" ${existing?.tipoCusto==='variavel'?'selected':''}>Variável</option>
+      </select></div>
+      <div class="field"><label>Centro de custo padrão (opcional)</label><input type="text" id="catCentroCustoDefault" value="${existing?escapeHTML(existing.centroCustoDefault||''):''}" placeholder="Preenche sozinho ao lançar"></div>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;font-size:13.5px;margin-top:4px;">
+      <input type="checkbox" id="catNaoOperacional" style="width:17px;height:17px;" ${existing?.naoOperacional?'checked':''}>
+      Não operacional (não é o "core" do negócio — ex: doações, multas avulsas)
+    </label>` : ''}
     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;font-size:13.5px;margin-top:4px;">
       <input type="checkbox" id="catEhFinanceira" style="width:17px;height:17px;" ${existing?.ehFinanceira?'checked':''}>
       💰 É uma categoria financeira
@@ -27490,15 +27639,23 @@ function openCategoriaModal(tipo, existing){
   });
   document.getElementById('btnSalvarCategoria').addEventListener('click', ()=>{
     const nome = document.getElementById('catNome').value.trim();
+    const icone = document.getElementById('catIcone').value.trim();
     const ehFinanceira = document.getElementById('catEhFinanceira').checked;
     const ehCapital = document.getElementById('catEhCapital').checked;
+    const tipoCusto = document.getElementById('catTipoCusto')?.value || '';
+    const centroCustoDefault = document.getElementById('catCentroCustoDefault')?.value.trim() || '';
+    const naoOperacional = document.getElementById('catNaoOperacional')?.checked || false;
     if(!nome){ showToast('Informe o nome da categoria'); return; }
     if(isEdit){
       const oldNome = existing.nome;
       existing.nome = nome;
       existing.cor = corSelecionada;
+      existing.icone = icone;
       existing.ehFinanceira = ehFinanceira;
       existing.ehCapital = ehCapital;
+      existing.tipoCusto = tipoCusto;
+      existing.centroCustoDefault = centroCustoDefault;
+      existing.naoOperacional = naoOperacional;
       if(oldNome !== nome){
         state.lancamentos.forEach(l=>{
           if(l.categoria===oldNome) l.categoria = nome;
@@ -27510,7 +27667,7 @@ function openCategoriaModal(tipo, existing){
         });
       }
     } else {
-      state.categorias[tipo].push({ id: uid(), nome, cor: corSelecionada, subcategorias: [], ehFinanceira, ehCapital });
+      state.categorias[tipo].push({ id: uid(), nome, cor: corSelecionada, icone, subcategorias: [], ehFinanceira, ehCapital, tipoCusto, centroCustoDefault, naoOperacional, favorita:false });
     }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Categoria atualizada' : 'Categoria criada');
