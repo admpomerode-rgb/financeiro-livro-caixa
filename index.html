@@ -1562,6 +1562,7 @@ function render(){
   else if(currentView==='retiradas') main.innerHTML = viewRetiradas();
   else if(currentView==='projetos-financeiros') main.innerHTML = viewProjetosFinanceiros();
   else if(currentView==='pendencias') main.innerHTML = viewCentralPendencias();
+  else if(currentView==='demonstracoes-financeiras') main.innerHTML = viewDemonstracoesFinanceiras();
   else if(currentView==='navegacao-objetivo') main.innerHTML = viewNavegacaoObjetivo();
   attachViewHandlers();
   atualizarBadgesBottomNav();
@@ -4677,6 +4678,28 @@ function viewDashboard(){
       <div class="panel" data-ir-relatorio="central_alertas" style="cursor:pointer;"><div class="panel-body" style="padding:14px 18px;text-align:center;"><div style="font-size:20px;">🔔</div><div style="font-size:12px;font-weight:600;margin-top:4px;">Alertas</div></div></div>
       <div class="panel" data-goto="metas" style="cursor:pointer;"><div class="panel-body" style="padding:14px 18px;text-align:center;"><div style="font-size:20px;">🎯</div><div style="font-size:12px;font-weight:600;margin-top:4px;">Metas</div></div></div>
     </div>
+    ${(()=>{
+      const evMs = movimentosRealizados().filter(ev=>ev.data>=`${mesGlobalRef}-01` && ev.data<=todayISO() && ev.origem!=='transferencia' && !ehMovimentoDeCapital(ev));
+      const resultadoMesDash = evMs.filter(ev=>ev.tipo==='entrada').reduce((s,ev)=>s+ev.valor,0) - evMs.filter(ev=>ev.tipo==='saida').reduce((s,ev)=>s+ev.valor,0);
+      const caixaDash = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+      const aReceberDash = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
+      const aPagarDash = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
+      const cartoesDash = state.cartoes.reduce((s,c)=>{ const comp=competenciaAtual(c); return s+(faturaStatus(c.id,comp)==='aberta'?totalCompetencia(c.id,comp):0); },0);
+      const plDash = (caixaDash+aReceberDash+totalInvestimentos()+totalAtivosPatrimoniais()+totalEstoqueInsumos()) - (aPagarDash+cartoesDash);
+      return `
+      <div class="panel" style="margin-top:12px;cursor:pointer;" data-action="ir-demonstracoes-financeiras">
+        <div class="panel-body" style="padding:14px 18px;">
+          <div style="font-size:13.5px;font-weight:700;margin-bottom:10px;">📑 Demonstrações Financeiras</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div><div style="font-size:10px;color:var(--text-soft);">DRE — Resultado do mês</div><div class="mono" style="font-size:13px;font-weight:600;color:${resultadoMesDash>=0?'var(--success)':'var(--danger)'};">${brl(resultadoMesDash)}</div></div>
+            <div><div style="font-size:10px;color:var(--text-soft);">Balanço — Patrimônio Líquido</div><div class="mono" style="font-size:13px;font-weight:600;color:${plDash>=0?'var(--success)':'var(--danger)'};">${brl(plDash)}</div></div>
+            <div><div style="font-size:10px;color:var(--text-soft);">DFC — Caixa atual</div><div class="mono" style="font-size:13px;font-weight:600;">${brl(caixaDash)}</div></div>
+            <div><div style="font-size:10px;color:var(--text-soft);">DMPL — PL final</div><div class="mono" style="font-size:13px;font-weight:600;color:${plDash>=0?'var(--success)':'var(--danger)'};">${brl(plDash)}</div></div>
+          </div>
+          <div style="text-align:right;margin-top:10px;"><span style="color:var(--blue-accent);font-size:12.5px;font-weight:600;">Abrir Demonstrações ›</span></div>
+        </div>
+      </div>`;
+    })()}
     ` : `
     <div class="dash-economia-avisos-row">
       <div class="dash-economia-col">
@@ -16228,6 +16251,70 @@ function renderRelatorioValuation(){
 
 function totalEstoqueInsumos(){ return (state.estoqueInsumos||[]).reduce((s,i)=>s+i.valorTotal,0); }
 
+/* ====================== CENTRAL DE DEMONSTRAÇÕES FINANCEIRAS ====================== */
+// Camada de navegação e apresentação SOBRE renderDRE/renderBalanco/renderDFC/renderDMPL, que já
+// existiam prontas. Não recalcula nada pesado aqui — só um resumo leve de cada uma pra dar contexto
+// antes de abrir. DRE já tem visão Gerencial/Vertical/Horizontal/Comparativa (seletor "Análise"),
+// não precisou criar nada disso de novo.
+function viewDemonstracoesFinanceiras(){
+  const hoje = todayISO();
+  const mesRef = hoje.slice(0,7);
+  const [anoM, mesM] = mesRef.split('-').map(Number);
+  const deMes = `${mesRef}-01`, ateMes = hoje;
+
+  // Resumo DRE do mês atual — mesma fonte de dados da DRE real (movimentosRealizados), só que
+  // leve (só entradas/saídas do mês, sem toda a estrutura de categorias/financeiro/etc.)
+  const eventosMs = movimentosRealizados().filter(ev=>ev.data>=deMes && ev.data<=ateMes && ev.origem!=='transferencia' && !ehMovimentoDeCapital(ev));
+  const receitaMes = eventosMs.filter(ev=>ev.tipo==='entrada').reduce((s,ev)=>s+ev.valor,0);
+  const despesaMes = eventosMs.filter(ev=>ev.tipo==='saida').reduce((s,ev)=>s+ev.valor,0);
+  const resultadoMes = receitaMes - despesaMes;
+
+  // Resumo Balanço — mesmos totais que renderBalanco() usa
+  const caixaBancos = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+  const aReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
+  const aPagar = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
+  const cartoesNaoFaturados = state.cartoes.reduce((s,c)=>{ const comp = competenciaAtual(c); return s + (faturaStatus(c.id, comp)==='aberta' ? totalCompetencia(c.id, comp) : 0); }, 0);
+  const totalAtivoResumo = caixaBancos + aReceber + totalInvestimentos() + totalAtivosPatrimoniais() + totalEstoqueInsumos();
+  const totalPassivoResumo = aPagar + cartoesNaoFaturados;
+  const plResumo = totalAtivoResumo - totalPassivoResumo;
+
+  // Resumo DFC — caixa final = soma dos saldos das contas (mesma fonte que o Balanço)
+  const caixaFinalResumo = caixaBancos;
+
+  const blocos = [
+    { id:'dre', titulo:'DRE', icone:'📊', desc:'Demonstração do Resultado — receitas, despesas e lucro/prejuízo do período', periodo:competenciaLabel(mesRef), rotulo:'Resultado do mês', valor:resultadoMes, cor: resultadoMes>=0?'var(--success)':'var(--danger)' },
+    { id:'balanco', titulo:'Balanço Patrimonial', icone:'⚖️', desc:'Ativos, passivos e patrimônio líquido na data de hoje', periodo:fmtDate(hoje), rotulo:'Patrimônio líquido', valor:plResumo, cor: plResumo>=0?'var(--success)':'var(--danger)' },
+    { id:'dfc', titulo:'DFC', icone:'💵', desc:'Demonstração dos Fluxos de Caixa — operacional, investimento e financiamento', periodo:competenciaLabel(mesRef), rotulo:'Caixa atual', valor:caixaFinalResumo, cor:'var(--ink)' },
+    { id:'dmpl', titulo:'DMPL', icone:'📈', desc:'Mutações do Patrimônio Líquido — aportes, lucros, prejuízos e retiradas', periodo:fmtDate(hoje), rotulo:'Patrimônio líquido final', valor:plResumo, cor: plResumo>=0?'var(--success)':'var(--danger)' },
+  ];
+
+  return `
+    <div class="topbar">
+      <div><h1>Central de Demonstrações Financeiras</h1><p>DRE, Balanço Patrimonial, DFC e DMPL — tudo num lugar só</p></div>
+    </div>
+    ${blocos.map(b=>`
+      <div class="panel" style="margin-bottom:14px;cursor:pointer;" data-action="abrir-demonstracao" data-id="${b.id}">
+        <div class="panel-body" style="padding:16px 20px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+            <div>
+              <div style="font-size:14.5px;font-weight:700;">${b.icone} ${b.titulo}</div>
+              <div style="font-size:12px;color:var(--text-soft);margin-top:3px;max-width:420px;">${b.desc}</div>
+              <div style="font-size:10.5px;color:var(--text-soft);margin-top:6px;">Último período disponível: ${b.periodo}</div>
+            </div>
+            <span style="color:var(--blue-accent);font-size:18px;">›</span>
+          </div>
+          <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:11.5px;color:var(--text-soft);">${b.rotulo}</span>
+            <span class="mono" style="font-size:15px;font-weight:700;color:${b.cor};">${brl(b.valor)}</span>
+          </div>
+        </div>
+      </div>
+    `).join('')}
+    <div class="note" style="margin-top:0;">Essa central é só um atalho — abrir qualquer demonstração aqui leva pro mesmo relatório já existente na Central de Relatórios, com os mesmos filtros de período e visão (Gerencial, Vertical, Horizontal, Comparativa) que já existiam.</div>
+  `;
+}
+/* ====================== FIM CENTRAL DE DEMONSTRAÇÕES FINANCEIRAS ====================== */
+
 function renderBalanco(){
   const dataRef = document.getElementById('balancoData')?.value || todayISO();
   const caixaBancos = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
@@ -16267,6 +16354,7 @@ function renderBalanco(){
 
       <div class="report-line result"><span>Patrimônio Líquido</span><span class="v" style="color:${patrimonioLiquido>=0?'var(--success)':'var(--danger)'}">${brl(patrimonioLiquido)}</span></div>
     </div>
+    <div class="note" style="border-color:var(--success);color:var(--success);">✓ Balanço fechado — Ativo (${brl(totalAtivo)}) = Passivo + Patrimônio Líquido (${brl(totalPassivo+patrimonioLiquido)})</div>
   `;
 }
 
@@ -19853,6 +19941,14 @@ async function preencherEstatisticasCodigo(){
 function attachViewHandlers(){
   if(currentView!==selecaoViewOrigem){ selecaoLancIds.clear(); selecaoViewOrigem = currentView; }
   atualizarSelecaoUI();
+  document.querySelector('[data-action="ir-demonstracoes-financeiras"]')?.addEventListener('click', ()=>{ currentView='demonstracoes-financeiras'; render(); });
+  document.querySelectorAll('[data-action="abrir-demonstracao"]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      relatorioAtivo = el.dataset.id;
+      currentView = 'relatorio-detalhe';
+      render();
+    });
+  });
   document.getElementById('btnNovaRetirada')?.addEventListener('click', ()=>openRetiradaModal());
   document.querySelectorAll('[data-action="editar-retirada"]').forEach(el=>{
     el.addEventListener('click', ()=>openRetiradaModal(state.retiradas.find(r=>r.id===el.dataset.id)));
