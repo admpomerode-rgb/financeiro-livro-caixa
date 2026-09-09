@@ -7263,7 +7263,12 @@ function renderExtratoConteudo(contaId){
   `).join('');
 
   // ---- Tabela desktop (seção 6) — mesma lista/dados, só apresentação em grade/tabela ----
-  const linhasDesktopHTML = grupos.slice().reverse().map(g=>g.itens.slice().reverse().map(({ev,saldoApos})=>`
+  const linhasDesktopHTML = grupos.slice().reverse().map(g=>`
+    <div class="extrato-dia-desktop-head" style="display:flex;justify-content:space-between;align-items:center;padding:9px 12px;background:var(--bone);border-top:3px solid var(--blue-accent);border-bottom:1px solid var(--line);font-size:12px;font-weight:600;">
+      <span class="mono">${fmtDate(g.dia)}</span>
+      <span style="font-size:11px;color:var(--text-soft);font-weight:400;">Entradas: <strong style="color:var(--success);">${brl(g.itens.filter(it=>it.ev.tipo==='entrada').reduce((s,it)=>s+it.ev.valor,0))}</strong> · Saídas: <strong style="color:var(--danger);">${brl(g.itens.filter(it=>it.ev.tipo==='saida').reduce((s,it)=>s+it.ev.valor,0))}</strong> · Saldo final: <strong class="mono" style="color:var(--ink);">${brl(g.saldoFinal)}</strong></span>
+    </div>
+    ${g.itens.slice().reverse().map(({ev,saldoApos})=>`
     <div class="ledger-row compact" data-id="${ev.lancamentoId}" data-action="abrir-lancamento" style="cursor:pointer;grid-template-columns:90px 1.6fr 1fr 100px 100px 110px 60px;">
       <span class="mono" style="font-size:12px;color:var(--text-soft);">${fmtDate(ev.data)}</span>
       <div class="desc-cell"><div>${escapeHTML(ev.descricao)}${extratoTodasContas ? ` <span style="color:var(--text-soft);font-size:10.5px;">· ${escapeHTML(nomeConta(ev.contaId))}</span>` : ''}${(ev.itens && ev.itens.length>1 && ev.itens.some(it=>it.categoria)) ? ` <span data-action="toggle-itens-detalhe" data-id="${ev.lancamentoId}" style="cursor:pointer;font-size:10.5px;color:var(--blue-accent);font-weight:600;">▾ ${ev.itens.length} itens</span>` : ''}</div></div>
@@ -7277,7 +7282,8 @@ function renderExtratoConteudo(contaId){
     <div id="itensDetalhe_${ev.lancamentoId}" style="display:none;padding:6px 16px 10px 100px;background:var(--bone);">
       ${ev.itens.map(it=>`<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span>${escapeHTML(it.nome)} <span style="color:var(--text-soft);">· ${escapeHTML(it.categoria||ev.categoria)}</span></span><span class="mono">${brl(it.valor)}</span></div>`).join('')}
     </div>` : ''}
-  `).join('')).join('');
+    `).join('')}
+  `).join('');
 
   return `
     <div class="cards cards-compact" style="grid-template-columns:repeat(auto-fit,minmax(100px,1fr));margin-bottom:14px;">
