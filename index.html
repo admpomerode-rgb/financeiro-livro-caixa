@@ -19893,6 +19893,40 @@ function viewOrcamentosProcessos(){
 function viewVK(){
   const cfg = state.vkConfig;
   const totalImportados = state.lancamentos.filter(l=>l.origem==='vk').length;
+
+  // ====== NOVO: painel de saúde e gráfico — só leitura de dados já existentes, nada aqui altera
+  // configuração nem dispara sincronização nenhuma. Todo o painel abaixo (Sincronização,
+  // Aprovações, Divergências, Configurações) continua exatamente como já era. ======
+  const hoje = todayISO();
+  function statusSyncArea(dataISO){
+    if(!dataISO) return 'nunca';
+    const dias = Math.floor((new Date(hoje)-new Date(dataISO))/86400000);
+    if(dias<=3) return 'ok';
+    if(dias<=10) return 'atencao';
+    return 'atrasado';
+  }
+  const areasSync = [
+    { nome:'Pedidos', data: cfg.ultimaSincronizacao },
+    { nome:'Estoque (compras)', data: cfg.ultimaSincronizacaoEstoque },
+    { nome:'Estoque de insumos', data: cfg.ultimaSincronizacaoEstoqueInsumos },
+    { nome:'Recomendações de compra', data: cfg.ultimaSincronizacaoRecomendacoes },
+    { nome:'Custos e margem', data: cfg.ultimaSincronizacaoCustosProdutos },
+    { nome:'Ativos e OS', data: cfg.ultimaSincronizacaoAtivos },
+  ].map(a=>({ ...a, status: statusSyncArea(a.data) }));
+  const qtdOk = areasSync.filter(a=>a.status==='ok').length;
+  const qtdAtencao = areasSync.filter(a=>a.status==='atencao').length;
+  const qtdAtrasado = areasSync.filter(a=>a.status==='atrasado' || a.status==='nunca').length;
+  const iconeStatus = { ok:'🟢', atencao:'🟡', atrasado:'🔴', nunca:'⚪' };
+  const rotuloStatus = { ok:'Em dia', atencao:'Atenção', atrasado:'Atrasado', nunca:'Nunca sincronizado' };
+  const pendenciasTotal = (state.vkAprovacoes||[]).length + (state.vkDivergencias||[]).length + (state.vkDivergenciasEstoque||[]).length;
+
+  // Evolução de itens importados — últimos 6 meses, agrupando por mês de criação do lançamento
+  const meses6 = Array.from({length:6},(_,i)=>{ const [ay,am]=hoje.slice(0,7).split('-').map(Number); const d=new Date(ay,am-1-(5-i),1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const importadosPorMes = meses6.map(m=>{
+    return state.lancamentos.filter(l=>(l.origem==='vk'||l.origem==='vk-estoque') && (l.criadoEm||'').slice(0,7)===m).length;
+  });
+  const labelsMeses6 = meses6.map(m=>competenciaLabel(m).split('/')[0].slice(0,3));
+
   return `
     <div class="topbar">
       <div>
@@ -19901,6 +19935,31 @@ function viewVK(){
         <p>Pedidos, ativos/OS e entradas de estoque do VK Industrial caem automaticamente aqui</p>
       </div>
     </div>
+
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:14px;">
+      ${metricCardHTML('Pedidos importados', totalImportados)}
+      ${metricCardHTML('Entradas de estoque', state.lancamentos.filter(l=>l.origem==='vk-estoque').length)}
+      ${metricCardHTML('Ativos/OS sincronizados', state.ativosPatrimoniais.filter(a=>a.vkAtivoId).length)}
+      ${metricCardHTML('Áreas em dia', `${qtdOk}/6`, qtdOk===6?'var(--success)':undefined)}
+      ${pendenciasTotal>0 ? metricCardHTML('Pendências', pendenciasTotal, 'var(--warn)') : ''}
+    </div>
+
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="panel-head"><h2>🩺 Saúde da sincronização</h2></div>
+      <div class="panel-body" style="padding:0;">
+        ${areasSync.map(a=>`
+          <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto;">
+            <span>${iconeStatus[a.status]}</span>
+            <span style="font-size:12.5px;">${escapeHTML(a.nome)}</span>
+            <span style="font-size:11px;color:var(--text-soft);">${a.data ? new Date(a.data).toLocaleDateString('pt-BR') : rotuloStatus[a.status]}</span>
+          </div>
+        `).join('')}
+      </div>
+      ${qtdAtrasado>0 ? `<div class="note" style="margin:0;border-radius:0;border-top:1px solid var(--line);">${qtdAtrasado} área(s) sem sincronizar há mais de 10 dias (ou nunca) — vale rodar a sincronização abaixo.</div>` : ''}
+    </div>
+
+    ${importadosPorMes.some(v=>v>0) ? chartCardHTML('📈 Itens importados do VK por mês', 'Últimos 6 meses — pedidos + entradas de estoque', svgLinhasMultiplas([{ nome:'Importados', valores:importadosPorMes, cor:'#1E49E2' }], labelsMeses6)) : ''}
+    <!-- ====== FIM DA PARTE NOVA — tudo abaixo é o painel original, intocado ====== -->
 
     <div class="panel">
       <div class="panel-head"><h2>Sincronização</h2></div>
