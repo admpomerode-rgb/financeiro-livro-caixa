@@ -22203,27 +22203,6 @@ function attachViewHandlers(){
     });
   });
 
-  // Provisões
-  document.getElementById('btnNovaProvisao')?.addEventListener('click', ()=>openProvisaoModal());
-  document.querySelectorAll('[data-action="editar-provisao"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>openProvisaoModal((state.provisoes||[]).find(x=>x.id===btn.dataset.id)));
-  });
-  document.querySelectorAll('[data-action="aportar-provisao"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{ const p=(state.provisoes||[]).find(x=>x.id===btn.dataset.id); if(p) openMovProvisaoModal(p,'aporte'); });
-  });
-  document.querySelectorAll('[data-action="usar-provisao"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{ const p=(state.provisoes||[]).find(x=>x.id===btn.dataset.id); if(p) openMovProvisaoModal(p,'uso'); });
-  });
-  document.querySelectorAll('[data-action="excluir-provisao"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      const p = (state.provisoes||[]).find(x=>x.id===btn.dataset.id);
-      if(!p || !confirm(`Excluir a provisão "${p.nome}"?`)) return;
-      registrarLog('Provisão excluída', p.nome);
-      state.provisoes = state.provisoes.filter(x=>x.id!==btn.dataset.id);
-      persist(); render(); showToast('Provisão excluída');
-    });
-  });
-
   // Fornecedores
   document.getElementById('btnNovoFornecedor')?.addEventListener('click', ()=>openFornecedorModal());
   document.getElementById('btnNovaOportunidade')?.addEventListener('click', ()=>openOportunidadeModal());
@@ -25077,6 +25056,30 @@ function contratosVencendoResumo(){
   };
 }
 
+const TIPOS_META = {
+  emergencia: { icone:'🆘', nome:'Reserva de Emergência' },
+  operacional: { icone:'🏢', nome:'Reserva Operacional' },
+  impostos: { icone:'🧾', nome:'Reserva de Impostos' },
+  manutencao: { icone:'🔧', nome:'Reserva de Manutenção' },
+  investimento: { icone:'📈', nome:'Meta de Investimento' },
+  divida: { icone:'💳', nome:'Redução de Dívida' },
+  expansao: { icone:'🚀', nome:'Expansão' },
+  outra: { icone:'🎯', nome:'Outra' },
+};
+// Status calculado só quando há prazo E ritmo de aporte informados — sem esses dois dados, não dá
+// pra saber se "vai bater ou não", então o status fica neutro em vez de inventar uma previsão.
+function statusMeta(m, atual){
+  if(atual>=m.valorAlvo) return 'concluida';
+  if(!m.prazo || !(m.aporteMensalPlanejado>0)) return null;
+  const falta = m.valorAlvo-atual;
+  const mesesNecessarios = falta/m.aporteMensalPlanejado;
+  const dataProjetada = new Date(); dataProjetada.setMonth(dataProjetada.getMonth()+Math.ceil(mesesNecessarios));
+  const prazo = new Date(m.prazo);
+  const folgaDias = Math.floor((prazo-dataProjetada)/86400000);
+  if(folgaDias<0) return 'atrasada';
+  if(folgaDias<=30) return 'atencao';
+  return 'no_caminho';
+}
 function viewMetasReserva(){
   const lista = [...(state.metasReserva||[])];
   const hoje = todayISO();
@@ -25098,10 +25101,34 @@ function viewMetasReserva(){
       <div style="font-size:11px;color:var(--text-soft);margin-top:3px;">${pct.toFixed(0)}%${pct>=100?' — meta batida! 🎉':''}</div>
     </div>`;
 
+  // Dados agregados de cada meta, calculados uma vez, reaproveitados no resumo e nos cards
+  const dadosMetas = lista.map(m=>{
+    const atual = m.contaId ? saldoConta(m.contaId) : (m.valorAtualManual||0);
+    const pct = m.valorAlvo>0 ? Math.min(100, Math.round(atual/m.valorAlvo*100)) : 0;
+    const status = statusMeta(m, atual);
+    const falta = Math.max(0, m.valorAlvo-atual);
+    const mesesNecessarios = (m.aporteMensalPlanejado>0 && falta>0) ? Math.ceil(falta/m.aporteMensalPlanejado) : null;
+    return { ...m, atual, pct, status, falta, mesesNecessarios };
+  });
+  const ordemPrioridade = { critica:0, alta:1, media:2, baixa:3 };
+  const ordemStatus = { atrasada:0, atencao:1, no_caminho:2, null:3, concluida:4 };
+  dadosMetas.sort((a,b)=>{
+    const os = (ordemStatus[a.status]??3)-(ordemStatus[b.status]??3);
+    if(os!==0) return os;
+    return (ordemPrioridade[a.prioridade]??2)-(ordemPrioridade[b.prioridade]??2);
+  });
+  const totalGuardado = dadosMetas.reduce((s,m)=>s+m.atual,0);
+  const totalAlvo = dadosMetas.reduce((s,m)=>s+m.valorAlvo,0);
+  const pctGeral = totalAlvo>0 ? Math.round(totalGuardado/totalAlvo*100) : 0;
+  const qtdAtrasadas = dadosMetas.filter(m=>m.status==='atrasada').length;
+  const qtdConcluidas = dadosMetas.filter(m=>m.status==='concluida').length;
+  const rotuloStatus = { atrasada:'🔴 Atrasada', atencao:'🟡 Atenção', no_caminho:'🟢 No caminho', concluida:'🏆 Concluída' };
+  const corStatus = { atrasada:'var(--danger)', atencao:'var(--warn)', no_caminho:'var(--success)', concluida:'var(--success)' };
+
   return `
     <div class="topbar">
-      <div><h1>Metas Financeiras</h1><p>Metas do mês (faturamento, lucro, despesa) e metas de reserva/poupança</p></div>
-      <button class="btn" id="btnNovaMeta">+ Meta de Reserva</button>
+      <div><h1>Central de Metas</h1><p>Metas do mês (faturamento, lucro, despesa) e metas de longo prazo (reservas, investimentos, dívidas)</p></div>
+      <button class="btn" id="btnNovaMeta">+ Nova meta</button>
     </div>
     ${(()=>{
       const conquistas = verificarConquistas();
@@ -25141,123 +25168,50 @@ function viewMetasReserva(){
         `}
       </div>
     </div>
-    <div class="panel" style="margin-top:16px;">
-      <div class="panel-head"><h2>🏦 Metas de Reserva</h2></div>
+
+    <div class="dash-section-label" style="margin-top:20px;">Metas e Reservas de longo prazo</div>
+    ${dadosMetas.length ? `
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:14px;">
+      <div class="card"><div class="label">Metas ativas</div><div class="value mono">${dadosMetas.length}</div></div>
+      <div class="card"><div class="label">Já guardado</div><div class="value mono">${brl(totalGuardado)}</div></div>
+      <div class="card"><div class="label">Total das metas</div><div class="value mono">${brl(totalAlvo)}</div></div>
+      <div class="card"><div class="label">Progresso geral</div><div class="value mono">${pctGeral}%</div></div>
+      ${qtdAtrasadas>0 ? `<div class="card"><div class="label">Atrasadas</div><div class="value mono" style="color:var(--danger);">${qtdAtrasadas}</div></div>` : ''}
+      ${qtdConcluidas>0 ? `<div class="card"><div class="label">Concluídas</div><div class="value mono" style="color:var(--success);">${qtdConcluidas}</div></div>` : ''}
+    </div>` : ''}
+    <div class="panel">
       <div class="panel-body" style="padding:16px 20px;">
-        ${lista.length ? lista.map(m=>{
-          const atual = m.contaId ? saldoConta(m.contaId) : (m.valorAtualManual||0);
-          const pct = m.valorAlvo>0 ? Math.min(100, Math.round(atual/m.valorAlvo*100)) : 0;
+        ${dadosMetas.length ? dadosMetas.map(m=>{
+          const tipo = TIPOS_META[m.tipo] || TIPOS_META.outra;
+          const rotuloPrioridade = { critica:'Crítica', alta:'Alta', media:'Média', baixa:'Baixa' };
           return `
-          <div style="margin-bottom:22px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-              <strong style="font-size:13.5px;">${escapeHTML(m.nome)}</strong>
-              <div class="row-actions">
+          <div style="margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid var(--line);">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;gap:8px;">
+              <div>
+                <strong style="font-size:13.5px;">${tipo.icone} ${escapeHTML(m.nome)}</strong>
+                <div style="font-size:10.5px;color:var(--text-soft);margin-top:2px;">${tipo.nome}${m.prioridade?' · Prioridade '+rotuloPrioridade[m.prioridade]:''}${m.prazo?' · prazo '+fmtDate(m.prazo):''}</div>
+              </div>
+              <div class="row-actions" style="flex-shrink:0;">
                 <button class="icon-btn" data-action="editar-meta" data-id="${m.id}" title="Editar">✎</button>
                 <button class="icon-btn" data-action="excluir-meta" data-id="${m.id}" title="Excluir">✕</button>
               </div>
             </div>
-            <div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--text-soft);margin-bottom:6px;">
-              <span class="mono">${brl(atual)} de ${brl(m.valorAlvo)}${m.contaId ? ' · '+escapeHTML(nomeConta(m.contaId)) : ''}</span>
-              <span>${pct}%</span>
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--text-soft);margin-bottom:6px;flex-wrap:wrap;gap:4px;">
+              <span class="mono">${brl(m.atual)} de ${brl(m.valorAlvo)}${m.contaId ? ' · '+escapeHTML(nomeConta(m.contaId)) : ''}</span>
+              <span style="display:flex;gap:8px;align-items:center;">${m.status?`<span style="font-weight:600;color:${corStatus[m.status]};">${rotuloStatus[m.status]}</span>`:''}<span>${m.pct}%</span></span>
             </div>
             <div style="background:var(--bone);border-radius:6px;height:9px;overflow:hidden;">
-              <div style="width:${pct}%;height:100%;background:${pct>=100?'var(--success)':'var(--blue-accent)'};"></div>
+              <div style="width:${m.pct}%;height:100%;background:${m.pct>=100?'var(--success)':m.status==='atrasada'?'var(--danger)':'var(--blue-accent)'};"></div>
             </div>
+            ${m.status!=='concluida' && m.mesesNecessarios ? `<div style="font-size:11px;color:var(--text-soft);margin-top:6px;">No ritmo de ${brl(m.aporteMensalPlanejado)}/mês, bate em ${m.mesesNecessarios} mês(es)${m.prazo?` — prazo é ${fmtDate(m.prazo)}`:''}.</div>` : ''}
+            ${m.status!=='concluida' && !m.aporteMensalPlanejado && m.prazo ? `<div style="font-size:11px;color:var(--text-soft);margin-top:6px;">Informe quanto pretende guardar por mês pra ver se essa meta vai bater no prazo.</div>` : ''}
           </div>
-        `;}).join('') : `<div class="empty">Nenhuma meta cadastrada ainda.</div>`}
-      </div>
-    </div>
-
-    <div class="panel" style="margin-top:16px;">
-      <div class="panel-head"><h2>🗃️ Provisões (13º, férias, impostos)</h2><button class="btn sm" id="btnNovaProvisao">+ Provisão</button></div>
-      <div class="panel-body" style="padding:16px 20px;">
-        ${(state.provisoes||[]).length ? state.provisoes.map(p=>{
-          const alvo = p.valorAlvo||0;
-          const pct = alvo>0 ? Math.min(100, Math.round((p.acumulado||0)/alvo*100)) : null;
-          return `
-          <div style="margin-bottom:20px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-              <strong style="font-size:13.5px;">${escapeHTML(p.nome)}</strong>
-              <div class="row-actions">
-                <button class="icon-btn" data-action="aportar-provisao" data-id="${p.id}" title="Registrar aporte do mês">＋</button>
-                <button class="icon-btn" data-action="usar-provisao" data-id="${p.id}" title="Usar / retirar">－</button>
-                <button class="icon-btn" data-action="editar-provisao" data-id="${p.id}" title="Editar">✎</button>
-                <button class="icon-btn" data-action="excluir-provisao" data-id="${p.id}" title="Excluir">✕</button>
-              </div>
-            </div>
-            <div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--text-soft);margin-bottom:6px;">
-              <span class="mono">Acumulado: ${brl(p.acumulado||0)}${alvo>0?` de ${brl(alvo)}`:''}</span>
-              <span>${p.valorMensal>0?`reservar ${brl(p.valorMensal)}/mês`:''}${pct!==null?` · ${pct}%`:''}</span>
-            </div>
-            ${alvo>0?`<div style="background:var(--bone);border-radius:6px;height:9px;overflow:hidden;"><div style="width:${pct}%;height:100%;background:${pct>=100?'var(--success)':'#7B5CD6'};"></div></div>`:''}
-            ${(p.historico||[]).length?`<div style="font-size:11px;color:var(--text-soft);margin-top:5px;">Último movimento: ${fmtDate(p.historico[0].data)} — ${p.historico[0].tipo==='uso'?'uso de':'aporte de'} ${brl(p.historico[0].valor)}</div>`:''}
-          </div>
-        `;}).join('') : `<div class="empty">Nenhuma provisão ainda. Crie uma pra reservar todo mês o dinheiro do 13º, das férias e dos impostos — e dezembro deixa de ser susto.</div>`}
+        `;}).join('') : `<div class="empty">Nenhuma meta cadastrada ainda. Reserva de emergência, troca de máquina, quitar uma dívida — cadastre aqui pra acompanhar o progresso.</div>`}
       </div>
     </div>
   `;
 }
 
-function openProvisaoModal(existing){
-  const isEdit = !!existing;
-  const modal = document.getElementById('modalContent');
-  modal.innerHTML = `
-    <h3>${isEdit?'Editar provisão':'Nova provisão'}</h3>
-    <div class="field"><label>Nome</label><input type="text" id="pvNome" value="${existing?escapeHTML(existing.nome):''}" placeholder="Ex: 13º salário, Férias, Impostos"></div>
-    <div class="field-row">
-      <div class="field"><label>Reservar por mês (R$)</label><input type="text" inputmode="decimal" id="pvMensal" value="${existing?existing.valorMensal||'':''}" placeholder="0,00"></div>
-      <div class="field"><label>Valor alvo (R$, opcional)</label><input type="text" inputmode="decimal" id="pvAlvo" value="${existing?existing.valorAlvo||'':''}" placeholder="0,00"></div>
-    </div>
-    ${isEdit?'':`<div class="field"><label>Já tem algum valor acumulado? (R$, opcional)</label><input type="text" inputmode="decimal" id="pvAcumulado" placeholder="0,00"></div>`}
-    <div class="modal-actions">
-      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
-      <button class="btn" id="btnSalvarProvisao">Salvar</button>
-    </div>`;
-  document.getElementById('modalOverlay').classList.add('open');
-  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  document.getElementById('btnSalvarProvisao').addEventListener('click', ()=>{
-    const nome = document.getElementById('pvNome').value.trim();
-    if(!nome){ showToast('Dê um nome pra provisão'); return; }
-    const valorMensal = numBR(document.getElementById('pvMensal').value)||0;
-    const valorAlvo = numBR(document.getElementById('pvAlvo').value)||0;
-    if(isEdit){
-      Object.assign(existing, { nome, valorMensal, valorAlvo });
-      registrarLog('Provisão editada', nome);
-    } else {
-      const acumulado = numBR(document.getElementById('pvAcumulado').value)||0;
-      state.provisoes.push({ id: uid(), nome, valorMensal, valorAlvo, acumulado, historico: acumulado>0?[{data: todayISO(), valor: acumulado, tipo:'aporte'}]:[], criadoEm: new Date().toISOString() });
-      registrarLog('Provisão criada', `${nome}${valorMensal>0?' — '+brl(valorMensal)+'/mês':''}`);
-    }
-    persist(); closeModal(); render();
-    showToast(isEdit?'Provisão atualizada':'Provisão criada');
-  });
-}
-
-function openMovProvisaoModal(provisao, tipo){
-  const modal = document.getElementById('modalContent');
-  const ehUso = tipo==='uso';
-  modal.innerHTML = `
-    <h3>${ehUso?'Usar provisão':'Aporte na provisão'} — ${escapeHTML(provisao.nome)}</h3>
-    <div class="note" style="margin-top:0;">Acumulado atual: <strong class="mono">${brl(provisao.acumulado||0)}</strong></div>
-    <div class="field"><label>Valor (R$)</label><input type="text" inputmode="decimal" id="mvValor" value="${ehUso?'':(provisao.valorMensal||'')}" placeholder="0,00"></div>
-    <div class="modal-actions">
-      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
-      <button class="btn" id="btnConfirmarMovProv">${ehUso?'Registrar uso':'Registrar aporte'}</button>
-    </div>`;
-  document.getElementById('modalOverlay').classList.add('open');
-  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  document.getElementById('btnConfirmarMovProv').addEventListener('click', ()=>{
-    const v = numBR(document.getElementById('mvValor').value)||0;
-    if(v<=0){ showToast('Informe um valor válido'); return; }
-    if(ehUso && v > (provisao.acumulado||0)){ showToast('O valor é maior que o acumulado da provisão'); return; }
-    provisao.acumulado = Math.round(((provisao.acumulado||0) + (ehUso?-v:v))*100)/100;
-    if(!provisao.historico) provisao.historico = [];
-    provisao.historico.unshift({ data: todayISO(), valor: v, tipo: ehUso?'uso':'aporte' });
-    registrarLog(ehUso?'Uso de provisão':'Aporte em provisão', `${provisao.nome} — ${brl(v)} (acumulado: ${brl(provisao.acumulado)})`);
-    persist(); closeModal(); render();
-    showToast(ehUso?'Uso registrado':'Aporte registrado');
-  });
-}
 
 function openSalvarCenarioLabModal(){
   const itensAtuais = state.simulacaoAtual||[];
@@ -25467,8 +25421,19 @@ function openMetaModal(existing){
   const isEdit = !!existing;
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
-    <h3>${isEdit?'Editar meta':'Nova meta de reserva'}</h3>
+    <h3>${isEdit?'Editar meta':'Nova meta'}</h3>
     <div class="field"><label>Nome da meta</label><input type="text" id="mtNome" value="${existing?escapeHTML(existing.nome):''}" placeholder="Ex: Reserva de emergência, Fundo pra máquina nova..."></div>
+    <div class="field-row">
+      <div class="field"><label>Tipo</label><select id="mtTipo">
+        ${Object.entries(TIPOS_META).map(([id,t])=>`<option value="${id}" ${existing?.tipo===id?'selected':''}>${t.icone} ${t.nome}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>Prioridade</label><select id="mtPrioridade">
+        <option value="media" ${(!existing||existing.prioridade==='media')?'selected':''}>Média</option>
+        <option value="critica" ${existing?.prioridade==='critica'?'selected':''}>Crítica</option>
+        <option value="alta" ${existing?.prioridade==='alta'?'selected':''}>Alta</option>
+        <option value="baixa" ${existing?.prioridade==='baixa'?'selected':''}>Baixa</option>
+      </select></div>
+    </div>
     <div class="field"><label>Valor alvo (R$)</label><input type="text" inputmode="decimal" id="mtValorAlvo" value="${existing?existing.valorAlvo:''}" placeholder="0,00"></div>
     <div class="field">
       <label>Vincular a uma conta bancária (opcional)</label>
@@ -25481,6 +25446,11 @@ function openMetaModal(existing){
       <label>Valor já guardado hoje (R$)</label>
       <input type="text" inputmode="decimal" id="mtValorManual" value="${existing&&existing.valorAtualManual?existing.valorAtualManual:''}" placeholder="0,00">
     </div>
+    <div class="field-row">
+      <div class="field"><label>Prazo (opcional)</label><input type="date" id="mtPrazo" value="${existing?.prazo||''}"></div>
+      <div class="field"><label>Aporte mensal planejado (opcional)</label><input type="text" inputmode="decimal" id="mtAporteMensal" value="${existing?.aporteMensalPlanejado||''}" placeholder="0,00"></div>
+    </div>
+    <div class="note" style="margin-top:0;">Informando prazo e aporte mensal, o sistema calcula se essa meta vai bater a tempo ou não — sem isso, mostramos só o progresso, sem previsão.</div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       <button class="btn" id="btnSalvarMeta">Salvar</button>
@@ -25500,7 +25470,11 @@ function openMetaModal(existing){
     const valorManualRaw = document.getElementById('mtValorManual').value.trim();
     const payload = {
       nome, valorAlvo, contaId,
-      valorAtualManual: !contaId && valorManualRaw ? numBR(valorManualRaw) : 0
+      valorAtualManual: !contaId && valorManualRaw ? numBR(valorManualRaw) : 0,
+      tipo: document.getElementById('mtTipo').value,
+      prioridade: document.getElementById('mtPrioridade').value,
+      prazo: document.getElementById('mtPrazo').value || null,
+      aporteMensalPlanejado: numBR(document.getElementById('mtAporteMensal').value) || null,
     };
     if(!state.metasReserva) state.metasReserva = [];
     if(isEdit){ Object.assign(existing, payload); }
