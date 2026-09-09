@@ -2584,6 +2584,8 @@ async function sincronizarPedidosVK(){
 
       if(existente){
         jaImportados++;
+        // Regra financeira VK: pedido pendente nunca fica vinculado a conta bancária.
+        if(existente.status==='pendente') existente.contaId = null;
         // Nome/vendedor do pedido sempre é corrigido, mesmo já recebido — não é dado financeiro sensível,
         // é só a atribuição de quem vendeu (importante pra Comissões não ficar desatualizado)
         if(existente.vendedorId!==vendedorId || existente.vendedorNome!==vendedorNome){
@@ -24670,12 +24672,12 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
         `}
       </div>
       <div class="field" id="wrapContaDespesa">
-        <label>Conta</label>
+        <label>${isEdit && existing?.origem==='vk' && existing?.status==='pendente' ? 'Conta (definida somente ao receber)' : 'Conta'}</label>
         <select id="fConta">
-          ${isEdit && !existing.contaId ? `<option value="" selected>— Nenhuma conta ainda (pedido não efetivado) —</option>` : ''}
-          ${state.contas.map(c=>`<option value="${c.id}" ${(existing?.contaId||contaPreSelecionadaId||(isEdit?'':state.contas[0].id))===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}
+          ${isEdit && existing?.origem==='vk' && existing?.status==='pendente' ? `<option value="" selected>— Nenhuma conta ainda (pedido VK pendente) —</option>` : (isEdit && !existing.contaId ? `<option value="" selected>— Nenhuma conta ainda (pedido não efetivado) —</option>` : '')}
+          ${!(isEdit && existing?.origem==='vk' && existing?.status==='pendente') ? state.contas.map(c=>`<option value="${c.id}" ${(existing?.contaId||contaPreSelecionadaId||(isEdit?'':state.contas[0].id))===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('') : ''}
         </select>
-        ${isEdit && !existing.contaId ? `<div class="note" style="margin-top:6px;">Esse pedido ainda não tem conta bancária vinculada — normal pra pedidos vindos do VK Industrial ainda não recebidos. Escolha uma conta aqui se quiser definir agora, ou deixe em branco e escolha só na hora de confirmar o recebimento.</div>` : ''}
+        ${isEdit && existing?.origem==='vk' && existing?.status==='pendente' ? `<div class="note" style="margin-top:6px;">Pedido VK ainda pendente: permanece sem conta bancária. A conta será escolhida somente ao confirmar o recebimento.</div>` : (isEdit && !existing.contaId ? `<div class="note" style="margin-top:6px;">Esse lançamento ainda não tem conta bancária vinculada.</div>` : '')}
       </div>
       <div class="field">
         <label>Forma de pagamento (opcional)</label>
@@ -25128,6 +25130,8 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       status,
       dataPagamento: efetivado ? dataEfetivacao : null,
     };
+    // Regra financeira VK: pendente = sem conta, inclusive se um recebido for revertido para pendente.
+    if(existing?.origem==='vk' && status==='pendente') payload.contaId = null;
     const cfgAprov = state.aprovacaoConfig || {};
     if(tipo==='saida' && cfgAprov.ativo && valor > (cfgAprov.limite||0) && existing?.aprovacao!=='aprovada'){
       payload.aprovacao = 'pendente';
