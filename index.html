@@ -986,7 +986,7 @@ function aplicarMigracoes(s){
     s.contas.push(padrao);
   }
   const idPadrao = s.contas[0].id;
-  (s.lancamentos||[]).forEach(l=>{ if(!l.contaId) l.contaId = idPadrao; });
+  (s.lancamentos||[]).forEach(l=>{ if(!l.contaId && !(l.origem==='vk' && l.status==='pendente')) l.contaId = idPadrao; });
   if(!s.cartoes) s.cartoes = [];
   s.cartoes.forEach(c=>{
     if(c.limitesCategorias===undefined) c.limitesCategorias = [];
