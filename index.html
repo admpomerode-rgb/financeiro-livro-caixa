@@ -25935,6 +25935,568 @@ function statusMeta(m, atual){
   if(folgaDias<=30) return 'atencao';
   return 'no_caminho';
 }
+/* ====================== ANÁLISE DE CENTRO DE CUSTOS ====================== */
+// Reaproveita l.centroCusto (já usado em Fluxo de Caixa e Despesas por Centro de Custo) e
+// categoria.tipoCusto (já criado no cadastro de categorias) — nenhum cálculo novo, só agregação.
+function tipoCustoDaCategoria(nomeCategoria){
+  const cat = (state.categorias.saida||[]).find(c=>c.nome===nomeCategoria || nomeCategoria?.startsWith(c.nome+' / '));
+  return cat?.tipoCusto || null;
+}
+function lancamentosCentroCustoNoPeriodo(dataDe, dataAte){
+  return state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.categoria!=='Ativos Patrimoniais' && l.dataPagamento>=dataDe && l.dataPagamento<=dataAte);
+}
+function dadosCentroCusto(dataDe, dataAte, filtros){
+  filtros = filtros || {};
+  let lancs = lancamentosCentroCustoNoPeriodo(dataDe, dataAte);
+  if(filtros.centro) lancs = lancs.filter(l=>(l.centroCusto||'(sem centro definido)')===filtros.centro);
+  if(filtros.categoria) lancs = lancs.filter(l=>l.categoria===filtros.categoria);
+  if(filtros.fornecedor) lancs = lancs.filter(l=>l.fornecedor===filtros.fornecedor);
+  if(filtros.tipoCusto) lancs = lancs.filter(l=>tipoCustoDaCategoria(l.categoria)===filtros.tipoCusto);
+  return lancs;
+}
+function resumoCentroCusto(lancs){
+  const total = lancs.reduce((s,l)=>s+l.valor,0);
+  const fixo = lancs.filter(l=>tipoCustoDaCategoria(l.categoria)==='fixa').reduce((s,l)=>s+l.valor,0);
+  const variavel = lancs.filter(l=>tipoCustoDaCategoria(l.categoria)==='variavel').reduce((s,l)=>s+l.valor,0);
+  const semClassificacao = total-fixo-variavel;
+  const porCentro = {};
+  lancs.forEach(l=>{ const c = l.centroCusto||'(sem centro definido)'; porCentro[c] = (porCentro[c]||0)+l.valor; });
+  const rankingCentros = Object.entries(porCentro).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor);
+  const maiorCentro = rankingCentros[0]||null;
+  return { total, fixo, variavel, semClassificacao, rankingCentros, maiorCentro };
+}
+/* ====================== FIM ANÁLISE DE CENTRO DE CUSTOS ====================== */
+
+/* ====================== CENTRAL DE RETIRADAS ====================== */
+// Cada retirada cria um lançamento REAL (mesmo padrão já usado em Veículos e Ativos Patrimoniais)
+// — não é um registro paralelo. O campo `proLabore` que já existia em lançamentos continua
+// funcionando normalmente; aqui só organizamos e damos contexto (sócio, tipo) a esses lançamentos.
+function viewRetiradas(){
+  const t = totaisPorMesRef(mesGlobalRef);
+  const hoje = todayISO();
+  const anoAtual = mesGlobalRef.slice(0,4);
+  const retiradasDoMes = state.retiradas.filter(r=>r.data>=t.de && r.data<=t.ateMes);
+  const retiradasDoAno = state.retiradas.filter(r=>r.data.slice(0,4)===anoAtual);
+  const totalMes = retiradasDoMes.reduce((s,r)=>s+r.valor,0);
+  const totalAno = retiradasDoAno.reduce((s,r)=>s+r.valor,0);
+  const caixaLivre = calcularCaixaLivreAssistente();
+
+  const porTipo = {};
+  retiradasDoAno.forEach(r=>{ porTipo[r.tipo] = (porTipo[r.tipo]||0)+r.valor; });
+  const porSocio = {};
+  retiradasDoAno.forEach(r=>{ const nome = state.socios.find(s=>s.id===r.socioId)?.nome || 'Sem sócio vinculado'; porSocio[nome] = (porSocio[nome]||0)+r.valor; });
+
+  const rotuloTipo = { 'pro-labore':'Pró-labore', 'retirada':'Retirada', 'distribuicao':'Distribuição de lucros', 'antecipacao':'Antecipação' };
+
+  return `
+    <div class="topbar">
+      <div><h1>Central de Retiradas</h1><p>Pró-labore, retiradas, distribuição de lucros e antecipações</p></div>
+      <button class="btn" id="btnNovaRetirada">+ Nova retirada</button>
+    </div>
+    ${mesNavHTML()}
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:14px;">
+      <div class="card"><div class="label">Retirado no mês</div><div class="value mono">${brl(totalMes)}</div></div>
+      <div class="card"><div class="label">Retirado no ano</div><div class="value mono">${brl(totalAno)}</div></div>
+      <div class="card saldo"><div class="label">Disponível pra decisão hoje</div><div class="value mono" style="color:${caixaLivre>0?'var(--success)':'var(--warn)'};">${brl(caixaLivre)}</div></div>
+    </div>
+    <div class="note" style="margin-top:0;">"Disponível pra decisão hoje" já desconta compromissos dos próximos 30 dias e faturas de cartão em aberto — é o mesmo cálculo usado na Central de Decisão, pra você ver o impacto real de uma nova retirada no caixa.</div>
+
+    ${Object.keys(porTipo).length ? `
+    <div class="dash-section-label">Por tipo (este ano)</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+      ${Object.entries(porTipo).sort((a,b)=>b[1]-a[1]).map(([tipo,v])=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span style="font-size:12.5px;">${rotuloTipo[tipo]||tipo}</span><span class="mono" style="font-weight:600;">${brl(v)}</span></div>`).join('')}
+    </div></div>` : ''}
+
+    ${state.socios.length && Object.keys(porSocio).length ? `
+    <div class="dash-section-label">Por sócio (este ano)</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+      ${Object.entries(porSocio).sort((a,b)=>b[1]-a[1]).map(([nome,v])=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span style="font-size:12.5px;">${escapeHTML(nome)}</span><span class="mono" style="font-weight:600;">${brl(v)}</span></div>`).join('')}
+    </div></div>` : ''}
+
+    <div class="dash-section-label">Histórico</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${state.retiradas.length ? [...state.retiradas].sort((a,b)=>b.data.localeCompare(a.data)).slice(0,40).map(r=>{
+        const socio = state.socios.find(s=>s.id===r.socioId);
+        return `
+        <div class="ledger-row compact" data-action="editar-retirada" data-id="${r.id}" style="cursor:pointer;grid-template-columns:auto 1fr auto;">
+          <span class="mono" style="font-size:11px;color:var(--text-soft);">${fmtDate(r.data)}</span>
+          <div class="desc-cell"><div>${rotuloTipo[r.tipo]||r.tipo}${socio?' — '+escapeHTML(socio.nome):''}</div><div class="cat">${r.observacao?escapeHTML(r.observacao):''}</div></div>
+          <span class="mono" style="font-weight:600;color:var(--danger);">${brl(r.valor)}</span>
+        </div>`;
+      }).join('') : `<div class="empty" style="padding:40px 20px;">Nenhuma retirada registrada ainda.</div>`}
+    </div></div>
+  `;
+}
+
+function openRetiradaModal(existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit?'Editar retirada':'Nova retirada'}</h3>
+    <div class="field-row">
+      <div class="field"><label>Tipo</label><select id="rtTipo">
+        <option value="pro-labore" ${(!existing||existing.tipo==='pro-labore')?'selected':''}>Pró-labore</option>
+        <option value="retirada" ${existing?.tipo==='retirada'?'selected':''}>Retirada</option>
+        <option value="distribuicao" ${existing?.tipo==='distribuicao'?'selected':''}>Distribuição de lucros</option>
+        <option value="antecipacao" ${existing?.tipo==='antecipacao'?'selected':''}>Antecipação</option>
+      </select></div>
+      <div class="field"><label>Data</label><input type="date" id="rtData" value="${existing?existing.data:todayISO()}"></div>
+    </div>
+    ${state.socios.length ? `<div class="field"><label>Sócio (opcional)</label><select id="rtSocio">
+      <option value="">Nenhum</option>
+      ${state.socios.map(s=>`<option value="${s.id}" ${existing?.socioId===s.id?'selected':''}>${escapeHTML(s.nome)}</option>`).join('')}
+    </select></div>` : ''}
+    <div class="field-row">
+      <div class="field"><label>Valor (R$)</label><input type="text" inputmode="decimal" id="rtValor" value="${existing?existing.valor:''}" placeholder="0,00"></div>
+      <div class="field"><label>Conta</label><select id="rtConta">${state.contas.map(c=>`<option value="${c.id}" ${existing?.contaId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+    </div>
+    <div class="field"><label>Observação (opcional)</label><input type="text" id="rtObservacao" value="${existing?escapeHTML(existing.observacao||''):''}"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      ${isEdit ? `<button class="btn ghost" id="btnExcluirRetirada" style="color:var(--danger);">Excluir</button>` : ''}
+      <button class="btn" id="btnSalvarRetirada">${isEdit?'Salvar':'Registrar'}</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnExcluirRetirada')?.addEventListener('click', ()=>{
+    if(!confirm('Excluir essa retirada? Isso também remove o lançamento financeiro vinculado a ela.')) return;
+    if(existing.lancamentoId) excluirLancamentoVeiculo(existing.lancamentoId);
+    state.retiradas = state.retiradas.filter(r=>r.id!==existing.id);
+    persist(); closeModal(); render();
+    showToast('Retirada excluída');
+  });
+  document.getElementById('btnSalvarRetirada').addEventListener('click', ()=>{
+    const tipo = document.getElementById('rtTipo').value;
+    const data = document.getElementById('rtData').value;
+    const socioId = document.getElementById('rtSocio')?.value || null;
+    const valor = numBR(document.getElementById('rtValor').value);
+    const contaId = document.getElementById('rtConta').value;
+    const observacao = document.getElementById('rtObservacao').value.trim();
+    if(!data || isNaN(valor) || valor<=0){ showToast('Preencha a data e o valor'); return; }
+    const rotuloTipo = { 'pro-labore':'Pró-labore', 'retirada':'Retirada', 'distribuicao':'Distribuição de lucros', 'antecipacao':'Antecipação' };
+    const socio = state.socios.find(s=>s.id===socioId);
+    const descricao = `${rotuloTipo[tipo]}${socio?' — '+socio.nome:''}`;
+    if(isEdit){
+      Object.assign(existing, { tipo, data, socioId, valor, contaId, observacao });
+      if(existing.lancamentoId) atualizarLancamentoVeiculo(existing.lancamentoId, { descricao, categoria:'Pró-labore/Retiradas', valor, contaId, data, status:'pago', tipo:'saida' });
+    } else {
+      const lancamentoId = criarLancamentoVeiculo({ tipo:'saida', veiculoId:null, descricao, categoria:'Pró-labore/Retiradas', valor, contaId, data, status:'pago' });
+      const l = state.lancamentos.find(x=>x.id===lancamentoId);
+      if(l){ l.origem = 'manual'; l.proLabore = tipo==='pro-labore'; delete l.veiculoId; }
+      state.retiradas.push({ id:uid(), tipo, data, socioId, valor, contaId, observacao, lancamentoId });
+    }
+    persist(); closeModal(); render();
+    showToast(isEdit?'Retirada atualizada':'Retirada registrada');
+  });
+}
+/* ====================== FIM CENTRAL DE RETIRADAS ====================== */
+
+let centroCustoFiltro = { periodo:'mes', centro:'', categoria:'', fornecedor:'', tipoCusto:'' };
+let centroCustoSelecionado = null;
+
+function viewCentroCustoDetalhe(nomeCentro){
+  const hoje = todayISO();
+  const meses12 = Array.from({length:12},(_,i)=>{ const [ay,am]=hoje.slice(0,7).split('-').map(Number); const d=new Date(ay,am-1-(11-i),1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const lancs12m = dadosCentroCusto(`${meses12[0]}-01`, hoje, { centro: nomeCentro });
+  const total = lancs12m.reduce((s,l)=>s+l.valor,0);
+  const custoMedioMensal = total/12;
+  const orc = (state.orcamentoCentrosCusto||{})[nomeCentro];
+
+  const evolucaoPorMes = meses12.map(m=>{
+    const [ay,am] = m.split('-').map(Number);
+    const de = `${m}-01`, ate = `${m}-${String(new Date(ay,am,0).getDate()).padStart(2,'0')}`;
+    return dadosCentroCusto(de, ate, { centro: nomeCentro }).reduce((s,l)=>s+l.valor,0);
+  });
+  const labelsMeses = meses12.map(m=>competenciaLabel(m).split('/')[0].slice(0,3));
+
+  const mesAtualRef = hoje.slice(0,7);
+  const realizadoMesAtual = evolucaoPorMes[evolucaoPorMes.length-1];
+
+  const porCategoria = {};
+  lancs12m.forEach(l=>{ porCategoria[l.categoria] = (porCategoria[l.categoria]||0)+l.valor; });
+  const topCategorias = Object.entries(porCategoria).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor).slice(0,6);
+
+  const porFornecedor = {};
+  lancs12m.forEach(l=>{ if(l.fornecedor){ porFornecedor[l.fornecedor] = (porFornecedor[l.fornecedor]||0)+l.valor; } });
+  const topFornecedores = Object.entries(porFornecedor).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor).slice(0,6);
+
+  const maioresLancamentos = [...lancs12m].sort((a,b)=>b.valor-a.valor).slice(0,8);
+
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-action="voltar-centros-custo">← Centro de Custos</span>
+        <h1 style="margin-top:6px;">${escapeHTML(nomeCentro)}</h1>
+        <p>Análise individual — últimos 12 meses</p>
+      </div>
+    </div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:14px;">
+      ${metricCardHTML('Custo total (12m)', brl(total))}
+      ${metricCardHTML('Custo médio mensal', brl(custoMedioMensal))}
+      ${metricCardHTML('Realizado — ' + competenciaLabel(mesAtualRef), brl(realizadoMesAtual))}
+      ${orc>0 ? metricCardHTML('Orçamento mensal', brl(orc)) : ''}
+      ${orc>0 ? metricCardHTML('Diferença', brl(orc-realizadoMesAtual), (orc-realizadoMesAtual)<0?'var(--danger)':'var(--success)') : ''}
+    </div>
+
+    ${chartCardHTML('📈 Evolução mensal', 'Últimos 12 meses', svgLinhasMultiplas([{ nome:nomeCentro, valores:evolucaoPorMes, cor:'#1E49E2' }], labelsMeses))}
+
+    <div class="cards" style="grid-template-columns:1fr 1fr;margin-bottom:14px;">
+      <div class="panel"><div class="panel-head"><h2>Principais categorias</h2></div><div class="panel-body" style="padding:18px;">
+        ${topCategorias.length ? svgBarrasHorizontais(topCategorias, '#7B5CD6') : '<div class="empty">Sem dados.</div>'}
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>Principais fornecedores</h2></div><div class="panel-body" style="padding:18px;">
+        ${topFornecedores.length ? svgBarrasHorizontais(topFornecedores, '#20C997') : '<div class="empty">Sem dados.</div>'}
+      </div></div>
+    </div>
+
+    <div class="dash-section-label">Maiores lançamentos</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${maioresLancamentos.length ? maioresLancamentos.map(l=>`
+        <div class="ledger-row compact" style="grid-template-columns:80px 1fr 90px;"><span class="mono" style="font-size:11px;color:var(--text-soft);">${fmtDate(l.dataPagamento)}</span><span style="font-size:12px;">${escapeHTML(l.descricao)}${l.fornecedor?' — '+escapeHTML(l.fornecedor):''}</span><span class="mono" style="font-size:11.5px;font-weight:600;">${brl(l.valor)}</span></div>
+      `).join('') : `<div class="empty">Nenhum lançamento nos últimos 12 meses.</div>`}
+    </div></div>
+  `;
+}
+
+function viewCentrosCusto(){
+  if(centroCustoSelecionado) return viewCentroCustoDetalhe(centroCustoSelecionado);
+
+  const periodo = resolverPeriodoAtalho(centroCustoFiltro.periodo);
+  const lancs = dadosCentroCusto(periodo.de, periodo.ate, centroCustoFiltro);
+  const resumo = resumoCentroCusto(lancs);
+  const orc = state.orcamentoCentrosCusto||{};
+  const orcamentoTotal = Object.values(orc).reduce((s,v)=>s+(v>0?v:0),0);
+  const diferenca = orcamentoTotal - resumo.total;
+
+  const categoriasUnicas = [...new Set(lancs.map(l=>l.categoria))].sort();
+  const fornecedoresUnicos = [...new Set(lancs.map(l=>l.fornecedor).filter(Boolean))].sort();
+
+  const hoje = todayISO();
+  const meses = Array.from({length:6},(_,i)=>{ const [ay,am]=hoje.slice(0,7).split('-').map(Number); const d=new Date(ay,am-1-(5-i),1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const evolucaoPorMes = meses.map(m=>{
+    const [ay,am] = m.split('-').map(Number);
+    const de = `${m}-01`, ate = `${m}-${String(new Date(ay,am,0).getDate()).padStart(2,'0')}`;
+    return dadosCentroCusto(de, ate, centroCustoFiltro).reduce((s,l)=>s+l.valor,0);
+  });
+  const labelsMeses = meses.map(m=>competenciaLabel(m).split('/')[0].slice(0,3));
+
+  const porCategoria = {};
+  lancs.forEach(l=>{ porCategoria[l.categoria] = (porCategoria[l.categoria]||0)+l.valor; });
+  const rankingCategorias = Object.entries(porCategoria).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor).slice(0,8);
+  const porFornecedor = {};
+  lancs.forEach(l=>{ if(l.fornecedor){ porFornecedor[l.fornecedor] = (porFornecedor[l.fornecedor]||0)+l.valor; } });
+  const rankingFornecedores = Object.entries(porFornecedor).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor).slice(0,8);
+
+  const alertas = [];
+  resumo.rankingCentros.forEach(c=>{
+    const orcC = orc[c.nome];
+    if(orcC>0 && c.valor>=orcC) alertas.push({ texto:`"${c.nome}" já ultrapassou o orçamento (${brl(c.valor)} de ${brl(orcC)})`, critico:true });
+    else if(orcC>0 && c.valor>=orcC*0.9) alertas.push({ texto:`"${c.nome}" está próximo do limite orçamentário (${(c.valor/orcC*100).toFixed(0)}%)`, critico:false });
+  });
+  if(evolucaoPorMes.length>=3){
+    const ultimos3 = evolucaoPorMes.slice(-3);
+    if(ultimos3[0]<ultimos3[1] && ultimos3[1]<ultimos3[2]) alertas.push({ texto:'O custo total vem crescendo por 3 meses seguidos', critico:false });
+  }
+
+  return `
+    <div class="topbar">
+      <div><h1>Centro de Custos</h1><p>Onde o dinheiro está sendo gasto, e como isso evolui ao longo do tempo</p></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn ghost sm" id="btnExportarCentroCustoCSV">📊 Excel</button>
+        <button class="btn ghost sm" id="btnExportarCentroCustoPDF">📄 PDF</button>
+        <button class="btn ghost sm" id="btnImprimirCentroCusto">🖨️ Imprimir</button>
+        <button class="btn ghost" id="btnOrcamentoCentroCusto">🎯 Definir orçamentos</button>
+      </div>
+    </div>
+    ${periodFilterHTML('centroCustoPeriodo', centroCustoFiltro.periodo)}
+
+    <div class="panel" style="margin:14px 0;">
+      <div class="panel-head"><h2>Filtros</h2></div>
+      <div class="panel-body" style="padding:16px 20px;">
+        <div class="field-row">
+          <div class="field"><label>Centro de custo</label><select id="ccfCentro"><option value="">Todos</option>${(state.centrosCusto||[]).map(c=>`<option ${centroCustoFiltro.centro===c?'selected':''}>${escapeHTML(c)}</option>`).join('')}<option value="(sem centro definido)" ${centroCustoFiltro.centro==='(sem centro definido)'?'selected':''}>(sem centro definido)</option></select></div>
+          <div class="field"><label>Categoria</label><select id="ccfCategoria"><option value="">Todas</option>${categoriasUnicas.map(c=>`<option ${centroCustoFiltro.categoria===c?'selected':''}>${escapeHTML(c)}</option>`).join('')}</select></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Fornecedor</label><select id="ccfFornecedor"><option value="">Todos</option>${fornecedoresUnicos.map(f=>`<option ${centroCustoFiltro.fornecedor===f?'selected':''}>${escapeHTML(f)}</option>`).join('')}</select></div>
+          <div class="field"><label>Tipo de custo</label><select id="ccfTipoCusto"><option value="">Todos</option><option value="fixa" ${centroCustoFiltro.tipoCusto==='fixa'?'selected':''}>Fixo</option><option value="variavel" ${centroCustoFiltro.tipoCusto==='variavel'?'selected':''}>Variável</option></select></div>
+          <div class="field" style="align-self:flex-end;"><button class="btn" id="btnAplicarFiltroCentroCusto" style="width:100%;">Aplicar</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:16px;">
+      ${metricCardHTML('Custo total do período', brl(resumo.total))}
+      ${metricCardHTML('Custos fixos', brl(resumo.fixo))}
+      ${metricCardHTML('Custos variáveis', brl(resumo.variavel))}
+      ${metricCardHTML('Maior centro', resumo.maiorCentro?escapeHTML(resumo.maiorCentro.nome):'—')}
+      ${metricCardHTML('Orçamento', orcamentoTotal>0?brl(orcamentoTotal):'—')}
+      ${metricCardHTML('Realizado', brl(resumo.total))}
+      ${orcamentoTotal>0 ? metricCardHTML('Orçamento × Realizado', brl(diferenca), diferenca<0?'var(--danger)':'var(--success)') : ''}
+    </div>
+
+    ${alertas.length ? `
+    <div class="dash-section-label">🔔 Alertas</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+      ${alertas.map(a=>`<div class="ledger-row compact" style="grid-template-columns:auto 1fr;"><span>${a.critico?'🔴':'🟡'}</span><span style="font-size:12.5px;">${a.texto}</span></div>`).join('')}
+    </div></div>` : ''}
+
+    ${chartCardHTML('📈 Evolução dos custos', 'Últimos 6 meses', svgLinhasMultiplas([{ nome:'Custo total', valores:evolucaoPorMes, cor:'#C74A3D' }], labelsMeses))}
+    ${resumo.rankingCentros.length ? chartCardHTML('🏗️ Custos por centro', 'Clique num centro pra ver o detalhamento', svgBarrasHorizontais(resumo.rankingCentros, '#1E49E2', null, 'abrir-centro-custo')) : ''}
+    ${resumo.fixo>0 || resumo.variavel>0 ? chartCardHTML('⚖️ Fixo × Variável', '', svgBarrasComparativas([{ nome:'Fixo', valores:[resumo.fixo], cor:'#1E49E2' },{ nome:'Variável', valores:[resumo.variavel], cor:'#E0A62B' }], [''])) : ''}
+
+    ${Object.keys(orc).length ? `
+    <div class="dash-section-label">🎯 Orçado × Realizado por centro</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+      ${resumo.rankingCentros.filter(c=>orc[c.nome]>0).map(c=>{
+        const orcC = orc[c.nome];
+        const pct = Math.round(c.valor/orcC*100);
+        return `<div class="ledger-row compact" style="grid-template-columns:1fr auto auto;"><span style="font-size:12.5px;">${escapeHTML(c.nome)}</span><span class="mono" style="font-size:11.5px;">${brl(c.valor)} de ${brl(orcC)}</span><span style="font-size:11px;font-weight:600;color:${pct>=100?'var(--danger)':pct>=90?'var(--warn)':'var(--success)'};">${pct}%</span></div>`;
+      }).join('') || `<div class="empty">Nenhum centro com orçamento definido tem gasto no período.</div>`}
+    </div></div>` : ''}
+
+    <div class="dash-section-label">💸 Onde estamos gastando mais?</div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;margin-bottom:14px;">
+      <div class="panel"><div class="panel-head"><h2>Por categoria</h2></div><div class="panel-body" style="padding:18px;">
+        ${rankingCategorias.length ? svgBarrasHorizontais(rankingCategorias, '#7B5CD6') : '<div class="empty">Sem dados no período/filtro atual.</div>'}
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>Por fornecedor</h2></div><div class="panel-body" style="padding:18px;">
+        ${rankingFornecedores.length ? svgBarrasHorizontais(rankingFornecedores, '#20C997') : '<div class="empty">Sem dados no período/filtro atual.</div>'}
+      </div></div>
+    </div>
+
+    <div class="dash-section-label">📋 Detalhamento</div>
+    <div class="panel"><div class="panel-body" style="padding:0;overflow-x:auto;">
+      <div class="ledger-row head" style="grid-template-columns:80px 1fr 120px 120px 120px 90px;min-width:640px;"><span>Data</span><span>Descrição</span><span>Centro</span><span>Categoria</span><span>Fornecedor</span><span>Valor</span></div>
+      <div style="min-width:640px;">
+        ${[...lancs].sort((a,b)=>b.dataPagamento.localeCompare(a.dataPagamento)).slice(0,60).map(l=>`
+          <div class="ledger-row compact" data-action="ver-lancamento-centro-custo" data-id="${l.id}" style="cursor:pointer;grid-template-columns:80px 1fr 120px 120px 120px 90px;">
+            <span class="mono" style="font-size:11px;color:var(--text-soft);">${fmtDate(l.dataPagamento)}</span>
+            <span style="font-size:11.5px;">${escapeHTML(l.descricao)}</span>
+            <span style="font-size:11px;">${escapeHTML(l.centroCusto||'—')}</span>
+            <span style="font-size:11px;">${escapeHTML(l.categoria)}</span>
+            <span style="font-size:11px;">${escapeHTML(l.fornecedor||'—')}</span>
+            <span class="mono" style="font-size:11.5px;font-weight:600;">${brl(l.valor)}</span>
+          </div>
+        `).join('') || `<div class="empty">Nenhum lançamento no período/filtro atual.</div>`}
+      </div>
+    </div></div>
+    ${lancs.length>60 ? `<div class="note" style="margin-top:0;">Mostrando os 60 mais recentes de ${lancs.length} lançamentos — use os filtros pra refinar.</div>` : ''}
+  `;
+}
+
+function gerarCSVCentroCusto(){
+  const periodo = resolverPeriodoAtalho(centroCustoFiltro.periodo);
+  const lancs = dadosCentroCusto(periodo.de, periodo.ate, centroCustoFiltro);
+  const linhas = [['Data','Descrição','Centro de Custo','Categoria','Fornecedor','Valor']];
+  [...lancs].sort((a,b)=>a.dataPagamento.localeCompare(b.dataPagamento)).forEach(l=>{
+    linhas.push([ fmtDate(l.dataPagamento), l.descricao, l.centroCusto||'', l.categoria, l.fornecedor||'', (l.valor||0).toFixed(2).replace('.',',') ]);
+  });
+  const csv = linhas.map(l=>l.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(';')).join('\n');
+  const blob = new Blob(['\ufeff'+csv], { type:'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `centro-custos-${todayISO()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+function gerarPDFCentroCusto(){
+  if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
+  const { jsPDF } = window.jspdf;
+  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+  const M = 15, PW = 210, W = PW - M*2;
+  const INK=[11,15,20], SOFT=[91,100,114], LINEC=[227,231,238];
+  const periodo = resolverPeriodoAtalho(centroCustoFiltro.periodo);
+  const lancs = dadosCentroCusto(periodo.de, periodo.ate, centroCustoFiltro);
+  const resumo = resumoCentroCusto(lancs);
+  let y = 20;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
+  docPdf.text('Relatório de Centro de Custos', M, y);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
+  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
+  y += 6;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 8;
+
+  docPdf.setFontSize(9.5); docPdf.setTextColor(...INK);
+  [ `Custo total: ${brl(resumo.total)}`, `Custos fixos: ${brl(resumo.fixo)}`, `Custos variáveis: ${brl(resumo.variavel)}`, `Maior centro: ${resumo.maiorCentro?resumo.maiorCentro.nome:'—'}` ].forEach(l=>{ docPdf.text(l, M, y); y += 5.5; });
+  y += 4;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(9);
+  const cols = [ ['Data',18], ['Descrição',52], ['Centro',34], ['Categoria',34], ['Valor',24] ];
+  let x = M;
+  cols.forEach(([label,w])=>{ docPdf.text(label, x, y); x += w; });
+  y += 4;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 5;
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8);
+  [...lancs].sort((a,b)=>a.dataPagamento.localeCompare(b.dataPagamento)).forEach(l=>{
+    if(y>270){ docPdf.addPage(); y = 20; }
+    x = M;
+    const valores = [ fmtDate(l.dataPagamento), l.descricao.slice(0,32), (l.centroCusto||'—').slice(0,22), l.categoria.slice(0,22), brl(l.valor) ];
+    valores.forEach((v,i)=>{ docPdf.text(String(v), x, y); x += cols[i][1]; });
+    y += 5;
+  });
+  docPdf.save(`centro-custos-${todayISO()}.pdf`);
+}
+function imprimirRelatorioCentroCusto(){
+  const periodo = resolverPeriodoAtalho(centroCustoFiltro.periodo);
+  const lancs = dadosCentroCusto(periodo.de, periodo.ate, centroCustoFiltro);
+  const resumo = resumoCentroCusto(lancs);
+  const linhasHTML = [...lancs].sort((a,b)=>a.dataPagamento.localeCompare(b.dataPagamento)).map(l=>`
+    <tr><td>${fmtDate(l.dataPagamento)}</td><td>${escapeHTML(l.descricao)}</td><td>${escapeHTML(l.centroCusto||'—')}</td>
+    <td>${escapeHTML(l.categoria)}</td><td>${escapeHTML(l.fornecedor||'—')}</td><td>${brl(l.valor)}</td></tr>`).join('');
+  const w = window.open('', '_blank');
+  w.document.write(`<html><head><title>Relatório de Centro de Custos</title><style>
+    body{font-family:Arial,sans-serif;padding:24px;color:#0B0F14;}
+    h1{font-size:18px;margin-bottom:4px;} p{color:#5B6472;font-size:12px;margin-top:0;}
+    .resumo{display:flex;gap:24px;margin:16px 0;font-size:13px;}
+    table{width:100%;border-collapse:collapse;font-size:11px;margin-top:12px;}
+    th,td{border-bottom:1px solid #E3E7EE;padding:6px 8px;text-align:left;}
+    th{background:#F5F6F8;}
+  </style></head><body>
+    <h1>Relatório de Centro de Custos</h1><p>Emitido em ${fmtDate(todayISO())}</p>
+    <div class="resumo">
+      <span><strong>Custo total:</strong> ${brl(resumo.total)}</span>
+      <span><strong>Fixo:</strong> ${brl(resumo.fixo)}</span>
+      <span><strong>Variável:</strong> ${brl(resumo.variavel)}</span>
+    </div>
+    <table><thead><tr><th>Data</th><th>Descrição</th><th>Centro</th><th>Categoria</th><th>Fornecedor</th><th>Valor</th></tr></thead>
+    <tbody>${linhasHTML}</tbody></table>
+  </body></html>`);
+  w.document.close();
+  w.print();
+}
+function openOrcamentoCentroCustoModal(){
+  const modal = document.getElementById('modalContent');
+  const orc = state.orcamentoCentrosCusto||{};
+  const centros = state.centrosCusto||[];
+  if(!centros.length){ showToast('Cadastre um centro de custo primeiro (em algum lançamento)'); return; }
+  modal.innerHTML = `
+    <h3>Orçamento por centro de custo</h3>
+    <div class="note" style="margin-top:0;">Valor mensal planejado pra cada centro. Deixe em branco os que não quer acompanhar.</div>
+    ${centros.map(c=>`<div class="field"><label>${escapeHTML(c)}</label><input type="text" inputmode="decimal" class="occ-input" data-centro="${escapeHTML(c)}" value="${orc[c]||''}" placeholder="0,00"></div>`).join('')}
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarOrcamentoCentroCusto">Salvar</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarOrcamentoCentroCusto').addEventListener('click', ()=>{
+    const novo = {};
+    document.querySelectorAll('.occ-input').forEach(inp=>{
+      const v = numBR(inp.value);
+      if(!isNaN(v) && v>0) novo[inp.dataset.centro] = v;
+    });
+    state.orcamentoCentrosCusto = novo;
+    persist(); closeModal(); render();
+    showToast('Orçamentos salvos');
+  });
+}
+
+/* ====================== CENTRAL DE PENDÊNCIAS ====================== */
+// Não cria NENHUM dado novo — só reúne sinais que já existem espalhados pelo sistema (contas
+// vencidas, aprovações, faturas pra revisar, investimentos desatualizados, seguros vencendo, etc.)
+// numa lista só, priorizada. Cada item leva de volta pro módulo de origem.
+function levantarPendencias(){
+  const hoje = todayISO();
+  const pendencias = [];
+
+  // Contas a pagar vencidas
+  const pagarVencidas = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento<hoje);
+  pagarVencidas.forEach(l=>pendencias.push({ chave:`pagar-${l.id}`, prioridade:'critica', texto:`Conta vencida: "${l.descricao}" — ${brl(valorEmAberto(l))}, venceu ${fmtDate(l.dataVencimento)}`, view:'pagar', icone:'💸', acaoRapida:{ tipo:'quitar', id:l.id } }));
+
+  // Contas a receber atrasadas
+  const receberAtrasadas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento<hoje);
+  if(receberAtrasadas.length) pendencias.push({ chave:'receber-atrasadas', prioridade:'critica', texto:`${receberAtrasadas.length} recebimento(s) atrasado(s), total ${brl(receberAtrasadas.reduce((s,l)=>s+valorEmAberto(l),0))}`, view:'receber', icone:'📥' });
+
+  // Aprovações VK Industrial
+  if((state.vkAprovacoes||[]).length) pendencias.push({ chave:'vk-aprovacoes', prioridade:'alta', texto:`${state.vkAprovacoes.length} item(ns) aguardando aprovação da integração VK Industrial`, view:'vk-aprovacoes', icone:'📋' });
+
+  // Faturas de cartão importadas aguardando revisão
+  if((state.faturasPendentes||[]).length) pendencias.push({ chave:'faturas-pendentes', prioridade:'alta', texto:`${state.faturasPendentes.length} fatura(s) de cartão aguardando revisão`, view:'cartoes', icone:'💳' });
+
+  // Compras pendentes de cadastro em Ativos Patrimoniais
+  if((state.comprasProcessosPendentes||[]).length) pendencias.push({ chave:'compras-processos-pendentes', prioridade:'media', texto:`${state.comprasProcessosPendentes.length} compra(s) pendente(s) de cadastro em Ativos Patrimoniais`, view:'ativos', icone:'📦' });
+
+  // Orçamentos de processo aguardando decisão
+  const orcPendentes = (state.orcamentosProcessos||[]).filter(o=>o.status==='pendente');
+  if(orcPendentes.length) pendencias.push({ chave:'orcamentos-pendentes', prioridade:'media', texto:`${orcPendentes.length} orçamento(s) aguardando decisão (Orçamentos e Compras)`, view:'orcamentos-processos', icone:'📋' });
+
+  // Investimentos com posição pendente de atualização
+  const investPendentes = itensAtualizaveisInvestimento().map(it=>({ ...it, status: statusAtualizacaoItem(it.dataUltimaAtualizacao, it.periodicidade) })).filter(it=>it.status==='pendente');
+  if(investPendentes.length) pendencias.push({ chave:'investimentos-pendentes', prioridade:'media', texto:`${investPendentes.length} posição(ões) de investimento com atualização pendente`, view:'investimentos', icone:'📈' });
+
+  // Seguro de ativo patrimonial vencido/vencendo
+  state.ativosPatrimoniais.filter(a=>!a.baixa && a.seguroVigenciaFim).forEach(a=>{
+    const dias = Math.floor((new Date(a.seguroVigenciaFim)-new Date(hoje))/86400000);
+    if(dias<0) pendencias.push({ chave:`seguro-${a.id}`, prioridade:'alta', texto:`Seguro de "${a.nome}" venceu há ${Math.abs(dias)} dia(s)`, view:'ativos', icone:'🛡️' });
+    else if(dias<=30) pendencias.push({ chave:`seguro-${a.id}`, prioridade:'media', texto:`Seguro de "${a.nome}" vence em ${dias} dia(s)`, view:'ativos', icone:'🛡️' });
+  });
+
+  // Documentos de veículos (IPVA, licenciamento, seguro, etc.) vencidos/vencendo
+  (state.veiculoDocumentos||[]).filter(d=>d.vencimento).forEach(d=>{
+    const veiculo = state.veiculos.find(v=>v.id===d.veiculoId);
+    if(!veiculo) return;
+    const dias = Math.floor((new Date(d.vencimento)-new Date(hoje))/86400000);
+    const nomeDoc = `${d.tipo}${d.descricao?' — '+d.descricao:''} de "${veiculo.nome}"`;
+    if(dias<0) pendencias.push({ chave:`doc-veiculo-${d.id}`, prioridade:'alta', texto:`${nomeDoc} venceu há ${Math.abs(dias)} dia(s)`, view:'veiculos', icone:'📄' });
+    else if(dias<=30) pendencias.push({ chave:`doc-veiculo-${d.id}`, prioridade:'media', texto:`${nomeDoc} vence em ${dias} dia(s)`, view:'veiculos', icone:'📄' });
+  });
+
+  // Projetos de CAPEX atrasados
+  state.capexProjetos.filter(p=>p.dataPrevista && p.dataPrevista<hoje && !['Concluído','Cancelado'].includes(p.status)).forEach(p=>{
+    pendencias.push({ chave:`capex-${p.id}`, prioridade:'media', texto:`Projeto de CAPEX "${p.nome}" está com execução atrasada`, view:'capex', icone:'🏗️' });
+  });
+
+  // Faturas de cartão vencidas e não pagas
+  state.cartoes.forEach(c=>{
+    const comp = competenciaAtual(c);
+    if(faturaStatus(c.id, comp)==='fechada'){
+      const venc = dataVencimentoFatura(c, comp);
+      if(venc<hoje) pendencias.push({ chave:`fatura-cartao-${c.id}-${comp}`, prioridade:'critica', texto:`Fatura do cartão "${c.nome}" venceu e ainda não foi paga`, view:'cartoes', icone:'💳' });
+    }
+  });
+
+  const dispensadas = new Set(state.pendenciasDispensadas||[]);
+  const ordemPrioridade = { critica:0, alta:1, media:2, baixa:3 };
+  return pendencias.filter(p=>!dispensadas.has(p.chave)).sort((a,b)=>ordemPrioridade[a.prioridade]-ordemPrioridade[b.prioridade]);
+}
+
+function viewCentralPendencias(){
+  const pendencias = levantarPendencias();
+  const rotuloPrioridade = { critica:'🔴 Crítica', alta:'🟠 Alta', media:'🟡 Média', baixa:'⚪ Baixa' };
+  const grupos = { critica:[], alta:[], media:[], baixa:[] };
+  pendencias.forEach(p=>grupos[p.prioridade].push(p));
+
+  return `
+    <div class="topbar">
+      <div><h1>Central de Pendências</h1><p>Tudo que exige alguma ação, reunido de todos os módulos numa lista só</p></div>
+    </div>
+    <div class="cards" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px;">
+      <div class="card"><div class="label">Crítica</div><div class="value mono" style="color:var(--danger);">${grupos.critica.length}</div></div>
+      <div class="card"><div class="label">Alta</div><div class="value mono" style="color:var(--warn);">${grupos.alta.length}</div></div>
+      <div class="card"><div class="label">Média</div><div class="value mono">${grupos.media.length}</div></div>
+      <div class="card"><div class="label">Baixa</div><div class="value mono" style="color:var(--text-soft);">${grupos.baixa.length}</div></div>
+    </div>
+    ${!pendencias.length ? `<div class="panel"><div class="empty" style="padding:50px 20px;">Nenhuma pendência no momento. 🎉</div></div>` : ['critica','alta','media','baixa'].filter(p=>grupos[p].length).map(p=>`
+      <div class="dash-section-label">${rotuloPrioridade[p]}</div>
+      <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+        ${grupos[p].map(item=>`
+          <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto auto;">
+            <span data-goto="${item.view}" style="cursor:pointer;">${item.icone}</span>
+            <span data-goto="${item.view}" style="cursor:pointer;font-size:12.5px;">${escapeHTML(item.texto)}</span>
+            ${item.acaoRapida?.tipo==='quitar' ? `<button class="btn ghost sm" data-action="pendencia-quitar-rapido" data-id="${item.acaoRapida.id}">💸 Pagar</button>` : ''}
+            <button class="icon-btn" data-action="dispensar-pendencia" data-chave="${escapeHTML(item.chave)}" title="Já resolvi / dispensar">✕</button>
+          </div>
+        `).join('')}
+      </div></div>
+    `).join('')}
+  `;
+}
+/* ====================== FIM CENTRAL DE PENDÊNCIAS ====================== */
+
 function viewMetasReserva(){
   const lista = [...(state.metasReserva||[])];
   const hoje = todayISO();
