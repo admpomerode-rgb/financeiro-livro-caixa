@@ -19689,6 +19689,18 @@ function viewProcessosConfig(){
   const cfg = state.processosConfig;
   const totalImportadas = state.ativosPatrimoniais.reduce((s,a)=>s+(a.ocorrencias||[]).filter(o=>o.origem==='processo').length,0);
   const orcamentosPendentes = (state.orcamentosProcessos||[]).filter(o=>o.status==='pendente');
+
+  // ====== NOVO: cards + saúde da sincronização — mesmo padrão da integração VK Industrial.
+  // Só leitura de dados já existentes; nada abaixo deste bloco foi alterado. ======
+  const hoje = todayISO();
+  let statusSync = 'nunca', diasSemSync = null;
+  if(cfg.ultimaSincronizacao){
+    diasSemSync = Math.floor((new Date(hoje)-new Date(cfg.ultimaSincronizacao))/86400000);
+    statusSync = diasSemSync<=3 ? 'ok' : diasSemSync<=10 ? 'atencao' : 'atrasado';
+  }
+  const iconeStatus = { ok:'🟢', atencao:'🟡', atrasado:'🔴', nunca:'⚪' };
+  const rotuloStatus = { ok:'Em dia', atencao:'Atenção', atrasado:'Atrasado', nunca:'Nunca sincronizado' };
+
   return `
     <div class="topbar">
       <div>
@@ -19697,6 +19709,15 @@ function viewProcessosConfig(){
         <p>Decisões finais de processos vinculados a um ativo caem automaticamente como ocorrência na ficha dele; orçamentos pedidos num processo vêm pra cá pra aprovação</p>
       </div>
     </div>
+
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:14px;">
+      ${metricCardHTML('Ocorrências importadas', totalImportadas)}
+      ${metricCardHTML('Orçamentos pendentes', orcamentosPendentes.length, orcamentosPendentes.length>0?'var(--warn)':undefined)}
+      ${metricCardHTML('Status da sincronização', `${iconeStatus[statusSync]} ${rotuloStatus[statusSync]}`)}
+    </div>
+    ${statusSync==='atrasado' ? `<div class="note" style="border-color:var(--danger);color:var(--danger);margin-bottom:14px;">⚠️ Sem sincronizar há ${diasSemSync} dias — vale rodar a sincronização abaixo.</div>` : ''}
+    <!-- ====== FIM DA PARTE NOVA — tudo abaixo é o painel original, intocado ====== -->
+
     <div class="panel">
       <div class="panel-head"><h2>Configuração</h2></div>
       <div class="panel-body" style="padding:16px 20px;">
@@ -19727,9 +19748,11 @@ function viewProcessosConfig(){
         <button class="btn lg" data-goto="orcamentos-processos">📋 Ver Orçamentos e Compras</button>
       </div>
     </div>
-    <div class="panel">
-      <div class="panel-head"><h2>O que o Livro de Processos precisa expor</h2></div>
-      <div class="panel-body" style="padding:16px 20px;font-size:12.5px;color:var(--text-soft);line-height:1.7;">
+    <details class="panel" style="padding:0;">
+      <summary style="padding:16px 20px;cursor:pointer;font-weight:600;font-size:13.5px;list-style:none;display:flex;justify-content:space-between;align-items:center;">
+        <span>📄 O que o Livro de Processos precisa expor</span><span style="color:var(--text-soft);font-size:11px;">documentação técnica ›</span>
+      </summary>
+      <div class="panel-body" style="padding:0 20px 16px;font-size:12.5px;color:var(--text-soft);line-height:1.7;">
         Uma coleção <strong>processos</strong> no Firestore, onde cada documento representa um processo e pode ter:
         <div class="note" style="margin:10px 0;font-family:'IBM Plex Mono',monospace;font-size:11.5px;white-space:pre-wrap;">{
   titulo: "Balança com defeito na bateria",
@@ -19743,10 +19766,12 @@ function viewProcessosConfig(){
 }</div>
         Quando <code>status</code> for <strong>decidido</strong>, <strong>finalizado</strong> ou <strong>concluido</strong> e tiver <code>decisaoFinal</code> preenchido, essa decisão vira automaticamente uma ocorrência na ficha do ativo correspondente. Decisões <strong>intermediárias</strong> vinculadas a um ativo (com <code>patrimonioAcao</code> preenchido) também são aceitas mesmo sem esse status, já que o processo continua tramitando — nesse caso, <code>patrimonioVinculoSeq</code> evita duplicar e permite que o mesmo processo gere várias ocorrências ao longo do tempo. Se <code>patrimonioAcao</code> vier como <strong>"observacao"</strong>, a ficha ganha um aviso "Em observação" (só visual, sem afetar valores). Se vier como <strong>"sugerir_baixa"</strong>, aparece um aviso de sugestão de baixa pendente de confirmação — nada é baixado automaticamente, é preciso confirmar manualmente na ficha do ativo (isso preenche o formulário de baixa já com o motivo, mas quem confirma valores e datas é sempre uma pessoa).
       </div>
-    </div>
-    <div class="panel">
-      <div class="panel-head"><h2>Orçamentos — esquema já implementado dos dois lados</h2></div>
-      <div class="panel-body" style="padding:16px 20px;font-size:12.5px;color:var(--text-soft);line-height:1.7;">
+    </details>
+    <details class="panel" style="padding:0;">
+      <summary style="padding:16px 20px;cursor:pointer;font-weight:600;font-size:13.5px;list-style:none;display:flex;justify-content:space-between;align-items:center;">
+        <span>💰 Orçamentos — esquema já implementado dos dois lados</span><span style="color:var(--text-soft);font-size:11px;">documentação técnica ›</span>
+      </summary>
+      <div class="panel-body" style="padding:0 20px 16px;font-size:12.5px;color:var(--text-soft);line-height:1.7;">
         Uma coleção <strong>orcamentos</strong> no mesmo Firestore, um documento por pedido de orçamento (ou por pesquisas de preço enviadas pra segunda aprovação) feito dentro de um processo:
         <div class="note" style="margin:10px 0;font-family:'IBM Plex Mono',monospace;font-size:11.5px;white-space:pre-wrap;">{
   processoId: "&lt;id do processo&gt;",
@@ -19758,7 +19783,7 @@ function viewProcessosConfig(){
 }</div>
         A sincronização acima detecta orçamentos novos, gera um <strong>número sequencial</strong> pra cada um e grava de volta no próprio documento (campo <code>numero</code>). O orçamento entra na fila de "Orçamentos e Compras" pra aprovar ou recusar — a decisão (<code>status: "aprovado"</code> ou <code>"recusado"</code>, mais <code>decididoEm</code>) é gravada de volta automaticamente no documento, pra aparecer no processo lá. As pesquisas de preço (2ª etapa, depois do pedido inicial aprovado) usam exatamente essa mesma coleção e o mesmo fluxo de aprovação, reaproveitando o mesmo número do pedido original — não precisam de nada especial.
       </div>
-    </div>
+    </details>
     <div class="panel">
       <div class="panel-head"><h2>Compra registrada → Conta a Pagar e Ativos Patrimoniais</h2></div>
       <div class="panel-body" style="padding:16px 20px;font-size:12.5px;color:var(--text-soft);line-height:1.7;">
