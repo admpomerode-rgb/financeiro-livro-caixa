@@ -7346,7 +7346,7 @@ function renderExtratoConteudo(contaId){
   `).join('')).join('');
 
   return `
-    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:14px;">
+    <div class="cards cards-compact" style="grid-template-columns:repeat(auto-fit,minmax(100px,1fr));margin-bottom:14px;">
       <div class="card saldo"><div class="label">Saldo atual</div><div class="value mono">${brl(saldoAtual)}</div></div>
       <div class="card"><div class="label">Entradas</div><div class="value mono" style="color:var(--success);">${brl(entradasPeriodo)}</div></div>
       <div class="card"><div class="label">Saídas</div><div class="value mono" style="color:var(--danger);">${brl(saidasPeriodo)}</div></div>
@@ -7367,41 +7367,46 @@ function renderExtratoConteudo(contaId){
       `).join('')}
     </div>` : ''}
 
-    ${lista.length ? `
-    <div class="panel" style="margin-bottom:14px;">
-      <div class="panel-head"><h2>Entradas × Saídas no período</h2></div>
-      <div class="panel-body"><canvas id="chartExtratoDiario" height="160"></canvas></div>
-    </div>` : ''}
-
-    ${(porConciliacao.pendente.qtd+porConciliacao.divergencia.qtd+porConciliacao.conciliado.qtd)>0 ? `
-    <div class="panel" style="margin-bottom:14px;">
-      <div class="panel-head"><h2>Situação da conciliação</h2></div>
-      <div class="panel-body" style="display:flex;gap:20px;flex-wrap:wrap;">
-        <span style="font-size:13px;">✓ Conciliado: <strong>${porConciliacao.conciliado.qtd}</strong></span>
-        <span style="font-size:13px;">○ Pendente: <strong>${porConciliacao.pendente.qtd}</strong></span>
-        <span style="font-size:13px;">⚠ Divergência: <strong>${porConciliacao.divergencia.qtd}</strong></span>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));gap:14px;margin-bottom:14px;align-items:start;">
+      <div>
+        ${lista.length ? `
+        <div class="panel" style="margin:0;">
+          <div class="panel-head"><h2>Entradas × Saídas no período</h2></div>
+          <div class="panel-body"><canvas id="chartExtratoDiario" height="160"></canvas></div>
+        </div>` : ''}
       </div>
-    </div>` : ''}
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        ${(porConciliacao.pendente.qtd+porConciliacao.divergencia.qtd+porConciliacao.conciliado.qtd)>0 ? `
+        <div class="panel" style="margin:0;">
+          <div class="panel-head"><h2>Conciliação</h2></div>
+          <div class="panel-body" style="display:flex;flex-direction:column;gap:6px;padding:14px 16px;">
+            <span style="font-size:12.5px;">✓ Conciliado: <strong>${porConciliacao.conciliado.qtd}</strong></span>
+            <span style="font-size:12.5px;">○ Pendente: <strong>${porConciliacao.pendente.qtd}</strong></span>
+            <span style="font-size:12.5px;">⚠ Divergência: <strong>${porConciliacao.divergencia.qtd}</strong></span>
+          </div>
+        </div>` : ''}
 
-    ${lista.length ? `
-    <div class="panel" style="margin-bottom:14px;">
-      <div class="panel-head"><h2>Resumo do período</h2></div>
-      <div class="panel-body" style="font-size:12.5px;line-height:2;">
-        <div>Quantidade de movimentações: <strong>${lista.length}</strong></div>
-        ${maiorEntrada ? `<div>Maior entrada: <strong style="color:var(--success);">${brl(maiorEntrada.valor)}</strong> — ${escapeHTML(maiorEntrada.descricao)}</div>` : ''}
-        ${maiorSaida ? `<div>Maior saída: <strong style="color:var(--danger);">${brl(maiorSaida.valor)}</strong> — ${escapeHTML(maiorSaida.descricao)}</div>` : ''}
-        ${varSaidasPct!==null ? `<div>${varSaidasPct>=0?'Saídas aumentaram':'Saídas caíram'} <strong>${Math.abs(varSaidasPct).toFixed(0)}%</strong> em relação a ${competenciaLabel(mesAnteriorRef)}.</div>` : ''}
-        ${varEntradasPct!==null ? `<div>${varEntradasPct>=0?'Entradas aumentaram':'Entradas caíram'} <strong>${Math.abs(varEntradasPct).toFixed(0)}%</strong> em relação a ${competenciaLabel(mesAnteriorRef)}.</div>` : ''}
-      </div>
-    </div>` : ''}
+        ${lista.length ? `
+        <div class="panel" style="margin:0;">
+          <div class="panel-head"><h2>Resumo do período</h2></div>
+          <div class="panel-body" style="font-size:12px;line-height:1.9;padding:14px 16px;">
+            <div>Movimentações: <strong>${lista.length}</strong></div>
+            ${maiorEntrada ? `<div>Maior entrada: <strong style="color:var(--success);">${brl(maiorEntrada.valor)}</strong></div>` : ''}
+            ${maiorSaida ? `<div>Maior saída: <strong style="color:var(--danger);">${brl(maiorSaida.valor)}</strong></div>` : ''}
+            ${varSaidasPct!==null ? `<div>${varSaidasPct>=0?'Saídas +':'Saídas '}<strong>${varSaidasPct.toFixed(0)}%</strong> vs ${competenciaLabel(mesAnteriorRef)}</div>` : ''}
+            ${varEntradasPct!==null ? `<div>${varEntradasPct>=0?'Entradas +':'Entradas '}<strong>${varEntradasPct.toFixed(0)}%</strong> vs ${competenciaLabel(mesAnteriorRef)}</div>` : ''}
+          </div>
+        </div>` : ''}
 
-    ${analisePeriodo.length ? `
-    <div class="panel" style="margin-bottom:14px;">
-      <div class="panel-head"><h2>🧠 Análise do período</h2></div>
-      <div class="panel-body" style="padding:0;">
-        ${analisePeriodo.map(a=>`<div class="ledger-row compact" style="grid-template-columns:1fr;">${a}</div>`).join('')}
+        ${analisePeriodo.length ? `
+        <div class="panel" style="margin:0;">
+          <div class="panel-head"><h2>🧠 Análise</h2></div>
+          <div class="panel-body" style="padding:0;">
+            ${analisePeriodo.map(a=>`<div class="ledger-row compact" style="grid-template-columns:1fr;font-size:12px;">${a}</div>`).join('')}
+          </div>
+        </div>` : ''}
       </div>
-    </div>` : ''}
+    </div>
 
     ${ehMobile ? (grupos.length ? gruposHTML : `<div class="panel"><div class="empty">${extratoBuscaTermo ? 'Nenhuma movimentação encontrada para essa busca neste mês.' : 'Nenhuma movimentação neste mês.'}</div></div>`) : (grupos.length ? `
     <div class="panel">
