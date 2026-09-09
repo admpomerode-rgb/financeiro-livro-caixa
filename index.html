@@ -27,6 +27,11 @@
     --danger:#D5473F;
     --warn:#D98F2B;
     --text-soft:#5B6472;
+    --bg-sutil-verde:#E6F6EE;
+    --bg-sutil-laranja:#FDF3E5;
+    --bg-sutil-vermelho:#FDEEED;
+    --bg-sutil-azul:#F0F4FF;
+    --bg-sutil-cinza:#E8ECF3;
     font-family:'Inter',sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
@@ -198,7 +203,7 @@
   }
   .btn:hover{background:var(--blue-deep);}
   .btn.ghost{background:transparent;color:var(--blue-accent);border:1px solid var(--line);}
-  .btn.ghost:hover{border-color:var(--blue-accent);background:#F0F4FF;}
+  .btn.ghost:hover{border-color:var(--blue-accent);background:var(--bg-sutil-azul);}
   .btn.sm{padding:6px 10px;font-size:12px;}
   .btn.lg{padding:14px 26px;font-size:14px;}
   .vk-status-panel{background:linear-gradient(135deg, var(--ink) 0%, #2A3548 100%);}
@@ -235,7 +240,7 @@
   .meta-progresso-fill{height:100%;background:var(--success);border-radius:4px;}
   .meta-progresso-label{font-size:11px;color:var(--text-soft);margin-top:4px;display:block;}
   .btn.danger-o{background:transparent;border:1px solid var(--line);color:var(--danger);}
-  .btn.danger-o:hover{background:#FDEEED;border-color:var(--danger);}
+  .btn.danger-o:hover{background:var(--bg-sutil-vermelho);border-color:var(--danger);}
   .btn:disabled{opacity:.45;cursor:not-allowed;}
   .btn:disabled:hover{background:var(--blue-accent);}
   .btn.ghost:disabled:hover{background:transparent;border-color:var(--line);}
@@ -268,12 +273,12 @@
   .status-chip{
     font-size:11px;padding:3px 9px;border-radius:20px;font-weight:500;display:inline-block;width:fit-content;
   }
-  .status-chip.pago{background:#E6F6EE;color:var(--success);}
-  .status-chip.recebido{background:#E6F6EE;color:var(--success);}
-  .status-chip.pendente{background:#FDF3E5;color:var(--warn);}
-  .status-chip.atrasado{background:#FDEEED;color:var(--danger);font-weight:700;}
-  .status-chip.vence-hoje{background:#FFF4D6;color:#8A6100;font-weight:700;}
-  .status-chip.cancelado{background:#E8ECF3;color:var(--text-soft);text-decoration:line-through;}
+  .status-chip.pago{background:var(--bg-sutil-verde);color:var(--success);}
+  .status-chip.recebido{background:var(--bg-sutil-verde);color:var(--success);}
+  .status-chip.pendente{background:var(--bg-sutil-laranja);color:var(--warn);}
+  .status-chip.atrasado{background:var(--bg-sutil-vermelho);color:var(--danger);font-weight:700;}
+  .status-chip.vence-hoje{background:var(--bg-sutil-laranja);color:#8A6100;font-weight:700;}
+  .status-chip.cancelado{background:var(--bg-sutil-cinza);color:var(--text-soft);text-decoration:line-through;}
   .ledger-row.linha-atrasada{border-left:3px solid var(--danger);}
   .ledger-row.linha-vence-hoje{border-left:3px solid var(--warn);}
   .row-actions{display:flex;gap:6px;justify-content:flex-end;}
@@ -282,7 +287,7 @@
     color:var(--text-soft);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;
   }
   .icon-btn:hover{border-color:var(--blue-accent);color:var(--blue-accent);}
-  .icon-btn-danger{border-color:#F3C6C2;color:var(--danger);background:#FDF3F2;}
+  .icon-btn-danger{border-color:#F3C6C2;color:var(--danger);background:var(--bg-sutil-vermelho);}
   .icon-btn-danger:hover{border-color:var(--danger);background:var(--danger);color:#fff;}
   .empty{padding:40px 20px;text-align:center;color:var(--text-soft);font-size:13.5px;}
 
@@ -299,7 +304,7 @@
   .field label{display:block;font-size:12.5px;color:var(--text-soft);margin-bottom:5px;font-weight:500;}
   .field input, .field select, .field textarea{
     width:100%;border:1px solid var(--line);border-radius:7px;padding:9px 11px;font-size:13.5px;font-family:'Inter';
-    background:var(--bone);
+    background:var(--bone);color:var(--ink);
   }
   .field input:focus, .field select:focus, .field textarea:focus{outline:2px solid var(--blue-accent);outline-offset:-1px;background:var(--white);}
   .field-row{display:flex;gap:10px;}
@@ -343,7 +348,7 @@
   .integ-status{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-soft);margin-top:10px;}
   .integ-status .dot{width:8px;height:8px;border-radius:50%;background:#C7CCD4;}
   .integ-status .dot.on{background:var(--success);}
-  .note{background:#F0F4FF;border:1px solid #D8E2FB;border-radius:8px;padding:12px 14px;font-size:12.5px;color:var(--blue-deep);line-height:1.5;margin-top:14px;}
+  .note{background:var(--bg-sutil-azul);border:1px solid var(--line);border-radius:8px;padding:12px 14px;font-size:12.5px;color:var(--ink);line-height:1.5;margin-top:14px;}
 
   .bank-logo{
     border-radius:8px;background:var(--bone);border:1px solid var(--line);
@@ -363,7 +368,7 @@
   .conta-cards{display:grid;grid-template-columns:repeat(auto-fill, minmax(220px,1fr));gap:14px;margin-bottom:22px;}
   .conta-card{background:var(--white);border:1px solid var(--line);border-radius:10px;padding:48px 18px 16px;border-top:3px solid var(--accent-c, var(--blue-accent));position:relative;}
   .conta-card.conta-principal{box-shadow:0 0 0 2px var(--warn);}
-  .conta-card.conta-negativa{background:#FFF8F7;}
+  .conta-card.conta-negativa{background:var(--bg-sutil-vermelho);}
   .conta-cards-compacto{grid-template-columns:1fr !important;}
   .conta-cards-compacto .conta-card{display:flex;align-items:center;gap:14px;padding:10px 16px;}
   .conta-cards-compacto .card-top{flex:1;margin:0;}
@@ -390,10 +395,10 @@
   .add-conta-card:hover{border-color:var(--blue-accent);color:var(--blue-accent);}
 
   /* Cartões de crédito */
-  .cartao-card{background:linear-gradient(145deg, var(--ink), #1B2430);color:var(--white);border-radius:14px;padding:48px 20px 18px;position:relative;overflow:hidden;border-top:8px solid var(--accent-c, var(--blue-accent));}
+  .cartao-card{background:linear-gradient(145deg, #0B0F14, #1B2430);color:#FFFFFF;border-radius:14px;padding:48px 20px 18px;position:relative;overflow:hidden;border-top:8px solid var(--accent-c, var(--blue-accent));}
   .cartao-card .card-menu-wrap{position:absolute;top:14px;right:14px;z-index:2;}
   .cartao-card .card-menu-wrap > .icon-btn{background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.18);color:#E4E7EC;font-weight:700;}
-  .cartao-card .card-menu-wrap > .icon-btn:hover{border-color:var(--white);color:var(--white);background:rgba(255,255,255,0.18);}
+  .cartao-card .card-menu-wrap > .icon-btn:hover{border-color:#FFFFFF;color:#FFFFFF;background:rgba(255,255,255,0.18);}
   .cartao-card .card-menu-wrap .dropdown-menu{right:0;left:auto;min-width:150px;}
   .cartao-card .card-top{display:flex;align-items:center;gap:10px;margin-bottom:16px;}
   .cartao-card .card-top .bank-logo{background:rgba(255,255,255,0.9);}
@@ -407,13 +412,13 @@
   .panel .limit-info{color:var(--text-soft);margin-bottom:0;}
   .cartao-card .cartao-actions-row{display:flex;gap:8px;}
   .cartao-card .cartao-actions-row .btn{flex:1;font-size:12px;padding:8px;}
-  .cartao-card .btn.ghost{background:rgba(255,255,255,0.06);border-color:rgba(255,255,255,0.18);color:var(--white);}
+  .cartao-card .btn.ghost{background:rgba(255,255,255,0.06);border-color:rgba(255,255,255,0.18);color:#FFFFFF;}
   .cartao-card .btn.ghost:hover{background:rgba(255,255,255,0.14);}
   .fatura-select-wrap{display:flex;gap:10px;align-items:center;}
   .fatura-status-badge{font-size:11px;padding:3px 10px;border-radius:20px;font-weight:500;}
-  .fatura-status-badge.aberta{background:#FDF3E5;color:var(--warn);}
-  .fatura-status-badge.fechada{background:#E8ECF3;color:var(--blue-deep);}
-  .fatura-status-badge.paga{background:#E6F6EE;color:var(--success);}
+  .fatura-status-badge.aberta{background:var(--bg-sutil-laranja);color:var(--warn);}
+  .fatura-status-badge.fechada{background:var(--bg-sutil-cinza);color:var(--ink);}
+  .fatura-status-badge.paga{background:var(--bg-sutil-verde);color:var(--success);}
 
   /* Comissões */
   .vendedor-mini-card{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid var(--line);border-radius:8px;margin-bottom:8px;}
@@ -468,7 +473,7 @@
   .report-controls{display:flex;gap:10px;align-items:center;padding:14px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap;}
   .report-controls select, .report-controls input{border:1px solid var(--line);border-radius:7px;padding:7px 10px;font-size:12.5px;font-family:'Inter';background:var(--bone);}
   .report-block{padding:20px;}
-  .report-title{font-family:'Space Grotesk';font-size:13.5px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--blue-deep);margin:18px 0 8px;}
+  .report-title{font-family:'Space Grotesk';font-size:13.5px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--ink);margin:18px 0 8px;}
   .report-title:first-child{margin-top:0;}
   .report-line{display:flex;justify-content:space-between;padding:7px 0;font-size:13.5px;border-bottom:1px solid var(--line);}
   .report-line.sub{padding-left:16px;color:var(--text-soft);font-size:13px;border-bottom:none;}
@@ -1089,8 +1094,10 @@ function aplicarTemaCor(temaId){
 // Modo escuro — troca só as 5 variáveis de base (texto, fundos, bordas). Sidebar, barra de
 // navegação mobile e toast já foram desacoplados dessas variáveis (usam cor fixa), então
 // continuam escuros do mesmo jeito nos dois modos, sem precisar de nenhum ajuste extra aqui.
-const PALETA_CLARA = { ink:'#0B0F14', white:'#FFFFFF', bone:'#F5F7FA', line:'#E3E7EE', textSoft:'#5B6472' };
-const PALETA_ESCURA = { ink:'#E8EAED', white:'#1C2128', bone:'#14171C', line:'#2D333B', textSoft:'#9BA3AF' };
+const PALETA_CLARA = { ink:'#0B0F14', white:'#FFFFFF', bone:'#F5F7FA', line:'#E3E7EE', textSoft:'#5B6472',
+  bgVerde:'#E6F6EE', bgLaranja:'#FDF3E5', bgVermelho:'#FDEEED', bgAzul:'#F0F4FF', bgCinza:'#E8ECF3' };
+const PALETA_ESCURA = { ink:'#E8EAED', white:'#1C2128', bone:'#14171C', line:'#2D333B', textSoft:'#9BA3AF',
+  bgVerde:'#16332A', bgLaranja:'#3D2E14', bgVermelho:'#3D1F1D', bgAzul:'#1A2540', bgCinza:'#262B33' };
 function aplicarModoEscuro(ativo){
   const p = ativo ? PALETA_ESCURA : PALETA_CLARA;
   document.documentElement.style.setProperty('--ink', p.ink);
@@ -1098,6 +1105,11 @@ function aplicarModoEscuro(ativo){
   document.documentElement.style.setProperty('--bone', p.bone);
   document.documentElement.style.setProperty('--line', p.line);
   document.documentElement.style.setProperty('--text-soft', p.textSoft);
+  document.documentElement.style.setProperty('--bg-sutil-verde', p.bgVerde);
+  document.documentElement.style.setProperty('--bg-sutil-laranja', p.bgLaranja);
+  document.documentElement.style.setProperty('--bg-sutil-vermelho', p.bgVermelho);
+  document.documentElement.style.setProperty('--bg-sutil-azul', p.bgAzul);
+  document.documentElement.style.setProperty('--bg-sutil-cinza', p.bgCinza);
 }
 
 function showToast(msg){
