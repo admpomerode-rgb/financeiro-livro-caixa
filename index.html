@@ -37,7 +37,7 @@
   /* Layout */
   .app{display:flex;min-height:100vh;}
   .sidebar{
-    width:248px;flex-shrink:0;background:var(--ink);color:var(--white);
+    width:248px;flex-shrink:0;background:#0B0F14;color:#FFFFFF;
     display:flex;flex-direction:column;padding:24px 0;transition:width .18s ease;
   }
   .sidebar.collapsed{width:72px;}
@@ -53,7 +53,7 @@
   }
   .sidebar-toggle:hover{border-color:var(--blue-accent);color:var(--white);}
   .sidebar.collapsed .sidebar-toggle{transform:rotate(180deg);}
-  .sidebar .brand .mark{font-family:'Space Grotesk';font-size:20px;font-weight:700;color:var(--white);}
+  .sidebar .brand .mark{font-family:'Space Grotesk';font-size:20px;font-weight:700;color:#FFFFFF;}
   .sidebar .brand .sub{font-size:11px;color:#8A93A3;margin-top:2px;letter-spacing:0.04em;text-transform:uppercase;}
   .nav{padding:16px 12px;flex:1;}
   .sidebar.collapsed .nav{padding:16px 10px;}
@@ -67,8 +67,8 @@
     border-left:2px solid transparent;transition:background .15s, color .15s;
   }
   .sidebar.collapsed .nav-item{justify-content:center;padding:10px 6px;}
-  .nav-item:hover{background:rgba(255,255,255,0.06);color:var(--white);}
-  .nav-item.active{background:rgba(255,255,255,0.08);color:var(--white);border-left:2px solid var(--group-accent, var(--blue-accent));}
+  .nav-item:hover{background:rgba(255,255,255,0.06);color:#FFFFFF;}
+  .nav-item.active{background:rgba(255,255,255,0.08);color:#FFFFFF;border-left:2px solid var(--group-accent, var(--blue-accent));}
   .sidebar.collapsed .nav-item.active{border-left:2px solid transparent;}
   .nav-dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.5;flex-shrink:0;}
   .sidebar.collapsed .nav-dot{display:none;}
@@ -79,7 +79,7 @@
     letter-spacing:.02em;font-family:'Space Grotesk';flex-shrink:0;
   }
   .sidebar.collapsed .nav-abbr{display:flex;}
-  .nav-item.active .nav-abbr{background:var(--group-accent, var(--blue-accent));color:var(--white);}
+  .nav-item.active .nav-abbr{background:var(--group-accent, var(--blue-accent));color:#FFFFFF;}
   .sidebar.collapsed .nav-label{display:none;}
   .sidebar-footer{padding:12px;border-top:1px solid rgba(255,255,255,0.08);}
   .sidebar-footer button{
@@ -314,7 +314,7 @@
   .stub p{font-size:13.5px;max-width:420px;margin:0 auto;line-height:1.5;}
 
   .toast{
-    position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--white);
+    position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0B0F14;color:#FFFFFF;
     padding:11px 20px;border-radius:8px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s, transform .2s;
   }
   .toast.show{opacity:1;transform:translateX(-50%) translateY(-6px);}
@@ -478,7 +478,7 @@
 
   .bottom-nav{
     display:none;position:fixed;left:0;right:0;bottom:0;z-index:60;
-    background:var(--ink);border-top:1px solid #1C2330;
+    background:#0B0F14;border-top:1px solid #1C2330;
     padding:8px 4px calc(8px + env(safe-area-inset-bottom));
     justify-content:space-around;align-items:center;
   }
@@ -979,6 +979,7 @@ function aplicarMigracoes(s){
   if(!s.acoesFinanceiras) s.acoesFinanceiras = [];
   if(!s.orcamentoCentrosCusto) s.orcamentoCentrosCusto = {};
   if(!s.temaCor) s.temaCor = 'azul';
+  if(s.modoEscuro===undefined) s.modoEscuro = false;
   if(!s.cofresVirtuais) s.cofresVirtuais = [
     { nome:'Operacional', pct:50 }, { nome:'Impostos', pct:15 }, { nome:'Emergência', pct:15 },
     { nome:'Investimentos', pct:10 }, { nome:'Distribuição aos Sócios', pct:10 },
@@ -1084,6 +1085,19 @@ function aplicarTemaCor(temaId){
   const tema = TEMAS_COR[temaId] || TEMAS_COR.azul;
   document.documentElement.style.setProperty('--blue-deep', tema.deep);
   document.documentElement.style.setProperty('--blue-accent', tema.accent);
+}
+// Modo escuro — troca só as 5 variáveis de base (texto, fundos, bordas). Sidebar, barra de
+// navegação mobile e toast já foram desacoplados dessas variáveis (usam cor fixa), então
+// continuam escuros do mesmo jeito nos dois modos, sem precisar de nenhum ajuste extra aqui.
+const PALETA_CLARA = { ink:'#0B0F14', white:'#FFFFFF', bone:'#F5F7FA', line:'#E3E7EE', textSoft:'#5B6472' };
+const PALETA_ESCURA = { ink:'#E8EAED', white:'#1C2128', bone:'#14171C', line:'#2D333B', textSoft:'#9BA3AF' };
+function aplicarModoEscuro(ativo){
+  const p = ativo ? PALETA_ESCURA : PALETA_CLARA;
+  document.documentElement.style.setProperty('--ink', p.ink);
+  document.documentElement.style.setProperty('--white', p.white);
+  document.documentElement.style.setProperty('--bone', p.bone);
+  document.documentElement.style.setProperty('--line', p.line);
+  document.documentElement.style.setProperty('--text-soft', p.textSoft);
 }
 
 function showToast(msg){
@@ -21006,8 +21020,20 @@ function viewConfiguracaoDetalhe(){
 
 function renderConfigAparencia(){
   const atual = state.temaCor || 'azul';
+  const escuro = !!state.modoEscuro;
   return `
     <div class="panel-body" style="padding:20px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid var(--line);">
+        <div>
+          <div style="font-weight:600;font-size:13px;">${escuro?'🌙 Modo escuro':'☀️ Modo claro'}</div>
+          <div style="font-size:11.5px;color:var(--text-soft);margin-top:2px;">Troca o fundo e o texto de todo o sistema</div>
+        </div>
+        <label style="position:relative;display:inline-block;width:46px;height:26px;flex-shrink:0;">
+          <input type="checkbox" id="cfgModoEscuro" ${escuro?'checked':''} style="opacity:0;width:0;height:0;">
+          <span id="cfgModoEscuroTrilho" style="position:absolute;inset:0;background:${escuro?'var(--blue-accent)':'var(--line)'};border-radius:26px;cursor:pointer;transition:background .2s;"></span>
+          <span id="cfgModoEscuroBolinha" style="position:absolute;top:3px;left:${escuro?'23px':'3px'};width:20px;height:20px;background:#fff;border-radius:50%;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.3);"></span>
+        </label>
+      </div>
       <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Cor de destaque</div>
       <p style="font-size:12px;color:var(--text-soft);margin-bottom:16px;">Muda a cor dos botões, links e realces em todo o sistema — o resto do visual continua igual.</p>
       <div style="display:flex;gap:16px;flex-wrap:wrap;">
@@ -21683,6 +21709,12 @@ function attachViewHandlers(){
         state.dashboardConfig = { cidade, ativos: ativos.length?ativos:['PETR4','VALE3','ITUB4'], brapiToken: token };
         persist();
         showToast('Configuração do widget salva — atualiza ao voltar pro Dashboard');
+      });
+      document.getElementById('cfgModoEscuro')?.addEventListener('change', (e)=>{
+        state.modoEscuro = e.target.checked;
+        aplicarModoEscuro(state.modoEscuro);
+        persist();
+        paintConfig();
       });
       document.querySelectorAll('[data-action="escolher-tema-cor"]').forEach(el=>{
         el.addEventListener('click', ()=>{
@@ -30217,6 +30249,7 @@ auth.onAuthStateChanged(async user=>{
       state = await carregarDados();
       dadosCarregados = true;
       aplicarTemaCor(state.temaCor);
+      aplicarModoEscuro(state.modoEscuro);
       gerarLancamentosRecorrentes();
       processarAnuidadesCartao();
       render();
