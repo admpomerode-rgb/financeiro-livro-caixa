@@ -660,6 +660,7 @@
         <div class="nav-item" data-view="orcamentos-processos" title="Orçamentos e Compras"><span class="nav-dot"></span><span class="nav-abbr">OC</span><span class="nav-label">Orçamentos e Compras</span></div>
         <div class="nav-item" data-view="comissoes" title="Comissões"><span class="nav-dot"></span><span class="nav-abbr">CM</span><span class="nav-label">Comissões</span></div>
         <div class="nav-item" data-view="vendas" title="Vendas"><span class="nav-dot"></span><span class="nav-abbr">VD</span><span class="nav-label">Vendas</span></div>
+        <div class="nav-item" data-view="centros-custo" title="Centro de Custos"><span class="nav-dot"></span><span class="nav-abbr">CC</span><span class="nav-label">Centro de Custos</span></div>
         <div class="nav-item" data-view="representantes" title="Representantes"><span class="nav-dot"></span><span class="nav-abbr">RP</span><span class="nav-label">Representantes</span></div>
       </div>
       <div class="nav-group" style="--group-accent:var(--success);">
@@ -976,6 +977,7 @@ function aplicarMigracoes(s){
   if(!s.checklistFimExpediente) s.checklistFimExpediente = {};
   if(!s.dashboardWidgetsOcultos) s.dashboardWidgetsOcultos = [];
   if(!s.acoesFinanceiras) s.acoesFinanceiras = [];
+  if(!s.orcamentoCentrosCusto) s.orcamentoCentrosCusto = {};
   if(!s.cofresVirtuais) s.cofresVirtuais = [
     { nome:'Operacional', pct:50 }, { nome:'Impostos', pct:15 }, { nome:'Emergência', pct:15 },
     { nome:'Investimentos', pct:10 }, { nome:'Distribuição aos Sócios', pct:10 },
@@ -1421,6 +1423,7 @@ function moreItensDef(){
     { view:'orcamentos-processos', icone:'📋', nome:'Orçamentos e Compras', grupo:'Operacional', badge:()=>(state.orcamentosProcessos||[]).filter(o=>o.status==='pendente').length },
     { view:'comissoes', icone:'🤝', nome:'Comissões', grupo:'Operacional' },
     { view:'vendas', icone:'📈', nome:'Vendas', grupo:'Operacional' },
+    { view:'centros-custo', icone:'🏗️', nome:'Centro de Custos', grupo:'Análise' },
     { view:'representantes', icone:'🧑‍💼', nome:'Representantes', grupo:'Operacional' },
     { view:'funil', icone:'🔻', nome:'Funil de Vendas', grupo:'Operacional' },
     { view:'a-receber-representante', icone:'💵', nome:'A Receber do Representante', grupo:'Operacional', badge:()=>todasFilasRecebimentoRep().filter(r=>!r.conferido).length },
@@ -1555,6 +1558,7 @@ function render(){
   else if(currentView==='orcamento') main.innerHTML = viewOrcamentoPlanejamento();
   else if(currentView==='comissoes') main.innerHTML = viewComissoes();
   else if(currentView==='vendas') main.innerHTML = viewVendas();
+  else if(currentView==='centros-custo') main.innerHTML = viewCentrosCusto();
   else if(currentView==='representantes') main.innerHTML = viewRepresentantes();
   else if(currentView==='funil') main.innerHTML = viewFunilVendas();
   else if(currentView==='ativos') main.innerHTML = viewAtivosPatrimoniais();
@@ -11793,12 +11797,12 @@ function svgBarrasComparativas(series, labels){
 }
 // HorizontalBarChart — ranking (Top representantes, Top clientes...), já usado em Comissões
 // como barraRankingHTML; generalizado aqui com formatador de valor customizável.
-function svgBarrasHorizontais(linhas, corBarra, formatador){
+function svgBarrasHorizontais(linhas, corBarra, formatador, dataAction){
   const fmt = formatador || brl;
   const max = Math.max(...linhas.map(l=>l.valor), 1);
   return linhas.map(l=>`
-    <div style="margin-bottom:10px;">
-      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;"><span style="font-weight:600;">${escapeHTML(l.nome)}</span><span class="mono">${fmt(l.valor)}</span></div>
+    <div style="margin-bottom:10px;${dataAction?'cursor:pointer;':''}" ${dataAction?`data-action="${dataAction}" data-nome="${escapeHTML(l.nome)}"`:''}>
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;"><span style="font-weight:600;${dataAction?'color:var(--blue-accent);':''}">${escapeHTML(l.nome)}</span><span class="mono">${fmt(l.valor)}</span></div>
       <div style="background:var(--bone);border-radius:5px;height:8px;overflow:hidden;"><div style="width:${(l.valor/max*100).toFixed(1)}%;height:100%;background:${corBarra};transition:width .3s;"></div></div>
     </div>
   `).join('');
@@ -21162,6 +21166,32 @@ function attachViewHandlers(){
   document.querySelector('[data-action="voltar-representantes"]')?.addEventListener('click', ()=>{
     representanteSelecionadoId = null; render();
   });
+  document.querySelectorAll('#centroCustoPeriodoToggle [data-periodo]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ centroCustoFiltro.periodo = btn.dataset.periodo; render(); });
+  });
+  document.getElementById('btnAplicarFiltroCentroCusto')?.addEventListener('click', ()=>{
+    centroCustoFiltro.centro = document.getElementById('ccfCentro').value;
+    centroCustoFiltro.categoria = document.getElementById('ccfCategoria').value;
+    centroCustoFiltro.fornecedor = document.getElementById('ccfFornecedor').value;
+    centroCustoFiltro.tipoCusto = document.getElementById('ccfTipoCusto').value;
+    render();
+  });
+  document.querySelectorAll('[data-action="abrir-centro-custo"]').forEach(el=>{
+    el.addEventListener('click', ()=>{ centroCustoSelecionado = el.dataset.nome; render(); });
+  });
+  document.querySelector('[data-action="voltar-centros-custo"]')?.addEventListener('click', ()=>{
+    centroCustoSelecionado = null; render();
+  });
+  document.getElementById('btnOrcamentoCentroCusto')?.addEventListener('click', ()=>openOrcamentoCentroCustoModal());
+  document.getElementById('btnExportarCentroCustoCSV')?.addEventListener('click', ()=>gerarCSVCentroCusto());
+  document.getElementById('btnExportarCentroCustoPDF')?.addEventListener('click', ()=>gerarPDFCentroCusto());
+  document.getElementById('btnImprimirCentroCusto')?.addEventListener('click', ()=>imprimirRelatorioCentroCusto());
+  document.querySelectorAll('[data-action="ver-lancamento-centro-custo"]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const lanc = state.lancamentos.find(l=>l.id===el.dataset.id);
+      if(lanc) openLancamentoModal('saida', lanc);
+    });
+  });
   document.getElementById('btnNovaRetirada')?.addEventListener('click', ()=>openRetiradaModal());
   document.querySelectorAll('[data-action="editar-retirada"]').forEach(el=>{
     el.addEventListener('click', ()=>openRetiradaModal(state.retiradas.find(r=>r.id===el.dataset.id)));
@@ -26584,6 +26614,346 @@ function openRetiradaModal(existing){
 // Um "projeto financeiro" aqui é uma camada de apresentação sobre o campo `centroCusto` que já
 // existe em cada lançamento — não cria uma segunda forma de agrupar dinheiro. Cadastrar um projeto
 // só dá contexto (orçamento, responsável, prazo, status) a um centro de custo que você já usa.
+/* ====================== ANÁLISE DE CENTRO DE CUSTOS ====================== */
+// Reaproveita l.centroCusto (já usado em Fluxo de Caixa e Despesas por Centro de Custo) e
+// categoria.tipoCusto (já criado no cadastro de categorias) — nenhum cálculo novo, só agregação.
+function tipoCustoDaCategoria(nomeCategoria){
+  const cat = (state.categorias.saida||[]).find(c=>c.nome===nomeCategoria || nomeCategoria?.startsWith(c.nome+' / '));
+  return cat?.tipoCusto || null;
+}
+function lancamentosCentroCustoNoPeriodo(dataDe, dataAte){
+  return state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.categoria!=='Ativos Patrimoniais' && l.dataPagamento>=dataDe && l.dataPagamento<=dataAte);
+}
+function dadosCentroCusto(dataDe, dataAte, filtros){
+  filtros = filtros || {};
+  let lancs = lancamentosCentroCustoNoPeriodo(dataDe, dataAte);
+  if(filtros.centro) lancs = lancs.filter(l=>(l.centroCusto||'(sem centro definido)')===filtros.centro);
+  if(filtros.categoria) lancs = lancs.filter(l=>l.categoria===filtros.categoria);
+  if(filtros.fornecedor) lancs = lancs.filter(l=>l.fornecedor===filtros.fornecedor);
+  if(filtros.tipoCusto) lancs = lancs.filter(l=>tipoCustoDaCategoria(l.categoria)===filtros.tipoCusto);
+  return lancs;
+}
+function resumoCentroCusto(lancs){
+  const total = lancs.reduce((s,l)=>s+l.valor,0);
+  const fixo = lancs.filter(l=>tipoCustoDaCategoria(l.categoria)==='fixa').reduce((s,l)=>s+l.valor,0);
+  const variavel = lancs.filter(l=>tipoCustoDaCategoria(l.categoria)==='variavel').reduce((s,l)=>s+l.valor,0);
+  const semClassificacao = total-fixo-variavel;
+  const porCentro = {};
+  lancs.forEach(l=>{ const c = l.centroCusto||'(sem centro definido)'; porCentro[c] = (porCentro[c]||0)+l.valor; });
+  const rankingCentros = Object.entries(porCentro).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor);
+  const maiorCentro = rankingCentros[0]||null;
+  return { total, fixo, variavel, semClassificacao, rankingCentros, maiorCentro };
+}
+/* ====================== FIM ANÁLISE DE CENTRO DE CUSTOS ====================== */
+
+let centroCustoFiltro = { periodo:'mes', centro:'', categoria:'', fornecedor:'', tipoCusto:'' };
+let centroCustoSelecionado = null;
+
+// Exportação — mesmo padrão já usado em Comissões, mesmos itens que a tela mostra
+function gerarCSVCentroCusto(){
+  const periodo = resolverPeriodoAtalho(centroCustoFiltro.periodo);
+  const lancs = dadosCentroCusto(periodo.de, periodo.ate, centroCustoFiltro);
+  const linhas = [['Data','Descrição','Centro de Custo','Categoria','Fornecedor','Valor']];
+  [...lancs].sort((a,b)=>a.dataPagamento.localeCompare(b.dataPagamento)).forEach(l=>{
+    linhas.push([ fmtDate(l.dataPagamento), l.descricao, l.centroCusto||'', l.categoria, l.fornecedor||'', (l.valor||0).toFixed(2).replace('.',',') ]);
+  });
+  const csv = linhas.map(l=>l.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(';')).join('\n');
+  const blob = new Blob(['\ufeff'+csv], { type:'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `centro-custos-${todayISO()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+function gerarPDFCentroCusto(){
+  if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
+  const { jsPDF } = window.jspdf;
+  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+  const M = 15, PW = 210, W = PW - M*2;
+  const INK=[11,15,20], SOFT=[91,100,114], LINEC=[227,231,238];
+  const periodo = resolverPeriodoAtalho(centroCustoFiltro.periodo);
+  const lancs = dadosCentroCusto(periodo.de, periodo.ate, centroCustoFiltro);
+  const resumo = resumoCentroCusto(lancs);
+  let y = 20;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
+  docPdf.text('Relatório de Centro de Custos', M, y);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
+  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
+  y += 6;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 8;
+
+  docPdf.setFontSize(9.5); docPdf.setTextColor(...INK);
+  [ `Custo total: ${brl(resumo.total)}`, `Custos fixos: ${brl(resumo.fixo)}`, `Custos variáveis: ${brl(resumo.variavel)}`, `Maior centro: ${resumo.maiorCentro?resumo.maiorCentro.nome:'—'}` ].forEach(l=>{ docPdf.text(l, M, y); y += 5.5; });
+  y += 4;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(9);
+  const cols = [ ['Data',18], ['Descrição',52], ['Centro',34], ['Categoria',34], ['Valor',24] ];
+  let x = M;
+  cols.forEach(([label,w])=>{ docPdf.text(label, x, y); x += w; });
+  y += 4;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 5;
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8);
+  [...lancs].sort((a,b)=>a.dataPagamento.localeCompare(b.dataPagamento)).forEach(l=>{
+    if(y>270){ docPdf.addPage(); y = 20; }
+    x = M;
+    const valores = [ fmtDate(l.dataPagamento), l.descricao.slice(0,32), (l.centroCusto||'—').slice(0,22), l.categoria.slice(0,22), brl(l.valor) ];
+    valores.forEach((v,i)=>{ docPdf.text(String(v), x, y); x += cols[i][1]; });
+    y += 5;
+  });
+  docPdf.save(`centro-custos-${todayISO()}.pdf`);
+}
+function imprimirRelatorioCentroCusto(){
+  const periodo = resolverPeriodoAtalho(centroCustoFiltro.periodo);
+  const lancs = dadosCentroCusto(periodo.de, periodo.ate, centroCustoFiltro);
+  const resumo = resumoCentroCusto(lancs);
+  const linhasHTML = [...lancs].sort((a,b)=>a.dataPagamento.localeCompare(b.dataPagamento)).map(l=>`
+    <tr><td>${fmtDate(l.dataPagamento)}</td><td>${escapeHTML(l.descricao)}</td><td>${escapeHTML(l.centroCusto||'—')}</td>
+    <td>${escapeHTML(l.categoria)}</td><td>${escapeHTML(l.fornecedor||'—')}</td><td>${brl(l.valor)}</td></tr>`).join('');
+  const w = window.open('', '_blank');
+  w.document.write(`<html><head><title>Relatório de Centro de Custos</title><style>
+    body{font-family:Arial,sans-serif;padding:24px;color:#0B0F14;}
+    h1{font-size:18px;margin-bottom:4px;} p{color:#5B6472;font-size:12px;margin-top:0;}
+    .resumo{display:flex;gap:24px;margin:16px 0;font-size:13px;}
+    table{width:100%;border-collapse:collapse;font-size:11px;margin-top:12px;}
+    th,td{border-bottom:1px solid #E3E7EE;padding:6px 8px;text-align:left;}
+    th{background:#F5F6F8;}
+  </style></head><body>
+    <h1>Relatório de Centro de Custos</h1><p>Emitido em ${fmtDate(todayISO())}</p>
+    <div class="resumo">
+      <span><strong>Custo total:</strong> ${brl(resumo.total)}</span>
+      <span><strong>Fixo:</strong> ${brl(resumo.fixo)}</span>
+      <span><strong>Variável:</strong> ${brl(resumo.variavel)}</span>
+    </div>
+    <table><thead><tr><th>Data</th><th>Descrição</th><th>Centro</th><th>Categoria</th><th>Fornecedor</th><th>Valor</th></tr></thead>
+    <tbody>${linhasHTML}</tbody></table>
+  </body></html>`);
+  w.document.close();
+  w.print();
+}
+function openOrcamentoCentroCustoModal(){
+  const modal = document.getElementById('modalContent');
+  const orc = state.orcamentoCentrosCusto||{};
+  const centros = state.centrosCusto||[];
+  if(!centros.length){ showToast('Cadastre um centro de custo primeiro (em algum lançamento)'); return; }
+  modal.innerHTML = `
+    <h3>Orçamento por centro de custo</h3>
+    <div class="note" style="margin-top:0;">Valor mensal planejado pra cada centro. Deixe em branco os que não quer acompanhar.</div>
+    ${centros.map(c=>`<div class="field"><label>${escapeHTML(c)}</label><input type="text" inputmode="decimal" class="occ-input" data-centro="${escapeHTML(c)}" value="${orc[c]||''}" placeholder="0,00"></div>`).join('')}
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarOrcamentoCentroCusto">Salvar</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarOrcamentoCentroCusto').addEventListener('click', ()=>{
+    const novo = {};
+    document.querySelectorAll('.occ-input').forEach(inp=>{
+      const v = numBR(inp.value);
+      if(!isNaN(v) && v>0) novo[inp.dataset.centro] = v;
+    });
+    state.orcamentoCentrosCusto = novo;
+    persist(); closeModal(); render();
+    showToast('Orçamentos salvos');
+  });
+}
+
+function viewCentroCustoDetalhe(nomeCentro){
+  const hoje = todayISO();
+  const meses12 = Array.from({length:12},(_,i)=>{ const [ay,am]=hoje.slice(0,7).split('-').map(Number); const d=new Date(ay,am-1-(11-i),1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const lancs12m = dadosCentroCusto(`${meses12[0]}-01`, hoje, { centro: nomeCentro });
+  const total = lancs12m.reduce((s,l)=>s+l.valor,0);
+  const custoMedioMensal = total/12;
+  const orc = (state.orcamentoCentrosCusto||{})[nomeCentro];
+
+  const evolucaoPorMes = meses12.map(m=>{
+    const [ay,am] = m.split('-').map(Number);
+    const de = `${m}-01`, ate = `${m}-${String(new Date(ay,am,0).getDate()).padStart(2,'0')}`;
+    return dadosCentroCusto(de, ate, { centro: nomeCentro }).reduce((s,l)=>s+l.valor,0);
+  });
+  const labelsMeses = meses12.map(m=>competenciaLabel(m).split('/')[0].slice(0,3));
+
+  const mesAtualRef = hoje.slice(0,7);
+  const realizadoMesAtual = evolucaoPorMes[evolucaoPorMes.length-1];
+
+  const porCategoria = {};
+  lancs12m.forEach(l=>{ porCategoria[l.categoria] = (porCategoria[l.categoria]||0)+l.valor; });
+  const topCategorias = Object.entries(porCategoria).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor).slice(0,6);
+
+  const porFornecedor = {};
+  lancs12m.forEach(l=>{ if(l.fornecedor){ porFornecedor[l.fornecedor] = (porFornecedor[l.fornecedor]||0)+l.valor; } });
+  const topFornecedores = Object.entries(porFornecedor).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor).slice(0,6);
+
+  const maioresLancamentos = [...lancs12m].sort((a,b)=>b.valor-a.valor).slice(0,8);
+
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-action="voltar-centros-custo">← Centro de Custos</span>
+        <h1 style="margin-top:6px;">${escapeHTML(nomeCentro)}</h1>
+        <p>Análise individual — últimos 12 meses</p>
+      </div>
+    </div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:14px;">
+      ${metricCardHTML('Custo total (12m)', brl(total))}
+      ${metricCardHTML('Custo médio mensal', brl(custoMedioMensal))}
+      ${metricCardHTML('Realizado — ' + competenciaLabel(mesAtualRef), brl(realizadoMesAtual))}
+      ${orc>0 ? metricCardHTML('Orçamento mensal', brl(orc)) : ''}
+      ${orc>0 ? metricCardHTML('Diferença', brl(orc-realizadoMesAtual), (orc-realizadoMesAtual)<0?'var(--danger)':'var(--success)') : ''}
+    </div>
+
+    ${chartCardHTML('📈 Evolução mensal', 'Últimos 12 meses', svgLinhasMultiplas([{ nome:nomeCentro, valores:evolucaoPorMes, cor:'#1E49E2' }], labelsMeses))}
+
+    <div class="cards" style="grid-template-columns:1fr 1fr;margin-bottom:14px;">
+      <div class="panel"><div class="panel-head"><h2>Principais categorias</h2></div><div class="panel-body" style="padding:18px;">
+        ${topCategorias.length ? svgBarrasHorizontais(topCategorias, '#7B5CD6') : '<div class="empty">Sem dados.</div>'}
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>Principais fornecedores</h2></div><div class="panel-body" style="padding:18px;">
+        ${topFornecedores.length ? svgBarrasHorizontais(topFornecedores, '#20C997') : '<div class="empty">Sem dados.</div>'}
+      </div></div>
+    </div>
+
+    <div class="dash-section-label">Maiores lançamentos</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${maioresLancamentos.length ? maioresLancamentos.map(l=>`
+        <div class="ledger-row compact" style="grid-template-columns:80px 1fr 90px;"><span class="mono" style="font-size:11px;color:var(--text-soft);">${fmtDate(l.dataPagamento)}</span><span style="font-size:12px;">${escapeHTML(l.descricao)}${l.fornecedor?' — '+escapeHTML(l.fornecedor):''}</span><span class="mono" style="font-size:11.5px;font-weight:600;">${brl(l.valor)}</span></div>
+      `).join('') : `<div class="empty">Nenhum lançamento nos últimos 12 meses.</div>`}
+    </div></div>
+  `;
+}
+
+function viewCentrosCusto(){
+  if(centroCustoSelecionado) return viewCentroCustoDetalhe(centroCustoSelecionado);
+
+  const periodo = resolverPeriodoAtalho(centroCustoFiltro.periodo);
+  const lancs = dadosCentroCusto(periodo.de, periodo.ate, centroCustoFiltro);
+  const resumo = resumoCentroCusto(lancs);
+  const orc = state.orcamentoCentrosCusto||{};
+  const orcamentoTotal = Object.values(orc).reduce((s,v)=>s+(v>0?v:0),0);
+  const diferenca = orcamentoTotal - resumo.total;
+
+  const categoriasUnicas = [...new Set(lancs.map(l=>l.categoria))].sort();
+  const fornecedoresUnicos = [...new Set(lancs.map(l=>l.fornecedor).filter(Boolean))].sort();
+
+  // Evolução — últimos 6 meses
+  const hoje = todayISO();
+  const meses = Array.from({length:6},(_,i)=>{ const [ay,am]=hoje.slice(0,7).split('-').map(Number); const d=new Date(ay,am-1-(5-i),1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const evolucaoPorMes = meses.map(m=>{
+    const [ay,am] = m.split('-').map(Number);
+    const de = `${m}-01`, ate = `${m}-${String(new Date(ay,am,0).getDate()).padStart(2,'0')}`;
+    return dadosCentroCusto(de, ate, centroCustoFiltro).reduce((s,l)=>s+l.valor,0);
+  });
+  const labelsMeses = meses.map(m=>competenciaLabel(m).split('/')[0].slice(0,3));
+
+  // Ranking por categoria e fornecedor (pra "Onde estamos gastando mais?")
+  const porCategoria = {};
+  lancs.forEach(l=>{ porCategoria[l.categoria] = (porCategoria[l.categoria]||0)+l.valor; });
+  const rankingCategorias = Object.entries(porCategoria).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor).slice(0,8);
+  const porFornecedor = {};
+  lancs.forEach(l=>{ if(l.fornecedor){ porFornecedor[l.fornecedor] = (porFornecedor[l.fornecedor]||0)+l.valor; } });
+  const rankingFornecedores = Object.entries(porFornecedor).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor).slice(0,8);
+
+  // Alertas — só baseados em dados reais: centro acima do orçamento, ou crescendo 3 meses seguidos
+  const alertas = [];
+  resumo.rankingCentros.forEach(c=>{
+    const orcC = orc[c.nome];
+    if(orcC>0 && c.valor>=orcC) alertas.push({ texto:`"${c.nome}" já ultrapassou o orçamento (${brl(c.valor)} de ${brl(orcC)})`, critico:true });
+    else if(orcC>0 && c.valor>=orcC*0.9) alertas.push({ texto:`"${c.nome}" está próximo do limite orçamentário (${(c.valor/orcC*100).toFixed(0)}%)`, critico:false });
+  });
+  if(evolucaoPorMes.length>=3){
+    const ultimos3 = evolucaoPorMes.slice(-3);
+    if(ultimos3[0]<ultimos3[1] && ultimos3[1]<ultimos3[2]) alertas.push({ texto:'O custo total vem crescendo por 3 meses seguidos', critico:false });
+  }
+
+  return `
+    <div class="topbar">
+      <div><h1>Centro de Custos</h1><p>Onde o dinheiro está sendo gasto, e como isso evolui ao longo do tempo</p></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn ghost sm" id="btnExportarCentroCustoCSV">📊 Excel</button>
+        <button class="btn ghost sm" id="btnExportarCentroCustoPDF">📄 PDF</button>
+        <button class="btn ghost sm" id="btnImprimirCentroCusto">🖨️ Imprimir</button>
+        <button class="btn ghost" id="btnOrcamentoCentroCusto">🎯 Definir orçamentos</button>
+      </div>
+    </div>
+    ${periodFilterHTML('centroCustoPeriodo', centroCustoFiltro.periodo)}
+
+    <div class="panel" style="margin:14px 0;">
+      <div class="panel-head"><h2>Filtros</h2></div>
+      <div class="panel-body" style="padding:16px 20px;">
+        <div class="field-row">
+          <div class="field"><label>Centro de custo</label><select id="ccfCentro"><option value="">Todos</option>${(state.centrosCusto||[]).map(c=>`<option ${centroCustoFiltro.centro===c?'selected':''}>${escapeHTML(c)}</option>`).join('')}<option value="(sem centro definido)" ${centroCustoFiltro.centro==='(sem centro definido)'?'selected':''}>(sem centro definido)</option></select></div>
+          <div class="field"><label>Categoria</label><select id="ccfCategoria"><option value="">Todas</option>${categoriasUnicas.map(c=>`<option ${centroCustoFiltro.categoria===c?'selected':''}>${escapeHTML(c)}</option>`).join('')}</select></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Fornecedor</label><select id="ccfFornecedor"><option value="">Todos</option>${fornecedoresUnicos.map(f=>`<option ${centroCustoFiltro.fornecedor===f?'selected':''}>${escapeHTML(f)}</option>`).join('')}</select></div>
+          <div class="field"><label>Tipo de custo</label><select id="ccfTipoCusto"><option value="">Todos</option><option value="fixa" ${centroCustoFiltro.tipoCusto==='fixa'?'selected':''}>Fixo</option><option value="variavel" ${centroCustoFiltro.tipoCusto==='variavel'?'selected':''}>Variável</option></select></div>
+          <div class="field" style="align-self:flex-end;"><button class="btn" id="btnAplicarFiltroCentroCusto" style="width:100%;">Aplicar</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:16px;">
+      ${metricCardHTML('Custo total do período', brl(resumo.total))}
+      ${metricCardHTML('Custos fixos', brl(resumo.fixo))}
+      ${metricCardHTML('Custos variáveis', brl(resumo.variavel))}
+      ${metricCardHTML('Maior centro', resumo.maiorCentro?escapeHTML(resumo.maiorCentro.nome):'—')}
+      ${metricCardHTML('Orçamento', orcamentoTotal>0?brl(orcamentoTotal):'—')}
+      ${metricCardHTML('Realizado', brl(resumo.total))}
+      ${orcamentoTotal>0 ? metricCardHTML('Orçamento × Realizado', brl(diferenca), diferenca<0?'var(--danger)':'var(--success)') : ''}
+    </div>
+
+    ${alertas.length ? `
+    <div class="dash-section-label">🔔 Alertas</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+      ${alertas.map(a=>`<div class="ledger-row compact" style="grid-template-columns:auto 1fr;"><span>${a.critico?'🔴':'🟡'}</span><span style="font-size:12.5px;">${a.texto}</span></div>`).join('')}
+    </div></div>` : ''}
+
+    ${chartCardHTML('📈 Evolução dos custos', 'Últimos 6 meses', svgLinhasMultiplas([{ nome:'Custo total', valores:evolucaoPorMes, cor:'#C74A3D' }], labelsMeses))}
+    ${resumo.rankingCentros.length ? chartCardHTML('🏗️ Custos por centro', 'Clique num centro pra ver o detalhamento', svgBarrasHorizontais(resumo.rankingCentros, '#1E49E2', null, 'abrir-centro-custo')) : ''}
+    ${resumo.fixo>0 || resumo.variavel>0 ? chartCardHTML('⚖️ Fixo × Variável', '', svgBarrasComparativas([{ nome:'Fixo', valores:[resumo.fixo], cor:'#1E49E2' },{ nome:'Variável', valores:[resumo.variavel], cor:'#E0A62B' }], [''])) : ''}
+
+    ${Object.keys(orc).length ? `
+    <div class="dash-section-label">🎯 Orçado × Realizado por centro</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+      ${resumo.rankingCentros.filter(c=>orc[c.nome]>0).map(c=>{
+        const orcC = orc[c.nome];
+        const pct = Math.round(c.valor/orcC*100);
+        return `<div class="ledger-row compact" style="grid-template-columns:1fr auto auto;"><span style="font-size:12.5px;">${escapeHTML(c.nome)}</span><span class="mono" style="font-size:11.5px;">${brl(c.valor)} de ${brl(orcC)}</span><span style="font-size:11px;font-weight:600;color:${pct>=100?'var(--danger)':pct>=90?'var(--warn)':'var(--success)'};">${pct}%</span></div>`;
+      }).join('') || `<div class="empty">Nenhum centro com orçamento definido tem gasto no período.</div>`}
+    </div></div>` : ''}
+
+    <div class="dash-section-label">💸 Onde estamos gastando mais?</div>
+    <div class="cards" style="grid-template-columns:1fr 1fr;margin-bottom:14px;">
+      <div class="panel"><div class="panel-head"><h2>Por categoria</h2></div><div class="panel-body" style="padding:18px;">
+        ${rankingCategorias.length ? svgBarrasHorizontais(rankingCategorias, '#7B5CD6') : '<div class="empty">Sem dados no período/filtro atual.</div>'}
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>Por fornecedor</h2></div><div class="panel-body" style="padding:18px;">
+        ${rankingFornecedores.length ? svgBarrasHorizontais(rankingFornecedores, '#20C997') : '<div class="empty">Sem dados no período/filtro atual.</div>'}
+      </div></div>
+    </div>
+
+    <div class="dash-section-label">📋 Detalhamento</div>
+    <div class="panel"><div class="panel-body" style="padding:0;overflow-x:auto;">
+      <div class="ledger-row head" style="grid-template-columns:80px 1fr 120px 120px 120px 90px;min-width:640px;"><span>Data</span><span>Descrição</span><span>Centro</span><span>Categoria</span><span>Fornecedor</span><span>Valor</span></div>
+      <div style="min-width:640px;">
+        ${[...lancs].sort((a,b)=>b.dataPagamento.localeCompare(a.dataPagamento)).slice(0,60).map(l=>`
+          <div class="ledger-row compact" data-action="ver-lancamento-centro-custo" data-id="${l.id}" style="cursor:pointer;grid-template-columns:80px 1fr 120px 120px 120px 90px;">
+            <span class="mono" style="font-size:11px;color:var(--text-soft);">${fmtDate(l.dataPagamento)}</span>
+            <span style="font-size:11.5px;">${escapeHTML(l.descricao)}</span>
+            <span style="font-size:11px;">${escapeHTML(l.centroCusto||'—')}</span>
+            <span style="font-size:11px;">${escapeHTML(l.categoria)}</span>
+            <span style="font-size:11px;">${escapeHTML(l.fornecedor||'—')}</span>
+            <span class="mono" style="font-size:11.5px;font-weight:600;">${brl(l.valor)}</span>
+          </div>
+        `).join('') || `<div class="empty">Nenhum lançamento no período/filtro atual.</div>`}
+      </div>
+    </div></div>
+    ${lancs.length>60 ? `<div class="note" style="margin-top:0;">Mostrando os 60 mais recentes de ${lancs.length} lançamentos — use os filtros pra refinar.</div>` : ''}
+  `;
+}
+
 function receitaProjetoFinanceiro(centroCusto, de, ate){
   return state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.centroCusto===centroCusto && (!de||l.dataPagamento>=de) && (!ate||l.dataPagamento<=ate)).reduce((s,l)=>s+l.valor,0);
 }
