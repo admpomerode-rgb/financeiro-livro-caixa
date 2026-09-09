@@ -21371,7 +21371,10 @@ function attachViewHandlers(){
       const v = veiculoAtivo();
       if(wrap && v){
         wrap.innerHTML = renderVeiculoTabConteudo(v);
-        document.querySelectorAll('#veiculoTabsRow [data-tab]').forEach(b=>b.classList.toggle('active', b.dataset.tab===veiculoTabAtiva));
+        document.querySelectorAll('#veiculoTabsRow [data-tab]').forEach(b=>{
+          b.classList.toggle('active', b.dataset.tab===veiculoTabAtiva);
+          b.replaceWith(b.cloneNode(true)); // remove qualquer listener antigo antes de religar
+        });
         attachViewHandlers();
       }
     });
