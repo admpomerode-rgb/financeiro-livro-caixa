@@ -1685,7 +1685,7 @@ function saldoContaEmData(contaId, dataISO){
 }
 // Últimos N dias de saldo da conta, pra desenhar a sparkline
 function saldoContaHistorico(contaId, dias){
-  const hoje = new Date();
+  const hoje = new Date(todayISO()+'T12:00:00');
   const pontos = [];
   for(let i=dias-1;i>=0;i--){
     const d = new Date(hoje); d.setDate(d.getDate()-i);
@@ -1908,7 +1908,7 @@ function custoInvestidoEmData(contaId, dataISO){
   }).reduce((s,a)=>s+(a.valorAplicado||0),0);
 }
 function custoInvestidoHistorico(contaId, dias){
-  const hoje = new Date();
+  const hoje = new Date(todayISO()+'T12:00:00');
   const pontos = [];
   for(let i=dias-1;i>=0;i--){
     const d = new Date(hoje); d.setDate(d.getDate()-i);
@@ -2079,7 +2079,7 @@ function viewRelatoriosInvestimentos(){
   const maioresPerdas = [...comResultado].filter(a=>a.resultado<0).sort((a,b)=>a.resultado-b.resultado).slice(0,5);
 
   // 4/5. Aportes e Resgates (últimos 12 meses)
-  const de12m = new Date(); de12m.setFullYear(de12m.getFullYear()-1);
+  const de12m = new Date(todayISO()+'T12:00:00'); de12m.setFullYear(de12m.getFullYear()-1);
   const de12mISO = de12m.toISOString().slice(0,10);
   const aportesRecentes = state.ativosInvestimento.filter(a=>a.dataAplicacao>=de12mISO).sort((a,b)=>b.dataAplicacao.localeCompare(a.dataAplicacao));
   const resgatesRecentes = ativosEncerrados.filter(a=>a.dataResgate>=de12mISO).sort((a,b)=>b.dataResgate.localeCompare(a.dataResgate));
@@ -4069,7 +4069,7 @@ function pendentesResumo(){
 
 function contasVencendoResumo(){
   const hoje = todayISO();
-  const em7dias = new Date(); em7dias.setDate(em7dias.getDate()+7);
+  const em7dias = new Date(todayISO()+'T12:00:00'); em7dias.setDate(em7dias.getDate()+7);
   const em7ISO = em7dias.toISOString().slice(0,10);
   const atrasadas = [], venceEmBreve = [];
   state.lancamentos.forEach(l=>{
@@ -4254,7 +4254,7 @@ function projecaoSaldoBaixo(dias){
   dias = dias || 30;
   const hoje = todayISO();
   const saldoAtual = totaisPorMesRef(hoje.slice(0,7)).saldoAtual;
-  const fim = new Date(); fim.setDate(fim.getDate()+dias);
+  const fim = new Date(todayISO()+'T12:00:00'); fim.setDate(fim.getDate()+dias);
   const fimISO = fim.toISOString().slice(0,10);
   const pendentes = state.lancamentos.filter(l=>l.status==='pendente' && l.dataVencimento && l.dataVencimento>hoje && l.dataVencimento<=fimISO).map(l=>({ data: l.dataVencimento, valor: l.tipo==='entrada'?valorEmAberto(l):-valorEmAberto(l) }));
   const previsoes = (state.previsoesGastoFuturo||[]).filter(p=>!p.convertida && p.dataPrevista && p.dataPrevista>hoje && p.dataPrevista<=fimISO).map(p=>({ data: p.dataPrevista, valor: -p.valorEstimado }));
@@ -4805,7 +4805,7 @@ function cardQualidadeDadosHTML(){
 function cardCentralDecisaoCompactoHTML(){
   const hoje = todayISO();
   const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
-  const de90 = new Date(); de90.setDate(de90.getDate()-90);
+  const de90 = new Date(todayISO()+'T12:00:00'); de90.setDate(de90.getDate()-90);
   const gastoMedioDiario = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90.toISOString().slice(0,10) && ev.data<=hoje && !ehMovimentoDeCapital(ev)).reduce((s,ev)=>s+ev.valor,0)/90;
   const sobraAcimaDaReserva = Math.max(0, saldoContasHoje - gastoMedioDiario*60);
   return `
@@ -4831,7 +4831,7 @@ function montarTextoResumoFalado(){
   const insights = gerarInsightsFinanceiros();
   const risco = insights.find(i=>i.tipo==='risco');
   const oportunidade = insights.find(i=>i.tipo==='oportunidade');
-  const em7 = new Date(); em7.setDate(em7.getDate()+7);
+  const em7 = new Date(todayISO()+'T12:00:00'); em7.setDate(em7.getDate()+7);
   const vencendo7dias = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento>=hoje && l.dataVencimento<=em7.toISOString().slice(0,10)).length;
   const partes = [];
   partes.push(`Hoje o caixa está ${dm.margemLiquidaPct>=0?'saudável':'em atenção'}.`);
@@ -4881,7 +4881,7 @@ function centroComandoHTML(){
   const t = totaisPorMesRef(mesGlobalRef);
   const dadosMesCC = dadosMesGerencial(mesGlobalRef, 'todos');
   const scoreAtual = calcularHealthScoreEm(hoje, mesGlobalRef).scoreTotal;
-  const em7 = new Date(); em7.setDate(em7.getDate()+7);
+  const em7 = new Date(todayISO()+'T12:00:00'); em7.setDate(em7.getDate()+7);
   const em7ISO = em7.toISOString().slice(0,10);
   const vencendo7dias = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento>=hoje && l.dataVencimento<=em7ISO);
   const acoes = [...riscos, ...atencoes].slice(0,4);
@@ -5532,7 +5532,7 @@ function viewFluxo(categoriaFiltro){
   const maxSaldoAbs = Math.max(1, ...saldoPorDia.map(d=>Math.abs(d.saldo)));
 
   // Fôlego de caixa (Runway): saldo atual ÷ gasto médio diário dos últimos 90 dias
-  const de90 = new Date(); de90.setDate(de90.getDate()-90);
+  const de90 = new Date(todayISO()+'T12:00:00'); de90.setDate(de90.getDate()-90);
   const de90ISO = de90.toISOString().slice(0,10);
   const gastos90dias = todosEventos.filter(ev=>ev.tipo==='saida' && ev.data>=de90ISO && ev.data<=hoje).reduce((s,ev)=>s+ev.valor,0);
   const gastoMedioDiario = gastos90dias / 90;
@@ -5542,7 +5542,7 @@ function viewFluxo(categoriaFiltro){
   // Categorias disponíveis pro filtro (só as que têm movimento no mês)
   const categoriasNoMes = [...new Set(todosEventos.filter(ev=>(ev.data||'')>=deMes && (ev.data||'')<=ateMes).map(ev=>ev.categoria))].sort();
 
-  const em60dias = new Date(); em60dias.setDate(em60dias.getDate()+60);
+  const em60dias = new Date(todayISO()+'T12:00:00'); em60dias.setDate(em60dias.getDate()+60);
   const em60ISO = em60dias.toISOString().slice(0,10);
   let pendentes = state.lancamentos.filter(l=>l.status==='pendente' && l.origem!=='transferencia' && l.origem!=='investimento' && l.dataVencimento && l.dataVencimento<=em60ISO);
   pendentes.sort((a,b)=>(a.dataVencimento||'').localeCompare(b.dataVencimento||''));
@@ -6329,7 +6329,7 @@ function openCenarioModal(cenario){
       const dias = numBR(document.getElementById('cenDias').value);
       if(isNaN(valor) || valor<=0 || isNaN(dias) || dias<=0){ showToast('Preencha valor e dias de atraso'); return; }
       const mesesDeslocados = Math.max(1, Math.round(dias/30));
-      const dataRecuperacao = new Date(); dataRecuperacao.setMonth(dataRecuperacao.getMonth()+mesesDeslocados);
+      const dataRecuperacao = new Date(todayISO()+'T12:00:00'); dataRecuperacao.setMonth(dataRecuperacao.getMonth()+mesesDeslocados);
       if(!state.simulacaoAtual) state.simulacaoAtual = [];
       state.simulacaoAtual.push({ id:uid(), descricao:`Atraso de recebimento — falta esse mês (${dias} dias de atraso)`, tipo:'saida', valor:Math.round(valor*100)/100, data:hoje, recorrente:false, parcelas:null });
       state.simulacaoAtual.push({ id:uid(), descricao:`Atraso de recebimento — recuperado ${mesesDeslocados} mês(es) depois`, tipo:'entrada', valor:Math.round(valor*100)/100, data:dataRecuperacao.toISOString().slice(0,10), recorrente:false, parcelas:null });
@@ -6861,7 +6861,7 @@ function viewContas(){
   // 'manual' mantém a ordem já salva em state.contas (drag-to-reorder)
 
   const hoje = todayISO();
-  const em90dias = new Date(); em90dias.setDate(em90dias.getDate()-90);
+  const em90dias = new Date(todayISO()+'T12:00:00'); em90dias.setDate(em90dias.getDate()-90);
   const em90ISO = em90dias.toISOString().slice(0,10);
 
   const cardHTML = (c) => {
@@ -9661,7 +9661,7 @@ function renderRentabilidadeProduto(periodo){
 function projecaoDiariaSaldo(dias){
   const hoje = todayISO();
   const saldoHoje = totaisPorMesRef(hoje.slice(0,7)).saldoAtual;
-  const fim = new Date(); fim.setDate(fim.getDate()+dias);
+  const fim = new Date(todayISO()+'T12:00:00'); fim.setDate(fim.getDate()+dias);
   const fimISO = fim.toISOString().slice(0,10);
   const pendentes = state.lancamentos.filter(l=>l.status==='pendente' && l.dataVencimento && l.dataVencimento>hoje && l.dataVencimento<=fimISO);
   const previsoes = (state.previsoesGastoFuturo||[]).filter(p=>!p.convertida && p.dataPrevista && p.dataPrevista>hoje && p.dataPrevista<=fimISO);
@@ -9690,9 +9690,9 @@ function projecaoDiariaSaldo(dias){
   const pontos = [];
   let saldo = saldoHoje;
   const passo = dias<=30 ? 1 : dias<=60 ? 2 : dias<=180 ? 7 : 15;
-  const d = new Date();
+  const d = new Date(todayISO()+'T12:00:00');
   for(let i=0; i<=dias; i++){
-    const dataRef = new Date(); dataRef.setDate(d.getDate()+i);
+    const dataRef = new Date(todayISO()+'T12:00:00'); dataRef.setDate(d.getDate()+i);
     const ref = dataRef.toISOString().slice(0,10);
     saldo += (porDia[ref]||0);
     if(i % passo === 0 || i===dias){
@@ -9850,7 +9850,7 @@ function renderStressTest(){
 }
 
 function todayISOMais(dias){
-  const d = new Date(); d.setDate(d.getDate()+dias);
+  const d = new Date(todayISO()+'T12:00:00'); d.setDate(d.getDate()+dias);
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
@@ -10742,7 +10742,7 @@ function gerarInsightsFinanceiros(){
 
   // RISCO — fôlego de caixa curto
   const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
-  const de90 = new Date(); de90.setDate(de90.getDate()-90);
+  const de90 = new Date(todayISO()+'T12:00:00'); de90.setDate(de90.getDate()-90);
   const gastoMedioDiario = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90.toISOString().slice(0,10) && ev.data<=hoje && !ehMovimentoDeCapital(ev)).reduce((s,ev)=>s+ev.valor,0)/90;
   const foldegoDias = gastoMedioDiario>0 ? saldoContasHoje/gastoMedioDiario : null;
   if(foldegoDias!==null && foldegoDias<15) insights.push({ tipo:'risco', titulo:'Fôlego de caixa curto', texto:`No ritmo médio de gastos, o saldo atual aguenta só mais ${Math.round(foldegoDias)} dia(s) sem entrar dinheiro novo.`, goto:'view', view:'fluxo' });
@@ -10847,7 +10847,7 @@ function renderCentralInteligencia(){
 // objetiva de pendências, sem classificação de risco/oportunidade.
 function renderCentralAlertas(){
   const hoje = todayISO();
-  const em7 = new Date(); em7.setDate(em7.getDate()+7);
+  const em7 = new Date(todayISO()+'T12:00:00'); em7.setDate(em7.getDate()+7);
   const em7ISO = em7.toISOString().slice(0,10);
   const alertas = [];
 
@@ -10884,7 +10884,7 @@ function renderCentralAlertas(){
   const abaixoMinimo = (state.estoqueInsumos||[]).filter(i=>i.estoqueMinimo>0 && i.quantidade<i.estoqueMinimo).length;
   if(abaixoMinimo) alertas.push({ icone:'🟡', titulo:'Insumos abaixo do mínimo', texto:`${abaixoMinimo} item(ns)`, view:'relatorios' });
 
-  const em60 = new Date(); em60.setDate(em60.getDate()+60);
+  const em60 = new Date(todayISO()+'T12:00:00'); em60.setDate(em60.getDate()+60);
   const em60ISO = em60.toISOString().slice(0,10);
   const garantiasVencendo = (state.ativosPatrimoniais||[]).filter(a=>!a.baixa && a.garantiaMeses && a.dataAquisicao).filter(a=>{
     const d = new Date(a.dataAquisicao); d.setMonth(d.getMonth()+Number(a.garantiaMeses));
@@ -10980,7 +10980,7 @@ function renderCalendarioFinanceiro(){
 
 function renderCalendarioVencimentos(){
   const hoje = todayISO();
-  const em90 = new Date(); em90.setDate(em90.getDate()+90);
+  const em90 = new Date(todayISO()+'T12:00:00'); em90.setDate(em90.getDate()+90);
   const em90ISO = em90.toISOString().slice(0,10);
   const itens = [];
   (state.contratos||[]).forEach(c=>{
@@ -11285,7 +11285,7 @@ function renderAmortizacaoEmprestimos(){
 // 58. Seguros de Ativos — vigência e alerta de vencimento próximo
 function renderSegurosAtivos(){
   const hoje = todayISO();
-  const em60 = new Date(); em60.setDate(em60.getDate()+60);
+  const em60 = new Date(todayISO()+'T12:00:00'); em60.setDate(em60.getDate()+60);
   const em60ISO = em60.toISOString().slice(0,10);
   const comSeguro = (state.ativosPatrimoniais||[]).filter(a=>!a.baixa && a.seguradora);
   const totalPremio = comSeguro.reduce((s,a)=>s+(a.seguroPremio||0),0);
@@ -12184,8 +12184,8 @@ function renderVendasCanceladas(){
 // 8. Comprometimento Futuro — quanto do dinheiro futuro já está comprometido com obrigações
 function renderComprometimentoFuturo(){
   const hoje = todayISO();
-  const em30 = new Date(); em30.setDate(em30.getDate()+30);
-  const em90 = new Date(); em90.setDate(em90.getDate()+90);
+  const em30 = new Date(todayISO()+'T12:00:00'); em30.setDate(em30.getDate()+30);
+  const em90 = new Date(todayISO()+'T12:00:00'); em90.setDate(em90.getDate()+90);
   const em30ISO = em30.toISOString().slice(0,10), em90ISO = em90.toISOString().slice(0,10);
   const aPagarPendente = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia');
   const total30 = aPagarPendente.filter(l=>l.dataVencimento<=em30ISO).reduce((s,l)=>s+valorEmAberto(l),0);
@@ -12434,8 +12434,8 @@ function renderCapitalDeGiro(){
 // 26. Endividamento por Vencimento — dívidas separadas por curto (30d), médio (30-180d) e longo prazo (180d+)
 function renderEndividamentoPorVencimento(){
   const hoje = todayISO();
-  const em30 = new Date(); em30.setDate(em30.getDate()+30);
-  const em180 = new Date(); em180.setDate(em180.getDate()+180);
+  const em30 = new Date(todayISO()+'T12:00:00'); em30.setDate(em30.getDate()+30);
+  const em180 = new Date(todayISO()+'T12:00:00'); em180.setDate(em180.getDate()+180);
   const em30ISO = em30.toISOString().slice(0,10), em180ISO = em180.toISOString().slice(0,10);
   const pendentes = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia');
   const curtoPrazo = pendentes.filter(l=>l.dataVencimento<=em30ISO).reduce((s,l)=>s+valorEmAberto(l),0);
@@ -12621,7 +12621,7 @@ function renderLucroPorCanal(){
 // 27. Obrigações Futuras — consolida TUDO que vence: contas, impostos, cartões, parcelas, contratos
 function renderObrigacoesFuturas(){
   const hoje = todayISO();
-  const em90 = new Date(); em90.setDate(em90.getDate()+90);
+  const em90 = new Date(todayISO()+'T12:00:00'); em90.setDate(em90.getDate()+90);
   const em90ISO = em90.toISOString().slice(0,10);
   const itens = [];
   state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento && l.dataVencimento<=em90ISO).forEach(l=>{
@@ -12691,7 +12691,7 @@ function renderEvolucaoPatrimonial(){
 function renderGiroCaixa(){
   const hoje = todayISO();
   const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
-  const de90 = new Date(); de90.setDate(de90.getDate()-90);
+  const de90 = new Date(todayISO()+'T12:00:00'); de90.setDate(de90.getDate()-90);
   const de90ISO = de90.toISOString().slice(0,10);
   const eventos90 = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90ISO && ev.data<=hoje && !ehMovimentoDeCapital(ev));
   const gastoMedioDiario = eventos90.reduce((s,ev)=>s+ev.valor,0)/90;
@@ -12754,7 +12754,7 @@ function renderNCG(){
 // 5. Caixa Mínimo Recomendado — reserva mínima baseada no histórico de despesas/compromissos
 function renderCaixaMinimoRecomendado(){
   const hoje = todayISO();
-  const de90 = new Date(); de90.setDate(de90.getDate()-90);
+  const de90 = new Date(todayISO()+'T12:00:00'); de90.setDate(de90.getDate()-90);
   const de90ISO = de90.toISOString().slice(0,10);
   const eventos90 = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90ISO && ev.data<=hoje && !ehMovimentoDeCapital(ev));
   const gastoMedioDiario = eventos90.reduce((s,ev)=>s+ev.valor,0)/90;
@@ -12861,7 +12861,7 @@ function renderDesembolsoFinanceiro(mesRef){
 
 // 13. Compromissos por Semana — visão semanal dos próximos desembolsos e recebimentos
 function renderCompromissosPorSemana(){
-  const hoje = new Date();
+  const hoje = new Date(todayISO()+'T12:00:00');
   const semanas = [];
   for(let i=0;i<8;i++){
     const inicio = new Date(hoje); inicio.setDate(inicio.getDate()+i*7 - hoje.getDay());
@@ -12891,7 +12891,7 @@ function renderRiscoCaixaPorData(){
   const proj = projecaoDiariaSaldo(90);
   const hoje = todayISO();
   const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
-  const de90 = new Date(); de90.setDate(de90.getDate()-90);
+  const de90 = new Date(todayISO()+'T12:00:00'); de90.setDate(de90.getDate()-90);
   const gastoMedioDiario = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90.toISOString().slice(0,10) && ev.data<=hoje && !ehMovimentoDeCapital(ev)).reduce((s,ev)=>s+ev.valor,0)/90;
   const limiteAlerta = gastoMedioDiario*7; // menos de 1 semana de fôlego é considerado crítico
   const diasCriticos = proj.pontos.filter(p=>p.saldo<limiteAlerta);
@@ -13175,7 +13175,7 @@ function renderDiagnosticoAutomatico(mesRef){
   if(pctTop3>=30) linhas.push({ cor: pctTop3>=50?'🔴':'🟡', texto:`${pctTop3.toFixed(0)}% dos recebimentos estão concentrados em 3 clientes.`, peso:pctTop3, tipo:'concentracao' });
   // Caixa vs mínimo recomendado
   const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
-  const de90 = new Date(); de90.setDate(de90.getDate()-90);
+  const de90 = new Date(todayISO()+'T12:00:00'); de90.setDate(de90.getDate()-90);
   const gastoMedioDiario = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90.toISOString().slice(0,10) && ev.data<=hoje && !ehMovimentoDeCapital(ev)).reduce((s,ev)=>s+ev.valor,0)/90;
   const minimoRecomendado = gastoMedioDiario*30;
   linhas.push({ cor: saldoContasHoje>=minimoRecomendado?'🟢':'🔴', texto:`Caixa ${saldoContasHoje>=minimoRecomendado?'está acima':'está abaixo'} do mínimo recomendado (${brl(minimoRecomendado)}).`, peso: saldoContasHoje>=minimoRecomendado?5:30, tipo:'caixa' });
@@ -13502,7 +13502,7 @@ function renderLucroDeVerdade(mesRef){
 // Caixa que Parece Livre — dinheiro em conta que parece disponível mas já está comprometido em 30 dias
 function renderCaixaQueParecelivre(){
   const hoje = todayISO();
-  const em30 = new Date(); em30.setDate(em30.getDate()+30);
+  const em30 = new Date(todayISO()+'T12:00:00'); em30.setDate(em30.getDate()+30);
   const em30ISO = em30.toISOString().slice(0,10);
   const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
   const comprometido30d = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento<=em30ISO).reduce((s,l)=>s+valorEmAberto(l),0);
@@ -13746,7 +13746,7 @@ function renderSimuladorCrescimento(){
 // Limite de Crescimento Seguro — até quanto dá pra crescer sem faltar capital de giro
 function renderLimiteCrescimentoSeguro(){
   const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
-  const de90 = new Date(); de90.setDate(de90.getDate()-90);
+  const de90 = new Date(todayISO()+'T12:00:00'); de90.setDate(de90.getDate()-90);
   const gastoMedioDiario = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90.toISOString().slice(0,10) && ev.data<=todayISO() && !ehMovimentoDeCapital(ev)).reduce((s,ev)=>s+ev.valor,0)/90;
   const reservaMinima = gastoMedioDiario*60;
   const folgaDisponivel = Math.max(0, saldoContasHoje-reservaMinima);
@@ -13809,7 +13809,7 @@ function renderOQueFariaSeFosseDono(){
   const pctTop3 = totalCli>0 ? (top3valor/totalCli*100) : 0;
 
   const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
-  const de90 = new Date(); de90.setDate(de90.getDate()-90);
+  const de90 = new Date(todayISO()+'T12:00:00'); de90.setDate(de90.getDate()-90);
   const gastoMedioDiario = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90.toISOString().slice(0,10) && ev.data<=hoje && !ehMovimentoDeCapital(ev)).reduce((s,ev)=>s+ev.valor,0)/90;
   const reservaMinima = gastoMedioDiario*60;
   const caixaSeguro = Math.max(0, saldoContasHoje-reservaMinima);
@@ -13984,7 +13984,7 @@ function renderDistanciaAtePrejuizo(){
 function renderDistanciaAteCaixaCritico(){
   const hoje = todayISO();
   const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
-  const de90 = new Date(); de90.setDate(de90.getDate()-90);
+  const de90 = new Date(todayISO()+'T12:00:00'); de90.setDate(de90.getDate()-90);
   const gastoMedioDiario = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90.toISOString().slice(0,10) && ev.data<=hoje && !ehMovimentoDeCapital(ev)).reduce((s,ev)=>s+ev.valor,0)/90;
   const nivelCritico = gastoMedioDiario*7; // referência já usada em Risco de Caixa por Data
   const distancia = saldoContasHoje-nivelCritico;
@@ -14090,7 +14090,7 @@ function renderAlavancagemOperacional(){
 function detectarDecisoesAutomaticas(){
   const decisoes = [];
   const hoje = todayISO();
-  const em30 = new Date(); em30.setDate(em30.getDate()+30);
+  const em30 = new Date(todayISO()+'T12:00:00'); em30.setDate(em30.getDate()+30);
   const em30ISO = em30.toISOString().slice(0,10);
 
   (state.contratos||[]).filter(ct=>ct.vigenciaFim && ct.vigenciaFim>=hoje && ct.vigenciaFim<=em30ISO).forEach(ct=>{
@@ -14098,7 +14098,7 @@ function detectarDecisoesAutomaticas(){
   });
 
   const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
-  const de90 = new Date(); de90.setDate(de90.getDate()-90);
+  const de90 = new Date(todayISO()+'T12:00:00'); de90.setDate(de90.getDate()-90);
   const gastoMedioDiario = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90.toISOString().slice(0,10) && ev.data<=hoje && !ehMovimentoDeCapital(ev)).reduce((s,ev)=>s+ev.valor,0)/90;
   const reservaMinima = gastoMedioDiario*60;
   const excedente = saldoContasHoje - reservaMinima;
@@ -14173,7 +14173,7 @@ function renderSaudePorArea(){
   const hoje = todayISO();
   const dm = dadosMesGerencial(mesGlobalRef,'todos');
   const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
-  const de90 = new Date(); de90.setDate(de90.getDate()-90);
+  const de90 = new Date(todayISO()+'T12:00:00'); de90.setDate(de90.getDate()-90);
   const gastoMedioDiario = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90.toISOString().slice(0,10) && ev.data<=hoje && !ehMovimentoDeCapital(ev)).reduce((s,ev)=>s+ev.valor,0)/90;
   const foldegoDias = gastoMedioDiario>0 ? saldoContasHoje/gastoMedioDiario : 60;
 
@@ -14299,7 +14299,7 @@ function renderDNAFinanceiro(){
   const hoje = todayISO();
   const dm = dadosMesGerencial(mesGlobalRef, 'todos');
   const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
-  const de90 = new Date(); de90.setDate(de90.getDate()-90);
+  const de90 = new Date(todayISO()+'T12:00:00'); de90.setDate(de90.getDate()-90);
   const gastoMedioDiario = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90.toISOString().slice(0,10) && ev.data<=hoje && !ehMovimentoDeCapital(ev)).reduce((s,ev)=>s+ev.valor,0)/90;
   const foldegoDias = gastoMedioDiario>0 ? saldoContasHoje/gastoMedioDiario : 60;
   const nivelLiquidez = foldegoDias>=90?'Alta':foldegoDias>=30?'Média':'Baixa';
@@ -14526,7 +14526,7 @@ function verificarConquistas(){
 
   const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
   const hoje = todayISO();
-  const de90 = new Date(); de90.setDate(de90.getDate()-90);
+  const de90 = new Date(todayISO()+'T12:00:00'); de90.setDate(de90.getDate()-90);
   const gastoMedioDiario = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90.toISOString().slice(0,10) && ev.data<=hoje && !ehMovimentoDeCapital(ev)).reduce((s,ev)=>s+ev.valor,0)/90;
   const caixaMinimo = gastoMedioDiario*60;
   if(saldoContasHoje>=caixaMinimo && caixaMinimo>0 && !jaDesbloqueadas.has('caixa_minimo_atingido')) novasDesbloqueadas.push({ id:'caixa_minimo_atingido', titulo:'Caixa mínimo recomendado atingido', icone:'🏆' });
@@ -15871,7 +15871,7 @@ function calcularHealthScoreEm(dataRefISO, mesRef){
 
 function renderHealthScore(){
   const hoje = todayISO();
-  const meses = Array.from({length:12},(_,i)=>{ const d = new Date(); d.setMonth(d.getMonth()-11+i); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const meses = Array.from({length:12},(_,i)=>{ const d = new Date(todayISO()+'T12:00:00'); d.setMonth(d.getMonth()-11+i); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
   const historico = meses.map(m=>{
     const [a,mm] = m.split('-').map(Number);
     const ultimoDiaMes = new Date(a,mm,0).getDate();
@@ -17797,7 +17797,7 @@ function viewAtivoPatrimonialDetalhe(id){
         `).join('') : `<div class="empty">Nenhuma manutenção registrada.</div>`}
       </div>
       ${(()=>{
-        const doze = new Date(); doze.setDate(doze.getDate()-365);
+        const doze = new Date(todayISO()+'T12:00:00'); doze.setDate(doze.getDate()-365);
         const dozeISO = doze.toISOString().slice(0,10);
         const custoManutUltimoAno = manutencoes.filter(m=>m.data>=dozeISO).reduce((s,m)=>s+(m.custo||0),0);
         if(d.valorAtual>0 && custoManutUltimoAno > d.valorAtual*0.5){
@@ -22183,7 +22183,7 @@ function attachViewHandlers(){
         const el = document.getElementById('dominoResultado');
         if(!nome){ el.innerHTML=''; return; }
         const hoje = todayISO();
-        const em30 = new Date(); em30.setDate(em30.getDate()+30);
+        const em30 = new Date(todayISO()+'T12:00:00'); em30.setDate(em30.getDate()+30);
         const em30ISO = em30.toISOString().slice(0,10);
         const valorEsperado = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.fornecedor===nome).reduce((s,l)=>s+valorEmAberto(l),0);
         const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
@@ -22386,7 +22386,7 @@ function attachViewHandlers(){
           document.getElementById('mtVendasLabel').textContent = `${pctVendas>=0?'+':''}${pctVendas}%`;
           document.getElementById('mtDespesasLabel').textContent = `${pctDespesas>=0?'+':''}${pctDespesas}%`;
           const receitaMediaMensal = mediaReceitaMensalRecente();
-          const de90 = new Date(); de90.setDate(de90.getDate()-90);
+          const de90 = new Date(todayISO()+'T12:00:00'); de90.setDate(de90.getDate()-90);
           const gastoMedioDiario = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90.toISOString().slice(0,10) && ev.data<=todayISO() && !ehMovimentoDeCapital(ev)).reduce((s,ev)=>s+ev.valor,0)/90;
           const mesesNoHorizonte = diasHorizonte/30;
           const impactoVendas = receitaMediaMensal*mesesNoHorizonte*(pctVendas/100);
@@ -22869,7 +22869,7 @@ function attachViewHandlers(){
   if(currentView==='central-decisao'){
     const hoje = todayISO();
     const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
-    const de90 = new Date(); de90.setDate(de90.getDate()-90);
+    const de90 = new Date(todayISO()+'T12:00:00'); de90.setDate(de90.getDate()-90);
     const de90ISO = de90.toISOString().slice(0,10);
     const gastoMedioDiario = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90ISO && ev.data<=hoje && !ehMovimentoDeCapital(ev)).reduce((s,ev)=>s+ev.valor,0)/90;
     const reservaMinima60d = gastoMedioDiario*60;
@@ -25009,7 +25009,7 @@ function totalGastoFornecedor(nome){
 let buscaGlobalTermo = '';
 function calcularCaixaLivreAssistente(){
   const hoje = todayISO();
-  const em30 = new Date(); em30.setDate(em30.getDate()+30);
+  const em30 = new Date(todayISO()+'T12:00:00'); em30.setDate(em30.getDate()+30);
   const em30ISO = em30.toISOString().slice(0,10);
   const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
   const comprometido30d = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento<=em30ISO).reduce((s,l)=>s+valorEmAberto(l),0);
@@ -25331,7 +25331,7 @@ function viewComparadorDecisoes(){
 function viewCentralDecisao(){
   const hoje = todayISO();
   const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
-  const de90 = new Date(); de90.setDate(de90.getDate()-90);
+  const de90 = new Date(todayISO()+'T12:00:00'); de90.setDate(de90.getDate()-90);
   const de90ISO = de90.toISOString().slice(0,10);
   const gastoMedioDiario = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de90ISO && ev.data<=hoje && !ehMovimentoDeCapital(ev)).reduce((s,ev)=>s+ev.valor,0)/90;
   const reservaMinima60d = gastoMedioDiario*60;
@@ -25484,8 +25484,8 @@ function ultimaCompraFornecedor(nome){
 // — mesma janela usada em outros detectores de anomalia do sistema, sem inventar um critério novo.
 function aumentoPrecoFornecedor(nome){
   const hoje = todayISO();
-  const de90 = new Date(); de90.setDate(de90.getDate()-90);
-  const de180 = new Date(); de180.setDate(de180.getDate()-180);
+  const de90 = new Date(todayISO()+'T12:00:00'); de90.setDate(de90.getDate()-90);
+  const de180 = new Date(todayISO()+'T12:00:00'); de180.setDate(de180.getDate()-180);
   const recentes = state.lancamentos.filter(l=>l.tipo==='saida' && l.fornecedor===nome && l.status==='pago' && l.dataPagamento>=de90.toISOString().slice(0,10));
   const anteriores = state.lancamentos.filter(l=>l.tipo==='saida' && l.fornecedor===nome && l.status==='pago' && l.dataPagamento>=de180.toISOString().slice(0,10) && l.dataPagamento<de90.toISOString().slice(0,10));
   if(!recentes.length || !anteriores.length) return null;
@@ -25847,7 +25847,7 @@ function openRecorrenciaModal(existing, contaPreSelecionadaId){
 
 function contratosVencendoResumo(){
   const hoje = todayISO();
-  const em30 = new Date(); em30.setDate(em30.getDate()+30);
+  const em30 = new Date(todayISO()+'T12:00:00'); em30.setDate(em30.getDate()+30);
   const em30ISO = em30.toISOString().slice(0,10);
   const lista = state.contratos||[];
   return {
@@ -25873,7 +25873,7 @@ function statusMeta(m, atual){
   if(!m.prazo || !(m.aporteMensalPlanejado>0)) return null;
   const falta = m.valorAlvo-atual;
   const mesesNecessarios = falta/m.aporteMensalPlanejado;
-  const dataProjetada = new Date(); dataProjetada.setMonth(dataProjetada.getMonth()+Math.ceil(mesesNecessarios));
+  const dataProjetada = new Date(todayISO()+'T12:00:00'); dataProjetada.setMonth(dataProjetada.getMonth()+Math.ceil(mesesNecessarios));
   const prazo = new Date(m.prazo);
   const folgaDias = Math.floor((prazo-dataProjetada)/86400000);
   if(folgaDias<0) return 'atrasada';
