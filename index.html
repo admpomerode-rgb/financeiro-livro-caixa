@@ -1072,7 +1072,10 @@ function fmtDateExtenso(d){
   const semanaCap = semana.charAt(0).toUpperCase()+semana.slice(1);
   return `${semanaCap}, ${dt.getDate()} de ${mes} de ${dt.getFullYear()}`;
 }
-function todayISO(){ return new Date().toISOString().slice(0,10); }
+function todayISO(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
 
 // Temas de cor — só troca as CSS custom properties já usadas em todo o sistema (--blue-deep e
 // --blue-accent), sem alterar nenhum outro estilo, componente ou lógica. Azul é o padrão original.
@@ -9846,7 +9849,10 @@ function renderStressTest(){
   `;
 }
 
-function todayISOMais(dias){ const d = new Date(); d.setDate(d.getDate()+dias); return d.toISOString().slice(0,10); }
+function todayISOMais(dias){
+  const d = new Date(); d.setDate(d.getDate()+dias);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
 
 function renderSplitSocios(){
   if(!state.socios) state.socios = [];
