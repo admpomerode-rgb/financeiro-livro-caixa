@@ -1288,6 +1288,8 @@ let investimentosOrdenacao = 'valor';
 let investimentosBusca = '';
 let investimentosMostrarArquivadas = false;
 let comissaoVendedorSelecionado = '';
+let comissaoAnaliseFiltro = { dataDe: null, dataAte: null, vendedorId: '', cliente: '', status: '' };
+let comissaoRelatorioAba = 'representantes';
 let comissaoDataDeSelecionada = null;
 let comissaoDataAteSelecionada = null;
 let comissaoAbaSelecionada = 'pendentes';
@@ -18414,18 +18416,239 @@ function openOportunidadeModal(){
   });
 }
 
+// ====================== ANÁLISE DE COMISSÕES ======================
+// Função central — TUDO no painel de análise passa por aqui. Não recalcula nada que já existisse:
+// reaproveita itensComissaoNoPeriodo() e a mesma lógica de "item pago" já usada na tela operacional.
+// Os 4 status pedidos (pendente/aprovada/paga/cancelada) já existiam organicamente no fluxo — só
+// não eram apresentados assim: pendente = venda ainda sem pagamento gerado; aprovada = pagamento já
+// gerado (existe em comissoesPagas) mas a despesa ainda não foi paga no financeiro; paga = a despesa
+// já foi paga; cancelada = o pedido de origem foi cancelado no VK.
+function extrairNumeroPedido(descricao){
+  const m = (descricao||'').match(/Pedido N[°ºo]\s*(\S+)/i);
+  return m ? m[1] : null;
+}
+function dadosComissaoAnalise(dataDe, dataAte){
+  const itens = [];
+
+  // Vendas canceladas no período — mostradas como "cancelada", não escondidas
+  state.lancamentos.forEach(l=>{
+    if(l.origem==='vk' && l.status==='cancelado' && l.dataVencimento>=dataDe && l.dataVencimento<=dataAte){
+      itens.push({ origem:'vk', id:l.id, vendedorId:l.vendedorId||null, descricao:l.descricao, cliente:l.fornecedor||null,
+        numeroPedido: extrairNumeroPedido(l.descricao), data:l.dataVencimento, valorBase:l.valor, status:'cancelada',
+        percentual:null, comissaoValor:0 });
+    }
+  });
+
+  // Vendas ativas — pendente / aprovada / paga, conforme o estado real do pagamento gerado
+  itensComissaoNoPeriodo(dataDe, dataAte).forEach(it=>{
+    const registroPagamento = state.comissoesPagas.find(cp=>cp.itens.some(x=>x.origem===it.origem && x.id===it.id));
+    let status='pendente', percentual=null, comissaoValor=0;
+    if(registroPagamento){
+      const lanc = state.lancamentos.find(l=>l.id===registroPagamento.lancamentoDespesaId);
+      status = (lanc && lanc.status==='pago') ? 'paga' : 'aprovada';
+      percentual = registroPagamento.percentual;
+      // rateio proporcional do valor da comissão do lote entre os itens que o compõem
+      comissaoValor = registroPagamento.valorTotalVendido>0 ? (it.valorBase/registroPagamento.valorTotalVendido)*registroPagamento.comissaoValor : 0;
+    } else {
+      const vendedor = state.vendedores.find(v=>v.id===it.vendedorId);
+      percentual = vendedor ? (vendedor.comissaoPadrao||0) : 0;
+      comissaoValor = it.valorBase*percentual/100;
+    }
+    // Cliente vem de l.fornecedor pra itens 'vk' (campo reaproveitado); itens manuais não têm cliente
+    let cliente = null;
+    if(it.origem==='vk'){
+      const lanc = state.lancamentos.find(l=>l.id===it.id);
+      cliente = lanc?.fornecedor || null;
+    }
+    itens.push({ ...it, cliente, numeroPedido: extrairNumeroPedido(it.descricao), status, percentual, comissaoValor, estimado: !registroPagamento });
+  });
+
+  return itens;
+}
+function resumoComissaoAnalise(itens){
+  const ativos = itens.filter(it=>it.status!=='cancelada');
+  const totalVendas = ativos.reduce((s,it)=>s+it.valorBase,0);
+  const totalComissoes = ativos.reduce((s,it)=>s+it.comissaoValor,0);
+  const pagas = ativos.filter(it=>it.status==='paga').reduce((s,it)=>s+it.comissaoValor,0);
+  const aprovadas = ativos.filter(it=>it.status==='aprovada').reduce((s,it)=>s+it.comissaoValor,0);
+  const pendentes = ativos.filter(it=>it.status==='pendente').reduce((s,it)=>s+it.comissaoValor,0);
+  const ticketMedio = ativos.length>0 ? totalVendas/ativos.length : 0;
+  const pctMedia = totalVendas>0 ? totalComissoes/totalVendas*100 : null;
+  return { totalVendas, totalComissoes, pagas, aprovadas, pendentes, totalAPagar: aprovadas+pendentes, ticketMedio, pctMedia, qtdVendas: ativos.length };
+}
+function itensComissaoFiltrados(){
+  const f = comissaoAnaliseFiltro;
+  const dataDe = f.dataDe || primeiroDiaMes();
+  const dataAte = f.dataAte || todayISO();
+  let itens = dadosComissaoAnalise(dataDe, dataAte);
+  if(f.vendedorId) itens = itens.filter(it=>it.vendedorId===f.vendedorId);
+  if(f.cliente) itens = itens.filter(it=>it.cliente && it.cliente.toLowerCase().includes(f.cliente.toLowerCase()));
+  if(f.status) itens = itens.filter(it=>it.status===f.status);
+  return itens;
+}
+
+function barraRankingHTML(linhas, corBarra){
+  const max = Math.max(...linhas.map(l=>l.valor), 1);
+  return linhas.map(l=>`
+    <div style="margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;"><span style="font-weight:600;">${escapeHTML(l.nome)}</span><span class="mono">${brl(l.valor)}</span></div>
+      <div style="background:var(--bone);border-radius:5px;height:8px;overflow:hidden;"><div style="width:${(l.valor/max*100).toFixed(1)}%;height:100%;background:${corBarra};"></div></div>
+    </div>
+  `).join('');
+}
+
+function renderGraficosComissoes(){
+  const hoje = todayISO();
+  const mesRefAtual = hoje.slice(0,7);
+  // Últimos 12 meses — evolução, independente do filtro de período ativo (olhar histórico faz
+  // mais sentido sempre nos últimos 12 meses, não dentro de um filtro que pode ser de 1 semana)
+  const meses = Array.from({length:12},(_,i)=>{ const [ay,am]=mesRefAtual.split('-').map(Number); const d=new Date(ay,am-1-(11-i),1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const dadosPorMes = meses.map(m=>{
+    const [ay,am] = m.split('-').map(Number);
+    const de = `${m}-01`, ate = `${m}-${String(new Date(ay,am,0).getDate()).padStart(2,'0')}`;
+    const itensDoMes = dadosComissaoAnalise(de, ate).filter(it=>it.status!=='cancelada');
+    const totalVendas = itensDoMes.reduce((s,it)=>s+it.valorBase,0);
+    const totalComissoes = itensDoMes.reduce((s,it)=>s+it.comissaoValor,0);
+    return { mes:m, totalVendas, totalComissoes, pctMedia: totalVendas>0 ? totalComissoes/totalVendas*100 : 0 };
+  });
+  const labelsMeses = meses.map(m=>competenciaLabel(m).split('/')[0].slice(0,3));
+
+  const itens = itensComissaoFiltrados();
+  const ativos = itens.filter(it=>it.status!=='cancelada');
+
+  // Ranking por representante
+  const porRepresentante = {};
+  ativos.forEach(it=>{
+    const nome = nomeVendedor(it.vendedorId) || 'Sem representante';
+    if(!porRepresentante[nome]) porRepresentante[nome] = 0;
+    porRepresentante[nome] += it.comissaoValor;
+  });
+  const rankingRepresentantes = Object.entries(porRepresentante).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor).slice(0,10);
+
+  // Comissão por cliente
+  const porCliente = {};
+  ativos.forEach(it=>{
+    if(!it.cliente) return;
+    if(!porCliente[it.cliente]) porCliente[it.cliente] = 0;
+    porCliente[it.cliente] += it.comissaoValor;
+  });
+  const rankingClientes = Object.entries(porCliente).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor).slice(0,10);
+
+  // Pagas x Pendentes (inclui aprovadas junto de pendentes, já que ambas ainda não foram pagas de fato)
+  const totalPagas = ativos.filter(it=>it.status==='paga').reduce((s,it)=>s+it.comissaoValor,0);
+  const totalAprovadas = ativos.filter(it=>it.status==='aprovada').reduce((s,it)=>s+it.comissaoValor,0);
+  const totalPendentes = ativos.filter(it=>it.status==='pendente').reduce((s,it)=>s+it.comissaoValor,0);
+  const totalGeralStatus = totalPagas+totalAprovadas+totalPendentes;
+
+  return `
+    <div class="dash-section-label">📈 Evolução das comissões — últimos 12 meses</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:16px 18px;">
+      ${svgLinhasMultiplas([{ nome:'Comissões', valores:dadosPorMes.map(d=>d.totalComissoes), cor:'#3B6FE0' }], labelsMeses)}
+    </div></div>
+
+    <div class="dash-section-label">⚖️ Vendas × Comissões — últimos 12 meses</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:16px 18px;">
+      ${svgLinhasMultiplas([
+        { nome:'Vendas', valores:dadosPorMes.map(d=>d.totalVendas), cor:'#8A8F98' },
+        { nome:'Comissões', valores:dadosPorMes.map(d=>d.totalComissoes), cor:'#3B6FE0' },
+      ], labelsMeses)}
+    </div></div>
+
+    <div class="dash-section-label">📊 Evolução da % média de comissão</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:16px 18px;">
+      ${svgLinhasMultiplas([{ nome:'% média', valores:dadosPorMes.map(d=>d.pctMedia), cor:'#7B5CD6' }], labelsMeses)}
+    </div></div>
+
+    <div class="cards" style="grid-template-columns:1fr 1fr;margin-bottom:14px;">
+      <div class="panel"><div class="panel-head"><h2>🏆 Ranking por representante</h2></div><div class="panel-body" style="padding:16px 18px;">
+        ${rankingRepresentantes.length ? barraRankingHTML(rankingRepresentantes, '#3B6FE0') : '<div class="empty">Sem dados no período/filtro atual.</div>'}
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>👤 Comissão por cliente</h2></div><div class="panel-body" style="padding:16px 18px;">
+        ${rankingClientes.length ? barraRankingHTML(rankingClientes, '#20C997') : '<div class="empty">Sem dados no período/filtro atual.</div>'}
+      </div></div>
+    </div>
+
+    <div class="cards" style="grid-template-columns:1fr 1fr;margin-bottom:14px;">
+      <div class="panel"><div class="panel-head"><h2>✅ Pagas × Pendentes</h2></div><div class="panel-body" style="padding:16px 18px;">
+        ${totalGeralStatus>0 ? `
+        <div style="display:flex;height:22px;border-radius:6px;overflow:hidden;margin-bottom:10px;">
+          ${totalPagas>0?`<div style="width:${(totalPagas/totalGeralStatus*100).toFixed(1)}%;background:var(--success);"></div>`:''}
+          ${totalAprovadas>0?`<div style="width:${(totalAprovadas/totalGeralStatus*100).toFixed(1)}%;background:var(--blue-accent);"></div>`:''}
+          ${totalPendentes>0?`<div style="width:${(totalPendentes/totalGeralStatus*100).toFixed(1)}%;background:var(--warn);"></div>`:''}
+        </div>
+        <div style="font-size:11.5px;display:flex;flex-direction:column;gap:5px;">
+          <span>🟢 Pagas: <strong class="mono">${brl(totalPagas)}</strong></span>
+          <span>🔵 Aprovadas (a pagar): <strong class="mono">${brl(totalAprovadas)}</strong></span>
+          <span>🟡 Pendentes: <strong class="mono">${brl(totalPendentes)}</strong></span>
+        </div>` : '<div class="empty">Sem dados no período/filtro atual.</div>'}
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>📦 Comissão por produto/categoria</h2></div><div class="panel-body" style="padding:16px 18px;">
+        <div class="empty">Dados insuficientes — o sistema registra cada pedido como um todo, não por item de produto individual, então não é possível quebrar a comissão por produto ou categoria com precisão.</div>
+      </div></div>
+    </div>
+  `;
+}
+// ====================== FIM ANÁLISE DE COMISSÕES ======================
+
 function viewComissoes(){
+  const itens = itensComissaoFiltrados();
+  const resumo = resumoComissaoAnalise(itens);
+  const f = comissaoAnaliseFiltro;
+  const clientesUnicos = [...new Set(dadosComissaoAnalise(f.dataDe||primeiroDiaMes(), f.dataAte||todayISO()).map(it=>it.cliente).filter(Boolean))].sort();
+
   return `
     <div class="topbar">
-      <div><h1>Comissões</h1><p>Escolha um vendedor e o período pra ver os pedidos e gerar o pagamento</p></div>
-      <div style="display:flex;gap:8px;">
+      <div><h1>Comissões</h1><p>Painel de análise comercial — vendas, comissões e pagamentos por representante</p></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn ghost sm" id="btnExportarComissoesCSV">📊 Excel</button>
+        <button class="btn ghost sm" id="btnExportarComissoesPDF">📄 PDF</button>
+        <button class="btn ghost sm" id="btnImprimirComissoes">🖨️ Imprimir</button>
         <button class="btn ghost" id="btnNovoVendedor">+ Vendedor</button>
         <button class="btn ghost" id="btnNovaComissaoManual">+ Comissão manual</button>
       </div>
     </div>
 
-    <div class="panel comissao-seletor">
-      <div class="panel-head"><h2>Selecionar vendedor e período</h2></div>
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="panel-head"><h2>Filtros</h2>${(f.dataDe||f.dataAte||f.vendedorId||f.cliente||f.status) ? `<span style="font-size:12px;color:var(--blue-accent);cursor:pointer;" id="btnLimparFiltrosComissao">Limpar filtros</span>` : ''}</div>
+      <div class="panel-body" style="padding:16px 20px;">
+        <div class="field-row">
+          <div class="field"><label>De</label><input type="date" id="cfDataDe" value="${f.dataDe||primeiroDiaMes()}"></div>
+          <div class="field"><label>Até</label><input type="date" id="cfDataAte" value="${f.dataAte||todayISO()}"></div>
+          <div class="field"><label>Representante</label><select id="cfVendedor">
+            <option value="">Todos</option>
+            ${state.vendedores.map(v=>`<option value="${v.id}" ${f.vendedorId===v.id?'selected':''}>${escapeHTML(v.nome)}</option>`).join('')}
+          </select></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Cliente</label><input type="text" id="cfCliente" list="cfClientesLista" value="${escapeHTML(f.cliente)}" placeholder="Buscar por cliente..."><datalist id="cfClientesLista">${clientesUnicos.map(c=>`<option value="${escapeHTML(c)}">`).join('')}</datalist></div>
+          <div class="field"><label>Status</label><select id="cfStatus">
+            <option value="">Todos</option>
+            <option value="pendente" ${f.status==='pendente'?'selected':''}>Pendente</option>
+            <option value="aprovada" ${f.status==='aprovada'?'selected':''}>Aprovada</option>
+            <option value="paga" ${f.status==='paga'?'selected':''}>Paga</option>
+            <option value="cancelada" ${f.status==='cancelada'?'selected':''}>Cancelada</option>
+          </select></div>
+          <div class="field" style="align-self:flex-end;"><button class="btn" id="btnAplicarFiltrosComissao" style="width:100%;">Aplicar</button></div>
+        </div>
+        <div class="note" style="margin-top:0;">Filtro por produto/categoria não está disponível — o sistema registra cada pedido como um todo, não por item de produto individual.</div>
+      </div>
+    </div>
+
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:16px;">
+      <div class="card saldo"><div class="label">Comissões do período</div><div class="value mono">${brl(resumo.totalComissoes)}</div></div>
+      <div class="card"><div class="label">Total de vendas</div><div class="value mono">${brl(resumo.totalVendas)}</div></div>
+      <div class="card"><div class="label">Ticket médio</div><div class="value mono">${brl(resumo.ticketMedio)}</div></div>
+      <div class="card"><div class="label">% média de comissão</div><div class="value mono">${resumo.pctMedia!==null?resumo.pctMedia.toFixed(1)+'%':'—'}</div></div>
+      <div class="card"><div class="label">Comissões pagas</div><div class="value mono" style="color:var(--success);">${brl(resumo.pagas)}</div></div>
+      <div class="card"><div class="label">Comissões pendentes</div><div class="value mono" style="color:var(--warn);">${brl(resumo.pendentes)}</div></div>
+      <div class="card"><div class="label">Total a pagar</div><div class="value mono" style="color:${resumo.totalAPagar>0?'var(--danger)':'inherit'};">${brl(resumo.totalAPagar)}</div></div>
+    </div>
+
+    <div id="comissoesGraficos">${renderGraficosComissoes()}</div>
+    <div id="comissoesRelatorios">${renderRelatoriosComissoes()}</div>
+
+    <div class="panel comissao-seletor" style="margin-top:20px;">
+      <div class="panel-head"><h2>Gerar pagamento de comissão</h2></div>
       <div class="panel-body" style="padding:20px;">
         <div class="field-row">
           <div class="field" style="flex:1.4;">
@@ -18444,6 +18667,235 @@ function viewComissoes(){
 
     <div id="comissaoResultado"></div>
   `;
+}
+
+const rotuloStatusComissao = { pendente:'Pendente', aprovada:'Aprovada', paga:'Paga', cancelada:'Cancelada' };
+const corStatusComissao = { pendente:'var(--warn)', aprovada:'var(--blue-accent)', paga:'var(--success)', cancelada:'var(--text-soft)' };
+
+function renderRelatorioRankingRepresentantes(itens){
+  const ativos = itens.filter(it=>it.status!=='cancelada');
+  const porRep = {};
+  ativos.forEach(it=>{
+    const id = it.vendedorId||'sem';
+    if(!porRep[id]) porRep[id] = { nome: nomeVendedor(it.vendedorId)||'Sem representante', vendas:0, qtd:0, comissao:0 };
+    porRep[id].vendas += it.valorBase; porRep[id].qtd++; porRep[id].comissao += it.comissaoValor;
+  });
+  const linhas = Object.entries(porRep).map(([id,d])=>({ id, ...d, pctMedio: d.vendas>0 ? d.comissao/d.vendas*100 : 0 })).sort((a,b)=>b.comissao-a.comissao);
+  return `
+    <div class="panel"><div class="panel-body" style="padding:0;overflow-x:auto;">
+      <div class="ledger-row head" style="grid-template-columns:1.3fr 110px 70px 110px 90px;min-width:520px;"><span>Representante</span><span>Vendas</span><span>Pedidos</span><span>Comissão</span><span>% médio</span></div>
+      <div style="min-width:520px;">
+        ${linhas.length ? linhas.map(l=>`
+          <div class="ledger-row compact" data-action="ver-detalhe-representante" data-id="${l.id}" style="cursor:pointer;grid-template-columns:1.3fr 110px 70px 110px 90px;">
+            <span style="font-size:12.5px;color:var(--blue-accent);">${escapeHTML(l.nome)}</span>
+            <span class="mono" style="font-size:11.5px;">${brl(l.vendas)}</span>
+            <span style="font-size:12px;">${l.qtd}</span>
+            <span class="mono" style="font-size:11.5px;font-weight:600;">${brl(l.comissao)}</span>
+            <span style="font-size:12px;">${l.pctMedio.toFixed(1)}%</span>
+          </div>
+        `).join('') : `<div class="empty">Nenhum dado no período/filtro atual.</div>`}
+      </div>
+    </div></div>`;
+}
+function renderRelatorioDetalhamento(itens){
+  const linhas = [...itens].sort((a,b)=>b.data.localeCompare(a.data));
+  return `
+    <div class="panel"><div class="panel-body" style="padding:0;overflow-x:auto;">
+      <div class="ledger-row head" style="grid-template-columns:80px 90px 1fr 1fr 100px 60px 100px 90px;min-width:720px;"><span>Data</span><span>Pedido</span><span>Cliente</span><span>Representante</span><span>Venda</span><span>%</span><span>Comissão</span><span>Status</span></div>
+      <div style="min-width:720px;">
+        ${linhas.length ? linhas.map(it=>`
+          <div class="ledger-row compact" data-action="ver-detalhe-item-comissao" data-origem="${it.origem}" data-id="${it.id}" style="cursor:pointer;grid-template-columns:80px 90px 1fr 1fr 100px 60px 100px 90px;">
+            <span class="mono" style="font-size:11px;color:var(--text-soft);">${fmtDate(it.data)}</span>
+            <span style="font-size:11.5px;">${it.numeroPedido?'#'+escapeHTML(it.numeroPedido):'—'}</span>
+            <span style="font-size:11.5px;">${escapeHTML(it.cliente||'—')}</span>
+            <span style="font-size:11.5px;">${escapeHTML(nomeVendedor(it.vendedorId)||'—')}</span>
+            <span class="mono" style="font-size:11.5px;">${brl(it.valorBase)}</span>
+            <span style="font-size:11.5px;">${it.percentual!==null?it.percentual.toFixed(1)+'%':'—'}</span>
+            <span class="mono" style="font-size:11.5px;font-weight:600;">${brl(it.comissaoValor)}</span>
+            <span style="font-size:10.5px;font-weight:600;color:${corStatusComissao[it.status]};">${rotuloStatusComissao[it.status]}${it.estimado&&it.status==='pendente'?' (est.)':''}</span>
+          </div>
+        `).join('') : `<div class="empty">Nenhum registro no período/filtro atual.</div>`}
+      </div>
+    </div></div>`;
+}
+function renderRelatorioControlePagamentos(itens){
+  const hoje = todayISO();
+  const ativos = itens.filter(it=>it.status!=='cancelada');
+  const totalPago = ativos.filter(it=>it.status==='paga').reduce((s,it)=>s+it.comissaoValor,0);
+  const aprovadasItens = ativos.filter(it=>it.status==='aprovada');
+  // "Vencido" = pagamento aprovado (já gerado como despesa) cujo vencimento já passou e ainda não foi pago
+  let totalVencido = 0, totalAPagarNoPrazo = 0;
+  aprovadasItens.forEach(it=>{
+    const registro = state.comissoesPagas.find(cp=>cp.itens.some(x=>x.origem===it.origem && x.id===it.id));
+    const lanc = registro ? state.lancamentos.find(l=>l.id===registro.lancamentoDespesaId) : null;
+    if(lanc && lanc.dataVencimento<hoje) totalVencido += it.comissaoValor;
+    else totalAPagarNoPrazo += it.comissaoValor;
+  });
+  const totalPendente = ativos.filter(it=>it.status==='pendente').reduce((s,it)=>s+it.comissaoValor,0);
+  return `
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));">
+      <div class="card"><div class="label">Total já pago</div><div class="value mono" style="color:var(--success);">${brl(totalPago)}</div></div>
+      <div class="card"><div class="label">A pagar (aprovado, no prazo)</div><div class="value mono" style="color:var(--blue-accent);">${brl(totalAPagarNoPrazo)}</div></div>
+      <div class="card"><div class="label">Vencido</div><div class="value mono" style="color:${totalVencido>0?'var(--danger)':'inherit'};">${brl(totalVencido)}</div></div>
+      <div class="card"><div class="label">Pendente (sem pagamento gerado)</div><div class="value mono" style="color:var(--warn);">${brl(totalPendente)}</div></div>
+    </div>
+    ${totalVencido>0 ? `<div class="note" style="border-color:var(--danger);color:var(--danger);margin-top:10px;">⚠️ Há comissões aprovadas com vencimento já passado — vale revisar em Contas a Pagar.</div>` : ''}`;
+}
+function renderRelatorioPorCliente(itens){
+  const ativos = itens.filter(it=>it.status!=='cancelada' && it.cliente);
+  const porCliente = {};
+  ativos.forEach(it=>{
+    if(!porCliente[it.cliente]) porCliente[it.cliente] = { vendas:0, comissao:0, qtd:0 };
+    porCliente[it.cliente].vendas += it.valorBase; porCliente[it.cliente].comissao += it.comissaoValor; porCliente[it.cliente].qtd++;
+  });
+  const linhas = Object.entries(porCliente).map(([nome,d])=>({nome,...d})).sort((a,b)=>b.vendas-a.vendas);
+  return `
+    <div class="panel"><div class="panel-body" style="padding:0;overflow-x:auto;">
+      <div class="ledger-row head" style="grid-template-columns:1.4fr 110px 70px 110px;min-width:460px;"><span>Cliente</span><span>Vendas</span><span>Pedidos</span><span>Comissão</span></div>
+      <div style="min-width:460px;">
+        ${linhas.length ? linhas.map(l=>`
+          <div class="ledger-row compact" data-action="ver-detalhe-cliente" data-nome="${escapeHTML(l.nome)}" style="cursor:pointer;grid-template-columns:1.4fr 110px 70px 110px;">
+            <span style="font-size:12.5px;color:var(--blue-accent);">${escapeHTML(l.nome)}</span>
+            <span class="mono" style="font-size:11.5px;">${brl(l.vendas)}</span>
+            <span style="font-size:12px;">${l.qtd}</span>
+            <span class="mono" style="font-size:11.5px;font-weight:600;">${brl(l.comissao)}</span>
+          </div>
+        `).join('') : `<div class="empty">Nenhum dado no período/filtro atual.</div>`}
+      </div>
+    </div></div>`;
+}
+function renderRelatoriosComissoes(){
+  const itens = itensComissaoFiltrados();
+  const abas = [
+    { id:'representantes', nome:'Ranking Representantes' }, { id:'detalhamento', nome:'Detalhamento' },
+    { id:'pagamentos', nome:'Controle de Pagamentos' }, { id:'clientes', nome:'Por Cliente' },
+  ];
+  const conteudo = {
+    representantes: renderRelatorioRankingRepresentantes(itens), detalhamento: renderRelatorioDetalhamento(itens),
+    pagamentos: renderRelatorioControlePagamentos(itens), clientes: renderRelatorioPorCliente(itens),
+  };
+  return `
+    <div class="dash-section-label">📋 Relatórios</div>
+    <div class="toggle-row" id="comissaoRelatorioToggle" style="overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;">
+      ${abas.map(a=>`<button type="button" data-aba-relatorio="${a.id}" class="${comissaoRelatorioAba===a.id?'active':''}" style="white-space:nowrap;">${a.nome}</button>`).join('')}
+    </div>
+    <div style="margin-top:12px;">${conteudo[comissaoRelatorioAba]}</div>
+  `;
+}
+// Detalhamento interativo — clicar num representante/cliente/item mostra exatamente quais pedidos
+// compõem aquele valor, e como a comissão foi calculada (percentual e origem do pagamento).
+function abrirDetalheComissao(titulo, itensDetalhe){
+  const modal = document.getElementById('modalContent');
+  const totalVendas = itensDetalhe.reduce((s,it)=>s+it.valorBase,0);
+  const totalComissao = itensDetalhe.reduce((s,it)=>s+it.comissaoValor,0);
+  modal.innerHTML = `
+    <h3>${escapeHTML(titulo)}</h3>
+    <div class="note" style="margin-top:0;">${itensDetalhe.length} pedido(s) · Vendas: ${brl(totalVendas)} · Comissão: ${brl(totalComissao)}</div>
+    <div class="panel" style="margin:0;"><div class="panel-body" style="padding:0;max-height:400px;overflow-y:auto;">
+      ${itensDetalhe.sort((a,b)=>b.data.localeCompare(a.data)).map(it=>`
+        <div class="ledger-row compact" style="grid-template-columns:80px 1fr 90px 100px;">
+          <span class="mono" style="font-size:11px;color:var(--text-soft);">${fmtDate(it.data)}</span>
+          <div class="desc-cell"><div>${escapeHTML(it.descricao)}</div><div class="cat">${it.cliente?escapeHTML(it.cliente)+' · ':''}${rotuloStatusComissao[it.status]}${it.percentual!==null?' · '+it.percentual.toFixed(1)+'%':''}</div></div>
+          <span class="mono" style="font-size:11.5px;">${brl(it.valorBase)}</span>
+          <span class="mono" style="font-size:11.5px;font-weight:600;">${brl(it.comissaoValor)}</span>
+        </div>
+      `).join('')}
+    </div></div>
+    <div class="modal-actions"><button class="btn ghost" id="btnCancelarModal">Fechar</button></div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+}
+
+// Exportação — usa exatamente os mesmos itens filtrados que a tela mostra, nunca recalcula nada
+function gerarCSVComissoes(){
+  const itens = itensComissaoFiltrados();
+  const linhas = [['Data','Pedido','Cliente','Representante','Valor da Venda','% Comissão','Valor da Comissão','Status']];
+  [...itens].sort((a,b)=>a.data.localeCompare(b.data)).forEach(it=>{
+    linhas.push([
+      fmtDate(it.data), it.numeroPedido||'', it.cliente||'', nomeVendedor(it.vendedorId)||'',
+      (it.valorBase||0).toFixed(2).replace('.',','), it.percentual!==null?it.percentual.toFixed(1).replace('.',','):'',
+      (it.comissaoValor||0).toFixed(2).replace('.',','), rotuloStatusComissao[it.status]||it.status,
+    ]);
+  });
+  const csv = linhas.map(l=>l.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(';')).join('\n');
+  const blob = new Blob(['\ufeff'+csv], { type:'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `comissoes-${todayISO()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+function gerarPDFComissoes(){
+  if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
+  const { jsPDF } = window.jspdf;
+  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+  const M = 15, PW = 210, W = PW - M*2;
+  const INK=[11,15,20], SOFT=[91,100,114], LINEC=[227,231,238];
+  const itens = itensComissaoFiltrados();
+  const resumo = resumoComissaoAnalise(itens);
+  let y = 20;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
+  docPdf.text('Relatório de Comissões', M, y);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
+  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
+  y += 6;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 8;
+
+  docPdf.setFontSize(9.5); docPdf.setTextColor(...INK);
+  const resumoLinhas = [
+    `Total de vendas: ${brl(resumo.totalVendas)}`, `Comissões do período: ${brl(resumo.totalComissoes)}`,
+    `Pagas: ${brl(resumo.pagas)}`, `Total a pagar: ${brl(resumo.totalAPagar)}`,
+  ];
+  resumoLinhas.forEach(l=>{ docPdf.text(l, M, y); y += 5.5; });
+  y += 4;
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(9);
+  const cols = [ ['Data',18], ['Pedido',18], ['Cliente',42], ['Repr.',34], ['Venda',24], ['%',12], ['Comissão',24], ['Status',20] ];
+  let x = M;
+  cols.forEach(([label,w])=>{ docPdf.text(label, x, y); x += w; });
+  y += 4;
+  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
+  y += 5;
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8);
+  [...itens].sort((a,b)=>a.data.localeCompare(b.data)).forEach(it=>{
+    if(y>270){ docPdf.addPage(); y = 20; }
+    x = M;
+    const valores = [ fmtDate(it.data), it.numeroPedido?'#'+it.numeroPedido:'—', (it.cliente||'—').slice(0,26), (nomeVendedor(it.vendedorId)||'—').slice(0,22), brl(it.valorBase), it.percentual!==null?it.percentual.toFixed(1)+'%':'—', brl(it.comissaoValor), rotuloStatusComissao[it.status] ];
+    valores.forEach((v,i)=>{ docPdf.text(String(v), x, y); x += cols[i][1]; });
+    y += 5;
+  });
+  docPdf.save(`comissoes-${todayISO()}.pdf`);
+}
+function imprimirRelatorioComissoes(){
+  const itens = itensComissaoFiltrados();
+  const resumo = resumoComissaoAnalise(itens);
+  const linhasHTML = [...itens].sort((a,b)=>a.data.localeCompare(b.data)).map(it=>`
+    <tr><td>${fmtDate(it.data)}</td><td>${escapeHTML(it.numeroPedido?'#'+it.numeroPedido:'—')}</td><td>${escapeHTML(it.cliente||'—')}</td>
+    <td>${escapeHTML(nomeVendedor(it.vendedorId)||'—')}</td><td>${brl(it.valorBase)}</td><td>${it.percentual!==null?it.percentual.toFixed(1)+'%':'—'}</td>
+    <td>${brl(it.comissaoValor)}</td><td>${rotuloStatusComissao[it.status]}</td></tr>`).join('');
+  const w = window.open('', '_blank');
+  w.document.write(`<html><head><title>Relatório de Comissões</title><style>
+    body{font-family:Arial,sans-serif;padding:24px;color:#0B0F14;}
+    h1{font-size:18px;margin-bottom:4px;} p{color:#5B6472;font-size:12px;margin-top:0;}
+    .resumo{display:flex;gap:24px;margin:16px 0;font-size:13px;}
+    table{width:100%;border-collapse:collapse;font-size:11px;margin-top:12px;}
+    th,td{border-bottom:1px solid #E3E7EE;padding:6px 8px;text-align:left;}
+    th{background:#F5F6F8;}
+  </style></head><body>
+    <h1>Relatório de Comissões</h1><p>Emitido em ${fmtDate(todayISO())}</p>
+    <div class="resumo">
+      <span><strong>Total de vendas:</strong> ${brl(resumo.totalVendas)}</span>
+      <span><strong>Comissões:</strong> ${brl(resumo.totalComissoes)}</span>
+      <span><strong>Pagas:</strong> ${brl(resumo.pagas)}</span>
+      <span><strong>A pagar:</strong> ${brl(resumo.totalAPagar)}</span>
+    </div>
+    <table><thead><tr><th>Data</th><th>Pedido</th><th>Cliente</th><th>Representante</th><th>Venda</th><th>%</th><th>Comissão</th><th>Status</th></tr></thead>
+    <tbody>${linhasHTML}</tbody></table>
+  </body></html>`);
+  w.document.close();
+  w.print();
 }
 
 function renderComissaoResultado(){
@@ -20345,6 +20797,55 @@ function attachViewHandlers(){
       currentView = 'relatorio-detalhe';
       render();
     });
+  });
+  function bindDetalheComissaoHandlers(){
+    document.querySelectorAll('[data-action="ver-detalhe-representante"]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const itens = itensComissaoFiltrados().filter(it=>it.status!=='cancelada' && (it.vendedorId||'sem')===el.dataset.id);
+        abrirDetalheComissao(nomeVendedor(el.dataset.id)||'Sem representante', itens);
+      });
+    });
+    document.querySelectorAll('[data-action="ver-detalhe-cliente"]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const itens = itensComissaoFiltrados().filter(it=>it.status!=='cancelada' && it.cliente===el.dataset.nome);
+        abrirDetalheComissao(el.dataset.nome, itens);
+      });
+    });
+    document.querySelectorAll('[data-action="ver-detalhe-item-comissao"]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const item = itensComissaoFiltrados().find(it=>it.origem===el.dataset.origem && it.id===el.dataset.id);
+        if(item) abrirDetalheComissao(item.descricao, [item]);
+      });
+    });
+  }
+  function bindAbasRelatorioComissao(){
+    document.querySelectorAll('[data-aba-relatorio]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        comissaoRelatorioAba = btn.dataset.abaRelatorio;
+        document.getElementById('comissoesRelatorios').innerHTML = renderRelatoriosComissoes();
+        bindAbasRelatorioComissao();
+        bindDetalheComissaoHandlers();
+      });
+    });
+  }
+  bindAbasRelatorioComissao();
+  bindDetalheComissaoHandlers();
+  document.getElementById('btnExportarComissoesCSV')?.addEventListener('click', ()=>gerarCSVComissoes());
+  document.getElementById('btnExportarComissoesPDF')?.addEventListener('click', ()=>gerarPDFComissoes());
+  document.getElementById('btnImprimirComissoes')?.addEventListener('click', ()=>imprimirRelatorioComissoes());
+  document.getElementById('btnAplicarFiltrosComissao')?.addEventListener('click', ()=>{
+    comissaoAnaliseFiltro = {
+      dataDe: document.getElementById('cfDataDe').value || null,
+      dataAte: document.getElementById('cfDataAte').value || null,
+      vendedorId: document.getElementById('cfVendedor').value,
+      cliente: document.getElementById('cfCliente').value.trim(),
+      status: document.getElementById('cfStatus').value,
+    };
+    render();
+  });
+  document.getElementById('btnLimparFiltrosComissao')?.addEventListener('click', ()=>{
+    comissaoAnaliseFiltro = { dataDe: null, dataAte: null, vendedorId: '', cliente: '', status: '' };
+    render();
   });
   document.getElementById('btnNovaRetirada')?.addEventListener('click', ()=>openRetiradaModal());
   document.querySelectorAll('[data-action="editar-retirada"]').forEach(el=>{
