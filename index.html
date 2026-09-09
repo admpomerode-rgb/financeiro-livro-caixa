@@ -567,6 +567,7 @@
     .extrato-dia-foot{flex-wrap:wrap;gap:4px 10px;}
 
     .sidebar{display:none;}
+    .toggle-row{max-width:100%;}
     .main{padding:18px 14px calc(78px + env(safe-area-inset-bottom));max-width:100%;}
     .bottom-nav{display:flex;}
     .topbar-actions-stack{width:100%;}
@@ -11822,7 +11823,7 @@ function periodFilterHTML(idPrefix, valorAtual){
     { id:'3m', nome:'Últimos 3 meses' }, { id:'6m', nome:'Últimos 6 meses' }, { id:'12m', nome:'Últimos 12 meses' },
     { id:'ano', nome:'Este ano' }, { id:'ano_anterior', nome:'Ano anterior' },
   ];
-  return `<div class="toggle-row" id="${idPrefix}Toggle" style="overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;">
+  return `<div class="toggle-row" id="${idPrefix}Toggle" style="overflow-x:auto;flex-wrap:nowrap;width:auto;-webkit-overflow-scrolling:touch;">
     ${atalhos.map(a=>`<button type="button" data-periodo="${a.id}" class="${valorAtual===a.id?'active':''}" style="white-space:nowrap;">${a.nome}</button>`).join('')}
   </div>`;
 }
@@ -19078,7 +19079,7 @@ function renderRelatoriosComissoes(){
   };
   return `
     <div class="dash-section-label">📋 Relatórios</div>
-    <div class="toggle-row" id="comissaoRelatorioToggle" style="overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;">
+    <div class="toggle-row" id="comissaoRelatorioToggle" style="overflow-x:auto;flex-wrap:nowrap;width:auto;-webkit-overflow-scrolling:touch;">
       ${abas.map(a=>`<button type="button" data-aba-relatorio="${a.id}" class="${comissaoRelatorioAba===a.id?'active':''}" style="white-space:nowrap;">${a.nome}</button>`).join('')}
     </div>
     <div style="margin-top:12px;">${conteudo[comissaoRelatorioAba]}</div>
