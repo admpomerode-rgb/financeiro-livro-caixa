@@ -658,6 +658,8 @@
         <div class="nav-item" data-view="investimentos" title="Investimentos"><span class="nav-dot"></span><span class="nav-abbr">IV</span><span class="nav-label">Investimentos</span></div>
         <div class="nav-item" data-view="orcamentos-processos" title="Orçamentos e Compras"><span class="nav-dot"></span><span class="nav-abbr">OC</span><span class="nav-label">Orçamentos e Compras</span></div>
         <div class="nav-item" data-view="comissoes" title="Comissões"><span class="nav-dot"></span><span class="nav-abbr">CM</span><span class="nav-label">Comissões</span></div>
+        <div class="nav-item" data-view="vendas" title="Vendas"><span class="nav-dot"></span><span class="nav-abbr">VD</span><span class="nav-label">Vendas</span></div>
+        <div class="nav-item" data-view="representantes" title="Representantes"><span class="nav-dot"></span><span class="nav-abbr">RP</span><span class="nav-label">Representantes</span></div>
       </div>
       <div class="nav-group" style="--group-accent:var(--success);">
         <div class="nav-section-label">Análise</div>
@@ -1417,6 +1419,8 @@ function moreItensDef(){
     { view:'investimentos', icone:'📈', nome:'Investimentos', grupo:'Operacional', badge:()=>(state.notasPendentes||[]).length },
     { view:'orcamentos-processos', icone:'📋', nome:'Orçamentos e Compras', grupo:'Operacional', badge:()=>(state.orcamentosProcessos||[]).filter(o=>o.status==='pendente').length },
     { view:'comissoes', icone:'🤝', nome:'Comissões', grupo:'Operacional' },
+    { view:'vendas', icone:'📈', nome:'Vendas', grupo:'Operacional' },
+    { view:'representantes', icone:'🧑‍💼', nome:'Representantes', grupo:'Operacional' },
     { view:'funil', icone:'🔻', nome:'Funil de Vendas', grupo:'Operacional' },
     { view:'a-receber-representante', icone:'💵', nome:'A Receber do Representante', grupo:'Operacional', badge:()=>todasFilasRecebimentoRep().filter(r=>!r.conferido).length },
     { view:'relatorios', icone:'📊', nome:'Relatórios', grupo:'Análise' },
@@ -1549,6 +1553,8 @@ function render(){
   else if(currentView==='simulacao') main.innerHTML = viewSimulacao();
   else if(currentView==='orcamento') main.innerHTML = viewOrcamentoPlanejamento();
   else if(currentView==='comissoes') main.innerHTML = viewComissoes();
+  else if(currentView==='vendas') main.innerHTML = viewVendas();
+  else if(currentView==='representantes') main.innerHTML = viewRepresentantes();
   else if(currentView==='funil') main.innerHTML = viewFunilVendas();
   else if(currentView==='ativos') main.innerHTML = viewAtivosPatrimoniais();
   else if(currentView==='ativo-detalhe') main.innerHTML = viewAtivoPatrimonialDetalhe(ativoPatrimonialDetalheId);
@@ -5021,6 +5027,8 @@ function viewDashboard(){
     </div>
 
     ${alertasInteligentesHTML()}
+
+    ${modoSimples ? '' : analiseGraficaDashboardHTML()}
 
     <div class="dash-section-label">Entradas x Saídas — últimos 6 meses</div>
     <div class="panel">
@@ -11739,6 +11747,300 @@ function svgHistograma(valores, nFaixas){
 
 // 21. Box plot — grupos: [{label, valores:[...]}]
 // 12. Linhas múltiplas — series: [{nome, cor, valores:[...]}], labels: [...]
+/* ====================== COMPONENTES DE GRÁFICO REUTILIZÁVEIS ====================== */
+// Mesmo padrão visual em todo o sistema — cantos arredondados, tipografia clara, uma única
+// paleta (CORES_GRAFICO, já usada em svgLinhasMultiplas). Usados no Dashboard, Vendas,
+// Representantes, Metas e Comissões, sem repetir a lógica de desenho em cada tela.
+
+// ChartCard — painel padrão que envolve qualquer gráfico, com título e descrição opcional
+function chartCardHTML(titulo, descricao, conteudoHTML){
+  return `
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="panel-head"><h2>${titulo}</h2></div>
+      <div class="panel-body" style="padding:18px;">
+        ${descricao ? `<div style="font-size:11px;color:var(--text-soft);margin-bottom:10px;">${descricao}</div>` : ''}
+        ${conteudoHTML}
+      </div>
+    </div>`;
+}
+// MetricCard — card de número único, usado nas fileiras de resumo no topo de cada tela
+function metricCardHTML(label, valor, cor){
+  return `<div class="card"><div class="label">${label}</div><div class="value mono" style="${cor?'color:'+cor+';':''}">${valor}</div></div>`;
+}
+// BarChart — barras verticais, uma ou mais séries lado a lado (ex: Meta × Realizado,
+// Entradas × Saídas). labels no eixo X, cada série com sua cor.
+function svgBarrasComparativas(series, labels){
+  const W=680, H=220, padL=8, padB=24, padT=14, padR=8;
+  const n = labels.length;
+  const todos = series.flatMap(s=>s.valores);
+  const max = Math.max(...todos, 1);
+  const grupoW = (W-padL-padR)/n;
+  const barW = Math.min(28, grupoW/(series.length+1)*0.8);
+  const barras = labels.map((lb,i)=>{
+    const xGrupo = padL + i*grupoW + grupoW/2 - (series.length*barW)/2;
+    return series.map((se,si)=>{
+      const v = se.valores[i]||0;
+      const h = (v/max)*(H-padB-padT);
+      const x = xGrupo + si*barW;
+      const y = H-padB-h;
+      return `<rect x="${x}" y="${y}" width="${barW-3}" height="${h}" rx="3" fill="${se.cor||CORES_GRAFICO[si%CORES_GRAFICO.length]}"><title>${escapeHTML(se.nome)} — ${escapeHTML(lb)}: ${typeof se.formatador==='function'?se.formatador(v):v}</title></rect>`;
+    }).join('');
+  }).join('');
+  const eixoX = labels.map((l,i)=>`<text x="${padL+i*grupoW+grupoW/2}" y="${H-6}" font-size="9" fill="var(--text-soft)" text-anchor="middle">${escapeHTML(l)}</text>`).join('');
+  const legenda = series.length>1 ? series.map((se,i)=>`<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;margin-right:12px;"><span style="width:10px;height:10px;border-radius:2px;background:${se.cor||CORES_GRAFICO[i%CORES_GRAFICO.length]};display:inline-block;"></span>${escapeHTML(se.nome)}</span>`).join('') : '';
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;">${barras}${eixoX}</svg>${legenda?`<div style="margin-top:6px;">${legenda}</div>`:''}`;
+}
+// HorizontalBarChart — ranking (Top representantes, Top clientes...), já usado em Comissões
+// como barraRankingHTML; generalizado aqui com formatador de valor customizável.
+function svgBarrasHorizontais(linhas, corBarra, formatador){
+  const fmt = formatador || brl;
+  const max = Math.max(...linhas.map(l=>l.valor), 1);
+  return linhas.map(l=>`
+    <div style="margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;"><span style="font-weight:600;">${escapeHTML(l.nome)}</span><span class="mono">${fmt(l.valor)}</span></div>
+      <div style="background:var(--bone);border-radius:5px;height:8px;overflow:hidden;"><div style="width:${(l.valor/max*100).toFixed(1)}%;height:100%;background:${corBarra};transition:width .3s;"></div></div>
+    </div>
+  `).join('');
+}
+// ComparisonChart — mostra dois números lado a lado com a variação % entre eles (período atual
+// × período anterior, ano atual × ano anterior, representante × representante)
+function comparisonChartHTML(labelA, valorA, labelB, valorB, formatador){
+  const fmt = formatador || brl;
+  const variacaoPct = valorB!==0 ? (valorA-valorB)/Math.abs(valorB)*100 : null;
+  return `
+    <div style="display:flex;justify-content:space-around;align-items:center;text-align:center;flex-wrap:wrap;gap:16px;">
+      <div><div style="font-size:11px;color:var(--text-soft);">${labelA}</div><div style="font-size:20px;font-weight:800;">${fmt(valorA)}</div></div>
+      <div style="font-size:20px;color:var(--text-soft);">→</div>
+      <div><div style="font-size:11px;color:var(--text-soft);">${labelB}</div><div style="font-size:20px;font-weight:800;">${fmt(valorB)}</div></div>
+      ${variacaoPct!==null ? `<div style="padding:6px 12px;border-radius:8px;background:${variacaoPct>=0?'#E8F5EE':'#FDECEC'};"><span style="font-weight:700;color:${variacaoPct>=0?'var(--success)':'var(--danger)'};">${variacaoPct>=0?'+':''}${variacaoPct.toFixed(1)}%</span></div>` : ''}
+    </div>`;
+}
+// PeriodFilter — atalhos de período padronizados, reaproveitados em toda tela nova de análise
+function periodFilterHTML(idPrefix, valorAtual){
+  const atalhos = [
+    { id:'hoje', nome:'Hoje' }, { id:'semana', nome:'Esta semana' }, { id:'mes', nome:'Este mês' },
+    { id:'3m', nome:'Últimos 3 meses' }, { id:'6m', nome:'Últimos 6 meses' }, { id:'12m', nome:'Últimos 12 meses' },
+    { id:'ano', nome:'Este ano' }, { id:'ano_anterior', nome:'Ano anterior' },
+  ];
+  return `<div class="toggle-row" id="${idPrefix}Toggle" style="overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;">
+    ${atalhos.map(a=>`<button type="button" data-periodo="${a.id}" class="${valorAtual===a.id?'active':''}" style="white-space:nowrap;">${a.nome}</button>`).join('')}
+  </div>`;
+}
+function resolverPeriodoAtalho(atalho){
+  const hoje = todayISO();
+  const d = new Date(hoje);
+  switch(atalho){
+    case 'hoje': return { de:hoje, ate:hoje };
+    case 'semana': { const ini=new Date(d); ini.setDate(d.getDate()-d.getDay()); return { de:ini.toISOString().slice(0,10), ate:hoje }; }
+    case 'mes': return { de:primeiroDiaMes(), ate:hoje };
+    case '3m': { const ini=new Date(d); ini.setMonth(d.getMonth()-3); return { de:ini.toISOString().slice(0,10), ate:hoje }; }
+    case '6m': { const ini=new Date(d); ini.setMonth(d.getMonth()-6); return { de:ini.toISOString().slice(0,10), ate:hoje }; }
+    case '12m': { const ini=new Date(d); ini.setMonth(d.getMonth()-12); return { de:ini.toISOString().slice(0,10), ate:hoje }; }
+    case 'ano': return { de:`${hoje.slice(0,4)}-01-01`, ate:hoje };
+    case 'ano_anterior': { const ano=Number(hoje.slice(0,4))-1; return { de:`${ano}-01-01`, ate:`${ano}-12-31` }; }
+    default: return { de:primeiroDiaMes(), ate:hoje };
+  }
+}
+/* ====================== FIM COMPONENTES DE GRÁFICO REUTILIZÁVEIS ====================== */
+
+/* ====================== TELA DE VENDAS ====================== */
+let vendasFiltroPeriodo = 'mes';
+function viewVendas(){
+  const periodo = resolverPeriodoAtalho(vendasFiltroPeriodo);
+  const itens = dadosComissaoAnalise(periodo.de, periodo.ate).filter(it=>it.status!=='cancelada');
+  const totalVendas = itens.reduce((s,it)=>s+it.valorBase,0);
+  const qtdPedidos = itens.length;
+  const ticketMedio = qtdPedidos>0 ? totalVendas/qtdPedidos : 0;
+
+  // Evolução — últimos 12 meses, independente do filtro (histórico sempre olha pra trás 1 ano)
+  const hoje = todayISO();
+  const meses = Array.from({length:12},(_,i)=>{ const [ay,am]=hoje.slice(0,7).split('-').map(Number); const d=new Date(ay,am-1-(11-i),1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const dadosPorMes = meses.map(m=>{
+    const [ay,am] = m.split('-').map(Number);
+    const de = `${m}-01`, ate = `${m}-${String(new Date(ay,am,0).getDate()).padStart(2,'0')}`;
+    const itensDoMes = dadosComissaoAnalise(de, ate).filter(it=>it.status!=='cancelada');
+    return { mes:m, totalVendas: itensDoMes.reduce((s,it)=>s+it.valorBase,0), qtdPedidos: itensDoMes.length };
+  });
+  const labelsMeses = meses.map(m=>competenciaLabel(m).split('/')[0].slice(0,3));
+
+  // Vendas por representante (dentro do período filtrado)
+  const porRep = {};
+  itens.forEach(it=>{
+    const nome = nomeVendedor(it.vendedorId)||'Sem representante';
+    porRep[nome] = (porRep[nome]||0)+it.valorBase;
+  });
+  const rankingRepresentantes = Object.entries(porRep).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor).slice(0,10);
+
+  // Vendas por cliente
+  const porCliente = {};
+  itens.forEach(it=>{ if(it.cliente){ porCliente[it.cliente] = (porCliente[it.cliente]||0)+it.valorBase; } });
+  const rankingClientes = Object.entries(porCliente).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor).slice(0,10);
+
+  // Meta x Realizado — reaproveita a mesma meta de faturamento já definida em Metas Financeiras
+  const mf = state.metasFinanceirasMes || {};
+  const mesAtualRef = hoje.slice(0,7);
+  const vendasMesAtual = dadosComissaoAnalise(`${mesAtualRef}-01`, hoje).filter(it=>it.status!=='cancelada').reduce((s,it)=>s+it.valorBase,0);
+
+  return `
+    <div class="topbar">
+      <div><h1>Vendas</h1><p>Análise de faturamento, pedidos e desempenho por representante e cliente</p></div>
+    </div>
+    ${periodFilterHTML('vendasPeriodo', vendasFiltroPeriodo)}
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin:14px 0;">
+      ${metricCardHTML('Faturamento do período', brl(totalVendas))}
+      ${metricCardHTML('Qtd. de pedidos', qtdPedidos)}
+      ${metricCardHTML('Ticket médio', brl(ticketMedio))}
+    </div>
+
+    ${chartCardHTML('📈 Vendas por mês', 'Últimos 12 meses', svgLinhasMultiplas([{ nome:'Vendas', valores:dadosPorMes.map(d=>d.totalVendas), cor:'#1E49E2' }], labelsMeses))}
+    ${chartCardHTML('📊 Quantidade de pedidos por mês', 'Últimos 12 meses', svgBarrasComparativas([{ nome:'Pedidos', valores:dadosPorMes.map(d=>d.qtdPedidos), cor:'#2FA36B', formatador:v=>v+' pedido(s)' }], labelsMeses))}
+    ${mf.faturamento>0 ? chartCardHTML('🎯 Meta × Realizado — mês atual', competenciaLabel(mesAtualRef), svgBarrasComparativas([{ nome:'Meta', valores:[mf.faturamento], cor:'#8A9099' },{ nome:'Realizado', valores:[vendasMesAtual], cor:'#1E49E2' }], [''])) : ''}
+
+    <div class="cards" style="grid-template-columns:1fr 1fr;">
+      <div class="panel"><div class="panel-head"><h2>🏆 Vendas por representante</h2></div><div class="panel-body" style="padding:18px;">
+        ${rankingRepresentantes.length ? svgBarrasHorizontais(rankingRepresentantes, '#1E49E2') : '<div class="empty">Sem dados no período.</div>'}
+      </div></div>
+      <div class="panel"><div class="panel-head"><h2>👤 Vendas por cliente</h2></div><div class="panel-body" style="padding:18px;">
+        ${rankingClientes.length ? svgBarrasHorizontais(rankingClientes, '#2FA36B') : '<div class="empty">Sem dados no período.</div>'}
+      </div></div>
+    </div>
+    <div class="note" style="margin-top:0;">Vendas por produto/categoria não estão disponíveis — o sistema registra cada pedido como um todo, sem o detalhamento de itens.</div>
+  `;
+}
+/* ====================== FIM TELA DE VENDAS ====================== */
+
+/* ====================== TELA DE REPRESENTANTES ====================== */
+let representanteSelecionadoId = null;
+function dadosRepresentanteNoPeriodo(vendedorId, dataDe, dataAte){
+  const itens = dadosComissaoAnalise(dataDe, dataAte).filter(it=>it.status!=='cancelada' && it.vendedorId===vendedorId);
+  const faturamento = itens.reduce((s,it)=>s+it.valorBase,0);
+  const qtdPedidos = itens.length;
+  const ticketMedio = qtdPedidos>0 ? faturamento/qtdPedidos : 0;
+  const comissao = itens.reduce((s,it)=>s+it.comissaoValor,0);
+  const pctMedio = faturamento>0 ? comissao/faturamento*100 : null;
+  return { faturamento, qtdPedidos, ticketMedio, comissao, pctMedio };
+}
+function viewRepresentantes(){
+  if(representanteSelecionadoId){
+    const vendedor = state.vendedores.find(v=>v.id===representanteSelecionadoId);
+    if(!vendedor){ representanteSelecionadoId = null; }
+    else return viewRepresentanteDetalhe(vendedor);
+  }
+  const hoje = todayISO();
+  const mesAtualRef = hoje.slice(0,7);
+  const dados = state.vendedores.map(v=>{
+    const d = dadosRepresentanteNoPeriodo(v.id, `${mesAtualRef}-01`, hoje);
+    const pctMeta = v.metaMensal>0 ? Math.min(100, Math.round(d.faturamento/v.metaMensal*100)) : null;
+    return { ...v, ...d, pctMeta };
+  }).sort((a,b)=>b.faturamento-a.faturamento);
+
+  return `
+    <div class="topbar">
+      <div><h1>Representantes</h1><p>Desempenho individual — ${competenciaLabel(mesAtualRef)}</p></div>
+    </div>
+    ${!dados.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum representante cadastrado ainda.</div></div>` :
+    dados.map(d=>`
+      <div class="panel" style="margin-bottom:12px;cursor:pointer;" data-action="abrir-representante" data-id="${d.id}">
+        <div class="panel-body" style="padding:16px 20px;">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+            <span class="vendedor-avatar lg" style="background:${corVendedor(d.id)}">${initials(d.nome)}</span>
+            <div style="flex:1;">
+              <div style="font-weight:700;font-size:14px;">${escapeHTML(d.nome)}</div>
+              <div style="font-size:11px;color:var(--text-soft);">Comissão padrão ${d.comissaoPadrao||0}%</div>
+            </div>
+            <span style="color:var(--blue-accent);font-size:18px;">›</span>
+          </div>
+          <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;">
+            <div><div style="font-size:10px;color:var(--text-soft);">Faturamento</div><div class="mono" style="font-size:12.5px;font-weight:600;">${brl(d.faturamento)}</div></div>
+            <div><div style="font-size:10px;color:var(--text-soft);">Pedidos</div><div class="mono" style="font-size:12.5px;font-weight:600;">${d.qtdPedidos}</div></div>
+            <div><div style="font-size:10px;color:var(--text-soft);">Ticket médio</div><div class="mono" style="font-size:12.5px;font-weight:600;">${brl(d.ticketMedio)}</div></div>
+            <div><div style="font-size:10px;color:var(--text-soft);">Comissão</div><div class="mono" style="font-size:12.5px;font-weight:600;">${brl(d.comissao)}</div></div>
+          </div>
+          ${d.pctMeta!==null ? `
+          <div style="margin-top:10px;">
+            <div style="background:var(--bone);border-radius:6px;height:8px;overflow:hidden;"><div style="width:${d.pctMeta}%;height:100%;background:${d.pctMeta>=100?'var(--success)':'var(--blue-accent)'};"></div></div>
+            <div style="font-size:10.5px;color:var(--text-soft);margin-top:3px;">${d.pctMeta}% da meta mensal (${brl(d.metaMensal)})</div>
+          </div>` : ''}
+        </div>
+      </div>
+    `).join('')}
+  `;
+}
+function viewRepresentanteDetalhe(vendedor){
+  const hoje = todayISO();
+  const mesAtualRef = hoje.slice(0,7);
+  const dMes = dadosRepresentanteNoPeriodo(vendedor.id, `${mesAtualRef}-01`, hoje);
+  const pctMeta = vendedor.metaMensal>0 ? Math.min(100, Math.round(dMes.faturamento/vendedor.metaMensal*100)) : null;
+
+  const meses = Array.from({length:12},(_,i)=>{ const [ay,am]=mesAtualRef.split('-').map(Number); const d=new Date(ay,am-1-(11-i),1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const dadosPorMes = meses.map(m=>{
+    const [ay,am] = m.split('-').map(Number);
+    const de = `${m}-01`, ate = `${m}-${String(new Date(ay,am,0).getDate()).padStart(2,'0')}`;
+    return { mes:m, ...dadosRepresentanteNoPeriodo(vendedor.id, de, ate) };
+  });
+  const labelsMeses = meses.map(m=>competenciaLabel(m).split('/')[0].slice(0,3));
+
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-action="voltar-representantes">← Representantes</span>
+        <h1 style="margin-top:6px;">${escapeHTML(vendedor.nome)}</h1>
+        <p>Análise individual de desempenho</p>
+      </div>
+    </div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:14px;">
+      ${metricCardHTML('Faturamento do mês', brl(dMes.faturamento))}
+      ${metricCardHTML('Pedidos', dMes.qtdPedidos)}
+      ${metricCardHTML('Ticket médio', brl(dMes.ticketMedio))}
+      ${metricCardHTML('Comissão do mês', brl(dMes.comissao))}
+      ${metricCardHTML('% médio de comissão', dMes.pctMedio!==null?dMes.pctMedio.toFixed(1)+'%':'—')}
+      ${vendedor.metaMensal>0 ? metricCardHTML('% da meta', pctMeta+'%', pctMeta>=100?'var(--success)':undefined) : ''}
+    </div>
+
+    ${chartCardHTML('📈 Evolução das vendas', 'Últimos 12 meses', svgLinhasMultiplas([{ nome:'Vendas', valores:dadosPorMes.map(d=>d.faturamento), cor:'#1E49E2' }], labelsMeses))}
+    ${chartCardHTML('💰 Comissão por mês', 'Últimos 12 meses', svgLinhasMultiplas([{ nome:'Comissão', valores:dadosPorMes.map(d=>d.comissao), cor:'#7B5CD6' }], labelsMeses))}
+    ${vendedor.metaMensal>0 ? chartCardHTML('🎯 Meta × Realizado — mês atual', competenciaLabel(mesAtualRef), svgBarrasComparativas([{ nome:'Meta', valores:[vendedor.metaMensal], cor:'#8A9099' },{ nome:'Realizado', valores:[dMes.faturamento], cor:'#1E49E2' }], [''])) : ''}
+  `;
+}
+/* ====================== FIM TELA DE REPRESENTANTES ====================== */
+
+/* ====================== ANÁLISE GRÁFICA — DASHBOARD ====================== */
+// Versão compacta — os gráficos completos (por representante, por cliente, meta x realizado
+// detalhado) já existem na tela de Vendas. Repetir tudo aqui violaria a própria regra de "não
+// empilhar vários gráficos pequenos": aqui mostramos só o essencial pro dia a dia, com um link
+// direto pra análise completa.
+function analiseGraficaDashboardHTML(){
+  if(!state.vendedores.length && !(state.lancamentos||[]).some(l=>l.origem==='vk')) return '';
+  const hoje = todayISO();
+  const mesAtualRef = hoje.slice(0,7);
+  const meses = Array.from({length:6},(_,i)=>{ const [ay,am]=mesAtualRef.split('-').map(Number); const d=new Date(ay,am-1-(5-i),1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const dadosPorMes = meses.map(m=>{
+    const [ay,am] = m.split('-').map(Number);
+    const de = `${m}-01`, ate = `${m}-${String(new Date(ay,am,0).getDate()).padStart(2,'0')}`;
+    const itensDoMes = dadosComissaoAnalise(de, ate).filter(it=>it.status!=='cancelada');
+    return { totalVendas: itensDoMes.reduce((s,it)=>s+it.valorBase,0) };
+  });
+  const labelsMeses = meses.map(m=>competenciaLabel(m).split('/')[0].slice(0,3));
+  const mf = state.metasFinanceirasMes || {};
+  const vendasMesAtual = dadosPorMes[dadosPorMes.length-1].totalVendas;
+
+  return `
+    <div class="dash-section-label" style="display:flex;justify-content:space-between;align-items:center;">
+      <span>📈 Vendas — últimos 6 meses</span>
+      <span style="font-size:11px;color:var(--blue-accent);cursor:pointer;" data-goto="vendas">Ver análise completa ›</span>
+    </div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:16px 18px;">
+      ${svgLinhasMultiplas([{ nome:'Faturamento', valores:dadosPorMes.map(d=>d.totalVendas), cor:'#1E49E2' }], labelsMeses)}
+    </div></div>
+    ${mf.faturamento>0 ? `
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:16px 18px;">
+      <div style="font-size:12px;font-weight:700;margin-bottom:10px;">🎯 Meta × Realizado — ${competenciaLabel(mesAtualRef)}</div>
+      ${svgBarrasComparativas([{ nome:'Meta', valores:[mf.faturamento], cor:'#8A9099' },{ nome:'Realizado', valores:[vendasMesAtual], cor:'#1E49E2' }], [''])}
+    </div></div>` : ''}
+  `;
+}
+/* ====================== FIM ANÁLISE GRÁFICA — DASHBOARD ====================== */
+
 function svgLinhasMultiplas(series, labels){
   const W=680,H=200,padL=8,padB=20,padT=10,padR=8;
   const n = labels.length;
@@ -20847,6 +21149,18 @@ function attachViewHandlers(){
     comissaoAnaliseFiltro = { dataDe: null, dataAte: null, vendedorId: '', cliente: '', status: '' };
     render();
   });
+  document.querySelectorAll('#vendasPeriodoToggle [data-periodo]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      vendasFiltroPeriodo = btn.dataset.periodo;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-action="abrir-representante"]').forEach(el=>{
+    el.addEventListener('click', ()=>{ representanteSelecionadoId = el.dataset.id; render(); });
+  });
+  document.querySelector('[data-action="voltar-representantes"]')?.addEventListener('click', ()=>{
+    representanteSelecionadoId = null; render();
+  });
   document.getElementById('btnNovaRetirada')?.addEventListener('click', ()=>openRetiradaModal());
   document.querySelectorAll('[data-action="editar-retirada"]').forEach(el=>{
     el.addEventListener('click', ()=>openRetiradaModal(state.retiradas.find(r=>r.id===el.dataset.id)));
@@ -25669,6 +25983,20 @@ function viewMetasReserva(){
         `}
       </div>
     </div>
+
+    ${mf.faturamento>0 && state.vendedores.length ? (()=>{
+      const meses6 = Array.from({length:6},(_,i)=>{ const [ay,am]=mesAtual.split('-').map(Number); const d=new Date(ay,am-1-(5-i),1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+      const realizadoPorMes = meses6.map(m=>{
+        const [ay,am] = m.split('-').map(Number);
+        const de = `${m}-01`, ate = `${m}-${String(new Date(ay,am,0).getDate()).padStart(2,'0')}`;
+        return dadosComissaoAnalise(de, ate).filter(it=>it.status!=='cancelada').reduce((s,it)=>s+it.valorBase,0);
+      });
+      const labels6 = meses6.map(m=>competenciaLabel(m).split('/')[0].slice(0,3));
+      return chartCardHTML('📊 Faturamento mensal × Meta', 'Últimos 6 meses — meta atual aplicada retroativamente pra comparação, já que o sistema não guarda histórico de metas passadas', svgLinhasMultiplas([
+        { nome:'Realizado', valores:realizadoPorMes, cor:'#1E49E2' },
+        { nome:'Meta', valores:meses6.map(()=>mf.faturamento), cor:'#8A9099' },
+      ], labels6));
+    })() : ''}
 
     <div class="dash-section-label" style="margin-top:20px;">Metas e Reservas de longo prazo</div>
     ${dadosMetas.length ? `
