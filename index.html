@@ -735,6 +735,7 @@
       <button type="button" data-novo="saida"><span class="dropdown-dot" style="background:var(--danger);"></span> Nova despesa</button>
       <button type="button" data-novo="recorrente"><span class="dropdown-dot" style="background:#7B5CD6;"></span> Despesa recorrente</button>
       <button type="button" data-novo="transferencia"><span class="dropdown-dot" style="background:var(--blue-accent);"></span> Transferência entre contas</button>
+      <button type="button" data-novo="deposito"><span class="dropdown-dot" style="background:#2E9E5B;"></span> 💵 Depósito em espécie</button>
       <button type="button" data-novo="investimento"><span class="dropdown-dot" style="background:var(--warn);"></span> Aplicação financeira</button>
       <button type="button" data-novo="qrnota"><span class="dropdown-dot" style="background:#00A884;"></span> 🧾 Ler nota fiscal (QR Code)</button>
       <button type="button" data-novo="notafiscalpdf"><span class="dropdown-dot" style="background:#3B6FE0;"></span> 📄 Importar nota fiscal (PDF/foto)</button>
@@ -1045,6 +1046,9 @@ function aplicarMigracoes(s){
   if(!s.dashboardWidgetsOcultos) s.dashboardWidgetsOcultos = [];
   if(!s.acoesFinanceiras) s.acoesFinanceiras = [];
   if(!s.orcamentoCentrosCusto) s.orcamentoCentrosCusto = {};
+  if(!s.contas.find(c=>c.tipo==='especie')){
+    s.contas.push({ id: uid(), nome:'Dinheiro em Espécie', banco:'Caixa físico', tipo:'especie', saldoInicial:0, cor: CONTA_CORES[s.contas.length % CONTA_CORES.length] });
+  }
   if(!s.temaCor) s.temaCor = 'azul';
   if(s.modoEscuro===undefined) s.modoEscuro = false;
   if(!s.cofresVirtuais) s.cofresVirtuais = [
@@ -1102,15 +1106,28 @@ async function carregarDados(){
 }
 let state = aplicarMigracoes(null);
 let saveTimeout = null;
+let saveTimeoutPendente = false;
 function persist(){
   clearTimeout(saveTimeout);
+  saveTimeoutPendente = true;
   saveTimeout = setTimeout(()=>{
+    saveTimeoutPendente = false;
     DOC_REF.set(state).catch(e=>{
       console.error('Erro ao salvar no Firestore:', e);
       showToast('Não foi possível salvar — verifique a internet');
     });
   }, 500);
 }
+// Se a página for fechada ou recarregada (F5) enquanto ainda há uma gravação pendente pelo
+// debounce acima, força o salvamento imediato — sem isso, mudanças feitas nos últimos 500ms
+// podem nunca chegar a ser salvas, e o F5 as perde de verdade (elas nunca existiram no servidor).
+window.addEventListener('beforeunload', ()=>{
+  if(saveTimeoutPendente){
+    clearTimeout(saveTimeout);
+    saveTimeoutPendente = false;
+    DOC_REF.set(state);
+  }
+});
 
 // Log de auditoria removido (usuário pediu, ele nunca tinha tela pra ser visto e só ocupava
 // espaço) — mantida como função vazia pra não precisar mexer nos ~41 lugares que a chamavam.
@@ -1255,18 +1272,9 @@ function initCalculadoraFlutuante(){
 }
 /* ====================== FIM CALCULADORA FLUTUANTE ====================== */
 
-// Conecta a calculadora a QUALQUER campo de valor do sistema (todos usam inputmode="decimal"
-// por convenção) — só em desktop; no celular o campo continua abrindo o teclado numérico normal.
-// Clique (não foco) evita abrir a calculadora em focos automáticos disparados pelo próprio código.
-document.addEventListener('click', (e)=>{
-  if(window.innerWidth<=900) return; // só desktop
-  const campo = e.target.closest('input[inputmode="decimal"]');
-  if(!campo || campo.readOnly || campo.disabled) return;
-  if(campo.id==='calcFlutuante' || campo.closest('#calcFlutuante')) return;
-  if(calcCampoDestino===campo.id) return; // já está aberta pra esse mesmo campo, não reabre
-  abrirCalculadora(campo.id);
-  if(campo.value) { calcExpressaoAtual = String(campo.value).replace('.',','); calcAtualizarVisor(); }
-});
+// A calculadora fica disponível só pelo botão da barra lateral (não abre automaticamente ao
+// clicar em campos de valor — isso atrapalhava o preenchimento normal nos modais de
+// receita/despesa/transferência).
 
 function aplicarModoEscuro(ativo){
   const p = ativo ? PALETA_ESCURA : PALETA_CLARA;
@@ -1637,7 +1645,6 @@ function moreItensDef(){
     { view:'comissoes', icone:'🤝', nome:'Comissões', grupo:'Operacional' },
     { view:'vendas', icone:'📈', nome:'Vendas', grupo:'Operacional' },
     { view:'centros-custo', icone:'🏗️', nome:'Centro de Custos', grupo:'Análise' },
-    { view:'funil', icone:'🔻', nome:'Funil de Vendas', grupo:'Operacional' },
     { view:'a-receber-representante', icone:'💵', nome:'A Receber do Representante', grupo:'Operacional', badge:()=>todasFilasRecebimentoRep().filter(r=>!r.conferido).length },
     { view:'relatorios', icone:'📊', nome:'Relatórios', grupo:'Análise' },
     { view:'busca-global', icone:'🔍', nome:'Busca Global', grupo:'Análise' },
@@ -1768,7 +1775,6 @@ function render(){
   else if(currentView==='comissoes') main.innerHTML = viewComissoes();
   else if(currentView==='vendas') main.innerHTML = viewVendas();
   else if(currentView==='centros-custo') main.innerHTML = viewCentrosCusto();
-  else if(currentView==='funil') main.innerHTML = viewFunilVendas();
   else if(currentView==='ativos') main.innerHTML = viewAtivosPatrimoniais();
   else if(currentView==='ativo-detalhe') main.innerHTML = viewAtivoPatrimonialDetalhe(ativoPatrimonialDetalheId);
   else if(currentView==='integracoes') main.innerHTML = viewIntegracoes();
@@ -18658,99 +18664,6 @@ function corVendedor(vendedorId){
   return CONTA_CORES[idx>=0 ? idx % CONTA_CORES.length : 0];
 }
 
-const FUNIL_ETAPAS = [
-  { id:'orcamento', nome:'Orçamento enviado', cor:'#8A8F98' },
-  { id:'pedido', nome:'Pedido confirmado', cor:'#3B6FE0' },
-  { id:'faturado', nome:'Faturado', cor:'#2E9E5B' }
-];
-
-function viewFunilVendas(){
-  const oport = state.oportunidadesVenda || [];
-  const perdidas = oport.filter(o=>o.etapa==='perdido');
-  const totalAberto = oport.filter(o=>o.etapa!=='faturado' && o.etapa!=='perdido').reduce((s,o)=>s+o.valor,0);
-  return `
-    <div class="topbar">
-      <div><h1>Funil de Vendas</h1><p>Acompanhe as oportunidades desde o orçamento até virar faturamento de verdade</p></div>
-      <button class="btn" id="btnNovaOportunidade">+ Nova oportunidade</button>
-    </div>
-    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:16px;">
-      <div class="card saldo"><div class="label">Em aberto no funil</div><div class="value mono">${brl(totalAberto)}</div></div>
-      <div class="card"><div class="label">Oportunidades ativas</div><div class="value mono">${oport.filter(o=>o.etapa!=='faturado' && o.etapa!=='perdido').length}</div></div>
-      <div class="card"><div class="label">Taxa de conversão (todas as encerradas)</div><div class="value mono">${(()=>{
-        const encerradas = oport.filter(o=>o.etapa==='faturado' || o.etapa==='perdido');
-        if(!encerradas.length) return '—';
-        return Math.round(oport.filter(o=>o.etapa==='faturado').length/encerradas.length*100)+'%';
-      })()}</div></div>
-    </div>
-    ${FUNIL_ETAPAS.map(et=>{
-      const itens = oport.filter(o=>o.etapa===et.id);
-      const totalEtapa = itens.reduce((s,o)=>s+o.valor,0);
-      return `
-      <div class="panel" style="margin-bottom:14px;border-left:3px solid ${et.cor};">
-        <div class="panel-head"><h2>${et.nome} <span style="font-weight:400;font-size:11.5px;color:var(--text-soft);">· ${itens.length} · ${brl(totalEtapa)}</span></h2></div>
-        <div class="panel-body" style="padding:0;">
-          ${itens.length ? itens.map(o=>`
-            <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;align-items:center;">
-              <div class="desc-cell"><div>${escapeHTML(o.cliente)}${o.descricao?' — '+escapeHTML(o.descricao):''}</div><div class="cat">${fmtDate(o.data)}</div></div>
-              <span class="mono" style="font-weight:600;">${brl(o.valor)}</span>
-              <div class="row-actions">
-                ${et.id!=='faturado' ? `<button class="icon-btn" data-action="avancar-oportunidade" data-id="${o.id}" title="Avançar etapa">➡️</button>` : ''}
-                ${et.id!=='faturado' ? `<button class="icon-btn" data-action="perder-oportunidade" data-id="${o.id}" title="Marcar como perdida">✕</button>` : ''}
-                ${et.id==='faturado' && !o.lancamentoId ? `<button class="icon-btn" data-action="converter-oportunidade" data-id="${o.id}" title="Lançar como conta a receber">💰</button>` : ''}
-                ${o.lancamentoId ? `<span style="font-size:10.5px;color:var(--success);">✓ lançado</span>` : ''}
-              </div>
-            </div>
-          `).join('') : `<div class="empty">Nada aqui ainda.</div>`}
-        </div>
-      </div>`;
-    }).join('')}
-    ${perdidas.length ? `
-    <details class="panel-details">
-      <summary>Perdidas (${perdidas.length})</summary>
-      <div class="panel-body">
-        ${perdidas.map(o=>`
-          <div class="ledger-row compact" style="grid-template-columns:1fr auto;">
-            <div class="desc-cell"><div>${escapeHTML(o.cliente)}${o.descricao?' — '+escapeHTML(o.descricao):''}</div><div class="cat">${fmtDate(o.data)}</div></div>
-            <span class="mono" style="color:var(--text-soft);">${brl(o.valor)}</span>
-          </div>
-        `).join('')}
-      </div>
-    </details>` : ''}
-  `;
-}
-
-function openOportunidadeModal(){
-  const modal = document.getElementById('modalContent');
-  modal.innerHTML = `
-    <h3>Nova oportunidade</h3>
-    <div class="field"><label>Cliente</label><input type="text" id="opCliente" placeholder="Nome do cliente"></div>
-    <div class="field"><label>Descrição (opcional)</label><input type="text" id="opDescricao" placeholder="Ex: pedido de 50 caixas"></div>
-    <div class="field-row">
-      <div class="field"><label>Valor estimado (R$)</label><input type="text" inputmode="decimal" id="opValor"></div>
-      <div class="field"><label>Data</label><input type="date" id="opData" value="${todayISO()}"></div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
-      <button class="btn" id="btnSalvarOportunidade">Adicionar ao funil</button>
-    </div>
-  `;
-  document.getElementById('modalOverlay').classList.add('open');
-  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  document.getElementById('btnSalvarOportunidade').addEventListener('click', ()=>{
-    const cliente = document.getElementById('opCliente').value.trim();
-    const valor = numBR(document.getElementById('opValor').value);
-    if(!cliente){ showToast('Digite o cliente'); return; }
-    if(isNaN(valor) || valor<=0){ showToast('Digite um valor válido'); return; }
-    if(!state.oportunidadesVenda) state.oportunidadesVenda = [];
-    state.oportunidadesVenda.push({
-      id: uid(), cliente, descricao: document.getElementById('opDescricao').value.trim(),
-      valor, data: document.getElementById('opData').value || todayISO(),
-      etapa: 'orcamento', lancamentoId: null, criadoEm: new Date().toISOString()
-    });
-    persist(); closeModal(); render();
-    showToast('Oportunidade adicionada ao funil');
-  });
-}
 
 // ====================== ANÁLISE DE COMISSÕES ======================
 // Função central — TUDO no painel de análise passa por aqui. Não recalcula nada que já existisse:
@@ -20699,6 +20612,7 @@ function dropdownNovoHTML(){
         <button type="button" data-novo="saida"><span class="dropdown-dot" style="background:var(--danger);"></span> Nova despesa</button>
         <button type="button" data-novo="recorrente"><span class="dropdown-dot" style="background:#7B5CD6;"></span> Despesa recorrente</button>
         <button type="button" data-novo="transferencia" ${state.contas.length<2?'disabled title="Crie pelo menos 2 contas para transferir"':''}><span class="dropdown-dot" style="background:var(--blue-accent);"></span> Transferência entre contas</button>
+        <button type="button" data-novo="deposito"><span class="dropdown-dot" style="background:#2E9E5B;"></span> 💵 Depósito em espécie</button>
         <button type="button" data-novo="investimento"><span class="dropdown-dot" style="background:var(--warn);"></span> Aplicação financeira</button>
         <button type="button" data-novo="qrnota"><span class="dropdown-dot" style="background:#00A884;"></span> 🧾 Ler nota fiscal (QR Code)</button>
         <button type="button" data-novo="notafiscalpdf"><span class="dropdown-dot" style="background:#3B6FE0;"></span> 📄 Importar nota fiscal (PDF/foto)</button>
@@ -21836,6 +21750,7 @@ function attachViewHandlers(){
         setNovoMenuAberto(false);
         const novoTipo = btn.dataset.novo;
         if(novoTipo==='transferencia') openTransferenciaModal();
+        else if(novoTipo==='deposito') openDepositoModal();
         else if(novoTipo==='recorrente') openRecorrenciaModal();
         else if(novoTipo==='investimento') openEscolherContaInvestirModal();
         else if(novoTipo==='qrnota') openLerQRNotaModal();
@@ -23176,39 +23091,6 @@ function attachViewHandlers(){
 
   // Fornecedores
   document.getElementById('btnNovoFornecedor')?.addEventListener('click', ()=>openFornecedorModal());
-  document.getElementById('btnNovaOportunidade')?.addEventListener('click', ()=>openOportunidadeModal());
-  document.querySelectorAll('[data-action="avancar-oportunidade"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      const o = state.oportunidadesVenda.find(x=>x.id===btn.dataset.id);
-      if(!o) return;
-      const idx = FUNIL_ETAPAS.findIndex(e=>e.id===o.etapa);
-      if(idx < FUNIL_ETAPAS.length-1){ o.etapa = FUNIL_ETAPAS[idx+1].id; persist(); render(); showToast(`Movido pra "${FUNIL_ETAPAS[idx+1].nome}"`); }
-    });
-  });
-  document.querySelectorAll('[data-action="perder-oportunidade"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      if(!confirm('Marcar essa oportunidade como perdida?')) return;
-      const o = state.oportunidadesVenda.find(x=>x.id===btn.dataset.id);
-      if(o){ o.etapa = 'perdido'; persist(); render(); showToast('Marcada como perdida'); }
-    });
-  });
-  document.querySelectorAll('[data-action="converter-oportunidade"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      const o = state.oportunidadesVenda.find(x=>x.id===btn.dataset.id);
-      if(!o) return;
-      const novoId = uid();
-      state.lancamentos.push({
-        id: novoId, tipo:'entrada', categoria:'Vendas',
-        descricao: o.descricao || `Venda — ${o.cliente}`, valor: o.valor,
-        fornecedor: o.cliente, observacao: '', contaId: state.contas[0]?.id || '',
-        dataVencimento: todayISO(), status:'pendente', dataPagamento:null,
-        criadoEm: new Date().toISOString()
-      });
-      o.lancamentoId = novoId;
-      persist(); render();
-      showToast('Lançado como conta a receber — confira/edite os detalhes se precisar');
-    });
-  });
   document.querySelectorAll('[data-action="ver-fornecedor"]').forEach(el=>{
     el.addEventListener('click', ()=>{
       const f = (state.fornecedores||[]).find(x=>x.id===el.dataset.id);
@@ -27137,6 +27019,82 @@ function openContaModal(existing){
   });
 }
 
+// Depósito — dinheiro em papel/espécie indo pra uma conta bancária. Modelado como uma
+// transferência de verdade (2 lançamentos ligados, igual a qualquer outra transferência), só que
+// a origem é sempre a conta "Dinheiro em Espécie" — criada automaticamente na primeira vez que
+// for necessária. Um pagamento recebido em papel entra nessa conta como receita normal; o
+// Depósito é só o passo seguinte, de levar aquele dinheiro pra dentro do banco.
+function contaDinheiroEspecie(){
+  let conta = state.contas.find(c=>c.tipo==='especie');
+  if(!conta){
+    conta = { id: uid(), nome:'Dinheiro em Espécie', banco:'Caixa físico', tipo:'especie', saldoInicial:0, cor: CONTA_CORES[state.contas.length % CONTA_CORES.length] };
+    state.contas.push(conta);
+  }
+  return conta;
+}
+function openDepositoModal(){
+  const origem = contaDinheiroEspecie();
+  const contasBancarias = state.contas.filter(c=>c.id!==origem.id);
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Depósito em espécie</h3>
+    <div class="note" style="margin-top:0;">Leva um valor que está em "${escapeHTML(origem.nome)}" pra dentro de uma conta bancária — funciona como uma transferência normal.</div>
+    <div class="field-row">
+      <div class="field">
+        <label>De (origem)</label>
+        <input type="text" value="${escapeHTML(origem.nome)}" disabled style="background:var(--bone);color:var(--text-soft);">
+      </div>
+      <div class="field">
+        <label>Para (conta bancária)</label>
+        <select id="dpConta">${contasBancarias.length ? contasBancarias.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('') : '<option value="">Cadastre uma conta bancária primeiro</option>'}</select>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Valor (R$)</label>
+        <input type="text" inputmode="decimal" id="dpValor" placeholder="0,00">
+      </div>
+      <div class="field">
+        <label>Data</label>
+        <input type="date" id="dpData" value="${todayISO()}">
+      </div>
+    </div>
+    <div class="field">
+      <label>Descrição (opcional)</label>
+      <input type="text" id="dpDescricao" placeholder="Ex: Depósito do caixa da loja">
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarDeposito">Depositar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarDeposito').addEventListener('click', ()=>{
+    const destinoId = document.getElementById('dpConta').value;
+    const valor = numBR(document.getElementById('dpValor').value);
+    const data = document.getElementById('dpData').value;
+    const descricaoExtra = document.getElementById('dpDescricao').value.trim();
+    if(!destinoId){ showToast('Cadastre uma conta bancária primeiro'); return; }
+    if(isNaN(valor) || valor<=0){ showToast('Informe um valor válido'); return; }
+    if(!data){ showToast('Informe a data'); return; }
+    const nomeDestino = nomeConta(destinoId);
+    const base = descricaoExtra ? ' — ' + descricaoExtra : '';
+    const tid = uid();
+    state.lancamentos.push({
+      id: uid(), tipo:'saida', categoria:'Transferência', descricao:`Depósito para ${nomeDestino}${base}`,
+      valor, contaId: origem.id, status:'pago', dataVencimento: data, dataPagamento: data,
+      origem:'transferencia', transferenciaId: tid, criadoEm: new Date().toISOString()
+    });
+    state.lancamentos.push({
+      id: uid(), tipo:'entrada', categoria:'Transferência', descricao:`Depósito de ${origem.nome}${base}`,
+      valor, contaId: destinoId, status:'recebido', dataVencimento: data, dataPagamento: data,
+      origem:'transferencia', transferenciaId: tid, criadoEm: new Date().toISOString()
+    });
+    persist(); closeModal(); render();
+    showToast('Depósito realizado');
+  });
+}
 function openTransferenciaModal(contaOrigemId, existingLancamento){
   const isEdit = !!existingLancamento;
   let parOrigem, parDestino;
@@ -29950,6 +29908,7 @@ document.getElementById('modalOverlay').addEventListener('click', (e)=>{ if(e.ta
         if(state.contas.length<2){ showToast('Crie pelo menos 2 contas pra transferir'); return; }
         openTransferenciaModal();
       }
+      else if(novoTipo==='deposito') openDepositoModal();
       else if(novoTipo==='recorrente') openRecorrenciaModal();
       else if(novoTipo==='investimento') openEscolherContaInvestirModal();
       else if(novoTipo==='qrnota') openLerQRNotaModal();
