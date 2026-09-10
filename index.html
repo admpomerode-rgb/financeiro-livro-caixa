@@ -2817,7 +2817,7 @@ async function sincronizarPedidosVK(){
     });
     if(escritasFinanceiro.length){
       await Promise.all(escritasFinanceiro.map(item=>
-        db.collection('pedidos').doc(item.vkPedidoId).update(item.dados).then(()=>{
+        db.collection('pedidos').doc(item.vkPedidoId).set(item.dados, { merge: true }).then(()=>{
           const l = state.lancamentos.find(x=>x.vkPedidoId===item.vkPedidoId && x.origem==='vk');
           if(l){ l.ultimoFinanceiroEnviadoVK = item.chave; atualizadosFinanceiro++; }
         }).catch(e=>console.error('Falha ao devolver status financeiro pro VK', item.vkPedidoId, e))
