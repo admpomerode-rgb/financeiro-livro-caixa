@@ -1107,12 +1107,35 @@ async function carregarDados(){
 let state = aplicarMigracoes(null);
 let saveTimeout = null;
 let saveTimeoutPendente = false;
+// O Firestore recusa o documento INTEIRO se qualquer campo, em qualquer nível, for undefined
+// (não confundir com null, que é aceito). Isso já causou perda silenciosa de salvamento: o
+// state ficava só na memória do navegador porque um campo qualquer virava undefined em algum
+// fluxo. encontrarCampoUndefined vasculha o objeto pra apontar exatamente onde, e
+// limparUndefined tira esses campos antes de mandar pro Firestore, pra nunca mais travar o
+// documento inteiro por causa de um campo isolado.
+function encontrarCampoUndefined(obj, caminho){
+  if(obj===undefined) return caminho || '(raiz)';
+  if(obj===null || typeof obj!=='object') return null;
+  for(const k of Object.keys(obj)){
+    const achou = encontrarCampoUndefined(obj[k], (caminho?caminho+'.':'')+k);
+    if(achou) return achou;
+  }
+  return null;
+}
+function limparUndefined(obj){
+  return JSON.parse(JSON.stringify(obj));
+}
+function salvarStateNoFirestore(){
+  const campoRuim = encontrarCampoUndefined(state, '');
+  if(campoRuim) console.warn('Campo com valor undefined encontrado em state (removido antes de salvar):', campoRuim);
+  return DOC_REF.set(limparUndefined(state));
+}
 function persist(){
   clearTimeout(saveTimeout);
   saveTimeoutPendente = true;
   saveTimeout = setTimeout(()=>{
     saveTimeoutPendente = false;
-    DOC_REF.set(state).catch(e=>{
+    salvarStateNoFirestore().catch(e=>{
       console.error('Erro ao salvar no Firestore:', e);
       showToast('Não foi possível salvar — verifique a internet');
     });
@@ -1125,7 +1148,7 @@ window.addEventListener('beforeunload', ()=>{
   if(saveTimeoutPendente){
     clearTimeout(saveTimeout);
     saveTimeoutPendente = false;
-    DOC_REF.set(state);
+    salvarStateNoFirestore().catch(e=>console.error('Erro ao salvar no Firestore (beforeunload):', e));
   }
 });
 
