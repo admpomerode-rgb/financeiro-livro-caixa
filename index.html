@@ -1098,6 +1098,22 @@ function aplicarMigracoes(s){
   // Log de auditoria removido — era gravado o tempo todo (41 lugares do sistema) mas nunca tinha
   // nenhuma tela pra ver esse histórico, só ocupava espaço no documento do Firestore à toa.
   if(s.logAuditoria) delete s.logAuditoria;
+  // Reparo de dados antigos: alguns pedidos importados do VK Industrial vieram sem o campo de
+  // valor preenchido lá na origem, e o código copiava isso direto pro lançamento sem proteção —
+  // resultado: lancamentos com valor undefined, que travava o salvamento do documento inteiro no
+  // Firestore (undefined não é aceito em nenhum campo). Aqui zeramos esses casos e marcamos pra
+  // o usuário conferir manualmente o valor correto, já que o original se perdeu na origem.
+  const lancamentosCorrigidos = [];
+  (s.lancamentos||[]).forEach(l=>{
+    if(l.valor===undefined){
+      l.valor = 0;
+      l.valorPrecisaConferencia = true;
+      lancamentosCorrigidos.push(l.vkPedidoId || l.id);
+    }
+  });
+  if(lancamentosCorrigidos.length){
+    console.warn('Lançamento(s) com valor ausente, zerado(s) e marcado(s) pra conferência manual:', lancamentosCorrigidos);
+  }
   return s;
 }
 async function carregarDados(){
@@ -2551,7 +2567,7 @@ async function sincronizarPedidosVK(){
         } else {
           state.vendasBonificadas.push({
             id: uid(), vkPedidoId: p.id, numero: p.numero,
-            clienteNome: cliente ? cliente.nome : '', valor: p.valorTotal, data: dataBonif,
+            clienteNome: cliente ? cliente.nome : '', valor: p.valorTotal||0, data: dataBonif,
             criadoEm: new Date().toISOString()
           });
         }
@@ -2601,7 +2617,7 @@ async function sincronizarPedidosVK(){
         // pedido já nasceu cancelado no VK — não precisa de aprovação, entra direto já marcado
         state.lancamentos.push({
           id: uid(), tipo:'entrada', categoria: cfg.categoria || 'Vendas',
-          descricao: descricaoPedido, valor: p.valorTotal,
+          descricao: descricaoPedido, valor: p.valorTotal||0,
           fornecedor: cliente ? cliente.nome : '', observacao: observacaoNova,
           contaId: null, dataVencimento: vencimentoNovo,
           status: 'cancelado', dataPagamento: null,
@@ -2636,12 +2652,10 @@ async function sincronizarPedidosVK(){
         return;
       }
 
-      // Só vira conta a receber quando o pedido já foi (ao menos parcialmente) entregue — pedido em
-      // produção/aguardando ainda não é receita esperada. Não mexe em quem já tinha virado
-      // lançamento/aprovação antes dessa regra existir — só passa a valer pra pedido novo daqui pra frente.
-      if(!emAprovacao && p.status!=='entregue' && p.status!=='parcial'){
-        return;
-      }
+      // REVERTIDO a pedido do usuário: chegou a existir uma regra aqui que só deixava passar pedidos
+      // "entregue"/"parcial", mas isso quebrou o fluxo real de uso (todo pedido lançado no VK Industrial
+      // sempre passou pro financeiro, independente do status). Voltou a ser: qualquer pedido novo
+      // (não cancelado, não bonificação) entra na fila de aprovação assim que aparece no VK.
 
       if(emAprovacao){
         jaImportados++;
@@ -2666,7 +2680,7 @@ async function sincronizarPedidosVK(){
       state.vkAprovacoes.push({
         id: uid(), tipo:'pedido', vkPedidoId: p.id,
         descricao: descricaoPedido,
-        valor: p.valorTotal,
+        valor: p.valorTotal||0,
         contraparte: nomeContraparte,
         observacao: observacaoNova,
         dataVencimento: vencimentoNovo,
@@ -2705,7 +2719,7 @@ async function sincronizarPedidosVK(){
         id: uid(), vkPedidoId: p.id, numero: p.numero, forma: 'dinheiro',
         representanteId: p.representanteId || null, representanteNome: rep ? rep.nome : 'Sem representante',
         clienteNome: cliente ? cliente.nome : '—',
-        valor: p.valorTotal,
+        valor: p.valorTotal||0,
         dataMarcado: p.pagamentoDinheiroData || new Date().toISOString(),
         conferido: false, conferidoEm: null,
         criadoEm: new Date().toISOString()
@@ -2739,7 +2753,7 @@ async function sincronizarPedidosVK(){
         id: uid(), vkPedidoId: p.id, numero: p.numero, forma: 'pix',
         representanteId: p.representanteId || null, representanteNome: rep ? rep.nome : 'Sem representante',
         clienteNome: cliente ? cliente.nome : '—',
-        valor: p.valorTotal,
+        valor: p.valorTotal||0,
         dataMarcado: p.pagamentoPixData || new Date().toISOString(),
         conferido: false, conferidoEm: null,
         criadoEm: new Date().toISOString()
@@ -2773,7 +2787,7 @@ async function sincronizarPedidosVK(){
         id: uid(), vkPedidoId: p.id, numero: p.numero, forma: 'cartao',
         representanteId: p.representanteId || null, representanteNome: rep ? rep.nome : 'Sem representante',
         clienteNome: cliente ? cliente.nome : '—',
-        valor: p.valorTotal,
+        valor: p.valorTotal||0,
         dataMarcado: p.pagamentoCartaoData || new Date().toISOString(),
         conferido: false, conferidoEm: null,
         criadoEm: new Date().toISOString()
@@ -2805,7 +2819,7 @@ async function sincronizarPedidosVK(){
         id: uid(), vkPedidoId: p.id, numero: p.numero, forma: 'boleto',
         representanteId: p.representanteId || null, representanteNome: rep ? rep.nome : 'Sem representante',
         clienteNome: cliente ? cliente.nome : '—',
-        valor: p.valorTotal,
+        valor: p.valorTotal||0,
         dataMarcado: p.pagamentoBoletoData || new Date().toISOString(),
         conferido: false, conferidoEm: null,
         criadoEm: new Date().toISOString()
