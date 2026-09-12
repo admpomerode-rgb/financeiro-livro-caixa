@@ -872,7 +872,15 @@ function ehMovimentoDeCapital(l){
   if(!l.categoria) return false;
   const lista = l.tipo==='saida' ? (state.categorias?.saida||[]) : (state.categorias?.entrada||[]);
   const cat = lista.find(c=>c.nome===l.categoria || l.categoria.startsWith(c.nome+' / '));
-  return !!(cat && cat.ehCapital);
+  if(!cat) return false;
+  if(cat.ehCapital) return true; // categoria pai marcada como capital cobre ela e todas as subcategorias
+  if(l.categoria!==cat.nome){
+    // é uma subcategoria ("Pai / Sub") — a subcategoria pode ter sua PRÓPRIA flag, independente do pai
+    const subNome = l.categoria.slice(cat.nome.length+3);
+    const sub = (cat.subcategorias||[]).find(s=>s.nome===subNome);
+    if(sub && sub.ehCapital) return true;
+  }
+  return false;
 }
 
 const CONTA_CORES = ['#3B6FE0','#1E9E6B','#D98F2B','#8A5CF6','#D5473F','#0F9BB0'];
@@ -29764,6 +29772,11 @@ function openSubcategoriaModal(tipo, categoriaId, existing){
       <label>Nome da subcategoria</label>
       <input type="text" id="subNome" value="${existing ? escapeHTML(existing.nome) : ''}" placeholder="Ex: Embalagens">
     </div>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;font-size:13.5px;margin-top:14px;">
+      <input type="checkbox" id="subEhCapital" style="width:17px;height:17px;" ${existing?.ehCapital?'checked':''}>
+      🔄 É retorno/aporte de capital (não é receita nem despesa)
+    </label>
+    <div class="note" style="margin-top:6px;">Mesma regra da categoria principal, só que específica pra essa subcategoria: fica fora de todos os relatórios de resultado (DRE e outros), só aparece no saldo real da conta e no fluxo de caixa.</div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       <button class="btn" id="btnSalvarSubcategoria">Salvar</button>
@@ -29773,10 +29786,12 @@ function openSubcategoriaModal(tipo, categoriaId, existing){
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnSalvarSubcategoria').addEventListener('click', ()=>{
     const nome = document.getElementById('subNome').value.trim();
+    const ehCapital = document.getElementById('subEhCapital').checked;
     if(!nome){ showToast('Informe o nome da subcategoria'); return; }
     if(isEdit){
       const oldFull = `${cat.nome} / ${existing.nome}`;
       existing.nome = nome;
+      existing.ehCapital = ehCapital;
       const newFull = `${cat.nome} / ${nome}`;
       if(oldFull !== newFull){
         state.lancamentos.forEach(l=>{ if(l.categoria===oldFull) l.categoria = newFull; });
@@ -29784,7 +29799,7 @@ function openSubcategoriaModal(tipo, categoriaId, existing){
       }
     } else {
       if(!cat.subcategorias) cat.subcategorias = [];
-      cat.subcategorias.push({ id: uid(), nome });
+      cat.subcategorias.push({ id: uid(), nome, ehCapital });
     }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Subcategoria atualizada' : 'Subcategoria criada');
