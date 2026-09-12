@@ -2223,7 +2223,7 @@ function openCentralAtualizacaoModal(){
     </div>`;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  document.getElementById('btnSalvarAtualizacoes').addEventListener('click', ()=>{
+  document.getElementById('btnSalvarAtualizacoes').addEventListener('click', async ()=>{
     const dataPosicao = document.getElementById('atlzDataPosicao').value || todayISO();
     const observacao = document.getElementById('atlzObservacao').value.trim();
     const campos = [...document.querySelectorAll('.atlz-novo-valor')].filter(inp=>inp.value.trim()!=='');
@@ -2238,7 +2238,7 @@ function openCentralAtualizacaoModal(){
     }).filter(v=>v.pct>=50);
     if(variacoesGrandes.length){
       const lista = variacoesGrandes.map(v=>`"${v.nome}": ${brl(v.anterior)} → ${brl(v.novo)} (${v.pct.toFixed(0)}%)`).join('\n');
-      if(!confirm(`Essas atualizações representam uma variação bem grande em relação à posição anterior:\n\n${lista}\n\nConfirma mesmo assim?`)) return;
+      if(!(await avisoModal({mensagem: `Essas atualizações representam uma variação bem grande em relação à posição anterior:\n\n${lista}\n\nConfirma mesmo assim?`, tipo:'aviso', textoConfirmar:'Continuar'}))) return;
     }
 
     let qtd = 0;
@@ -3969,8 +3969,8 @@ function openDocumentoVeiculoModal(veiculoId, existing){
     </div>`;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  document.getElementById('btnExcluirDocumentoVeiculo')?.addEventListener('click', ()=>{
-    if(!confirm('Excluir esse documento?')) return;
+  document.getElementById('btnExcluirDocumentoVeiculo')?.addEventListener('click', async ()=>{
+    if(!(await avisoModal({mensagem: 'Excluir esse documento?', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
     state.veiculoDocumentos = state.veiculoDocumentos.filter(d=>d.id!==existing.id);
     persist(); closeModal(); render();
   });
@@ -5390,14 +5390,14 @@ function rowHTML(l){
 // Só permite quando TODOS ainda estão pendentes e nenhum recebeu pagamento parcial — combinar
 // lançamentos que já têm histórico de pagamento diferente entre si seria ambíguo demais pra fazer
 // sozinho sem risco de perder informação.
-function unificarGrupoLancamentos(grupoId){
+async function unificarGrupoLancamentos(grupoId){
   const itensDoGrupo = state.lancamentos.filter(l=>l.grupoId===grupoId);
   if(itensDoGrupo.length<2) return;
   if(itensDoGrupo.some(l=>l.status!=='pendente' || l.valorRecebido>0)){
     showToast('Só é possível unificar quando todos os itens ainda estão pendentes, sem nenhum pago');
     return;
   }
-  if(!confirm(`Unificar esses ${itensDoGrupo.length} lançamentos em um só, de ${brl(itensDoGrupo.reduce((s,l)=>s+l.valor,0))}? Essa ação não pode ser desfeita.`)) return;
+  if(!(await avisoModal({mensagem: `Unificar esses ${itensDoGrupo.length} lançamentos em um só, de ${brl(itensDoGrupo.reduce((s,l)=>s+l.valor,0))}? Essa ação não pode ser desfeita.`, tipo:'perigo', textoConfirmar:'Confirmar'}))) return;
 
   const primeiro = itensDoGrupo[0];
   const valorTotal = itensDoGrupo.reduce((s,l)=>s+l.valor,0);
@@ -8413,8 +8413,8 @@ function openImportarFaturaModal(cartaoId, faturaPendenteId){
       faturaEmRevisao.itens = lerItensDoDOM();
       publicarFaturaCartao(faturaEmRevisao);
     });
-    document.getElementById('btnExcluirFatura').addEventListener('click', ()=>{
-      if(!confirm('Excluir esta fatura pendente? Nenhuma compra foi lançada, então nada muda na fatura do cartão.')) return;
+    document.getElementById('btnExcluirFatura').addEventListener('click', async ()=>{
+      if(!(await avisoModal({mensagem: 'Excluir esta fatura pendente? Nenhuma compra foi lançada, então nada muda na fatura do cartão.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
       state.faturasPendentes = (state.faturasPendentes||[]).filter(f=>f.id!==faturaEmRevisao.id);
       registrarLog('Fatura excluída', `Fatura pendente de ${cartaoAlvo.nome} descartada sem publicar`);
       persist(); closeModal(); render();
@@ -8695,7 +8695,7 @@ function atualizarInvestimentosCards(){
     });
   });
   wrap.querySelectorAll('[data-conta-inv-menu]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       document.querySelectorAll('.dropdown-menu[data-menu-conta-inv]').forEach(m=>m.classList.remove('open'));
       const acao = btn.dataset.contaInvMenu, id = btn.dataset.id;
       const conta = state.contasInvestimento.find(c=>c.id===id);
@@ -8706,7 +8706,7 @@ function atualizarInvestimentosCards(){
       else if(acao==='desarquivar'){ conta.arquivada = false; persist(); atualizarInvestimentosCards(); showToast('Conta reativada'); }
       else if(acao==='excluir'){
         const usada = state.ativosInvestimento.some(a=>a.contaId===id);
-        if(usada && !confirm('Essa conta tem ativos cadastrados. Excluí-la remove os ativos junto. Continuar?')) return;
+        if(usada && !(await avisoModal({mensagem: 'Essa conta tem ativos cadastrados. Excluí-la remove os ativos junto. Continuar?', tipo:'aviso', textoConfirmar:'Continuar'}))) return;
         state.contasInvestimento = state.contasInvestimento.filter(c=>c.id!==id);
         state.ativosInvestimento = state.ativosInvestimento.filter(a=>a.contaId!==id);
         persist(); render(); showToast('Conta de investimento excluída');
@@ -11483,8 +11483,8 @@ function openEmprestimoModal(existing){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  if(isEdit) document.getElementById('btnExcluirEmprestimo').addEventListener('click', ()=>{
-    if(!confirm('Excluir esse empréstimo? Isso não mexe em nenhum lançamento já feito.')) return;
+  if(isEdit) document.getElementById('btnExcluirEmprestimo').addEventListener('click', async ()=>{
+    if(!(await avisoModal({mensagem: 'Excluir esse empréstimo? Isso não mexe em nenhum lançamento já feito.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
     state.emprestimos = state.emprestimos.filter(e=>e.id!==existing.id);
     persist(); closeModal(); render();
   });
@@ -17256,10 +17256,10 @@ function openProjetoCapexModal(existing){
     </div>`;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  document.getElementById('btnExcluirProjetoCapex')?.addEventListener('click', ()=>{
+  document.getElementById('btnExcluirProjetoCapex')?.addEventListener('click', async ()=>{
     const vinculados = state.ativosPatrimoniais.filter(a=>a.capexProjetoId===existing.id).length;
     const aviso = vinculados>0 ? `\n\nAtenção: existem ${vinculados} ativo(s) patrimonial(is) vinculado(s) a este projeto — eles NÃO serão excluídos, só perdem o vínculo com o projeto.` : '';
-    if(!confirm(`Excluir o projeto "${existing.nome}"?${aviso}`)) return;
+    if(!(await avisoModal({mensagem: `Excluir o projeto "${existing.nome}"?${aviso}`, tipo:'perigo', textoConfirmar:'Excluir'}))) return;
     state.ativosPatrimoniais.forEach(a=>{ if(a.capexProjetoId===existing.id) a.capexProjetoId = null; });
     state.capexProjetos = state.capexProjetos.filter(p=>p.id!==existing.id);
     persist(); closeModal(); render();
@@ -17637,8 +17637,8 @@ function atualizarAtivosListaConteudo(){
     });
   });
   container.querySelectorAll('[data-action="excluir-ativo-patrimonial"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      if(!confirm('Excluir este ativo? O lançamento de aquisição vinculado (se houver) não será excluído automaticamente.')) return;
+    btn.addEventListener('click', async ()=>{
+      if(!(await avisoModal({mensagem: 'Excluir este ativo? O lançamento de aquisição vinculado (se houver) não será excluído automaticamente.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
       state.ativosPatrimoniais = state.ativosPatrimoniais.filter(x=>x.id!==btn.dataset.id);
       persist(); render(); showToast('Ativo excluído');
     });
@@ -17878,8 +17878,8 @@ function openAtivoPatrimonialModal(existing, prefillPendente){
     btnExcluirModal.style.color = 'var(--danger)';
     btnExcluirModal.style.borderColor = '#F3C6C2';
     btnExcluirModal.textContent = 'Excluir cadastro';
-    btnExcluirModal.addEventListener('click', ()=>{
-      if(!confirm(`Excluir o cadastro de "${existing.nome}"? Essa ação não pode ser desfeita.`)) return;
+    btnExcluirModal.addEventListener('click', async ()=>{
+      if(!(await avisoModal({mensagem: `Excluir o cadastro de "${existing.nome}"? Essa ação não pode ser desfeita.`, tipo:'perigo', textoConfirmar:'Excluir'}))) return;
       state.ativosPatrimoniais = state.ativosPatrimoniais.filter(x=>x.id!==existing.id);
       persist(); closeModal(); render();
       showToast('Ativo excluído');
@@ -18294,13 +18294,13 @@ function openBaixaModal(ativo, prefill){
   syncMotivo();
   const chkEntrada = document.getElementById('bxRegistrarEntrada');
   chkEntrada.addEventListener('change', ()=>{ document.getElementById('bxContaGrupo').style.display = chkEntrada.checked ? 'block' : 'none'; });
-  document.getElementById('btnSalvarBaixa').addEventListener('click', ()=>{
+  document.getElementById('btnSalvarBaixa').addEventListener('click', async ()=>{
     const motivo = selMotivo.value;
     const data = document.getElementById('bxData').value || todayISO();
     const observacao = document.getElementById('bxObservacao').value.trim();
     const valorVendaRaw = document.getElementById('bxValor').value.trim();
     const valorVenda = valorVendaRaw ? numBR(valorVendaRaw) : 0;
-    if(!confirm(`Confirmar baixa deste ativo por motivo "${motivo}"? Essa ação marca o ativo como baixado.`)) return;
+    if(!(await avisoModal({mensagem: `Confirmar baixa deste ativo por motivo "${motivo}"? Essa ação marca o ativo como baixado.`, tipo:'aviso', textoConfirmar:'Continuar'}))) return;
     ativo.baixa = { motivo, data, observacao, valorVenda: motivo==='Venda' ? valorVenda : 0 };
     if(ativo.sugestaoBaixa) ativo.sugestaoBaixa = null;
     if(motivo==='Venda' && valorVenda>0 && chkEntrada.checked){
@@ -20644,8 +20644,8 @@ function aprovarItemVK(id){
   showToast('Aprovado e lançado');
 }
 
-function descartarItemVK(id){
-  if(!confirm('Descartar esse item? Ele não vira lançamento nenhum. Se ainda existir no VK Industrial, pode voltar a aparecer numa próxima sincronização.')) return;
+async function descartarItemVK(id){
+  if(!(await avisoModal({mensagem: 'Descartar esse item? Ele não vira lançamento nenhum. Se ainda existir no VK Industrial, pode voltar a aparecer numa próxima sincronização.', tipo:'perigo', textoConfirmar:'Confirmar'}))) return;
   state.vkAprovacoes = (state.vkAprovacoes||[]).filter(a=>a.id!==id);
   persist(); render();
   showToast('Item descartado');
@@ -20821,14 +20821,14 @@ function abrirQuitarModal(id){
   });
 }
 
-function excluirLancamento(id){
+async function excluirLancamento(id){
   const l = state.lancamentos.find(x=>x.id===id);
   if(!l) return;
   const ehFaturaAbertaSombra = l.origem==='cartao' && !state.faturasFechadas.some(f=>idsLancamentosFatura(f).includes(l.id));
   const msg = l.origem==='transferencia' ? 'Excluir esta transferência? As duas pontas (saída e entrada) serão removidas.'
     : ehFaturaAbertaSombra ? 'Esse valor é a soma das despesas da fatura ainda aberta — excluir aqui não apaga as despesas, e ele volta a aparecer sozinho na próxima vez que alguma delas mudar. Pra remover de verdade, exclua as despesas dentro da tela da fatura. Excluir mesmo assim?'
     : 'Excluir este lançamento?';
-  if(!confirm(msg)) return;
+  if(!(await avisoModal({mensagem: msg, tipo:'aviso', textoConfirmar:'Continuar'}))) return;
   registrarLog('Lançamento excluído', `${l.tipo==='entrada'?'Receita':'Despesa'} "${l.descricao}" — ${brl(l.valor)}`);
   if(l.origem==='transferencia' && l.transferenciaId){
     state.lancamentos = state.lancamentos.filter(x=>x.transferenciaId!==l.transferenciaId);
@@ -20839,12 +20839,12 @@ function excluirLancamento(id){
   persist(); render(); showToast('Lançamento excluído');
 }
 
-function executarAcaoSelecaoLote(acao){
+async function executarAcaoSelecaoLote(acao){
   const lancs = [...selecaoLancIds].map(id=>state.lancamentos.find(l=>l.id===id)).filter(Boolean);
   if(!lancs.length){ showToast('Nenhum lançamento selecionado'); return; }
   if(acao==='apagar'){
     const temTransf = lancs.some(l=>l.origem==='transferencia');
-    if(!confirm(`Apagar ${lancs.length} lançamento(s)?${temTransf?' As transferências terão as duas pontas (saída e entrada) removidas.':''} Essa ação não pode ser desfeita.`)) return;
+    if(!(await avisoModal({mensagem: `Apagar ${lancs.length} lançamento(s)?${temTransf?' As transferências terão as duas pontas (saída e entrada) removidas.':''} Essa ação não pode ser desfeita.`, tipo:'perigo', textoConfirmar:'Excluir'}))) return;
     const ids = new Set(lancs.map(l=>l.id));
     const transfIds = new Set(lancs.filter(l=>l.origem==='transferencia' && l.transferenciaId).map(l=>l.transferenciaId));
     state.lancamentos = state.lancamentos.filter(l=> !ids.has(l.id) && !(l.transferenciaId && transfIds.has(l.transferenciaId)));
@@ -20865,7 +20865,7 @@ function executarAcaoSelecaoLote(acao){
     if(aguardandoAprovacao.length===pendentes.length){ showToast('Todos os selecionados ainda aguardam aprovação — aprove primeiro'); return; }
     openMarcarPagoLoteModal(pendentes.filter(l=>!(l.tipo==='saida' && l.aprovacao==='pendente')));
   } else if(acao==='duplicar'){
-    if(!confirm(`Duplicar ${lancs.length} lançamento(s) para o mesmo dia do mês seguinte?`)) return;
+    if(!(await avisoModal({mensagem: `Duplicar ${lancs.length} lançamento(s) para o mesmo dia do mês seguinte?`, tipo:'aviso', textoConfirmar:'Continuar'}))) return;
     lancs.forEach(l=>duplicarLancamentoProximoMesSemRender(l.id));
     limparSelecaoLanc(); persist(); render();
     showToast(`${lancs.length} lançamento(s) duplicado(s)`);
@@ -21860,12 +21860,12 @@ function attachViewHandlers(){
   });
 
   document.querySelectorAll('.grupo-mudar-conta').forEach(sel=>{
-    sel.addEventListener('change', ()=>{
+    sel.addEventListener('change', async ()=>{
       if(!sel.value) return;
       const chave = sel.dataset.grupo;
       const itensDoGrupo = state.lancamentos.filter(l=>(l.grupoId||l.id)===chave);
       if(!itensDoGrupo.length) return;
-      if(!confirm(`Mudar a conta bancária de ${itensDoGrupo.length} item(ns) dessa despesa de uma vez?`)) { sel.value=''; return; }
+      if(!(await avisoModal({mensagem: `Mudar a conta bancária de ${itensDoGrupo.length} item(ns) dessa despesa de uma vez?`, tipo:'aviso', textoConfirmar:'Continuar'}))) { sel.value=''; return; }
       itensDoGrupo.forEach(l=>{ l.contaId = sel.value; });
       persist(); render();
       showToast('Conta atualizada em todos os itens');
@@ -22620,8 +22620,8 @@ function attachViewHandlers(){
         });
       });
       document.querySelectorAll('[data-action="excluir-previsao-gasto"]').forEach(btn=>{
-        btn.addEventListener('click', ()=>{
-          if(!confirm('Excluir essa previsão?')) return;
+        btn.addEventListener('click', async ()=>{
+          if(!(await avisoModal({mensagem: 'Excluir essa previsão?', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
           state.previsoesGastoFuturo = (state.previsoesGastoFuturo||[]).filter(p=>p.id!==btn.dataset.id);
           persist();
           document.getElementById('reportPanel').innerHTML = renderPrevisaoSaldoFuturo();
@@ -22824,8 +22824,8 @@ function attachViewHandlers(){
     });
   });
   document.querySelectorAll('[data-action="excluir-recorrencia"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      if(!confirm('Excluir esta recorrência? Os lançamentos já gerados não são apagados.')) return;
+    btn.addEventListener('click', async ()=>{
+      if(!(await avisoModal({mensagem: 'Excluir esta recorrência? Os lançamentos já gerados não são apagados.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
       const r = (state.recorrencias||[]).find(x=>x.id===btn.dataset.id);
       if(r) registrarLog('Recorrência excluída', `"${r.descricao}" — ${brl(r.valor)}/mês`);
       state.recorrencias = (state.recorrencias||[]).filter(r=>r.id!==btn.dataset.id);
@@ -22873,9 +22873,9 @@ function attachViewHandlers(){
     render();
   });
   document.querySelectorAll('[data-action="remover-orcamento"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       const cat = btn.dataset.cat;
-      if(!confirm(`Remover "${cat}" do orçamento de despesas?`)) return;
+      if(!(await avisoModal({mensagem: `Remover "${cat}" do orçamento de despesas?`, tipo:'perigo', textoConfirmar:'Excluir'}))) return;
       delete state.orcamentoCategorias[cat];
       if(state.orcamentoAlertaPct) delete state.orcamentoAlertaPct[cat];
       persist(); render();
@@ -22901,8 +22901,8 @@ function attachViewHandlers(){
       openCenarioModal(btn.dataset.cenario);
     });
   });
-  document.getElementById('btnLimparSimulacao')?.addEventListener('click', ()=>{
-    if(!confirm('Remover todos os itens da simulação?')) return;
+  document.getElementById('btnLimparSimulacao')?.addEventListener('click', async ()=>{
+    if(!(await avisoModal({mensagem: 'Remover todos os itens da simulação?', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
     state.simulacaoAtual = [];
     persist(); render(); showToast('Simulação limpa');
   });
@@ -23166,8 +23166,8 @@ function attachViewHandlers(){
     btn.addEventListener('click', ()=>openMetaModal((state.metasReserva||[]).find(x=>x.id===btn.dataset.id)));
   });
   document.querySelectorAll('[data-action="excluir-meta"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      if(!confirm('Excluir esta meta?')) return;
+    btn.addEventListener('click', async ()=>{
+      if(!(await avisoModal({mensagem: 'Excluir esta meta?', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
       state.metasReserva = (state.metasReserva||[]).filter(x=>x.id!==btn.dataset.id);
       persist(); render(); showToast('Meta excluída');
     });
@@ -23189,8 +23189,8 @@ function attachViewHandlers(){
     btn.addEventListener('click', ()=>openFornecedorModal((state.fornecedores||[]).find(x=>x.id===btn.dataset.id)));
   });
   document.querySelectorAll('[data-action="excluir-fornecedor"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      if(!confirm('Excluir este fornecedor? Os lançamentos já feitos com ele não são apagados.')) return;
+    btn.addEventListener('click', async ()=>{
+      if(!(await avisoModal({mensagem: 'Excluir este fornecedor? Os lançamentos já feitos com ele não são apagados.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
       const f = (state.fornecedores||[]).find(x=>x.id===btn.dataset.id);
       if(f) registrarLog('Fornecedor excluído', f.nome);
       state.fornecedores = (state.fornecedores||[]).filter(f=>f.id!==btn.dataset.id);
@@ -23242,7 +23242,7 @@ function attachViewHandlers(){
         });
       });
       document.querySelectorAll('[data-cat-menu]').forEach(btn=>{
-        btn.addEventListener('click', ()=>{
+        btn.addEventListener('click', async ()=>{
           document.querySelectorAll('.dropdown-menu[data-menu-categoria]').forEach(m=>m.classList.remove('open'));
           const acao = btn.dataset.catMenu;
           if(acao==='mover'){
@@ -23261,12 +23261,12 @@ function attachViewHandlers(){
             const nomesAfetados = [cat.nome, ...(cat.subcategorias||[]).map(s=>`${cat.nome} / ${s.nome}`)];
             if(nomesAfetados.some(n=>categoriaEmUso(n))){
               const qtdLancamentos = nomesAfetados.reduce((s,n)=>s+state.lancamentos.filter(l=>l.categoria===n).length+state.comprasCartao.filter(p=>p.categoria===n).length, 0);
-              if(confirm(`"${cat.nome}" tem ${qtdLancamentos} lançamento(s) e por isso não pode ser excluída direto (isso evitaria perder a categoria desses lançamentos).\n\nQuer mover esses lançamentos pra outra categoria agora? Depois de mover, você pode excluir essa categoria normalmente.`)){
+              if((await avisoModal({mensagem: `"${cat.nome}" tem ${qtdLancamentos} lançamento(s) e por isso não pode ser excluída direto (isso evitaria perder a categoria desses lançamentos).\n\nQuer mover esses lançamentos pra outra categoria agora? Depois de mover, você pode excluir essa categoria normalmente.`, tipo:'perigo', textoConfirmar:'Excluir'}))){
                 openMoverLancamentosModal(tipo, cat.nome);
               }
               return;
             }
-            if(!confirm(`Excluir a categoria "${cat.nome}"${(cat.subcategorias||[]).length?' e suas subcategorias':''}?`)) return;
+            if(!(await avisoModal({mensagem: `Excluir a categoria "${cat.nome}"${(cat.subcategorias||[]).length?' e suas subcategorias':''}?`, tipo:'perigo', textoConfirmar:'Excluir'}))) return;
             state.categorias[tipo] = state.categorias[tipo].filter(c=>c.id!==id);
             persist(); paintCategorias(); showToast('Categoria excluída');
           } else if(acao==='editar-sub'){
@@ -23281,12 +23281,12 @@ function attachViewHandlers(){
             const full = `${cat.nome} / ${sub.nome}`;
             if(categoriaEmUso(full)){
               const qtdLancamentos = state.lancamentos.filter(l=>l.categoria===full).length;
-              if(confirm(`"${sub.nome}" tem ${qtdLancamentos} lançamento(s) e por isso não pode ser excluída direto.\n\nQuer mover esses lançamentos pra outra categoria/subcategoria agora? Depois de mover, você pode excluir normalmente.`)){
+              if((await avisoModal({mensagem: `"${sub.nome}" tem ${qtdLancamentos} lançamento(s) e por isso não pode ser excluída direto.\n\nQuer mover esses lançamentos pra outra categoria/subcategoria agora? Depois de mover, você pode excluir normalmente.`, tipo:'perigo', textoConfirmar:'Excluir'}))){
                 openMoverLancamentosModal(tipo, full);
               }
               return;
             }
-            if(!confirm(`Excluir a subcategoria "${sub.nome}"?`)) return;
+            if(!(await avisoModal({mensagem: `Excluir a subcategoria "${sub.nome}"?`, tipo:'perigo', textoConfirmar:'Excluir'}))) return;
             cat.subcategorias = cat.subcategorias.filter(s=>s.id!==id);
             persist(); paintCategorias(); showToast('Subcategoria excluída');
           }
@@ -23378,7 +23378,7 @@ function attachViewHandlers(){
     const bindBotaoGerarPagamento = (container)=>{
       const btn = container.querySelector('.btn-gerar-pagamento');
       if(!btn) return;
-      btn.addEventListener('click', ()=>{
+      btn.addEventListener('click', async ()=>{
         const bloco = container;
         const vendedorId = btn.dataset.vendedor;
         const contaSelect = bloco.querySelector('.conta-pagamento-comissao');
@@ -23400,7 +23400,7 @@ function attachViewHandlers(){
         const total = Math.round((comissaoValor+extrasTotal)*100)/100;
         if(!itensSelecionados.length && !extras.length){ showToast('Selecione ao menos um pedido ou adicione uma bonificação'); return; }
         if(total<=0){ showToast('O valor total está zerado — confira o percentual e os pedidos selecionados'); return; }
-        if(!confirm(`Gerar pagamento de ${brl(total)} para ${btn.dataset.nome}?`)) return;
+        if(!(await avisoModal({mensagem: `Gerar pagamento de ${brl(total)} para ${btn.dataset.nome}?`, tipo:'aviso', textoConfirmar:'Continuar'}))) return;
         let lancId = null;
         if(comissaoValor>0){
           lancId = uid();
@@ -23440,10 +23440,10 @@ function attachViewHandlers(){
       } else {
         conteudo.innerHTML = renderComissoesPagas(comissaoVendedorSelecionado);
         conteudo.querySelectorAll('[data-action="excluir-pagamento-comissao"]').forEach(btn=>{
-          btn.addEventListener('click', ()=>{
+          btn.addEventListener('click', async ()=>{
             const cp = state.comissoesPagas.find(x=>x.id===btn.dataset.id);
             if(!cp) return;
-            if(!confirm('Excluir este pagamento de comissão? Os pedidos voltam a ficar pendentes e as contas a pagar vinculadas (comissão e bonificações) serão removidas.')) return;
+            if(!(await avisoModal({mensagem: 'Excluir este pagamento de comissão? Os pedidos voltam a ficar pendentes e as contas a pagar vinculadas (comissão e bonificações) serão removidas.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
             const idsRemover = [cp.lancamentoDespesaId, ...(cp.extrasLancamentoIds||[])];
             state.lancamentos = state.lancamentos.filter(l=>!idsRemover.includes(l.id));
             state.comissoesPagas = state.comissoesPagas.filter(x=>x.id!==cp.id);
@@ -23467,10 +23467,10 @@ function attachViewHandlers(){
         });
       });
       document.querySelectorAll('[data-action="excluir-vendedor-comissoes"]').forEach(btn=>{
-        btn.addEventListener('click', ()=>{
+        btn.addEventListener('click', async ()=>{
           const id = btn.dataset.id;
           const usado = state.lancamentos.some(l=>l.vendedorId===id) || state.comissoesManuais.some(m=>m.vendedorId===id);
-          if(usado && !confirm('Esse vendedor tem pedidos vinculados. Excluir só remove o cadastro, os pedidos continuam aparecendo como "Sem vendedor definido". Continuar?')) return;
+          if(usado && !(await avisoModal({mensagem: 'Esse vendedor tem pedidos vinculados. Excluir só remove o cadastro, os pedidos continuam aparecendo como "Sem vendedor definido". Continuar?', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
           state.vendedores = state.vendedores.filter(v=>v.id!==id);
           if(comissaoVendedorSelecionado===id) comissaoVendedorSelecionado = '';
           persist(); render(); showToast('Vendedor excluído');
@@ -23525,10 +23525,10 @@ function attachViewHandlers(){
     });
   });
   document.querySelectorAll('[data-action="excluir-compra-pendente-ativo"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       const pp = (state.comprasProcessosPendentes||[]).find(x=>x.id===btn.dataset.id);
       if(!pp) return;
-      if(!confirm(`Não cadastrar "${pp.nome}" (${brl(pp.valorAquisicao)}) como ativo patrimonial? Ela some dessa lista pra sempre (não volta na próxima sincronização) — não mexe no processo lá no Livro de Processos, nem na conta a pagar já lançada dessa compra.`)) return;
+      if(!(await avisoModal({mensagem: `Não cadastrar "${pp.nome}" (${brl(pp.valorAquisicao)}) como ativo patrimonial? Ela some dessa lista pra sempre (não volta na próxima sincronização) — não mexe no processo lá no Livro de Processos, nem na conta a pagar já lançada dessa compra.`, tipo:'aviso', textoConfirmar:'Continuar'}))) return;
       if(!state.comprasProcessosDispensadas) state.comprasProcessosDispensadas = [];
       state.comprasProcessosDispensadas.push({ processoId: pp.processoId, compraSeq: pp.compraSeq });
       state.comprasProcessosPendentes = state.comprasProcessosPendentes.filter(x=>x.id!==pp.id);
@@ -23549,8 +23549,8 @@ function attachViewHandlers(){
     });
   });
   document.querySelectorAll('[data-action="excluir-ativo-patrimonial"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      if(!confirm('Excluir este ativo? O lançamento de aquisição vinculado (se houver) não será excluído automaticamente.')) return;
+    btn.addEventListener('click', async ()=>{
+      if(!(await avisoModal({mensagem: 'Excluir este ativo? O lançamento de aquisição vinculado (se houver) não será excluído automaticamente.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
       state.ativosPatrimoniais = state.ativosPatrimoniais.filter(x=>x.id!==btn.dataset.id);
       persist(); render(); showToast('Ativo excluído');
     });
@@ -23569,12 +23569,12 @@ function attachViewHandlers(){
     document.getElementById('btnEditarAtivoDetalhe')?.addEventListener('click', ()=>openAtivoPatrimonialModal(ativoDetalheAtual));
     document.getElementById('btnGerarFichaPDF')?.addEventListener('click', ()=>gerarFichaPatrimonialPDF(ativoDetalheAtual));
     document.querySelectorAll('[data-action="anular-ficha"]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
+      btn.addEventListener('click', async ()=>{
         const numero = parseInt(btn.dataset.numero);
         const ficha = ativoDetalheAtual.fichas.find(f=>f.numero===numero);
         if(!ficha) return;
         const motivo = window.prompt('Motivo da anulação (opcional):', '') || '';
-        if(!confirm(`Anular a Ficha Nº ${numero}?`)) return;
+        if(!(await avisoModal({mensagem: `Anular a Ficha Nº ${numero}?`, tipo:'perigo', textoConfirmar:'Confirmar'}))) return;
         ficha.anulada = true;
         ficha.motivoAnulacao = motivo;
         persist(); render();
@@ -23607,8 +23607,8 @@ function attachViewHandlers(){
       });
     });
     document.querySelectorAll('[data-action="remover-foto"]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        if(!confirm('Remover esta foto?')) return;
+      btn.addEventListener('click', async ()=>{
+        if(!(await avisoModal({mensagem: 'Remover esta foto?', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
         ativoDetalheAtual.fotos = (ativoDetalheAtual.fotos||[]).filter(f=>f.id!==btn.dataset.id);
         persist(); render(); showToast('Foto removida');
       });
@@ -23616,16 +23616,16 @@ function attachViewHandlers(){
     document.getElementById('btnAdicionarManutencao')?.addEventListener('click', ()=>openManutencaoModal(ativoDetalheAtual));
     document.getElementById('btnAdicionarReavaliacao')?.addEventListener('click', ()=>openReavaliacaoModal(ativoDetalheAtual));
     document.querySelectorAll('[data-action="excluir-manutencao"]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        if(!confirm('Excluir este registro de manutenção?')) return;
+      btn.addEventListener('click', async ()=>{
+        if(!(await avisoModal({mensagem: 'Excluir este registro de manutenção?', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
         ativoDetalheAtual.manutencoes = (ativoDetalheAtual.manutencoes||[]).filter(m=>m.id!==btn.dataset.id);
         persist(); render(); showToast('Manutenção excluída');
       });
     });
     document.getElementById('btnAdicionarOcorrencia')?.addEventListener('click', ()=>openOcorrenciaModal(ativoDetalheAtual));
     document.querySelectorAll('[data-action="excluir-ocorrencia"]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        if(!confirm('Excluir esta ocorrência?')) return;
+      btn.addEventListener('click', async ()=>{
+        if(!(await avisoModal({mensagem: 'Excluir esta ocorrência?', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
         ativoDetalheAtual.ocorrencias = (ativoDetalheAtual.ocorrencias||[]).filter(o=>o.id!==btn.dataset.id);
         persist(); render(); showToast('Ocorrência excluída');
       });
@@ -23635,8 +23635,8 @@ function attachViewHandlers(){
       const s = ativoDetalheAtual.sugestaoBaixa;
       openBaixaModal(ativoDetalheAtual, { observacao: s ? s.motivo : '' });
     });
-    document.getElementById('btnDescartarSugestaoBaixa')?.addEventListener('click', ()=>{
-      if(!confirm('Descartar esta sugestão de baixa? O ativo continua ativo normalmente.')) return;
+    document.getElementById('btnDescartarSugestaoBaixa')?.addEventListener('click', async ()=>{
+      if(!(await avisoModal({mensagem: 'Descartar esta sugestão de baixa? O ativo continua ativo normalmente.', tipo:'perigo', textoConfirmar:'Confirmar'}))) return;
       ativoDetalheAtual.sugestaoBaixa = null;
       persist(); render(); showToast('Sugestão descartada');
     });
@@ -23644,13 +23644,13 @@ function attachViewHandlers(){
       ativoDetalheAtual.emObservacao = null;
       persist(); render(); showToast('Sinalização removida');
     });
-    document.getElementById('btnReverterBaixa')?.addEventListener('click', ()=>{
-      if(!confirm('Reverter a baixa deste ativo? Ele volta a ser contado como ativo normalmente.')) return;
+    document.getElementById('btnReverterBaixa')?.addEventListener('click', async ()=>{
+      if(!(await avisoModal({mensagem: 'Reverter a baixa deste ativo? Ele volta a ser contado como ativo normalmente.', tipo:'perigo', textoConfirmar:'Confirmar'}))) return;
       ativoDetalheAtual.baixa = null;
       persist(); render(); showToast('Baixa revertida');
     });
-    document.getElementById('btnExcluirAtivoDetalhe')?.addEventListener('click', ()=>{
-      if(!confirm('Excluir este ativo definitivamente? Essa ação não pode ser desfeita.')) return;
+    document.getElementById('btnExcluirAtivoDetalhe')?.addEventListener('click', async ()=>{
+      if(!(await avisoModal({mensagem: 'Excluir este ativo definitivamente? Essa ação não pode ser desfeita.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
       state.ativosPatrimoniais = state.ativosPatrimoniais.filter(x=>x.id!==ativoDetalheAtual.id);
       persist();
       currentView = 'ativos';
@@ -23700,10 +23700,10 @@ function attachViewHandlers(){
     btn.addEventListener('click', ()=>openContaModal(state.contas.find(c=>c.id===btn.dataset.id)));
   });
   document.querySelectorAll('[data-action="excluir-conta"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       const id = btn.dataset.id;
       const usada = state.lancamentos.some(l=>l.contaId===id);
-      if(usada && !confirm('Essa conta tem lançamentos vinculados. Excluí-la vai movê-los para a primeira conta da lista. Continuar?')) return;
+      if(usada && !(await avisoModal({mensagem: 'Essa conta tem lançamentos vinculados. Excluí-la vai movê-los para a primeira conta da lista. Continuar?', tipo:'aviso', textoConfirmar:'Continuar'}))) return;
       state.contas = state.contas.filter(c=>c.id!==id);
       const idPadrao = state.contas[0].id;
       state.lancamentos.forEach(l=>{ if(l.contaId===id) l.contaId = idPadrao; });
@@ -23721,11 +23721,11 @@ function attachViewHandlers(){
     });
   });
   document.querySelectorAll('[data-action="arquivar-conta"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       const conta = state.contas.find(c=>c.id===btn.dataset.id);
       if(!conta) return;
       const saldo = saldoConta(conta.id);
-      if(Math.abs(saldo)>0.009 && !confirm(`Essa conta ainda tem saldo de ${brl(saldo)}. Arquivar mesmo assim? Os lançamentos continuam nela, só some da lista principal.`)) return;
+      if(Math.abs(saldo)>0.009 && !(await avisoModal({mensagem: `Essa conta ainda tem saldo de ${brl(saldo)}. Arquivar mesmo assim? Os lançamentos continuam nela, só some da lista principal.`, tipo:'aviso', textoConfirmar:'Continuar'}))) return;
       conta.arquivada = true;
       if(conta.principal) conta.principal = false;
       persist(); render();
@@ -23930,14 +23930,14 @@ function attachViewHandlers(){
     });
   });
   document.querySelectorAll('[data-cartao-menu]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       document.querySelectorAll('.dropdown-menu[data-menu-cartao]').forEach(m=>m.classList.remove('open'));
       const id = btn.dataset.id;
       if(btn.dataset.cartaoMenu==='editar'){
         openCartaoModal(state.cartoes.find(c=>c.id===id));
       } else {
         const usado = state.comprasCartao.some(p=>p.cartaoId===id);
-        if(usado && !confirm('Este cartão tem compras lançadas. Excluí-lo também remove o histórico de compras dele. Continuar?')) return;
+        if(usado && !(await avisoModal({mensagem: 'Este cartão tem compras lançadas. Excluí-lo também remove o histórico de compras dele. Continuar?', tipo:'aviso', textoConfirmar:'Continuar'}))) return;
         state.cartoes = state.cartoes.filter(c=>c.id!==id);
         state.comprasCartao = state.comprasCartao.filter(p=>p.cartaoId!==id);
         state.faturasFechadas = state.faturasFechadas.filter(f=>f.cartaoId!==id);
@@ -24014,7 +24014,7 @@ function attachViewHandlers(){
     });
   });
   document.querySelectorAll('[data-action="excluir-compra-cartao"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       const p = state.comprasCartao.find(x=>x.id===btn.dataset.id);
       if(!p) return;
       if(p.totalParcelas>1){
@@ -24033,7 +24033,7 @@ function attachViewHandlers(){
         }
         return;
       }
-      if(!confirm(`Excluir "${p.descricao}" (${brl(p.valor)}) dessa fatura?`)) return;
+      if(!(await avisoModal({mensagem: `Excluir "${p.descricao}" (${brl(p.valor)}) dessa fatura?`, tipo:'perigo', textoConfirmar:'Excluir'}))) return;
       state.comprasCartao = state.comprasCartao.filter(x=>x.id!==p.id);
       sincronizarLancamentoAbertoFatura(p.cartaoId, p.competencia);
       persist(); render();
@@ -24060,7 +24060,7 @@ function attachViewHandlers(){
     atualizarNotaParcelas();
   }
   const btnFecharFatura = document.getElementById('btnFecharFatura');
-  if(btnFecharFatura) btnFecharFatura.addEventListener('click', ()=>{
+  if(btnFecharFatura) btnFecharFatura.addEventListener('click', async ()=>{
     const cartao = state.cartoes.find(c=>c.id===faturaCartaoId);
     const comp = faturaCompetenciaAtual;
     const total = totalCompetencia(cartao.id, comp);
@@ -24072,7 +24072,7 @@ function attachViewHandlers(){
       ? `Fechar a fatura de ${competenciaLabel(comp)} (${brl(total)}) e lançar como conta a pagar, parcelada em ${parcelasSaldo}x?`
       : `Fechar a fatura de ${competenciaLabel(comp)} (${brl(total)}) e lançar como conta a pagar?`)
       + (jaPago>0.004 ? `\n\n${brl(jaPago)} já foi pago e vai ser descontado.` : '');
-    if(!confirm(msgConfirm)) return;
+    if(!(await avisoModal({mensagem: msgConfirm, tipo:'aviso', textoConfirmar:'Continuar'}))) return;
 
     if(parcelasSaldo===1 && lancAberto){
       // Já existe o lançamento (crescia sozinho em Contas a Pagar desde a 1ª compra) — só oficializa,
@@ -24157,11 +24157,11 @@ function attachViewHandlers(){
     });
   });
   document.querySelectorAll('[data-action="excluir-subconta"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       const s = state.subcontasInvestimento.find(x=>x.id===btn.dataset.id);
       if(!s) return;
       const qtdAtivos = state.ativosInvestimento.filter(a=>a.subContaId===s.id).length;
-      if(!confirm(`Excluir a subconta "${s.nome}"?${qtdAtivos?' Os '+qtdAtivos+' ativo(s) dela voltam pra "Sem subconta" (nada é apagado).':''}`)) return;
+      if(!(await avisoModal({mensagem: `Excluir a subconta "${s.nome}"?${qtdAtivos?' Os '+qtdAtivos+' ativo(s) dela voltam pra "Sem subconta" (nada é apagado).':''}`, tipo:'perigo', textoConfirmar:'Excluir'}))) return;
       state.ativosInvestimento.forEach(a=>{ if(a.subContaId===s.id) a.subContaId = null; });
       state.subcontasInvestimento = state.subcontasInvestimento.filter(x=>x.id!==s.id);
       persist(); render(); showToast('Subconta excluída');
@@ -24174,8 +24174,8 @@ function attachViewHandlers(){
     });
   });
   document.querySelectorAll('[data-action="excluir-ativo"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      if(!confirm('Excluir este ativo?')) return;
+    btn.addEventListener('click', async ()=>{
+      if(!(await avisoModal({mensagem: 'Excluir este ativo?', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
       state.ativosInvestimento = state.ativosInvestimento.filter(x=>x.id!==btn.dataset.id);
       persist(); render(); showToast('Ativo excluído');
     });
@@ -24207,8 +24207,8 @@ function attachViewHandlers(){
     });
   });
   document.querySelectorAll('[data-action="excluir-ativo-orfao"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      if(!confirm('Excluir esse ativo de vez? Essa ação não pode ser desfeita.')) return;
+    btn.addEventListener('click', async ()=>{
+      if(!(await avisoModal({mensagem: 'Excluir esse ativo de vez? Essa ação não pode ser desfeita.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
       state.ativosInvestimento = state.ativosInvestimento.filter(a=>a.id!==btn.dataset.id);
       persist(); render();
       showToast('Ativo órfão excluído');
@@ -24232,8 +24232,8 @@ function attachViewHandlers(){
     });
   });
   document.querySelectorAll('[data-action="excluir-subconta-orfa"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      if(!confirm('Excluir essa subconta de vez (e os ativos soltos dentro dela, se tiver)? Essa ação não pode ser desfeita.')) return;
+    btn.addEventListener('click', async ()=>{
+      if(!(await avisoModal({mensagem: 'Excluir essa subconta de vez (e os ativos soltos dentro dela, se tiver)? Essa ação não pode ser desfeita.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
       state.ativosInvestimento = state.ativosInvestimento.filter(a=>a.subContaId!==btn.dataset.id);
       state.subcontasInvestimento = state.subcontasInvestimento.filter(s=>s.id!==btn.dataset.id);
       persist(); render();
@@ -24350,7 +24350,7 @@ function attachViewHandlers(){
       const o = (state.orcamentosProcessos||[]).find(x=>x.id===btn.dataset.id);
       if(!o) return;
       const resposta = (document.getElementById(`resposta-${o.id}`)||{}).value || '';
-      if(!confirm('Adiar esse orçamento? Ele continua pendente, só fica sinalizado.')) return;
+      if(!(await avisoModal({mensagem: 'Adiar esse orçamento? Ele continua pendente, só fica sinalizado.', tipo:'aviso', textoConfirmar:'Continuar'}))) return;
       o.adiado = true;
       o.adiadoEm = new Date().toISOString();
       if(resposta.trim()) o.resposta = resposta.trim();
@@ -24526,10 +24526,10 @@ function attachViewHandlers(){
     render();
   });
   document.querySelectorAll('[data-action="avisar-vk-retroativo"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       const l = state.lancamentos.find(x=>x.id===btn.dataset.id);
       if(!l) return;
-      if(!confirm(`Confirmar que "${l.descricao}" (${brl(l.valor)}) foi pago via Pix, e avisar o VK Industrial agora?`)) return;
+      if(!(await avisoModal({mensagem: `Confirmar que "${l.descricao}" (${brl(l.valor)}) foi pago via Pix, e avisar o VK Industrial agora?`, tipo:'aviso', textoConfirmar:'Continuar'}))) return;
       l.formaRecebimento = 'pix';
       persist(); render();
       avisarVKPedidoPagoPix(l.vkPedidoId);
@@ -25004,7 +25004,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     fCanalVenda.insertBefore(opt2, fCanalVenda.querySelector('option[value="__novo__"]'));
     fCanalVenda.value = nome;
   });
-  document.getElementById('btnSalvarLancamento').addEventListener('click', ()=>{
+  document.getElementById('btnSalvarLancamento').addEventListener('click', async ()=>{
     const categoria = document.getElementById('fCategoria').value;
     const descricao = document.getElementById('fDescricao').value.trim() || categoria;
     const valor = valorTravado ? existing.valor : numBR(document.getElementById('fValor').value);
@@ -25132,7 +25132,12 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
         if(caixaLivreAgora>0){
           const pctImpacto = valor/caixaLivreAgora*100;
           if(pctImpacto>=30){
-            const confirmar = confirm(`⚠️ Essa saída reduz seu dinheiro disponível pra decisão em ${pctImpacto.toFixed(0)}% (de ${brl(caixaLivreAgora)} pra ${brl(caixaLivreAgora-valor)}). Continuar mesmo assim?`);
+            const confirmar = await avisoModal({
+              titulo: 'Isso vai reduzir bastante seu caixa livre',
+              mensagem: `Essa saída de ${brl(valor)} reduz seu dinheiro disponível pra decisão em <strong>${pctImpacto.toFixed(0)}%</strong> — de ${brl(caixaLivreAgora)} pra ${brl(caixaLivreAgora-valor)}.`,
+              explicacao: `"Disponível pra decisão" é o saldo real da sua conta, já descontando compromissos dos próximos 30 dias e faturas em aberto. Esse aviso só aparece pra lançamentos que contam como despesa de verdade (não aparece pra passagem de valores, aporte de capital, etc. — essas você já revisou antes de confirmar a categoria). Pode ser uma saída totalmente normal e esperada; o aviso só existe pra você não ser pego de surpresa por um gasto grande de uma vez.`,
+              tipo: 'aviso', textoConfirmar: 'Continuar mesmo assim', textoCancelar: 'Revisar'
+            });
             if(!confirmar) return;
           }
         }
@@ -25420,8 +25425,8 @@ function openAcaoFinanceiraModal(existing){
     </div>`;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  document.getElementById('btnExcluirAcaoFinanceira')?.addEventListener('click', ()=>{
-    if(!confirm('Excluir essa ação?')) return;
+  document.getElementById('btnExcluirAcaoFinanceira')?.addEventListener('click', async ()=>{
+    if(!(await avisoModal({mensagem: 'Excluir essa ação?', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
     state.acoesFinanceiras = state.acoesFinanceiras.filter(a=>a.id!==existing.id);
     persist(); closeModal(); render();
   });
@@ -26149,8 +26154,8 @@ function openRetiradaModal(existing){
     </div>`;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  document.getElementById('btnExcluirRetirada')?.addEventListener('click', ()=>{
-    if(!confirm('Excluir essa retirada? Isso também remove o lançamento financeiro vinculado a ela.')) return;
+  document.getElementById('btnExcluirRetirada')?.addEventListener('click', async ()=>{
+    if(!(await avisoModal({mensagem: 'Excluir essa retirada? Isso também remove o lançamento financeiro vinculado a ela.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
     if(existing.lancamentoId) excluirLancamentoVeiculo(existing.lancamentoId);
     state.retiradas = state.retiradas.filter(r=>r.id!==existing.id);
     persist(); closeModal(); render();
@@ -27342,8 +27347,8 @@ function openVeiculoModal(existing){
   document.getElementById('vcStatus').addEventListener('change', (e)=>{
     document.getElementById('vcVendaWrap').style.display = e.target.value==='Vendido'?'block':'none';
   });
-  document.getElementById('btnExcluirVeiculo')?.addEventListener('click', ()=>{
-    if(!confirm(`Excluir "${existing.nome}"? Os abastecimentos/despesas/receitas/serviços já registrados continuam no histórico financeiro, só deixam de aparecer agrupados nesse veículo.`)) return;
+  document.getElementById('btnExcluirVeiculo')?.addEventListener('click', async ()=>{
+    if(!(await avisoModal({mensagem: `Excluir "${existing.nome}"? Os abastecimentos/despesas/receitas/serviços já registrados continuam no histórico financeiro, só deixam de aparecer agrupados nesse veículo.`, tipo:'perigo', textoConfirmar:'Excluir'}))) return;
     state.veiculos = state.veiculos.filter(v=>v.id!==existing.id);
     if(veiculoSelecionadoId===existing.id) veiculoSelecionadoId = null;
     persist(); closeModal(); currentView='veiculos'; render();
@@ -27419,8 +27424,8 @@ function openAbastecimentoModal(veiculoId, existing){
     </div>`;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  document.getElementById('btnExcluirRegistroVeiculo')?.addEventListener('click', ()=>{
-    if(!confirm('Excluir esse abastecimento? Isso também remove o lançamento financeiro vinculado a ele.')) return;
+  document.getElementById('btnExcluirRegistroVeiculo')?.addEventListener('click', async ()=>{
+    if(!(await avisoModal({mensagem: 'Excluir esse abastecimento? Isso também remove o lançamento financeiro vinculado a ele.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
     if(existing.lancamentoId) excluirLancamentoVeiculo(existing.lancamentoId);
     state.veiculoAbastecimentos = state.veiculoAbastecimentos.filter(a=>a.id!==existing.id);
     persist(); closeModal(); render();
@@ -27484,8 +27489,8 @@ function openVeiculoRegistroModal(veiculoId, tipoRegistro, existing){
     </div>`;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  document.getElementById('btnExcluirRegistroVeiculo')?.addEventListener('click', ()=>{
-    if(!confirm('Excluir esse registro? Isso também remove o lançamento financeiro vinculado a ele.')) return;
+  document.getElementById('btnExcluirRegistroVeiculo')?.addEventListener('click', async ()=>{
+    if(!(await avisoModal({mensagem: 'Excluir esse registro? Isso também remove o lançamento financeiro vinculado a ele.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
     if(existing.lancamentoId) excluirLancamentoVeiculo(existing.lancamentoId);
     state[config.array] = state[config.array].filter(r=>r.id!==existing.id);
     persist(); closeModal(); render();
@@ -27530,8 +27535,8 @@ function openLeituraModal(veiculoId, existing){
     </div>`;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  document.getElementById('btnExcluirRegistroVeiculo')?.addEventListener('click', ()=>{
-    if(!confirm('Excluir essa leitura?')) return;
+  document.getElementById('btnExcluirRegistroVeiculo')?.addEventListener('click', async ()=>{
+    if(!(await avisoModal({mensagem: 'Excluir essa leitura?', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
     state.veiculoLeituras = state.veiculoLeituras.filter(r=>r.id!==existing.id);
     persist(); closeModal(); render();
   });
@@ -27575,8 +27580,8 @@ function openLembreteVeiculoModal(veiculoId, existing){
     document.getElementById('lbKmWrap').style.display = e.target.value==='km'?'block':'none';
     document.getElementById('lbDataWrap').style.display = e.target.value==='data'?'block':'none';
   });
-  document.getElementById('btnExcluirLembreteVeiculo')?.addEventListener('click', ()=>{
-    if(!confirm('Excluir esse lembrete?')) return;
+  document.getElementById('btnExcluirLembreteVeiculo')?.addEventListener('click', async ()=>{
+    if(!(await avisoModal({mensagem: 'Excluir esse lembrete?', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
     state.veiculoLembretes = state.veiculoLembretes.filter(l=>l.id!==existing.id);
     persist(); closeModal(); render();
   });
@@ -28392,8 +28397,8 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
       Object.assign(notaEmRevisao, coletarNotaFormulario(), { atualizadoEm: new Date().toISOString() });
       publicarNotaCorretagem(notaEmRevisao);
     });
-    document.getElementById('btnExcluirNota').addEventListener('click', ()=>{
-      if(!confirm('Excluir esta nota pendente? Nenhum lançamento foi criado, então nada muda no caixa.')) return;
+    document.getElementById('btnExcluirNota').addEventListener('click', async ()=>{
+      if(!(await avisoModal({mensagem: 'Excluir esta nota pendente? Nenhum lançamento foi criado, então nada muda no caixa.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
       state.notasPendentes = (state.notasPendentes||[]).filter(n=>n.id!==notaEmRevisao.id);
       registrarLog('Nota de corretagem excluída', `Nota pendente${notaEmRevisao.corretora?' — '+notaEmRevisao.corretora:''} de ${notaEmRevisao.dataPregao} descartada sem publicar`);
       persist(); closeModal(); render();
@@ -29985,6 +29990,37 @@ function closeModal(){
 }
 document.getElementById('modalOverlay').addEventListener('click', (e)=>{ if(e.target.id==='modalOverlay') closeModal(); });
 
+// Modal de aviso/confirmação no estilo visual do próprio app, no lugar do (await avisoModal({mensagem: , tipo:'aviso', textoConfirmar:'Continuar'})) nativo do
+// navegador (aquela caixinha cinza sem cara de nada). Tem espaço pra uma explicação de UM parágrafo
+// sobre o PORQUÊ do aviso, não só o "continuar mesmo assim?" seco. Retorna uma Promise<boolean> —
+// por isso todo lugar que chamar precisa de "await" (e a função em volta precisa ser async).
+//   tipo: 'perigo' (ação destrutiva/irreversível, botão vermelho) | 'aviso' (atenção, mas reversível) | 'info'
+function avisoModal({ titulo, mensagem, explicacao='', tipo='aviso', textoConfirmar='Continuar', textoCancelar='Cancelar' }){
+  return new Promise(resolve=>{
+    const cores = { perigo:'var(--danger)', aviso:'var(--warn)', info:'var(--blue-accent)' };
+    const icones = { perigo:'🗑️', aviso:'⚠️', info:'ℹ️' };
+    const modal = document.getElementById('modalContent');
+    modal.innerHTML = `
+      <div style="display:flex;gap:12px;align-items:flex-start;">
+        <div style="font-size:26px;line-height:1;flex-shrink:0;">${icones[tipo]||icones.aviso}</div>
+        <div style="min-width:0;">
+          <h3 style="margin:0 0 8px 0;color:${cores[tipo]||cores.aviso};">${escapeHTML(titulo||'Atenção')}</h3>
+          <p style="margin:0;font-size:14.5px;color:var(--ink);line-height:1.5;">${mensagem}</p>
+          ${explicacao ? `<div class="note" style="margin-top:10px;">${explicacao}</div>` : ''}
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="btnAvisoCancelar">${escapeHTML(textoCancelar)}</button>
+        <button class="btn" id="btnAvisoConfirmar" style="${tipo==='perigo'?'background:var(--danger);border-color:var(--danger);':''}">${escapeHTML(textoConfirmar)}</button>
+      </div>
+    `;
+    document.getElementById('modalOverlay').classList.add('open');
+    const finalizar = (valor)=>{ closeModal(); resolve(valor); };
+    document.getElementById('btnAvisoCancelar').addEventListener('click', ()=>finalizar(false));
+    document.getElementById('btnAvisoConfirmar').addEventListener('click', ()=>finalizar(true));
+  });
+}
+
 /* Botão flutuante fixo de lançamento rápido (desktop) — visível em qualquer tela, sem precisar
    depender do dropdown "+ Novo" de cada tela individualmente. Wiring feito uma única vez, já que
    o botão fica fora do #main (não é recriado a cada render()). */
@@ -30128,8 +30164,8 @@ function tentarLogin(){
 document.getElementById('btnEntrar').addEventListener('click', tentarLogin);
 document.getElementById('loginSenha').addEventListener('keydown', e=>{ if(e.key==='Enter') tentarLogin(); });
 
-document.getElementById('btnSair').addEventListener('click', ()=>{
-  if(confirm('Sair da sua conta?')) auth.signOut();
+document.getElementById('btnSair').addEventListener('click', async ()=>{
+  if((await avisoModal({mensagem: 'Sair da sua conta?', tipo:'info', textoConfirmar:'Sair'}))) auth.signOut();
 });
 </script>
 </body>
