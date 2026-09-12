@@ -24639,11 +24639,11 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       <div class="field">
         <label>${tipo==='saida' ? 'Fornecedor (opcional)' : 'Cliente (opcional)'}</label>
         ${tipo==='saida' ? `
-          <select id="fFornecedorSelect">
-            <option value="">— nenhum —</option>
-            ${(state.fornecedores||[]).map(f=>`<option value="${escapeHTML(f.nome)}" ${existing?.fornecedor===f.nome?'selected':''}>${escapeHTML(f.nome)}</option>`).join('')}
-            <option value="__outro__" ${existing?.fornecedor && !(state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? 'selected' : ''}>Outro (digitar)</option>
-          </select>
+          <input type="hidden" id="fFornecedorSelect" value="${existing?.fornecedor ? ((state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? escapeHTML(existing.fornecedor) : '__outro__') : ''}">
+          <button type="button" id="fFornecedorBtn" class="btn ghost" style="width:100%;display:flex;align-items:center;justify-content:space-between;text-align:left;font-weight:400;">
+            <span id="fFornecedorBtnLabel" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${existing?.fornecedor && (state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? escapeHTML(existing.fornecedor) : '— nenhum —'}</span>
+            <span style="opacity:.5;flex-shrink:0;margin-left:8px;">🔍 Buscar</span>
+          </button>
           <input type="text" id="fFornecedor" placeholder="Nome do fornecedor" style="margin-top:8px;${existing?.fornecedor && !(state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? '' : 'display:none;'}" value="${existing?.fornecedor && !(state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? escapeHTML(existing.fornecedor) : ''}">
           <div class="note" id="fContratoAlerta" style="margin-top:8px;"></div>
         ` : `
@@ -24866,6 +24866,19 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     const fFornecedorInput = document.getElementById('fFornecedor');
     fFornecedorSelect.addEventListener('change', ()=>{
       fFornecedorInput.style.display = fFornecedorSelect.value==='__outro__' ? 'block' : 'none';
+    });
+    document.getElementById('fFornecedorBtn')?.addEventListener('click', ()=>{
+      abrirSeletorBusca({
+        titulo: 'Selecionar fornecedor',
+        itens: (state.fornecedores||[]).map(f=>({ value:f.nome, label:f.nome })),
+        valorAtual: fFornecedorSelect.value,
+        permitirOutro: true,
+        onSelecionar: (valor)=>{
+          fFornecedorSelect.value = valor;
+          fFornecedorSelect.dispatchEvent(new Event('change'));
+          document.getElementById('fFornecedorBtnLabel').textContent = valor==='__outro__' ? 'Outro (digitar)' : (valor || '— nenhum —');
+        }
+      });
     });
   }
   let formaPagtoAtual = 'conta';
@@ -29982,6 +29995,50 @@ function openAtualizarValorModal(a){
   });
 }
 
+// Subtela de busca — lista com campo de busca no topo, no lugar de um <select> nativo gigante
+// (ruim de navegar no celular quando tem dezenas de opções, tipo lista de fornecedores).
+// itens: [{value, label}]. onSelecionar recebe o value escolhido ('' pra nenhum, '__outro__' pra outro).
+function abrirSeletorBusca({ titulo, itens, valorAtual, onSelecionar, permitirOutro=false, permitirNenhum=true }){
+  const modal = document.getElementById('modalContent');
+  const render = (filtro)=>{
+    const f = (filtro||'').toLowerCase();
+    const lista = itens.filter(it=>it.label.toLowerCase().includes(f));
+    return `
+      <h3 style="margin-bottom:12px;">${escapeHTML(titulo)}</h3>
+      <input type="text" id="seletorBuscaInput" placeholder="Buscar..." value="${escapeHTML(filtro||'')}" style="width:100%;padding:11px 12px;font-size:14.5px;margin-bottom:4px;border:1px solid var(--line);border-radius:8px;">
+      <div id="seletorBuscaLista" style="max-height:min(50vh,380px);overflow-y:auto;border-top:1px solid var(--line);margin-top:8px;">
+        ${permitirNenhum ? `<div class="seletor-item" data-value="" style="padding:13px 4px;border-bottom:1px solid var(--line);cursor:pointer;color:var(--text-soft);${!valorAtual?'font-weight:700;':''}">— nenhum —</div>` : ''}
+        ${lista.map(it=>`<div class="seletor-item" data-value="${escapeHTML(it.value)}" style="padding:13px 4px;border-bottom:1px solid var(--line);cursor:pointer;${it.value===valorAtual?'font-weight:700;color:var(--blue-accent);':''}">${escapeHTML(it.label)}</div>`).join('') || `<div class="empty" style="padding:18px 4px;">Nada encontrado</div>`}
+        ${permitirOutro ? `<div class="seletor-item" data-value="__outro__" style="padding:13px 4px;cursor:pointer;font-style:italic;color:var(--blue-accent);">+ Outro (digitar)</div>` : ''}
+      </div>
+      <div class="modal-actions"><button class="btn ghost" id="btnCancelarModal">Cancelar</button></div>
+    `;
+  };
+  const bind = ()=>{
+    document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+    const input = document.getElementById('seletorBuscaInput');
+    input.addEventListener('input', (e)=>{
+      const filtro = e.target.value;
+      const posCursor = e.target.selectionStart;
+      modal.innerHTML = render(filtro);
+      bind();
+      const novoInput = document.getElementById('seletorBuscaInput');
+      novoInput.focus();
+      novoInput.setSelectionRange(posCursor, posCursor);
+    });
+    modal.querySelectorAll('.seletor-item').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        onSelecionar(el.dataset.value);
+        closeModal();
+      });
+    });
+  };
+  modal.innerHTML = render('');
+  document.getElementById('modalOverlay').classList.add('open');
+  bind();
+  document.getElementById('seletorBuscaInput').focus();
+}
+
 function closeModal(){
   if(typeof pararCameraQRAtiva==='function') pararCameraQRAtiva();
   document.getElementById('modalOverlay').classList.remove('open');
@@ -29990,7 +30047,7 @@ function closeModal(){
 }
 document.getElementById('modalOverlay').addEventListener('click', (e)=>{ if(e.target.id==='modalOverlay') closeModal(); });
 
-// Modal de aviso/confirmação no estilo visual do próprio app, no lugar do (await avisoModal({mensagem: , tipo:'aviso', textoConfirmar:'Continuar'})) nativo do
+// Modal de aviso/confirmação no estilo visual do próprio app, no lugar do confirm() nativo do
 // navegador (aquela caixinha cinza sem cara de nada). Tem espaço pra uma explicação de UM parágrafo
 // sobre o PORQUÊ do aviso, não só o "continuar mesmo assim?" seco. Retorna uma Promise<boolean> —
 // por isso todo lugar que chamar precisa de "await" (e a função em volta precisa ser async).
