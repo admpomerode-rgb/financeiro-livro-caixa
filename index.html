@@ -1098,22 +1098,6 @@ function aplicarMigracoes(s){
   // Log de auditoria removido — era gravado o tempo todo (41 lugares do sistema) mas nunca tinha
   // nenhuma tela pra ver esse histórico, só ocupava espaço no documento do Firestore à toa.
   if(s.logAuditoria) delete s.logAuditoria;
-  // Reparo de dados antigos: alguns pedidos importados do VK Industrial vieram sem o campo de
-  // valor preenchido lá na origem, e o código copiava isso direto pro lançamento sem proteção —
-  // resultado: lancamentos com valor undefined, que travava o salvamento do documento inteiro no
-  // Firestore (undefined não é aceito em nenhum campo). Aqui zeramos esses casos e marcamos pra
-  // o usuário conferir manualmente o valor correto, já que o original se perdeu na origem.
-  const lancamentosCorrigidos = [];
-  (s.lancamentos||[]).forEach(l=>{
-    if(l.valor===undefined){
-      l.valor = 0;
-      l.valorPrecisaConferencia = true;
-      lancamentosCorrigidos.push(l.vkPedidoId || l.id);
-    }
-  });
-  if(lancamentosCorrigidos.length){
-    console.warn('Lançamento(s) com valor ausente, zerado(s) e marcado(s) pra conferência manual:', lancamentosCorrigidos);
-  }
   return s;
 }
 async function carregarDados(){
@@ -1123,35 +1107,12 @@ async function carregarDados(){
 let state = aplicarMigracoes(null);
 let saveTimeout = null;
 let saveTimeoutPendente = false;
-// O Firestore recusa o documento INTEIRO se qualquer campo, em qualquer nível, for undefined
-// (não confundir com null, que é aceito). Isso já causou perda silenciosa de salvamento: o
-// state ficava só na memória do navegador porque um campo qualquer virava undefined em algum
-// fluxo. encontrarCampoUndefined vasculha o objeto pra apontar exatamente onde, e
-// limparUndefined tira esses campos antes de mandar pro Firestore, pra nunca mais travar o
-// documento inteiro por causa de um campo isolado.
-function encontrarCampoUndefined(obj, caminho){
-  if(obj===undefined) return caminho || '(raiz)';
-  if(obj===null || typeof obj!=='object') return null;
-  for(const k of Object.keys(obj)){
-    const achou = encontrarCampoUndefined(obj[k], (caminho?caminho+'.':'')+k);
-    if(achou) return achou;
-  }
-  return null;
-}
-function limparUndefined(obj){
-  return JSON.parse(JSON.stringify(obj));
-}
-function salvarStateNoFirestore(){
-  const campoRuim = encontrarCampoUndefined(state, '');
-  if(campoRuim) console.warn('Campo com valor undefined encontrado em state (removido antes de salvar):', campoRuim);
-  return DOC_REF.set(limparUndefined(state));
-}
 function persist(){
   clearTimeout(saveTimeout);
   saveTimeoutPendente = true;
   saveTimeout = setTimeout(()=>{
     saveTimeoutPendente = false;
-    salvarStateNoFirestore().catch(e=>{
+    DOC_REF.set(state).catch(e=>{
       console.error('Erro ao salvar no Firestore:', e);
       showToast('Não foi possível salvar — verifique a internet');
     });
@@ -1164,7 +1125,7 @@ window.addEventListener('beforeunload', ()=>{
   if(saveTimeoutPendente){
     clearTimeout(saveTimeout);
     saveTimeoutPendente = false;
-    salvarStateNoFirestore().catch(e=>console.error('Erro ao salvar no Firestore (beforeunload):', e));
+    DOC_REF.set(state);
   }
 });
 
@@ -1493,6 +1454,7 @@ let orcamentoAnualAno = new Date().getFullYear();
 let descontosBonifPeriodo = 'mes';
 let dreCentroAtivo = 'todos';
 let mesGlobalRef = todayISO().slice(0,7);
+let investimentosMesFiltro = null; // null = últimos 12 meses (padrão); 'YYYY-MM' = um mês específico
 let categoriaLancamentosAtual = null;
 let lancamentosBuscaPreenchida = '';
 let ativoPatrimonialDetalheId = null;
@@ -2292,11 +2254,13 @@ function viewRelatoriosInvestimentos(){
   const maioresGanhos = [...comResultado].filter(a=>a.resultado>0).sort((a,b)=>b.resultado-a.resultado).slice(0,5);
   const maioresPerdas = [...comResultado].filter(a=>a.resultado<0).sort((a,b)=>a.resultado-b.resultado).slice(0,5);
 
-  // 4/5. Aportes e Resgates (últimos 12 meses)
+  // 4/5. Aportes e Resgates — últimos 12 meses por padrão, ou um mês específico se filtrado
   const de12m = new Date(todayISO()+'T12:00:00'); de12m.setFullYear(de12m.getFullYear()-1);
   const de12mISO = de12m.toISOString().slice(0,10);
-  const aportesRecentes = state.ativosInvestimento.filter(a=>a.dataAplicacao>=de12mISO).sort((a,b)=>b.dataAplicacao.localeCompare(a.dataAplicacao));
-  const resgatesRecentes = ativosEncerrados.filter(a=>a.dataResgate>=de12mISO).sort((a,b)=>b.dataResgate.localeCompare(a.dataResgate));
+  const filtroDe = investimentosMesFiltro ? `${investimentosMesFiltro}-01` : de12mISO;
+  const filtroAte = investimentosMesFiltro ? `${investimentosMesFiltro}-31` : todayISO();
+  const aportesRecentes = state.ativosInvestimento.filter(a=>a.dataAplicacao>=filtroDe && a.dataAplicacao<=filtroAte).sort((a,b)=>b.dataAplicacao.localeCompare(a.dataAplicacao));
+  const resgatesRecentes = ativosEncerrados.filter(a=>a.dataResgate>=filtroDe && a.dataResgate<=filtroAte).sort((a,b)=>b.dataResgate.localeCompare(a.dataResgate));
   const totalAportado12m = aportesRecentes.reduce((s,a)=>s+(a.valorAplicado||0),0);
   const totalResgatado12m = resgatesRecentes.reduce((s,a)=>s+(a.valorResgatado||0),0);
 
@@ -2383,15 +2347,22 @@ function viewRelatoriosInvestimentos(){
       </div></div>
     </div>
 
-    <div class="dash-section-label">4/5. Aportes e Resgates — últimos 12 meses</div>
+    <div class="dash-section-label" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+      <span>4/5. Aportes e Resgates ${investimentosMesFiltro ? '— ' + competenciaLabel(investimentosMesFiltro) : '— últimos 12 meses'}</span>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button type="button" class="btn ghost sm" id="btnInvestMesAnterior" title="Mês anterior">‹</button>
+        <button type="button" class="btn ghost sm" id="btnInvestMesProximo" title="Próximo mês">›</button>
+        ${investimentosMesFiltro ? `<button type="button" class="btn ghost sm" id="btnInvest12Meses">Ver últimos 12 meses</button>` : ''}
+      </div>
+    </div>
     <div class="cards" style="grid-template-columns:1fr 1fr;margin-bottom:8px;">
       <div class="card"><div class="label">Total aportado</div><div class="value mono">${brl(totalAportado12m)}</div></div>
       <div class="card"><div class="label">Total resgatado</div><div class="value mono">${brl(totalResgatado12m)}</div></div>
     </div>
-    <div class="panel" style="margin-bottom:8px;"><div class="panel-head"><h2>Aportes recentes</h2></div><div class="panel-body" style="padding:0;">
+    <div class="panel" style="margin-bottom:8px;"><div class="panel-head"><h2>Aportes ${investimentosMesFiltro?'do mês':'recentes'}</h2></div><div class="panel-body" style="padding:0;">
       ${aportesRecentes.slice(0,15).map(a=>`<div class="ledger-row compact" style="grid-template-columns:auto 1fr auto;"><span class="mono" style="font-size:11px;color:var(--text-soft);">${fmtDate(a.dataAplicacao)}</span><span style="font-size:12px;">${escapeHTML(a.nome||a.ticker||'Ativo')}</span><span class="mono" style="font-size:11.5px;">${brl(a.valorAplicado||0)}</span></div>`).join('') || '<div class="empty">Nenhum aporte no período.</div>'}
     </div></div>
-    <div class="panel" style="margin-bottom:8px;"><div class="panel-head"><h2>Resgates recentes</h2></div><div class="panel-body" style="padding:0;">
+    <div class="panel" style="margin-bottom:8px;"><div class="panel-head"><h2>Resgates ${investimentosMesFiltro?'do mês':'recentes'}</h2></div><div class="panel-body" style="padding:0;">
       ${resgatesRecentes.slice(0,15).map(a=>`<div class="ledger-row compact" style="grid-template-columns:auto 1fr auto auto;"><span class="mono" style="font-size:11px;color:var(--text-soft);">${fmtDate(a.dataResgate)}</span><span style="font-size:12px;">${escapeHTML(a.nome||a.ticker||'Ativo')}</span><span class="mono" style="font-size:11.5px;">${brl(a.valorResgatado||0)}</span><span class="mono" style="font-size:11px;color:${a.rendimentoResgate>=0?'var(--success)':'var(--danger)'};">${a.rendimentoResgate>=0?'+':''}${brl(a.rendimentoResgate||0)}</span></div>`).join('') || '<div class="empty">Nenhum resgate no período.</div>'}
     </div></div>
 
@@ -2567,7 +2538,7 @@ async function sincronizarPedidosVK(){
         } else {
           state.vendasBonificadas.push({
             id: uid(), vkPedidoId: p.id, numero: p.numero,
-            clienteNome: cliente ? cliente.nome : '', valor: p.valorTotal||0, data: dataBonif,
+            clienteNome: cliente ? cliente.nome : '', valor: p.valorTotal, data: dataBonif,
             criadoEm: new Date().toISOString()
           });
         }
@@ -2617,7 +2588,7 @@ async function sincronizarPedidosVK(){
         // pedido já nasceu cancelado no VK — não precisa de aprovação, entra direto já marcado
         state.lancamentos.push({
           id: uid(), tipo:'entrada', categoria: cfg.categoria || 'Vendas',
-          descricao: descricaoPedido, valor: p.valorTotal||0,
+          descricao: descricaoPedido, valor: p.valorTotal,
           fornecedor: cliente ? cliente.nome : '', observacao: observacaoNova,
           contaId: null, dataVencimento: vencimentoNovo,
           status: 'cancelado', dataPagamento: null,
@@ -2652,10 +2623,12 @@ async function sincronizarPedidosVK(){
         return;
       }
 
-      // REVERTIDO a pedido do usuário: chegou a existir uma regra aqui que só deixava passar pedidos
-      // "entregue"/"parcial", mas isso quebrou o fluxo real de uso (todo pedido lançado no VK Industrial
-      // sempre passou pro financeiro, independente do status). Voltou a ser: qualquer pedido novo
-      // (não cancelado, não bonificação) entra na fila de aprovação assim que aparece no VK.
+      // Só vira conta a receber quando o pedido já foi (ao menos parcialmente) entregue — pedido em
+      // produção/aguardando ainda não é receita esperada. Não mexe em quem já tinha virado
+      // lançamento/aprovação antes dessa regra existir — só passa a valer pra pedido novo daqui pra frente.
+      if(!emAprovacao && p.status!=='entregue' && p.status!=='parcial'){
+        return;
+      }
 
       if(emAprovacao){
         jaImportados++;
@@ -2680,7 +2653,7 @@ async function sincronizarPedidosVK(){
       state.vkAprovacoes.push({
         id: uid(), tipo:'pedido', vkPedidoId: p.id,
         descricao: descricaoPedido,
-        valor: p.valorTotal||0,
+        valor: p.valorTotal,
         contraparte: nomeContraparte,
         observacao: observacaoNova,
         dataVencimento: vencimentoNovo,
@@ -2719,7 +2692,7 @@ async function sincronizarPedidosVK(){
         id: uid(), vkPedidoId: p.id, numero: p.numero, forma: 'dinheiro',
         representanteId: p.representanteId || null, representanteNome: rep ? rep.nome : 'Sem representante',
         clienteNome: cliente ? cliente.nome : '—',
-        valor: p.valorTotal||0,
+        valor: p.valorTotal,
         dataMarcado: p.pagamentoDinheiroData || new Date().toISOString(),
         conferido: false, conferidoEm: null,
         criadoEm: new Date().toISOString()
@@ -2753,7 +2726,7 @@ async function sincronizarPedidosVK(){
         id: uid(), vkPedidoId: p.id, numero: p.numero, forma: 'pix',
         representanteId: p.representanteId || null, representanteNome: rep ? rep.nome : 'Sem representante',
         clienteNome: cliente ? cliente.nome : '—',
-        valor: p.valorTotal||0,
+        valor: p.valorTotal,
         dataMarcado: p.pagamentoPixData || new Date().toISOString(),
         conferido: false, conferidoEm: null,
         criadoEm: new Date().toISOString()
@@ -2787,7 +2760,7 @@ async function sincronizarPedidosVK(){
         id: uid(), vkPedidoId: p.id, numero: p.numero, forma: 'cartao',
         representanteId: p.representanteId || null, representanteNome: rep ? rep.nome : 'Sem representante',
         clienteNome: cliente ? cliente.nome : '—',
-        valor: p.valorTotal||0,
+        valor: p.valorTotal,
         dataMarcado: p.pagamentoCartaoData || new Date().toISOString(),
         conferido: false, conferidoEm: null,
         criadoEm: new Date().toISOString()
@@ -2819,7 +2792,7 @@ async function sincronizarPedidosVK(){
         id: uid(), vkPedidoId: p.id, numero: p.numero, forma: 'boleto',
         representanteId: p.representanteId || null, representanteNome: rep ? rep.nome : 'Sem representante',
         clienteNome: cliente ? cliente.nome : '—',
-        valor: p.valorTotal||0,
+        valor: p.valorTotal,
         dataMarcado: p.pagamentoBoletoData || new Date().toISOString(),
         conferido: false, conferidoEm: null,
         criadoEm: new Date().toISOString()
@@ -9239,6 +9212,10 @@ function exportarRelatorioPDF(titulo){
   if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
   const panel = document.getElementById('reportPanel');
   if(!panel) return;
+  // A fonte padrão do PDF (helvetica) não desenha emojis — viram símbolos quebrados. Como os
+  // títulos e textos do sistema usam emoji com frequência (⚠️, 💰, 📊...), tira eles antes de
+  // desenhar; o texto e a pontuação normal (acentos, travessão, parênteses) continuam intactos.
+  const limparParaPDF = (txt)=> txt.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu, '').replace(/\s+/g,' ').trim();
   const { jsPDF } = window.jspdf;
   const docPdf = new jsPDF({ unit:'mm', format:'a4' });
   const M = 20, PW = 210, W = PW - M*2;
@@ -9254,7 +9231,7 @@ function exportarRelatorioPDF(titulo){
   y += 10;
 
   docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...BLUEDEEP);
-  docPdf.text(titulo.toUpperCase(), M, y);
+  docPdf.text(limparParaPDF(titulo).toUpperCase(), M, y);
   y += 4;
   docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
   y += 9;
@@ -9262,7 +9239,7 @@ function exportarRelatorioPDF(titulo){
   const controls = panel.querySelector('.report-controls');
   if(controls){
     docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
-    docPdf.text(controls.textContent.replace(/\s+/g,' ').trim(), M, y);
+    docPdf.text(limparParaPDF(controls.textContent), M, y);
     y += 9;
   }
 
@@ -9273,12 +9250,12 @@ function exportarRelatorioPDF(titulo){
     if(el.classList.contains('report-title')){
       y += 3;
       docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10.5); docPdf.setTextColor(...INK);
-      docPdf.text(el.textContent.trim(), M, y);
+      docPdf.text(limparParaPDF(el.textContent), M, y);
       y += 6;
       return;
     }
-    const label = el.querySelector('span:first-child')?.textContent.trim() || '';
-    const valor = el.querySelector('.v')?.textContent.trim() || '';
+    const label = limparParaPDF(el.querySelector('span:first-child')?.textContent || '');
+    const valor = limparParaPDF(el.querySelector('.v')?.textContent || '');
     const isTotal = el.classList.contains('total');
     const isResult = el.classList.contains('result');
     docPdf.setFont('helvetica', isTotal||isResult ? 'bold' : 'normal');
@@ -9390,19 +9367,7 @@ function renderRelatorioInvestimentos(){
   const barra = (v,max) => max>0 ? `<div style="height:5px;border-radius:3px;background:var(--line);margin-top:5px;overflow:hidden;"><div style="height:100%;width:${Math.max(2,Math.round(v/max*100))}%;background:var(--blue-accent);border-radius:3px;"></div></div>` : '';
 
   return `
-    <div class="report-controls">
-      <select id="investMes">${(()=>{
-        const opcoes = new Set();
-        const [anoAtualInv, mesAtualInv] = todayISO().split('-').map(Number);
-        for(let i=23;i>=-2;i--){
-          const d = new Date(anoAtualInv, mesAtualInv-1-i, 1);
-          opcoes.add(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
-        }
-        opcoes.add(mesGlobalRef); // garante que o mês atualmente selecionado sempre aparece, mesmo se for mais antigo
-        return [...opcoes].sort().map(m=>`<option value="${m}" ${m===mesGlobalRef?'selected':''}>${competenciaLabel(m)}</option>`).join('');
-      })()}</select>
-      <span style="font-size:12.5px;color:var(--text-soft);">Relatório de Investimentos — ${label}</span>
-    </div>
+    <div class="report-controls"><span style="font-size:12.5px;color:var(--text-soft);">Relatório de Investimentos — ${label}</span></div>
     <div class="report-block">
       <div class="report-title">Resumo do mês</div>
       <div class="report-line"><span>Total aplicado no mês</span><span class="v">${brl(totalAportado)}</span></div>
@@ -21289,6 +21254,24 @@ function attachViewHandlers(){
       if(lanc) openLancamentoModal('saida', lanc);
     });
   });
+  document.getElementById('btnInvestMesAnterior')?.addEventListener('click', ()=>{
+    const base = investimentosMesFiltro || todayISO().slice(0,7);
+    const [ay,am] = base.split('-').map(Number);
+    const d = new Date(ay, am-2, 1);
+    investimentosMesFiltro = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    render();
+  });
+  document.getElementById('btnInvestMesProximo')?.addEventListener('click', ()=>{
+    const base = investimentosMesFiltro || todayISO().slice(0,7);
+    const [ay,am] = base.split('-').map(Number);
+    const d = new Date(ay, am, 1);
+    investimentosMesFiltro = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    render();
+  });
+  document.getElementById('btnInvest12Meses')?.addEventListener('click', ()=>{
+    investimentosMesFiltro = null;
+    render();
+  });
   document.getElementById('btnNovaRetirada')?.addEventListener('click', ()=>openRetiradaModal());
   document.querySelectorAll('[data-action="editar-retirada"]').forEach(el=>{
     el.addEventListener('click', ()=>openRetiradaModal(state.retiradas.find(r=>r.id===el.dataset.id)));
@@ -22684,13 +22667,6 @@ function attachViewHandlers(){
       const dreDe = document.getElementById('dreDe'), dreAte = document.getElementById('dreAte');
       if(dreDe) dreDe.addEventListener('change', ()=>{ document.getElementById('reportPanel').innerHTML = renderDRE('custom'); bindReportInner(); });
       if(dreAte) dreAte.addEventListener('change', ()=>{ document.getElementById('reportPanel').innerHTML = renderDRE('custom'); bindReportInner(); });
-      const investMes = document.getElementById('investMes');
-      if(investMes) investMes.addEventListener('change', ()=>{
-        if(!investMes.value) return;
-        mesGlobalRef = investMes.value; // mesmo mês global usado em todo o app — troca aqui reflete em qualquer outra tela também
-        document.getElementById('reportPanel').innerHTML = renderRelatorioInvestimentos();
-        bindReportInner();
-      });
       const balancoData = document.getElementById('balancoData');
       if(balancoData) balancoData.addEventListener('change', ()=>{ document.getElementById('reportPanel').innerHTML = renderBalanco(); bindReportInner(); });
       const meiAno = document.getElementById('meiAno');
