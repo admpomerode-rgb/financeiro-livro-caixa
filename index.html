@@ -2904,6 +2904,22 @@ async function sincronizarPedidosVK(){
   }
 }
 
+// Correção B1 da auditoria: antes, uma falha de leitura de uma coleção secundária durante a
+// sincronização (sem permissão, sem internet, timeout) virava silenciosamente "coleção vazia"
+// (`.catch(()=>({docs:[]}))`), e a sincronização seguia como se tivesse lido tudo certo — podendo
+// concluir "nada novo" quando na verdade nem conseguiu checar. Essas duas funções só mudam ISSO:
+// marcam a falha com contexto (pra log e pra quem chamar decidir o que fazer) e não mexem em mais
+// nada da lógica de sincronização.
+function tratarFalhaLeituraColecao(nomeColecao, contexto){
+  return (e)=>{
+    console.error(`Falha ao ler a coleção "${nomeColecao}" (${contexto}):`, e);
+    return { docs: [], _falhouLeitura: true, _colecaoComFalha: nomeColecao };
+  };
+}
+function primeiraLeituraComFalha(...snaps){
+  return snaps.find(s=>s && s._falhouLeitura);
+}
+
 async function sincronizarRecomendacoesCompraVK(){
   const cfg = state.vkConfig;
   if(!cfg.firebaseConfig){ showToast('Cole a configuração do Firebase antes de sincronizar'); render(); return; }
@@ -2921,8 +2937,14 @@ async function sincronizarRecomendacoesCompraVK(){
     const db = vkFirebaseApp.firestore();
     const [recSnap, insumosSnap] = await Promise.all([
       db.collection('recomendacoes_compra').get({ source: 'server' }),
-      db.collection('insumos').get({ source: 'server' }).catch(()=>({docs:[]}))
+      db.collection('insumos').get({ source: 'server' }).catch(tratarFalhaLeituraColecao('insumos', 'sincronizarRecomendacoesCompraVK'))
     ]);
+    const falhaLeitura = primeiraLeituraComFalha(insumosSnap);
+    if(falhaLeitura){
+      showToast(`Não consegui verificar "${falhaLeitura._colecaoComFalha}" no VK Industrial — tente sincronizar de novo`);
+      render();
+      return;
+    }
     const recomendacoes = recSnap.docs.map(d=>({ id: d.id, ...d.data() }));
     const insumosVK = insumosSnap.docs.map(d=>({ id: d.id, ...d.data() }));
 
@@ -3000,10 +3022,16 @@ async function sincronizarCustosProdutosVK(){
     const db = vkFirebaseApp.firestore();
     const [produtosSnap, fichasSnap, insumosSnap, entradasSnap] = await Promise.all([
       db.collection('produtos').get({ source: 'server' }),
-      db.collection('fichas_tecnicas').get({ source: 'server' }).catch(()=>({docs:[]})),
-      db.collection('insumos').get({ source: 'server' }).catch(()=>({docs:[]})),
-      db.collection('entradas_estoque').get({ source: 'server' }).catch(()=>({docs:[]}))
+      db.collection('fichas_tecnicas').get({ source: 'server' }).catch(tratarFalhaLeituraColecao('fichas_tecnicas', 'sincronizarCustosProdutosVK')),
+      db.collection('insumos').get({ source: 'server' }).catch(tratarFalhaLeituraColecao('insumos', 'sincronizarCustosProdutosVK')),
+      db.collection('entradas_estoque').get({ source: 'server' }).catch(tratarFalhaLeituraColecao('entradas_estoque', 'sincronizarCustosProdutosVK'))
     ]);
+    const falhaLeitura = primeiraLeituraComFalha(fichasSnap, insumosSnap, entradasSnap);
+    if(falhaLeitura){
+      showToast(`Não consegui verificar "${falhaLeitura._colecaoComFalha}" no VK Industrial — tente sincronizar de novo`);
+      render();
+      return;
+    }
     const produtosVK = produtosSnap.docs.map(d=>({ id: d.id, ...d.data() }));
     const fichasVK = fichasSnap.docs.map(d=>({ id: d.id, ...d.data() }));
     const insumosVK = insumosSnap.docs.map(d=>({ id: d.id, ...d.data() }));
@@ -3094,8 +3122,14 @@ async function sincronizarEstoqueInsumosVK(){
     const db = vkFirebaseApp.firestore();
     const [insumosSnap, entradasSnap] = await Promise.all([
       db.collection('insumos').get({ source: 'server' }),
-      db.collection('entradas_estoque').get({ source: 'server' }).catch(()=>({docs:[]}))
+      db.collection('entradas_estoque').get({ source: 'server' }).catch(tratarFalhaLeituraColecao('entradas_estoque', 'sincronizarEstoqueInsumosVK'))
     ]);
+    const falhaLeitura = primeiraLeituraComFalha(entradasSnap);
+    if(falhaLeitura){
+      showToast(`Não consegui verificar "${falhaLeitura._colecaoComFalha}" no VK Industrial — tente sincronizar de novo`);
+      render();
+      return;
+    }
     const insumosVK = insumosSnap.docs.map(d=>({ id: d.id, ...d.data() }));
     const entradasVK = entradasSnap.docs.map(d=>({ id: d.id, ...d.data() }));
 
@@ -3163,9 +3197,15 @@ async function sincronizarEntradasEstoqueVK(){
     const db = vkFirebaseApp.firestore();
     const [entradasSnap, insumosSnap, fornecedoresSnap] = await Promise.all([
       db.collection('entradas_estoque').get({ source: 'server' }),
-      db.collection('insumos').get({ source: 'server' }).catch(()=>({docs:[]})),
-      db.collection('fornecedores').get({ source: 'server' }).catch(()=>({docs:[]}))
+      db.collection('insumos').get({ source: 'server' }).catch(tratarFalhaLeituraColecao('insumos', 'sincronizarEntradasEstoqueVK')),
+      db.collection('fornecedores').get({ source: 'server' }).catch(tratarFalhaLeituraColecao('fornecedores', 'sincronizarEntradasEstoqueVK'))
     ]);
+    const falhaLeitura = primeiraLeituraComFalha(insumosSnap, fornecedoresSnap);
+    if(falhaLeitura){
+      showToast(`Não consegui verificar "${falhaLeitura._colecaoComFalha}" no VK Industrial — tente sincronizar de novo`);
+      render();
+      return;
+    }
     const entradas = entradasSnap.docs.map(d=>({ id: d.id, ...d.data() }));
     const insumosVK = insumosSnap.docs.map(d=>({ id: d.id, ...d.data() }));
     const fornecedoresVK = fornecedoresSnap.docs.map(d=>({ id: d.id, ...d.data() }));
@@ -19389,9 +19429,15 @@ async function sincronizarAtivosVK(){
     }
     const db = vkFirebaseApp.firestore();
     const [ativosSnap, osSnap] = await Promise.all([
-      db.collection('ativosPatrimoniais').get({ source: 'server' }).catch(()=>({docs:[]})),
-      db.collection('ordensServico').get({ source: 'server' }).catch(()=>({docs:[]}))
+      db.collection('ativosPatrimoniais').get({ source: 'server' }).catch(tratarFalhaLeituraColecao('ativosPatrimoniais', 'sincronizarAtivosVK')),
+      db.collection('ordensServico').get({ source: 'server' }).catch(tratarFalhaLeituraColecao('ordensServico', 'sincronizarAtivosVK'))
     ]);
+    const falhaLeitura = primeiraLeituraComFalha(ativosSnap, osSnap);
+    if(falhaLeitura){
+      showToast(`Não consegui verificar "${falhaLeitura._colecaoComFalha}" no VK Industrial — tente sincronizar de novo`);
+      render();
+      return;
+    }
     const ativosVK = ativosSnap.docs.map(d=>({ id: d.id, ...d.data() }));
     const ordensVK = osSnap.docs.map(d=>({ id: d.id, ...d.data() }));
 
@@ -19467,7 +19513,12 @@ async function sincronizarProcessos(){
       await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
     }
     const db = processosFirebaseApp.firestore();
-    const snap = await db.collection('processos').get({ source: 'server' }).catch(()=>({docs:[]}));
+    const snap = await db.collection('processos').get({ source: 'server' }).catch(tratarFalhaLeituraColecao('processos', 'sincronizarProcessos'));
+    if(snap._falhouLeitura){
+      showToast(`Não consegui verificar "${snap._colecaoComFalha}" no Livro de Processos — tente sincronizar de novo`);
+      render();
+      return;
+    }
     const processos = snap.docs.map(d=>({ id: d.id, ...d.data() }));
 
     let novasOcorrencias = 0, semDecisao = 0, semAtivoCorrespondente = 0;
@@ -19551,7 +19602,12 @@ async function sincronizarProcessos(){
     });
 
     // Orçamentos pedidos dentro de um processo — viram fila de aprovação aqui.
-    const snapOrc = await db.collection('orcamentos').get({ source: 'server' }).catch(()=>({docs:[]}));
+    const snapOrc = await db.collection('orcamentos').get({ source: 'server' }).catch(tratarFalhaLeituraColecao('orcamentos', 'sincronizarProcessos'));
+    if(snapOrc._falhouLeitura){
+      showToast(`Não consegui verificar "${snapOrc._colecaoComFalha}" no Livro de Processos — tente sincronizar de novo`);
+      render();
+      return;
+    }
     const orcamentosVK = snapOrc.docs.map(d=>({ id: d.id, ...d.data() }));
     if(!state.orcamentosProcessos) state.orcamentosProcessos = [];
     if(!state.orcamentosProcessosContador) state.orcamentosProcessosContador = 0;
@@ -25043,6 +25099,10 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     fCanalVenda.value = nome;
   });
   document.getElementById('btnSalvarLancamento').addEventListener('click', async ()=>{
+    const btnSalvarClick = document.getElementById('btnSalvarLancamento');
+    if(btnSalvarClick.disabled) return; // já está processando um clique anterior — ignora o segundo
+    btnSalvarClick.disabled = true;
+    try{
     const categoria = document.getElementById('fCategoria').value;
     const descricao = document.getElementById('fDescricao').value.trim() || categoria;
     const valor = valorTravado ? existing.valor : numBR(document.getElementById('fValor').value);
@@ -25189,6 +25249,10 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     closeModal();
     render();
     mostrarToastComDesfazer(isEdit ? 'Lançamento atualizado' : 'Lançamento criado');
+    }finally{
+      const btnSalvarFim = document.getElementById('btnSalvarLancamento');
+      if(btnSalvarFim) btnSalvarFim.disabled = false;
+    }
   });
 }
 function totalGastoFornecedor(nome){
@@ -26063,7 +26127,7 @@ function statusMeta(m, atual){
   const falta = m.valorAlvo-atual;
   const mesesNecessarios = falta/m.aporteMensalPlanejado;
   const dataProjetada = new Date(todayISO()+'T12:00:00'); dataProjetada.setMonth(dataProjetada.getMonth()+Math.ceil(mesesNecessarios));
-  const prazo = new Date(m.prazo);
+  const prazo = new Date(m.prazo+'T12:00:00');
   const folgaDias = Math.floor((prazo-dataProjetada)/86400000);
   if(folgaDias<0) return 'atrasada';
   if(folgaDias<=30) return 'atencao';
