@@ -713,6 +713,7 @@
         <div class="nav-section-label">Cadastros e Configurações</div>
         <div class="nav-item" data-view="categorias" title="Categorias"><span class="nav-dot"></span><span class="nav-abbr">CT</span><span class="nav-label">Categorias</span></div>
         <div class="nav-item" data-view="fornecedores" title="Fornecedores"><span class="nav-dot"></span><span class="nav-abbr">FN</span><span class="nav-label">Fornecedores</span></div>
+        <div class="nav-item" data-view="descricoes" title="Padronizar Descrições"><span class="nav-dot"></span><span class="nav-abbr">DS</span><span class="nav-label">Padronizar Descrições</span></div>
         <div class="nav-item" data-view="recorrencias" title="Lançamentos Recorrentes"><span class="nav-dot"></span><span class="nav-abbr">RC</span><span class="nav-label">Recorrentes</span></div>
         <div class="nav-item" data-view="metas" title="Metas de Reserva"><span class="nav-dot"></span><span class="nav-abbr">MT</span><span class="nav-label">Metas de Reserva</span></div>
         <div class="nav-item" data-view="integracoes" title="Central de Integrações"><span class="nav-dot"></span><span class="nav-abbr">IN</span><span class="nav-label">Central de Integrações</span></div>
@@ -1816,6 +1817,7 @@ function render(){
   else if(currentView==='categorias') main.innerHTML = viewCategorias();
   else if(currentView==='lancamentos-categoria') main.innerHTML = viewLancamentosCategoria();
   else if(currentView==='fornecedores') main.innerHTML = viewFornecedores();
+  else if(currentView==='descricoes') main.innerHTML = viewDescricoes();
   else if(currentView==='recorrencias') main.innerHTML = viewRecorrencias();
   else if(currentView==='metas') main.innerHTML = viewMetasReserva();
   else if(currentView==='simulacao') main.innerHTML = viewSimulacao();
@@ -3224,7 +3226,7 @@ async function sincronizarEntradasEstoqueVK(){
     function resolverFornecedor(fornecedorId){
       const fVK = fornecedoresVK.find(f=>f.id===fornecedorId);
       if(!fVK) return { nome: '', cnpj: '', naoIdentificado: true };
-      const nomeVK = fVK.nome || fVK.nomeFantasia || fVK.razaoSocial || fVK.nomeEmpresa || fVK.empresa || fVK.descricao || '';
+      const nomeVK = capitalizarNomeFornecedor(fVK.nome || fVK.nomeFantasia || fVK.razaoSocial || fVK.nomeEmpresa || fVK.empresa || fVK.descricao || '');
       const cnpj = fVK.cnpj || fVK.cnpjCpf || fVK.documento || '';
       let fornecedorLocal = cnpj ? state.fornecedores.find(f=>soDigitos(f.cnpjCpf)===soDigitos(cnpj)) : null;
       if(!fornecedorLocal && nomeVK){
@@ -23254,6 +23256,32 @@ function attachViewHandlers(){
     });
   });
 
+  // Padronizar Descrições
+  document.getElementById('descricoesBusca')?.addEventListener('input', (e)=>{
+    descricoesFiltro = e.target.value;
+    render();
+  });
+  document.querySelectorAll('[data-action="renomear-descricao"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openRenomearDescricaoModal(btn.dataset.texto));
+  });
+  document.getElementById('btnPadronizarTudoDescricao')?.addEventListener('click', async ()=>{
+    const todas = mapaDescricoes();
+    const foraDoPadrao = todas.filter(d=>d.texto!==capitalizarTitulo(d.texto));
+    if(!foraDoPadrao.length) return;
+    const confirmar = await avisoModal({
+      titulo: 'Padronizar todas as descrições',
+      mensagem: `Isso vai colocar ${foraDoPadrao.length} descrição(ões) diferente(s) no formato Título (minúsculo com iniciais maiúsculas), afetando todos os lançamentos que usam elas.`,
+      explicacao: 'Se duas descrições diferentes (ex: "COMPRA MERCADO" e "compra mercado") virarem o mesmo texto padronizado, elas passam a ser tratadas como uma só daqui pra frente — o que geralmente é o objetivo de padronizar. Nenhum lançamento é excluído, só o texto da descrição muda.',
+      tipo: 'aviso', textoConfirmar: 'Padronizar', textoCancelar: 'Cancelar'
+    });
+    if(!confirmar) return;
+    let totalAfetados = 0;
+    foraDoPadrao.forEach(d=>{ totalAfetados += renomearDescricaoEmMassa(d.texto, capitalizarTitulo(d.texto)); });
+    registrarLog('Descrições padronizadas em massa', `${foraDoPadrao.length} descrição(ões) diferentes, ${totalAfetados} lançamento(s) afetado(s)`);
+    persist(); render();
+    showToast(`${totalAfetados} lançamento(s) atualizado(s)`);
+  });
+
   // Fornecedores
   document.getElementById('btnNovoFornecedor')?.addEventListener('click', ()=>openFornecedorModal());
   document.querySelectorAll('[data-action="ver-fornecedor"]').forEach(el=>{
@@ -25748,6 +25776,94 @@ function aumentoPrecoFornecedor(nome){
   const variacaoPct = (mediaRecente-mediaAnterior)/mediaAnterior*100;
   return Math.abs(variacaoPct)>=15 ? { mediaRecente, mediaAnterior, variacaoPct } : null;
 }
+// Junta as descrições de lançamentos e de compras de cartão num só mapa (texto exato -> contagem
+// e valor total), pra "Padronizar Descrições" mostrar tudo num lugar só. Comparação é sempre pelo
+// texto EXATO (sensível a maiúscula/minúscula) — é assim que duas grafias diferentes da "mesma"
+// descrição aparecem como itens separados na lista, pra você decidir se quer unificar ou não.
+function mapaDescricoes(){
+  const mapa = new Map();
+  const add = (desc, valor)=>{
+    if(!desc) return;
+    if(!mapa.has(desc)) mapa.set(desc, { texto: desc, qtd: 0, total: 0 });
+    const item = mapa.get(desc);
+    item.qtd++; item.total += (valor||0);
+  };
+  state.lancamentos.forEach(l=>add(l.descricao, l.valor));
+  (state.comprasCartao||[]).forEach(c=>add(c.descricao, c.valor));
+  return [...mapa.values()];
+}
+
+// Troca uma descrição (texto exato) por outra em TODOS os lançamentos e compras de cartão que
+// usam ela. Não mexe em categoria, fornecedor, valor ou qualquer outro campo — só na descrição.
+function renomearDescricaoEmMassa(antiga, nova){
+  if(!antiga || !nova || antiga===nova) return 0;
+  let afetados = 0;
+  state.lancamentos.forEach(l=>{ if(l.descricao===antiga){ l.descricao = nova; afetados++; } });
+  (state.comprasCartao||[]).forEach(c=>{ if(c.descricao===antiga){ c.descricao = nova; afetados++; } });
+  return afetados;
+}
+
+let descricoesFiltro = '';
+function viewDescricoes(){
+  const todas = mapaDescricoes().sort((a,b)=> b.qtd-a.qtd || a.texto.localeCompare(b.texto));
+  const filtro = descricoesFiltro.toLowerCase();
+  const lista = filtro ? todas.filter(d=>d.texto.toLowerCase().includes(filtro)) : todas;
+  const foraDoPadrao = todas.filter(d=>d.texto!==capitalizarTitulo(d.texto)).length;
+
+  return `
+    <div class="topbar">
+      <div><h1>Padronizar Descrições</h1><p>${todas.length} descrição(ões) distinta(s) em uso · renomeie pra corrigir todos os lançamentos de uma vez</p></div>
+      ${foraDoPadrao>0 ? `<button class="btn ghost" id="btnPadronizarTudoDescricao">Padronizar todas pro formato Título (${foraDoPadrao})</button>` : ''}
+    </div>
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="filter-bar"><input type="text" id="descricoesBusca" placeholder="Buscar descrição..." value="${escapeHTML(descricoesFiltro)}" style="flex:1;"></div>
+    </div>
+    <div class="panel">
+      <div class="ledger-row head" style="grid-template-columns:1fr auto auto;">
+        <span>Descrição</span><span>Usos</span><span></span>
+      </div>
+      <div class="panel-body">
+        ${lista.length ? lista.map(d=>`
+          <div class="ledger-row" style="grid-template-columns:1fr auto auto;align-items:center;">
+            <div class="desc-cell"><div>${escapeHTML(d.texto)}</div><div class="cat">${brl(d.total)} no total</div></div>
+            <span class="mono" style="font-size:12.5px;color:var(--text-soft);">${d.qtd}×</span>
+            <div class="row-actions">
+              <button class="icon-btn" data-action="renomear-descricao" data-texto="${escapeHTML(d.texto)}" title="Renomear (afeta os ${d.qtd} lançamento(s))">✎</button>
+            </div>
+          </div>
+        `).join('') : `<div class="empty">Nenhuma descrição encontrada.</div>`}
+      </div>
+    </div>
+    <div class="note" style="margin-top:0;">Renomear aqui muda a descrição em TODOS os lançamentos e compras de cartão que usam exatamente esse texto — não afeta categoria, fornecedor, valor ou qualquer outro dado.</div>
+  `;
+}
+
+function openRenomearDescricaoModal(textoAtual){
+  const info = mapaDescricoes().find(d=>d.texto===textoAtual);
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Renomear descrição</h3>
+    <div class="note" style="margin-top:0;">Isso vai afetar ${info?info.qtd:0} lançamento(s)/compra(s) que usam exatamente este texto hoje.</div>
+    <div class="field"><label>Descrição atual</label><input type="text" value="${escapeHTML(textoAtual)}" disabled style="opacity:.6;"></div>
+    <div class="field"><label>Nova descrição</label><input type="text" id="novaDescricaoInput" value="${escapeHTML(capitalizarTitulo(textoAtual))}"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarRenomearDescricao">Renomear</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('novaDescricaoInput').focus();
+  document.getElementById('btnConfirmarRenomearDescricao').addEventListener('click', ()=>{
+    const nova = document.getElementById('novaDescricaoInput').value.trim();
+    if(!nova){ showToast('Digite a nova descrição'); return; }
+    const afetados = renomearDescricaoEmMassa(textoAtual, nova);
+    registrarLog('Descrição padronizada', `"${textoAtual}" → "${nova}" (${afetados} lançamento(s))`);
+    persist(); closeModal(); render();
+    showToast(`${afetados} lançamento(s) atualizado(s)`);
+  });
+}
+
 function viewFornecedores(){
   const lista = [...(state.fornecedores||[])].sort((a,b)=>a.nome.localeCompare(b.nome));
   const dadosPorFornecedor = lista.map(f=>{
@@ -28768,6 +28884,20 @@ function decodeQRFromFile(file){
   });
 }
 
+// Padroniza nome de fornecedor vindo de importação automática (nota fiscal lida por IA) pro
+// padrão "Título": tudo minúsculo, com a inicial de cada palavra em maiúscula. Ex: "AUTO POSTO
+// POMERODE" -> "Auto Posto Pomerode". Não mexe em nome digitado manualmente em outras telas —
+// só entra em ação nos dois pontos da importação de nota fiscal.
+// Título: minúsculo com inicial de cada palavra maiúscula. Genérica — usada tanto pro nome de
+// fornecedor importado da nota fiscal quanto pra padronização de descrição de lançamento.
+function capitalizarTitulo(texto){
+  if(!texto) return texto;
+  return texto.toLowerCase().replace(/(^|\s)([a-zà-ú])/g, (m,sep,letra)=>sep+letra.toUpperCase());
+}
+function capitalizarNomeFornecedor(nome){
+  return capitalizarTitulo(nome);
+}
+
 function parseNFeQR(conteudo){
   const chaveMatch = conteudo.match(/(\d{44})/);
   const url = /^https?:\/\//i.test(conteudo) ? conteudo : null;
@@ -28865,7 +28995,7 @@ function openImportarNotaFiscalModal(){
       const dados = await extrairDadosNotaFiscalIA(file);
       itensExtraidos = Array.isArray(dados.itens) ? dados.itens : [];
 
-      document.getElementById('nfFornecedorNome').value = dados.fornecedorNome || '';
+      document.getElementById('nfFornecedorNome').value = capitalizarNomeFornecedor(dados.fornecedorNome) || '';
       document.getElementById('nfFornecedorCNPJ').value = dados.fornecedorCNPJ || '';
       document.getElementById('nfValor').value = dados.valorTotal != null ? dados.valorTotal : '';
       document.getElementById('nfData').value = dados.dataEmissao || todayISO();
@@ -28896,7 +29026,7 @@ function openImportarNotaFiscalModal(){
   });
 
   document.getElementById('btnLancarNotaFiscal').addEventListener('click', ()=>{
-    const nomeForn = document.getElementById('nfFornecedorNome').value.trim();
+    const nomeForn = capitalizarNomeFornecedor(document.getElementById('nfFornecedorNome').value.trim());
     const cnpj = document.getElementById('nfFornecedorCNPJ').value.trim();
     const valor = numBR(document.getElementById('nfValor').value);
     const data = document.getElementById('nfData').value || todayISO();
