@@ -5540,8 +5540,12 @@ function rowHTMLEstiloBluecoins(l){
 }
 
 function viewTodosLancamentos(){
+  const hoje = todayISO();
   const dias = new Map();
-  [...state.lancamentos].sort((a,b)=>(b.dataPagamento||b.dataVencimento||'').localeCompare(a.dataPagamento||a.dataVencimento||'')).forEach(l=>{
+  // Histórico = já aconteceu (tem data de pagamento) ou já venceu (vencimento até hoje). Pendente
+  // com vencimento no futuro é "agendado", não histórico — esse fica só nas telas de Contas a
+  // Pagar/Receber, senão ele aparecia lá na frente da lista, empurrando o dia de hoje pra baixo.
+  [...state.lancamentos].filter(l=>(l.dataPagamento||l.dataVencimento||'')<=hoje).sort((a,b)=>(b.dataPagamento||b.dataVencimento||'').localeCompare(a.dataPagamento||a.dataVencimento||'')).forEach(l=>{
     const dia = l.dataPagamento||l.dataVencimento||'sem-data';
     if(!dias.has(dia)) dias.set(dia, []);
     dias.get(dia).push(l);
@@ -5551,7 +5555,7 @@ function viewTodosLancamentos(){
 
   return `
     <div class="topbar">
-      <div><h1>Todos os Lançamentos</h1><p>${state.lancamentos.length} lançamento(s) · segure pra selecionar vários</p></div>
+      <div><h1>Todos os Lançamentos</h1><p>${[...dias.values()].reduce((s,arr)=>s+arr.length,0)} lançamento(s) já realizados ou vencidos · segure pra selecionar vários</p></div>
     </div>
     <div class="panel">
       <div class="panel-body">
