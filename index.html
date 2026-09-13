@@ -4087,28 +4087,136 @@ function itemComissaoPago(item){
   );
 }
 
+/* ========================================================================================
+   NÚCLEO CENTRALIZADO DE GERAÇÃO DE PDF
+   Usado por todos os geradores de PDF do sistema (recibo de comissão, extratos, DRE, DFC,
+   Balanço, investimentos, ativos patrimoniais, comissões, centro de custo, contas a
+   receber/pagar, etc). Objetivo: um único lugar pra resolver os problemas recorrentes de
+   caracteres quebrados em PDF (emojis viram quadrado/símbolo estranho quando a fonte padrão
+   do jsPDF não tem esse glifo) e padronizar numeração de página.
+
+   Acentuação (á é í ó ú ã õ ç â ê ô etc.) e o símbolo de R$: a fonte padrão do jsPDF
+   ("helvetica", que é uma fonte-base embutida no PDF) já usa a codificação WinAnsi, que cobre
+   todos esses caracteres do português — por isso NÃO foi embutida uma fonte TTF externa
+   (Noto Sans/DejaVu): isso inflaria bastante o tamanho deste arquivo único em HTML sem
+   resolver um problema que a fonte padrão já não tem. O problema real e visível nos PDFs
+   emitidos são os EMOJIS (📄 🔴 🟢 ⚠️ 💰 etc.) usados em textos/botões da tela — esses sim
+   ficam fora do conjunto de caracteres da fonte padrão e aparecem quebrados/quadrados no PDF.
+   ======================================================================================== */
+
+// Remove emojis e símbolos incompatíveis de um texto antes de desenhar num PDF. Cobre os
+// principais blocos Unicode de emoji (rostos, objetos, símbolos, bandeiras, variação de
+// apresentação de emoji) e colapsa espaços duplicados que sobram depois da remoção.
+function limparTextoPDF(txt){
+  if(txt===null || txt===undefined) return '';
+  if(Array.isArray(txt)) return txt.map(limparTextoPDF);
+  let s = String(txt);
+  s = s.replace(/[\u{1F300}-\u{1FAFF}]/gu, '');   // emojis (símbolos, objetos, pessoas, etc.)
+  s = s.replace(/[\u{2600}-\u{27BF}]/gu, '');      // símbolos diversos e dingbats (⚠️ ☀️ ✔️ etc.)
+  s = s.replace(/[\u{2190}-\u{21FF}]/gu, '');      // setas (não usadas no texto de relatório)
+  s = s.replace(/[\u{FE00}-\u{FE0F}]/gu, '');      // seletores de variação (o "️" que vem grudado em ⚠️)
+  s = s.replace(/[\u{200D}]/gu, '');               // zero-width joiner (usado em emojis compostos)
+  s = s.replace(/\s{2,}/g, ' ').trim();
+  return s;
+}
+
+// Cria uma instância de jsPDF já com o método .text() interceptado pra sanitizar automaticamente
+// qualquer string (ou array de strings) antes de desenhar — assim NENHUM gerador de PDF precisa
+// se preocupar em limpar emoji manualmente, incluindo os que já existiam antes dessa revisão.
+function criarPDF(opts){
+  const { jsPDF } = window.jspdf;
+  const docPdf = new jsPDF(Object.assign({ unit:'mm', format:'a4' }, opts||{}));
+  const textoOriginal = docPdf.text.bind(docPdf);
+  docPdf.text = function(txt, x, y, opcoes){
+    return textoOriginal(limparTextoPDF(txt), x, y, opcoes);
+  };
+  const splitOriginal = docPdf.splitTextToSize.bind(docPdf);
+  docPdf.splitTextToSize = function(txt, maxWidth, opcoes){
+    return splitOriginal(limparTextoPDF(txt), maxWidth, opcoes);
+  };
+  return docPdf;
+}
+
+// Chamar por último, antes do docPdf.save(...), em qualquer relatório que possa ter mais de uma
+// página. Escreve "Página X de Y" no rodapé de cada página já desenhada (centralizado, mesmo
+// texto/posição em todos os relatórios).
+function pdfNumerarPaginas(docPdf){
+  const total = docPdf.internal.getNumberOfPages();
+  const largura = docPdf.internal.pageSize.getWidth();
+  const altura = docPdf.internal.pageSize.getHeight();
+  for(let i=1;i<=total;i++){
+    docPdf.setPage(i);
+    docPdf.setDrawColor(227,231,238); docPdf.setLineWidth(0.2); docPdf.line(18, altura-14, largura-18, altura-14);
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(7.5); docPdf.setTextColor(150,150,150);
+    docPdf.text(`Livro Caixa Financeiro VK · dados gerados em ${fmtDate(todayISO())}`, 18, altura-9);
+    docPdf.text(`Página ${i} de ${total}`, largura-18, altura-9, { align:'right' });
+  }
+}
+
+// Guarda o cabeçalho do relatório sendo gerado no momento, pra pdfChecarQuebra saber o que
+// redesenhar quando pular de página (antes disso, cada relatório só fazia addPage() e continuava
+// escrevendo do topo, sem repetir nem o nome do relatório nem o período — dado ficava "solto"
+// numa página nova sem contexto nenhum de qual relatório é aquele).
+let pdfContextoAtual = null;
+
+// Cabeçalho padrão de todos os relatórios: marca (Livro Caixa Financeiro VK / Administração
+// Financeira) + data/hora de emissão, nome do relatório, e uma linha de subtítulo (geralmente o
+// período/filtro aplicado). Retorna o Y onde o conteúdo do relatório deve começar a ser desenhado.
+// M/W = margem e largura útil, sempre as mesmas em todos os relatórios (retrato A4).
+function pdfCabecalho(docPdf, { relatorio, subtitulo='', semMarca=false, desenharCabecalhoTabela=null }){
+  const M = 18, W = docPdf.internal.pageSize.getWidth() - M*2;
+  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238];
+  let y = 22;
+  pdfContextoAtual = { relatorio, subtitulo, semMarca, desenharCabecalhoTabela };
+
+  if(!semMarca){
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10); docPdf.setTextColor(...INK);
+    docPdf.text('Livro Caixa Financeiro VK', M, y);
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8); docPdf.setTextColor(...SOFT);
+    docPdf.text('Administração Financeira', M, y+4.5);
+    docPdf.setFontSize(8.5);
+    docPdf.text(`Emitido em ${fmtDate(todayISO())} às ${new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}`, M+W, y, { align:'right' });
+    y += 9;
+    docPdf.setDrawColor(...LINEC); docPdf.setLineWidth(0.3); docPdf.line(M, y, M+W, y);
+    y += 9;
+  }
+
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(14.5); docPdf.setTextColor(...BLUEDEEP);
+  docPdf.text(relatorio, M, y);
+  y += 6;
+  if(subtitulo){
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
+    docPdf.text(subtitulo, M, y);
+    y += 6;
+  }
+  y += 3;
+  if(desenharCabecalhoTabela) y = desenharCabecalhoTabela(y);
+  return y;
+}
+
+// Chamar antes de desenhar cada linha/bloco que possa não caber na página. Se não houver espaço
+// (usando "altura" como estimativa da altura do próximo bloco), pula de página, redesenha o
+// cabeçalho do relatório E o cabeçalho da tabela (se houver um, guardado em pdfContextoAtual) e
+// retorna o novo Y pra continuar dali.
+function pdfChecarQuebra(docPdf, y, altura=7){
+  const alturaPagina = docPdf.internal.pageSize.getHeight();
+  if(y + altura > alturaPagina - 22){
+    docPdf.addPage();
+    if(pdfContextoAtual){
+      return pdfCabecalho(docPdf, pdfContextoAtual);
+    }
+    return 20;
+  }
+  return y;
+}
+
 function gerarReciboComissaoPDF(cp){
   if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
-  const { jsPDF } = window.jspdf;
-  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+    const docPdf = criarPDF();
   const M = 20, PW = 210, W = PW - M*2;
   const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107];
   const nome = nomeVendedor(cp.vendedorId) || 'Vendedor removido';
-  let y = 25;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
-  docPdf.text('Livro Caixa Financeiro VK', M, y);
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
-  docPdf.text(`Emitido em ${fmtDate(cp.dataGeracao)}`, M+W, y, { align:'right' });
-  y += 8;
-  docPdf.setDrawColor(...LINEC); docPdf.setLineWidth(0.3); docPdf.line(M, y, M+W, y);
-  y += 10;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...BLUEDEEP);
-  docPdf.text('RECIBO DE PAGAMENTO DE COMISSÃO', M, y);
-  y += 4;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
-  y += 9;
+  let y = pdfCabecalho(docPdf, { relatorio: 'RECIBO DE PAGAMENTO DE COMISSÃO' });
 
   docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...SOFT);
   docPdf.text('VENDEDOR', M, y);
@@ -4184,6 +4292,7 @@ function gerarReciboComissaoPDF(cp){
   docPdf.text('VIERGUTZ E KRUEGER PARTICIPAÇÕES E EMPREENDIMENTOS', M+W/2, y, { align:'center' });
 
   const nomeArquivo = `recibo-comissao-${nome.replace(/\s+/g,'-').toLowerCase()}-${cp.dataGeracao}.pdf`;
+  pdfNumerarPaginas(docPdf);
   docPdf.save(nomeArquivo);
 }
 
@@ -5635,37 +5744,28 @@ function duplicarLancamentoProximoMes(id){
 function gerarLancamentosPDF(lista, tipo){
   if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
   if(!lista.length){ showToast('Nenhum lançamento pra exportar com esse filtro'); return; }
-  const { jsPDF } = window.jspdf;
-  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+    const docPdf = criarPDF();
   const M = 18, W = 210 - M*2;
-  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
-  let y = 22;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
-  docPdf.text('Livro Caixa Financeiro VK', M, y);
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
-  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
-  y += 7;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
-  y += 9;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
-  docPdf.text(tipo==='saida' ? 'Contas a Pagar' : 'Contas a Receber', M, y);
-  y += 9;
+  const INK=[11,15,20], SOFT=[91,100,114], SUCCESS=[30,158,107], DANGER=[194,74,61];
 
   const total = lista.reduce((s,l)=>s+valorEmAberto(l),0);
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
-  docPdf.text(`${lista.length} lançamento(s)   ·   total ${brl(total)}`, M, y);
-  y += 8;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(8); docPdf.setTextColor(...SOFT);
-  docPdf.text('VENCE', M, y); docPdf.text('DESCRIÇÃO', M+22, y); docPdf.text('STATUS', M+130, y); docPdf.text('VALOR', M+W, y, { align:'right' });
-  y += 4;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
-  y += 5;
+  const desenharCabecalhoTabelaLanc = (yIni)=>{
+    let yy = yIni;
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(8); docPdf.setTextColor(...SOFT);
+    docPdf.text('VENCE', M, yy); docPdf.text('DESCRIÇÃO', M+22, yy); docPdf.text('STATUS', M+130, yy); docPdf.text('VALOR', M+W, yy, { align:'right' });
+    yy += 4;
+    docPdf.setDrawColor(227,231,238); docPdf.line(M, yy, M+W, yy);
+    yy += 5;
+    return yy;
+  };
+  let y = pdfCabecalho(docPdf, {
+    relatorio: tipo==='saida' ? 'Contas a Pagar' : 'Contas a Receber',
+    subtitulo: `${lista.length} lançamento(s)   ·   total ${brl(total)}`,
+    desenharCabecalhoTabela: desenharCabecalhoTabelaLanc
+  });
 
   lista.forEach(l=>{
-    if(y > 275){ docPdf.addPage(); y = 20; }
+    y = pdfChecarQuebra(docPdf, y);
     const hoje = todayISO();
     const atrasado = l.status==='pendente' && l.dataVencimento && l.dataVencimento<hoje;
     docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...INK);
@@ -5678,6 +5778,8 @@ function gerarLancamentosPDF(lista, tipo){
     docPdf.text(`${l.tipo==='entrada'?'+':'-'} ${brl(valorEmAberto(l))}`, M+W, y, { align:'right' });
     y += 5.5;
   });
+
+  pdfNumerarPaginas(docPdf);
 
   docPdf.save(`${tipo==='saida'?'contas-a-pagar':'contas-a-receber'}-${todayISO()}.pdf`);
 }
@@ -5878,36 +5980,28 @@ function gerarFluxoCaixaPDF(mesRef, categoriaFiltro){
   eventosMes.sort((a,b)=>(a.data||'').localeCompare(b.data||''));
   if(!eventosMes.length){ showToast('Nenhuma movimentação nesse mês pra gerar o PDF'); return; }
 
-  const { jsPDF } = window.jspdf;
-  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+    const docPdf = criarPDF();
   const M = 18, W = 210 - M*2;
-  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
-  let y = 22;
+  const INK=[11,15,20], SOFT=[91,100,114], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
 
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
-  docPdf.text('Livro Caixa Financeiro VK', M, y);
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
-  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
-  y += 7;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
-  y += 9;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
-  docPdf.text(`Fluxo de Caixa — ${competenciaLabel(mesRef)}`, M, y);
-  y += 6;
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
-  docPdf.text(`Saldo início do mês: ${brl(saldoInicio)}${categoriaFiltro?` · Categoria: ${categoriaFiltro}`:''}`, M, y);
-  y += 9;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(8.5); docPdf.setTextColor(...SOFT);
-  docPdf.text('DATA', M, y); docPdf.text('DESCRIÇÃO', M+22, y); docPdf.text('VALOR', M+W, y, { align:'right' });
-  y += 4;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
-  y += 5;
+  const desenharCabecalhoTabelaFluxo = (yIni)=>{
+    let yy = yIni;
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(8.5); docPdf.setTextColor(...SOFT);
+    docPdf.text('DATA', M, yy); docPdf.text('DESCRIÇÃO', M+22, yy); docPdf.text('VALOR', M+W, yy, { align:'right' });
+    yy += 4;
+    docPdf.setDrawColor(...LINEC); docPdf.line(M, yy, M+W, yy);
+    yy += 5;
+    return yy;
+  };
+  let y = pdfCabecalho(docPdf, {
+    relatorio: `Fluxo de Caixa — ${competenciaLabel(mesRef)}`,
+    subtitulo: `Saldo início do mês: ${brl(saldoInicio)}${categoriaFiltro?` · Categoria: ${categoriaFiltro}`:''}`,
+    desenharCabecalhoTabela: desenharCabecalhoTabelaFluxo
+  });
 
   let saldoCorrida = saldoInicio;
   eventosMes.forEach(ev=>{
-    if(y > 270){ docPdf.addPage(); y = 20; }
+    y = pdfChecarQuebra(docPdf, y);
     saldoCorrida += ev.tipo==='entrada' ? ev.valor : -ev.valor;
     docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...INK);
     docPdf.text(fmtDate(ev.data), M, y);
@@ -5918,12 +6012,15 @@ function gerarFluxoCaixaPDF(mesRef, categoriaFiltro){
     y += 5.5;
   });
 
+  y = pdfChecarQuebra(docPdf, y, 12);
   y += 3;
   docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
   y += 6;
   docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10.5); docPdf.setTextColor(...INK);
   docPdf.text('Saldo final do mês', M, y);
   docPdf.text(brl(saldoCorrida), M+W, y, { align:'right' });
+
+  pdfNumerarPaginas(docPdf);
 
   docPdf.save(`fluxo-caixa-${mesRef}.pdf`);
 }
@@ -6685,39 +6782,31 @@ function gerarExtratoCategoriaPDF(tipo, categoria, dataDe, dataAte){
   lista.sort((a,b)=>(a.dataPagamento||a.dataVencimento||'').localeCompare(b.dataPagamento||b.dataVencimento||''));
   if(!lista.length){ showToast('Nenhum lançamento no período selecionado'); return; }
 
-  const { jsPDF } = window.jspdf;
-  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+    const docPdf = criarPDF();
   const M = 18, W = 210 - M*2;
-  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
-  let y = 22;
+  const INK=[11,15,20], SOFT=[91,100,114], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
 
   const titulo = categoria || (tipo==='entrada' ? 'Todas as categorias de receita' : 'Todas as categorias de despesa');
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
-  docPdf.text('Livro Caixa Financeiro VK', M, y);
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
-  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
-  y += 7;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
-  y += 9;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
-  docPdf.text(`Extrato — ${titulo}`, M, y);
-  y += 6;
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
-  docPdf.text(`${tipo==='entrada'?'Receita':'Despesa'} · ${(dataDe||dataAte) ? `Período: ${dataDe?fmtDate(dataDe):'início'} até ${dataAte?fmtDate(dataAte):'hoje'}` : 'Todas as movimentações'}`, M, y);
-  y += 10;
-
   const total = lista.reduce((s,l)=>s+l.valor,0);
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10); docPdf.setTextColor(...INK);
-  docPdf.text('Total do período', M, y);
-  docPdf.setTextColor(...(tipo==='entrada'?SUCCESS:DANGER));
-  docPdf.text(brl(total), M+W, y, { align:'right' });
-  y += 9;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y-4, M+W, y-4);
+  const desenharCabecalhoTabelaExtCat = (yIni)=>{
+    let yy = yIni;
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10); docPdf.setTextColor(...INK);
+    docPdf.text('Total do período', M, yy);
+    docPdf.setTextColor(...(tipo==='entrada'?SUCCESS:DANGER));
+    docPdf.text(brl(total), M+W, yy, { align:'right' });
+    yy += 5;
+    docPdf.setDrawColor(...LINEC); docPdf.line(M, yy, M+W, yy);
+    yy += 6;
+    return yy;
+  };
+  let y = pdfCabecalho(docPdf, {
+    relatorio: `Extrato — ${titulo}`,
+    subtitulo: `${tipo==='entrada'?'Receita':'Despesa'} · ${(dataDe||dataAte) ? `Período: ${dataDe?fmtDate(dataDe):'início'} até ${dataAte?fmtDate(dataAte):'hoje'}` : 'Todas as movimentações'}`,
+    desenharCabecalhoTabela: desenharCabecalhoTabelaExtCat
+  });
 
   lista.forEach(l=>{
-    if(y > 270){ docPdf.addPage(); y = 20; }
+    y = pdfChecarQuebra(docPdf, y);
     docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...INK);
     const sufixoCategoria = categoria ? '' : `  (${l.categoria})`;
     const limiteTexto = categoria ? 45 : 34;
@@ -6728,6 +6817,8 @@ function gerarExtratoCategoriaPDF(tipo, categoria, dataDe, dataAte){
     y += 6;
   });
 
+  pdfNumerarPaginas(docPdf);
+
   docPdf.save(`extrato-${titulo.toLowerCase().replace(/\s+/g,'-')}.pdf`);
   showToast('Extrato baixado em PDF');
 }
@@ -6736,26 +6827,13 @@ function gerarResumoCategoriaPDF(tipo, dataDe, dataAte){
   if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
   const tipos = tipo==='ambos' ? ['saida','entrada'] : [tipo];
 
-  const { jsPDF } = window.jspdf;
-  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+    const docPdf = criarPDF();
   const M = 18, W = 210 - M*2;
-  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
-  let y = 22;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
-  docPdf.text('Livro Caixa Financeiro VK', M, y);
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
-  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
-  y += 7;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
-  y += 9;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
-  docPdf.text('Resumo por Categoria', M, y);
-  y += 6;
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
-  docPdf.text((dataDe||dataAte) ? `Período: ${dataDe?fmtDate(dataDe):'início'} até ${dataAte?fmtDate(dataAte):'hoje'}` : 'Todas as movimentações', M, y);
-  y += 10;
+  const INK=[11,15,20], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
+  let y = pdfCabecalho(docPdf, {
+    relatorio: 'Resumo por Categoria',
+    subtitulo: (dataDe||dataAte) ? `Período: ${dataDe?fmtDate(dataDe):'início'} até ${dataAte?fmtDate(dataAte):'hoje'}` : 'Todas as movimentações'
+  });
 
   let algumaLinha = false;
   tipos.forEach(t=>{
@@ -6767,7 +6845,7 @@ function gerarResumoCategoriaPDF(tipo, dataDe, dataAte){
     if(!lista.length) return;
     algumaLinha = true;
 
-    if(y>255){ docPdf.addPage(); y=20; }
+    y = pdfChecarQuebra(docPdf, y, 15);
     docPdf.setFont('helvetica','bold'); docPdf.setFontSize(11); docPdf.setTextColor(...INK);
     docPdf.text(titulo, M, y); y+=6;
     docPdf.setDrawColor(...LINEC); docPdf.line(M, y-3, M+W, y-3);
@@ -6777,7 +6855,7 @@ function gerarResumoCategoriaPDF(tipo, dataDe, dataAte){
     lista.forEach(l=>{ porCategoria[l.categoria] = (porCategoria[l.categoria]||0)+l.valor; });
     const totalTipo = Object.values(porCategoria).reduce((a,b)=>a+b,0);
     Object.entries(porCategoria).sort((a,b)=>b[1]-a[1]).forEach(([cat,valor])=>{
-      if(y>270){ docPdf.addPage(); y=20; }
+      y = pdfChecarQuebra(docPdf, y);
       docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...INK);
       docPdf.text(cat, M+2, y);
       docPdf.setTextColor(...cor);
@@ -6794,6 +6872,8 @@ function gerarResumoCategoriaPDF(tipo, dataDe, dataAte){
   });
 
   if(!algumaLinha){ showToast('Nenhum lançamento no período selecionado'); return; }
+
+  pdfNumerarPaginas(docPdf);
 
   docPdf.save('resumo-categorias.pdf');
   showToast('Resumo por categoria baixado em PDF');
@@ -6886,39 +6966,32 @@ function gerarExtratoGeralPDF(dataDe, dataAte){
   lista.sort((a,b)=>(a.dataPagamento||'').localeCompare(b.dataPagamento||''));
   if(!lista.length){ showToast('Nenhum lançamento realizado ainda'); return; }
 
-  const { jsPDF } = window.jspdf;
-  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+    const docPdf = criarPDF();
   const M = 18, W = 210 - M*2;
-  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
-  let y = 22;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
-  docPdf.text('Livro Caixa Financeiro VK', M, y);
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
-  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
-  y += 7;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
-  y += 9;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
-  docPdf.text('Extrato Geral — Receitas e Despesas', M, y);
-  y += 6;
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
-  docPdf.text('Todo o histórico de lançamentos já realizados', M, y);
-  y += 10;
+  const INK=[11,15,20], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
 
   const totalReceitas = lista.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+l.valor,0);
   const totalDespesas = lista.filter(l=>l.tipo==='saida').reduce((s,l)=>s+l.valor,0);
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10); docPdf.setTextColor(...SUCCESS);
-  docPdf.text('Total de Receitas', M, y); docPdf.text(brl(totalReceitas), M+W, y, { align:'right' }); y += 6;
-  docPdf.setTextColor(...DANGER);
-  docPdf.text('Total de Despesas', M, y); docPdf.text(brl(totalDespesas), M+W, y, { align:'right' }); y += 6;
-  docPdf.setTextColor(...INK);
-  docPdf.text('Saldo', M, y); docPdf.text(brl(totalReceitas-totalDespesas), M+W, y, { align:'right' }); y += 9;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y-4, M+W, y-4);
+  const desenharCabecalhoTabelaExtGeral = (yIni)=>{
+    let yy = yIni;
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10); docPdf.setTextColor(...SUCCESS);
+    docPdf.text('Total de Receitas', M, yy); docPdf.text(brl(totalReceitas), M+W, yy, { align:'right' }); yy += 6;
+    docPdf.setTextColor(...DANGER);
+    docPdf.text('Total de Despesas', M, yy); docPdf.text(brl(totalDespesas), M+W, yy, { align:'right' }); yy += 6;
+    docPdf.setTextColor(...INK);
+    docPdf.text('Saldo', M, yy); docPdf.text(brl(totalReceitas-totalDespesas), M+W, yy, { align:'right' }); yy += 5;
+    docPdf.setDrawColor(...LINEC); docPdf.line(M, yy, M+W, yy);
+    yy += 6;
+    return yy;
+  };
+  let y = pdfCabecalho(docPdf, {
+    relatorio: 'Extrato Geral — Receitas e Despesas',
+    subtitulo: 'Todo o histórico de lançamentos já realizados',
+    desenharCabecalhoTabela: desenharCabecalhoTabelaExtGeral
+  });
 
   lista.forEach(l=>{
-    if(y > 270){ docPdf.addPage(); y = 20; }
+    y = pdfChecarQuebra(docPdf, y);
     docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...INK);
     const desc = l.descricao.length>38 ? l.descricao.slice(0,38)+'…' : l.descricao;
     docPdf.text(`${fmtDate(l.dataPagamento)}  ${desc}  (${l.categoria})`, M, y);
@@ -6926,6 +6999,8 @@ function gerarExtratoGeralPDF(dataDe, dataAte){
     docPdf.text(`${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}`, M+W, y, { align:'right' });
     y += 6;
   });
+
+  pdfNumerarPaginas(docPdf);
 
   docPdf.save('extrato-geral.pdf');
   showToast('Extrato geral baixado em PDF');
@@ -6939,32 +7014,26 @@ function gerarExtratoConsolidadoPDF(){
   const hoje = todayISO();
   const de = `${hoje.slice(0,7)}-01`;
 
-  const { jsPDF } = window.jspdf;
-  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+    const docPdf = criarPDF();
   const M = 18, W = 210 - M*2;
   const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
-  let y = 22;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
-  docPdf.text('Livro Caixa Financeiro VK', M, y);
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
-  docPdf.text(`Emitido em ${fmtDate(hoje)}`, M+W, y, { align:'right' });
-  y += 7;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
-  y += 9;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
-  docPdf.text(`Extrato Consolidado — ${competenciaLabel(hoje.slice(0,7))}`, M, y);
-  y += 9;
 
   const totalGeral = contasAtivas.reduce((s,c)=>s+saldoConta(c.id),0);
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10.5); docPdf.setTextColor(...INK);
-  docPdf.text('Saldo total de todas as contas', M, y);
-  docPdf.text(brl(totalGeral), M+W, y, { align:'right' });
-  y += 10;
+  const desenharCabecalhoTabelaConsol = (yIni)=>{
+    let yy = yIni;
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10.5); docPdf.setTextColor(...INK);
+    docPdf.text('Saldo total de todas as contas', M, yy);
+    docPdf.text(brl(totalGeral), M+W, yy, { align:'right' });
+    yy += 8;
+    return yy;
+  };
+  let y = pdfCabecalho(docPdf, {
+    relatorio: `Extrato Consolidado — ${competenciaLabel(hoje.slice(0,7))}`,
+    desenharCabecalhoTabela: desenharCabecalhoTabelaConsol
+  });
 
   contasAtivas.forEach(conta=>{
-    if(y > 260){ docPdf.addPage(); y = 20; }
+    y = pdfChecarQuebra(docPdf, y, 20);
     docPdf.setFont('helvetica','bold'); docPdf.setFontSize(11.5); docPdf.setTextColor(...BLUEDEEP);
     docPdf.text(`${conta.nome} — ${conta.banco||''}`, M, y);
     docPdf.setFont('helvetica','normal'); docPdf.setFontSize(10); docPdf.setTextColor(...INK);
@@ -6978,7 +7047,7 @@ function gerarExtratoConsolidadoPDF(){
       y += 8;
     } else {
       lista.forEach(l=>{
-        if(y > 275){ docPdf.addPage(); y = 20; }
+        y = pdfChecarQuebra(docPdf, y);
         docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...INK);
         docPdf.text(fmtDate(l.dataPagamento), M, y);
         const desc = (l.descricao||'').length>45 ? l.descricao.slice(0,45)+'…' : (l.descricao||'');
@@ -6992,6 +7061,8 @@ function gerarExtratoConsolidadoPDF(){
     docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
     y += 8;
   });
+
+  pdfNumerarPaginas(docPdf);
 
   docPdf.save(`extrato-consolidado-${hoje.slice(0,7)}.pdf`);
 }
@@ -7024,30 +7095,15 @@ function gerarExtratoPDF(contaId, dataDe, dataAte){
 
   if(!grupos.length){ showToast('Nenhuma movimentação no período selecionado'); return; }
 
-  const { jsPDF } = window.jspdf;
-  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+    const docPdf = criarPDF();
   const M = 18, W = 210 - M*2;
-  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
-  let y = 22;
+  const INK=[11,15,20], SOFT=[91,100,114], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
 
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
-  docPdf.text('Livro Caixa Financeiro VK', M, y);
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
-  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
-  y += 7;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
-  y += 9;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
-  docPdf.text(`Extrato — ${conta.nome}`, M, y);
-  y += 6;
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
   const periodoTxt = (dataDe||dataAte) ? `Período: ${dataDe?fmtDate(dataDe):'início'} até ${dataAte?fmtDate(dataAte):'hoje'}` : 'Período: todas as movimentações';
-  docPdf.text(periodoTxt, M, y);
-  y += 9;
+  let y = pdfCabecalho(docPdf, { relatorio: `Extrato — ${conta.nome}`, subtitulo: periodoTxt });
 
   grupos.forEach(g=>{
-    if(y > 265){ docPdf.addPage(); y = 20; }
+    y = pdfChecarQuebra(docPdf, y, 14);
     docPdf.setFillColor(245,247,250);
     docPdf.rect(M, y-4.5, W, 7, 'F');
     docPdf.setFont('helvetica','bold'); docPdf.setFontSize(9.5); docPdf.setTextColor(...INK);
@@ -7057,7 +7113,7 @@ function gerarExtratoPDF(contaId, dataDe, dataAte){
     y += 7;
 
     g.itens.forEach(l=>{
-      if(y > 270){ docPdf.addPage(); y = 20; }
+      y = pdfChecarQuebra(docPdf, y);
       docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...INK);
       const desc = l.descricao.length>55 ? l.descricao.slice(0,55)+'…' : l.descricao;
       docPdf.text(desc, M+2, y);
@@ -7072,6 +7128,8 @@ function gerarExtratoPDF(contaId, dataDe, dataAte){
     docPdf.text(brl(g.saldoFinal), M+W-2, y+3, { align:'right' });
     y += 9;
   });
+
+  pdfNumerarPaginas(docPdf);
 
   docPdf.save(`extrato-${conta.nome.toLowerCase().replace(/\s+/g,'-')}${dataDe?'-'+dataDe:''}${dataAte?'-a-'+dataAte:''}.pdf`);
   showToast('Extrato baixado em PDF');
@@ -9254,26 +9312,11 @@ function exportarRelatorioPDF(titulo){
   if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
   const panel = document.getElementById('reportPanel');
   if(!panel) return;
-  const { jsPDF } = window.jspdf;
-  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+    const docPdf = criarPDF();
   const M = 20, PW = 210, W = PW - M*2;
-  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
-  let y = 25;
+  const INK=[11,15,20], SOFT=[91,100,114], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
 
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
-  docPdf.text('Livro Caixa Financeiro VK', M, y);
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
-  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
-  y += 8;
-  docPdf.setDrawColor(...LINEC); docPdf.setLineWidth(0.3); docPdf.line(M, y, M+W, y);
-  y += 10;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...BLUEDEEP);
-  docPdf.text(titulo.toUpperCase(), M, y);
-  y += 4;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
-  y += 9;
-
+  let filtroTexto = '';
   const controls = panel.querySelector('.report-controls');
   if(controls){
     // controls.textContent pegaria o texto de TODAS as <option> de cada <select> (mesmo as não
@@ -9289,15 +9332,13 @@ function exportarRelatorioPDF(titulo){
         if(txt) partes.push(txt);
       }
     });
-    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
-    docPdf.text(partes.join(' — ').replace(/\s+/g,' ').trim(), M, y);
-    y += 9;
+    filtroTexto = partes.join(' — ').replace(/\s+/g,' ').trim();
   }
 
-  const checkPageBreak = ()=>{ if(y > 275){ docPdf.addPage(); y = 25; } };
+  let y = pdfCabecalho(docPdf, { relatorio: titulo.toUpperCase(), subtitulo: filtroTexto });
 
   panel.querySelectorAll('.report-title, .report-line').forEach(el=>{
-    checkPageBreak();
+    y = pdfChecarQuebra(docPdf, y);
     if(el.classList.contains('report-title')){
       y += 3;
       docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10.5); docPdf.setTextColor(...INK);
@@ -9319,14 +9360,15 @@ function exportarRelatorioPDF(titulo){
     if(isTotal){ docPdf.setDrawColor(...LINEC); docPdf.line(M, y-4.5, M+W, y-4.5); }
   });
 
+  y = pdfChecarQuebra(docPdf, y, 16);
   y += 10;
-  checkPageBreak();
   docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
   y += 6;
   docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8); docPdf.setTextColor(...SOFT);
   docPdf.text('VIERGUTZ E KRUEGER PARTICIPAÇÕES E EMPREENDIMENTOS', M, y);
 
   const slugPdf = titulo.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40);
+  pdfNumerarPaginas(docPdf);
   docPdf.save(`${slugPdf}-${todayISO()}.pdf`);
   showToast('PDF gerado');
 }
@@ -17684,35 +17726,22 @@ function gerarAtivosPatrimoniaisPDF(){
   const ativosVivos = state.ativosPatrimoniais.filter(a=>!a.baixa);
   if(!ativosVivos.length){ showToast('Nenhum ativo pra exportar'); return; }
 
-  const { jsPDF } = window.jspdf;
-  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+    const docPdf = criarPDF();
   const M = 18, W = 210 - M*2;
   const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], DANGER=[194,74,61];
-  let y = 22;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
-  docPdf.text('Livro Caixa Financeiro VK', M, y);
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
-  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
-  y += 7;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
-  y += 9;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
-  docPdf.text('Ativos Patrimoniais', M, y);
-  y += 9;
 
   const totalAquisicao = ativosVivos.reduce((s,a)=>s+a.valorAquisicao,0);
   const totalAtual = totalAtivosPatrimoniais();
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
-  docPdf.text(`Valor de aquisição: ${brl(totalAquisicao)}   ·   Valor atual: ${brl(totalAtual)}   ·   ${ativosVivos.length} bem(ns)`, M, y);
-  y += 10;
+  let y = pdfCabecalho(docPdf, {
+    relatorio: 'Ativos Patrimoniais',
+    subtitulo: `Valor de aquisição: ${brl(totalAquisicao)}   ·   Valor atual: ${brl(totalAtual)}   ·   ${ativosVivos.length} bem(ns)`
+  });
 
   const porCategoria = {};
   ativosVivos.forEach(a=>{ const c = a.categoria||'Sem categoria'; if(!porCategoria[c]) porCategoria[c]=[]; porCategoria[c].push(a); });
 
   Object.keys(porCategoria).sort().forEach(cat=>{
-    if(y > 265){ docPdf.addPage(); y = 20; }
+    y = pdfChecarQuebra(docPdf, y, 16);
     docPdf.setFont('helvetica','bold'); docPdf.setFontSize(11); docPdf.setTextColor(...BLUEDEEP);
     docPdf.text(cat, M, y);
     y += 6;
@@ -17722,7 +17751,7 @@ function gerarAtivosPatrimoniaisPDF(){
     docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
     y += 5;
     porCategoria[cat].sort((a,b)=>a.nome.localeCompare(b.nome)).forEach(a=>{
-      if(y > 275){ docPdf.addPage(); y = 20; }
+      y = pdfChecarQuebra(docPdf, y);
       const d = calcDepreciacao(a);
       docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...INK);
       const nome = a.nome.length>42 ? a.nome.slice(0,42)+'…' : a.nome;
@@ -17735,6 +17764,8 @@ function gerarAtivosPatrimoniaisPDF(){
     });
     y += 5;
   });
+
+  pdfNumerarPaginas(docPdf);
 
   docPdf.save(`ativos-patrimoniais-${todayISO()}.pdf`);
 }
@@ -18328,8 +18359,7 @@ function gerarFichaPatrimonialPDF(ativo){
   ativo.fichas.push(ficha);
   persist(); render();
 
-  const { jsPDF } = window.jspdf;
-  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+    const docPdf = criarPDF();
   const M = 20, W = 210 - M*2;
   const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
   let y = 25;
@@ -18447,6 +18477,8 @@ function gerarFichaPatrimonialPDF(ativo){
   y += 6;
   docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8); docPdf.setTextColor(...SOFT);
   docPdf.text('VIERGUTZ E KRUEGER PARTICIPAÇÕES E EMPREENDIMENTOS', M, y);
+
+  pdfNumerarPaginas(docPdf);
 
   docPdf.save(`ficha-patrimonio-${(ativo.numeroPatrimonio||ativo.id)}-n${numero}.pdf`);
   showToast(`Ficha Nº ${numero} gerada`);
@@ -19153,45 +19185,38 @@ function gerarCSVComissoes(){
 }
 function gerarPDFComissoes(){
   if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
-  const { jsPDF } = window.jspdf;
-  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+    const docPdf = criarPDF();
   const M = 15, PW = 210, W = PW - M*2;
-  const INK=[11,15,20], SOFT=[91,100,114], LINEC=[227,231,238];
+  const INK=[11,15,20];
   const itens = itensComissaoFiltrados();
   const resumo = resumoComissaoAnalise(itens);
-  let y = 20;
 
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
-  docPdf.text('Relatório de Comissões', M, y);
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
-  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
-  y += 6;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
-  y += 8;
-
-  docPdf.setFontSize(9.5); docPdf.setTextColor(...INK);
-  const resumoLinhas = [
-    `Total de vendas: ${brl(resumo.totalVendas)}`, `Comissões do período: ${brl(resumo.totalComissoes)}`,
-    `Pagas: ${brl(resumo.pagas)}`, `Total a pagar: ${brl(resumo.totalAPagar)}`,
-  ];
-  resumoLinhas.forEach(l=>{ docPdf.text(l, M, y); y += 5.5; });
-  y += 4;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(9);
   const cols = [ ['Data',18], ['Pedido',18], ['Cliente',42], ['Repr.',34], ['Venda',24], ['%',12], ['Comissão',24], ['Status',20] ];
-  let x = M;
-  cols.forEach(([label,w])=>{ docPdf.text(label, x, y); x += w; });
-  y += 4;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
-  y += 5;
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8);
+  const desenharCabecalhoTabelaComissoes = (yIni)=>{
+    let yy = yIni;
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(9); docPdf.setTextColor(...INK);
+    let xx = M;
+    cols.forEach(([label,w])=>{ docPdf.text(label, xx, yy); xx += w; });
+    yy += 4;
+    docPdf.setDrawColor(227,231,238); docPdf.line(M, yy, M+W, yy);
+    yy += 5;
+    return yy;
+  };
+  let y = pdfCabecalho(docPdf, {
+    relatorio: 'Relatório de Comissões',
+    subtitulo: `Total de vendas: ${brl(resumo.totalVendas)}   ·   Comissões do período: ${brl(resumo.totalComissoes)}   ·   Pagas: ${brl(resumo.pagas)}   ·   Total a pagar: ${brl(resumo.totalAPagar)}`,
+    desenharCabecalhoTabela: desenharCabecalhoTabelaComissoes
+  });
+
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8); docPdf.setTextColor(...INK);
   [...itens].sort((a,b)=>a.data.localeCompare(b.data)).forEach(it=>{
-    if(y>270){ docPdf.addPage(); y = 20; }
-    x = M;
+    y = pdfChecarQuebra(docPdf, y, 5);
+    let x = M;
     const valores = [ fmtDate(it.data), it.numeroPedido?'#'+it.numeroPedido:'—', (it.cliente||'—').slice(0,26), (nomeVendedor(it.vendedorId)||'—').slice(0,22), brl(it.valorBase), it.percentual!==null?it.percentual.toFixed(1)+'%':'—', brl(it.comissaoValor), rotuloStatusComissao[it.status] ];
     valores.forEach((v,i)=>{ docPdf.text(String(v), x, y); x += cols[i][1]; });
     y += 5;
   });
+  pdfNumerarPaginas(docPdf);
   docPdf.save(`comissoes-${todayISO()}.pdf`);
 }
 function imprimirRelatorioComissoes(){
@@ -26411,42 +26436,39 @@ function gerarCSVCentroCusto(){
 }
 function gerarPDFCentroCusto(){
   if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
-  const { jsPDF } = window.jspdf;
-  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+    const docPdf = criarPDF();
   const M = 15, PW = 210, W = PW - M*2;
-  const INK=[11,15,20], SOFT=[91,100,114], LINEC=[227,231,238];
+  const INK=[11,15,20];
   const periodo = resolverPeriodoAtalho(centroCustoFiltro.periodo);
   const lancs = dadosCentroCusto(periodo.de, periodo.ate, centroCustoFiltro);
   const resumo = resumoCentroCusto(lancs);
-  let y = 20;
 
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
-  docPdf.text('Relatório de Centro de Custos', M, y);
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
-  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
-  y += 6;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
-  y += 8;
-
-  docPdf.setFontSize(9.5); docPdf.setTextColor(...INK);
-  [ `Custo total: ${brl(resumo.total)}`, `Custos fixos: ${brl(resumo.fixo)}`, `Custos variáveis: ${brl(resumo.variavel)}`, `Maior centro: ${resumo.maiorCentro?resumo.maiorCentro.nome:'—'}` ].forEach(l=>{ docPdf.text(l, M, y); y += 5.5; });
-  y += 4;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(9);
   const cols = [ ['Data',18], ['Descrição',52], ['Centro',34], ['Categoria',34], ['Valor',24] ];
-  let x = M;
-  cols.forEach(([label,w])=>{ docPdf.text(label, x, y); x += w; });
-  y += 4;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
-  y += 5;
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8);
+  const desenharCabecalhoTabelaCC = (yIni)=>{
+    let yy = yIni;
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(9); docPdf.setTextColor(...INK);
+    let xx = M;
+    cols.forEach(([label,w])=>{ docPdf.text(label, xx, yy); xx += w; });
+    yy += 4;
+    docPdf.setDrawColor(227,231,238); docPdf.line(M, yy, M+W, yy);
+    yy += 5;
+    return yy;
+  };
+  let y = pdfCabecalho(docPdf, {
+    relatorio: 'Relatório de Centro de Custos',
+    subtitulo: `Custo total: ${brl(resumo.total)}   ·   Custos fixos: ${brl(resumo.fixo)}   ·   Custos variáveis: ${brl(resumo.variavel)}   ·   Maior centro: ${resumo.maiorCentro?resumo.maiorCentro.nome:'—'}`,
+    desenharCabecalhoTabela: desenharCabecalhoTabelaCC
+  });
+
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8); docPdf.setTextColor(...INK);
   [...lancs].sort((a,b)=>a.dataPagamento.localeCompare(b.dataPagamento)).forEach(l=>{
-    if(y>270){ docPdf.addPage(); y = 20; }
-    x = M;
+    y = pdfChecarQuebra(docPdf, y, 5);
+    let x = M;
     const valores = [ fmtDate(l.dataPagamento), l.descricao.slice(0,32), (l.centroCusto||'—').slice(0,22), l.categoria.slice(0,22), brl(l.valor) ];
     valores.forEach((v,i)=>{ docPdf.text(String(v), x, y); x += cols[i][1]; });
     y += 5;
   });
+  pdfNumerarPaginas(docPdf);
   docPdf.save(`centro-custos-${todayISO()}.pdf`);
 }
 function imprimirRelatorioCentroCusto(){
@@ -27988,32 +28010,19 @@ function gerarInvestimentosPDF(){
   if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
   const contasAtivas = state.contasInvestimento.filter(c=>!c.arquivada);
   if(!contasAtivas.length){ showToast('Nenhuma conta de investimento ativa pra exportar'); return; }
-  const { jsPDF } = window.jspdf;
-  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+    const docPdf = criarPDF();
   const M = 18, W = 210 - M*2;
   const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
-  let y = 22;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
-  docPdf.text('Livro Caixa Financeiro VK', M, y);
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
-  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
-  y += 7;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
-  y += 9;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
-  docPdf.text('Posição de Investimentos', M, y);
-  y += 9;
 
   const totalGeral = totalInvestimentos(), custoGeral = custoTotalInvestimentos();
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
-  docPdf.text(`Total investido: ${brl(custoGeral)}   ·   Saldo atual: ${brl(totalGeral)}   ·   Rendimento: ${brl(totalGeral-custoGeral)}`, M, y);
-  y += 10;
+  let y = pdfCabecalho(docPdf, {
+    relatorio: 'Posição de Investimentos',
+    subtitulo: `Total investido: ${brl(custoGeral)}   ·   Saldo atual: ${brl(totalGeral)}   ·   Rendimento: ${brl(totalGeral-custoGeral)}`
+  });
 
   contasAtivas.forEach(conta=>{
-    if(y > 265){ docPdf.addPage(); y = 20; }
-    const v = valorContaInvestimento(conta.id), cu = custoContaInvestimento(conta.id);
+    y = pdfChecarQuebra(docPdf, y, 16);
+    const v = valorContaInvestimento(conta.id);
     docPdf.setFont('helvetica','bold'); docPdf.setFontSize(11); docPdf.setTextColor(...BLUEDEEP);
     docPdf.text(`${conta.nome} — ${conta.instituicao||''}`, M, y);
     docPdf.setFont('helvetica','normal'); docPdf.setFontSize(10); docPdf.setTextColor(...INK);
@@ -28026,7 +28035,7 @@ function gerarInvestimentosPDF(){
       y += 8;
     } else {
       ativos.forEach(a=>{
-        if(y > 275){ docPdf.addPage(); y = 20; }
+        y = pdfChecarQuebra(docPdf, y);
         const va = valorAtivo(a), ca = custoAtivo(a);
         docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...INK);
         docPdf.text((a.nome||a.ticker||'Ativo').slice(0,45), M, y);
@@ -28039,6 +28048,8 @@ function gerarInvestimentosPDF(){
     docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
     y += 8;
   });
+
+  pdfNumerarPaginas(docPdf);
 
   docPdf.save(`investimentos-${todayISO()}.pdf`);
 }
@@ -29428,29 +29439,13 @@ function gerarDescontosBonificacoesPDF(pedidosComDesconto, pedidosBonificados, l
   if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
   if(!pedidosComDesconto.length && !pedidosBonificados.length){ showToast('Nada pra gerar PDF nesse período'); return; }
 
-  const { jsPDF } = window.jspdf;
-  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+    const docPdf = criarPDF();
   const M = 18, W = 210 - M*2;
-  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], DANGER=[194,74,61];
-  let y = 22;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
-  docPdf.text('Livro Caixa Financeiro VK', M, y);
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
-  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
-  y += 7;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
-  y += 9;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
-  docPdf.text('Descontos e Bonificações', M, y);
-  y += 6;
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
-  docPdf.text(label, M, y);
-  y += 10;
+  const INK=[11,15,20], SOFT=[91,100,114], LINEC=[227,231,238], DANGER=[194,74,61];
+  let y = pdfCabecalho(docPdf, { relatorio: 'Descontos e Bonificações', subtitulo: label });
 
   const linhaItem = (titulo, sub, valor)=>{
-    if(y > 270){ docPdf.addPage(); y = 20; }
+    y = pdfChecarQuebra(docPdf, y, 10.3);
     docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...INK);
     const tituloCorte = titulo.length>55 ? titulo.slice(0,55)+'…' : titulo;
     docPdf.text(tituloCorte, M+3, y);
@@ -29463,6 +29458,7 @@ function gerarDescontosBonificacoesPDF(pedidosComDesconto, pedidosBonificados, l
   };
 
   if(pedidosComDesconto.length){
+    y = pdfChecarQuebra(docPdf, y, 10);
     docPdf.setFont('helvetica','bold'); docPdf.setFontSize(11); docPdf.setTextColor(...INK);
     docPdf.text(`Pedidos com desconto (${pedidosComDesconto.length})`, M, y);
     docPdf.setTextColor(...DANGER);
@@ -29476,7 +29472,7 @@ function gerarDescontosBonificacoesPDF(pedidosComDesconto, pedidosBonificados, l
   }
 
   if(pedidosBonificados.length){
-    if(y > 260){ docPdf.addPage(); y = 20; }
+    y = pdfChecarQuebra(docPdf, y, 10);
     docPdf.setFont('helvetica','bold'); docPdf.setFontSize(11); docPdf.setTextColor(...INK);
     docPdf.text(`Pedidos de bonificação (${pedidosBonificados.length})`, M, y);
     docPdf.setTextColor(...DANGER);
@@ -29487,6 +29483,8 @@ function gerarDescontosBonificacoesPDF(pedidosComDesconto, pedidosBonificados, l
       linhaItem(`Pedido N° ${b.numero||'—'} — ${b.clienteNome||'—'}`, fmtDate(b.data), brl(b.valor));
     });
   }
+
+  pdfNumerarPaginas(docPdf);
 
   docPdf.save('descontos-e-bonificacoes.pdf');
   showToast('PDF baixado');
@@ -29504,30 +29502,18 @@ function gerarAReceberRepresentantePDF(filtroRep){
     porRep[chave].push(r);
   });
 
-  const { jsPDF } = window.jspdf;
-  const docPdf = new jsPDF({ unit:'mm', format:'a4' });
+    const docPdf = criarPDF();
   const M = 18, W = 210 - M*2;
-  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], DANGER=[194,74,61];
-  let y = 22;
+  const INK=[11,15,20], SOFT=[91,100,114], LINEC=[227,231,238], DANGER=[194,74,61];
 
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
-  docPdf.text('Livro Caixa Financeiro VK', M, y);
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
-  docPdf.text(`Emitido em ${fmtDate(todayISO())}`, M+W, y, { align:'right' });
-  y += 7;
-  docPdf.setDrawColor(...LINEC); docPdf.line(M, y, M+W, y);
-  y += 9;
-
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(15); docPdf.setTextColor(...BLUEDEEP);
-  docPdf.text(`A Receber do Representante${filtroRep ? ' — '+filtroRep : ''}`, M, y);
-  y += 6;
   const totalGeral = pendentes.reduce((s,r)=>s+r.valor,0);
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...SOFT);
-  docPdf.text(`${pendentes.length} pedido(s) pendente(s) · total ${brl(totalGeral)}`, M, y);
-  y += 10;
+  let y = pdfCabecalho(docPdf, {
+    relatorio: `A Receber do Representante${filtroRep ? ' — '+filtroRep : ''}`,
+    subtitulo: `${pendentes.length} pedido(s) pendente(s) · total ${brl(totalGeral)}`
+  });
 
   Object.entries(porRep).forEach(([nomeRep, itens])=>{
-    if(y > 260){ docPdf.addPage(); y = 20; }
+    y = pdfChecarQuebra(docPdf, y, 16);
     const totalRep = itens.reduce((s,r)=>s+r.valor,0);
     docPdf.setFont('helvetica','bold'); docPdf.setFontSize(11); docPdf.setTextColor(...INK);
     docPdf.text(nomeRep, M, y);
@@ -29536,7 +29522,7 @@ function gerarAReceberRepresentantePDF(filtroRep){
     y += 6;
     docPdf.setDrawColor(...LINEC); docPdf.line(M, y-3, M+W, y-3);
     itens.sort((a,b)=>(b.dataMarcado||'').localeCompare(a.dataMarcado||'')).forEach(r=>{
-      if(y > 270){ docPdf.addPage(); y = 20; }
+      y = pdfChecarQuebra(docPdf, y);
       docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...INK);
       const desc = `Pedido N° ${r.numero||'—'} — ${r.clienteNome}`;
       const dataFmt = new Date(r.dataMarcado).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});
@@ -29547,6 +29533,8 @@ function gerarAReceberRepresentantePDF(filtroRep){
     });
     y += 5;
   });
+
+  pdfNumerarPaginas(docPdf);
 
   docPdf.save(`a-receber-representante${filtroRep ? '-'+filtroRep.toLowerCase().replace(/\s+/g,'-') : ''}.pdf`);
   showToast('PDF baixado');
