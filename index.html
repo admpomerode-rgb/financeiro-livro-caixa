@@ -715,6 +715,7 @@
         <div class="nav-item" data-view="categorias" title="Categorias"><span class="nav-dot"></span><span class="nav-abbr">CT</span><span class="nav-label">Categorias</span></div>
         <div class="nav-item" data-view="fornecedores" title="Fornecedores"><span class="nav-dot"></span><span class="nav-abbr">FN</span><span class="nav-label">Fornecedores</span></div>
         <div class="nav-item" data-view="descricoes" title="Padronizar Descrições"><span class="nav-dot"></span><span class="nav-abbr">DS</span><span class="nav-label">Padronizar Descrições</span></div>
+        <div class="nav-item" data-view="todos-lancamentos" title="Todos os Lançamentos"><span class="nav-dot"></span><span class="nav-abbr">TL</span><span class="nav-label">Todos os Lançamentos</span></div>
         <div class="nav-item" data-view="recorrencias" title="Lançamentos Recorrentes"><span class="nav-dot"></span><span class="nav-abbr">RC</span><span class="nav-label">Recorrentes</span></div>
         <div class="nav-item" data-view="metas" title="Metas de Reserva"><span class="nav-dot"></span><span class="nav-abbr">MT</span><span class="nav-label">Metas de Reserva</span></div>
         <div class="nav-item" data-view="integracoes" title="Central de Integrações"><span class="nav-dot"></span><span class="nav-abbr">IN</span><span class="nav-label">Central de Integrações</span></div>
@@ -1709,6 +1710,7 @@ function moreItensDef(){
     { view:'categorias', icone:'🏷️', nome:'Categorias', grupo:'Cadastros e Configurações' },
     { view:'fornecedores', icone:'🚚', nome:'Fornecedores', grupo:'Cadastros e Configurações' },
     { view:'descricoes', icone:'📝', nome:'Padronizar Descrições', grupo:'Cadastros e Configurações' },
+    { view:'todos-lancamentos', icone:'📜', nome:'Todos os Lançamentos', grupo:'Operacional' },
     { view:'recorrencias', icone:'🔁', nome:'Recorrentes', grupo:'Cadastros e Configurações' },
     { view:'metas', icone:'🎯', nome:'Metas de Reserva', grupo:'Cadastros e Configurações' },
     { view:'integracoes', icone:'🔌', nome:'Central de Integrações', grupo:'Cadastros e Configurações', badge:()=>(state.vkAprovacoes||[]).length+(state.faturasPendentes||[]).length },
@@ -1821,6 +1823,7 @@ function render(){
   else if(currentView==='fornecedores') main.innerHTML = viewFornecedores();
   else if(currentView==='descricoes') main.innerHTML = viewDescricoes();
   else if(currentView==='descricao-detalhe') main.innerHTML = viewDescricaoDetalhe();
+  else if(currentView==='todos-lancamentos') main.innerHTML = viewTodosLancamentos();
   else if(currentView==='recorrencias') main.innerHTML = viewRecorrencias();
   else if(currentView==='metas') main.innerHTML = viewMetasReserva();
   else if(currentView==='simulacao') main.innerHTML = viewSimulacao();
@@ -5508,6 +5511,66 @@ function movimentosRealizados(){
     }
   });
   return eventos;
+}
+
+function rowHTMLEstiloBluecoins(l){
+  const cor = l.origem==='transferencia' ? '#3B6FE0' : (l.tipo==='entrada' ? 'var(--success)' : 'var(--danger)');
+  const bg = l.origem==='transferencia' ? '#3B6FE022' : (l.tipo==='entrada' ? 'var(--success)22' : 'var(--danger)22');
+  const icone = l.origem==='transferencia' ? '🔁' : (iconeCategoriaLancamento(l) || (l.tipo==='entrada' ? '💰' : '💸'));
+  const confirmado = l.status==='pago' || l.status==='recebido';
+  // Saldo da conta no fim do dia daquele lançamento (histórico), não o saldo de hoje — mesmo
+  // conceito do Bluecoins, com uma diferença: se houver mais de um lançamento na mesma conta no
+  // mesmo dia, todos mostram o saldo de FIM do dia (não dá pra saber a ordem exata entre eles).
+  const dataRef = l.dataPagamento || l.dataVencimento;
+  const saldoHistorico = (confirmado && l.contaId && dataRef) ? saldoContaEmData(l.contaId, dataRef) : null;
+  return `
+    <div class="ledger-row" data-id="${l.id}" data-action="abrir-lancamento" style="display:grid;grid-template-columns:40px 1fr auto;gap:12px;align-items:start;padding:10px 4px;cursor:pointer;">
+      <div style="width:40px;height:40px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0;">${icone}</div>
+      <div style="min-width:0;">
+        <div style="font-weight:600;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHTML(l.descricao)}</div>
+        <div style="font-size:12px;color:var(--text-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${l.origem==='transferencia' ? 'Transferência' : escapeHTML(l.categoria||'')}</div>
+        ${(l.tags && l.tags.length) ? `<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:5px;">${l.tags.map(t=>`<span style="font-size:10.5px;border:1px solid var(--line);border-radius:20px;padding:2px 8px;color:var(--text-soft);">${escapeHTML(t)}</span>`).join('')}</div>` : ''}
+      </div>
+      <div style="text-align:right;flex-shrink:0;">
+        <div style="font-weight:700;font-size:14.5px;color:${cor};">${l.tipo==='entrada'?'':'-'}${brl(valorEmAberto(l))}${confirmado?' <span style="font-size:12px;">✅</span>':' <span style="font-size:12px;" title="Pendente">⏳</span>'}</div>
+        <div style="font-size:11px;color:var(--text-soft);margin-top:2px;">${escapeHTML(nomeConta(l.contaId))}${saldoHistorico!==null ? ' '+brl(saldoHistorico) : ''}</div>
+      </div>
+    </div>
+  `;
+}
+
+function viewTodosLancamentos(){
+  const dias = new Map();
+  [...state.lancamentos].sort((a,b)=>(b.dataPagamento||b.dataVencimento||'').localeCompare(a.dataPagamento||a.dataVencimento||'')).forEach(l=>{
+    const dia = l.dataPagamento||l.dataVencimento||'sem-data';
+    if(!dias.has(dia)) dias.set(dia, []);
+    dias.get(dia).push(l);
+  });
+  const diasSemana = ['DOM','SEG','TER','QUA','QUI','SEX','SAB'];
+  const meses = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+
+  return `
+    <div class="topbar">
+      <div><h1>Todos os Lançamentos</h1><p>${state.lancamentos.length} lançamento(s) · segure pra selecionar vários</p></div>
+    </div>
+    <div class="panel">
+      <div class="panel-body">
+        ${[...dias.entries()].map(([dia, itens])=>{
+          const [ano,mes,d] = dia.split('-').map(Number);
+          const dt = new Date(ano, mes-1, d, 12);
+          const totalDia = itens.reduce((s,l)=>s+(l.tipo==='entrada'?l.valor:-l.valor),0);
+          return `
+            <div style="display:flex;justify-content:space-between;padding:10px 4px;background:var(--bone);font-size:12.5px;font-weight:600;color:var(--text-soft);">
+              <span>${diasSemana[dt.getDay()]} · ${d} de ${meses[mes-1]} de ${ano}</span>
+              <span class="mono" style="color:${totalDia>=0?'var(--success)':'var(--danger)'};">${totalDia>=0?'':'-'}${brl(Math.abs(totalDia))}</span>
+            </div>
+            ${itens.map(rowHTMLEstiloBluecoins).join('')}
+          `;
+        }).join('') || `<div class="empty">Nenhum lançamento ainda.</div>`}
+      </div>
+    </div>
+    <div class="note" style="margin-top:0;">O valor abaixo da conta é o saldo dela no fim do dia daquele lançamento. Se houver mais de um lançamento na mesma conta no mesmo dia, todos mostram esse mesmo saldo de fim de dia — não é possível saber a ordem exata entre eles.</div>
+  `;
 }
 
 function rowHTML(l){
@@ -24878,6 +24941,10 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       <label>Observação (opcional)</label>
       <textarea id="fObservacao" rows="3" placeholder="Detalhes extras — ex: nome do cliente, itens do pedido, etc.">${existing?.observacao ? escapeHTML(existing.observacao) : ''}</textarea>
     </div>
+    <div class="field">
+      <label>Etiquetas (opcional)</label>
+      <input type="text" id="fEtiquetas" placeholder="Separe por vírgula — ex: Universidade, Melhoria Home" value="${existing?.tags ? escapeHTML(existing.tags.join(', ')) : ''}">
+    </div>
     ${isEdit ? `
     <div class="modal-actions" style="justify-content:space-between;border-top:1px solid var(--line);padding-top:14px;margin-top:4px;">
       <button class="btn ghost" id="btnExcluirDoEditar" style="color:var(--danger);border-color:#F3C6C2;">Excluir</button>
@@ -25200,12 +25267,14 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       const contaId = document.getElementById('fConta').value;
       const fornecedorValor = fFornecedorSelect ? (fFornecedorSelect.value==='__outro__' ? document.getElementById('fFornecedor').value.trim() : fFornecedorSelect.value) : document.getElementById('fFornecedor').value.trim();
       const grupoDivisaoId = uid();
+      const tagsInformadas = (document.getElementById('fEtiquetas')?.value||'').split(',').map(s=>s.trim()).filter(Boolean);
       linhas.forEach(l=>{
         state.lancamentos.push({
           id: uid(), tipo:'saida', categoria: l.categoria, valor: l.valor,
           descricao, fornecedor: fornecedorValor,
           centroCusto: (fCentroCusto && fCentroCusto.value!=='__novo__') ? fCentroCusto.value : '',
           observacao: document.getElementById('fObservacao').value.trim(),
+          tags: tagsInformadas,
           contaId, dataVencimento: vencimentoInformado || dataEfetivacao || todayISO(),
           status, dataPagamento: efetivado ? dataEfetivacao : null,
           origem:'manual', grupoDivisaoId, criadoEm: new Date().toISOString()
@@ -25243,6 +25312,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       canalVenda: (fCanalVenda && fCanalVenda.value!=='__novo__') ? fCanalVenda.value : (existing?.canalVenda||''),
       comprovanteFoto: comprovanteAtual,
       observacao: document.getElementById('fObservacao').value.trim(),
+      tags: (document.getElementById('fEtiquetas')?.value||'').split(',').map(s=>s.trim()).filter(Boolean),
       contaId: document.getElementById('fConta').value || null,
       dataVencimento: vencimentoInformado || dataEfetivacao || todayISO(),
       status,
@@ -25886,6 +25956,16 @@ function openRenomearDescricaoModal(textoAtual){
     persist(); closeModal(); render();
     showToast(`${afetados} lançamento(s) atualizado(s)`);
   });
+}
+
+// Ícone da categoria de um lançamento, pra mostrar na bolinha colorida da tela "Todos os
+// Lançamentos" — considera subcategoria também ("Pai / Sub" usa o ícone do Pai, já que
+// subcategoria não tem ícone próprio no cadastro).
+function iconeCategoriaLancamento(l){
+  if(!l.categoria) return null;
+  const lista = listaCategorias(l.tipo);
+  const cat = lista.find(c=>c.nome===l.categoria || l.categoria.startsWith(c.nome+' / '));
+  return cat?.icone || null;
 }
 
 let descricaoDetalheAtual = null;
