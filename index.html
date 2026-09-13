@@ -25781,21 +25781,23 @@ function aumentoPrecoFornecedor(nome){
   const variacaoPct = (mediaRecente-mediaAnterior)/mediaAnterior*100;
   return Math.abs(variacaoPct)>=15 ? { mediaRecente, mediaAnterior, variacaoPct } : null;
 }
-// Junta as descrições de lançamentos e de compras de cartão num só mapa (texto exato -> contagem
-// e valor total), pra "Padronizar Descrições" mostrar tudo num lugar só. Comparação é sempre pelo
-// texto EXATO (sensível a maiúscula/minúscula) — é assim que duas grafias diferentes da "mesma"
-// descrição aparecem como itens separados na lista, pra você decidir se quer unificar ou não.
+// Junta as descrições de lançamentos e de compras de cartão num só mapa (texto exato -> contagem,
+// total de entrada, total de saída), pra "Padronizar Descrições" mostrar tudo num lugar só.
+// Comparação é sempre pelo texto EXATO (sensível a maiúscula/minúscula) — é assim que duas
+// grafias diferentes da "mesma" descrição aparecem como itens separados na lista, pra você decidir
+// se quer unificar ou não.
 function mapaDescricoes(){
   const mapa = new Map();
-  const add = (desc, valor)=>{
+  const add = (desc, valor, tipo)=>{
     if(!desc) return;
-    if(!mapa.has(desc)) mapa.set(desc, { texto: desc, qtd: 0, total: 0 });
+    if(!mapa.has(desc)) mapa.set(desc, { texto: desc, qtd: 0, totalEntrada: 0, totalSaida: 0 });
     const item = mapa.get(desc);
-    item.qtd++; item.total += (valor||0);
+    item.qtd++;
+    if(tipo==='entrada') item.totalEntrada += (valor||0); else item.totalSaida += (valor||0);
   };
-  state.lancamentos.forEach(l=>add(l.descricao, l.valor));
-  (state.comprasCartao||[]).forEach(c=>add(c.descricao, c.valor));
-  return [...mapa.values()];
+  state.lancamentos.forEach(l=>add(l.descricao, l.valor, l.tipo));
+  (state.comprasCartao||[]).forEach(c=>add(c.descricao, c.valor, 'saida'));
+  return [...mapa.values()].map(item=>({ ...item, liquido: item.totalEntrada-item.totalSaida, total: item.totalEntrada+item.totalSaida }));
 }
 
 // Troca uma descrição (texto exato) por outra em TODOS os lançamentos e compras de cartão que
@@ -25810,10 +25812,11 @@ function renomearDescricaoEmMassa(antiga, nova){
 
 let descricoesFiltro = '';
 function viewDescricoes(){
-  const todas = mapaDescricoes().sort((a,b)=> b.qtd-a.qtd || a.texto.localeCompare(b.texto));
+  const todas = mapaDescricoes().sort((a,b)=> Math.abs(b.liquido)-Math.abs(a.liquido) || a.texto.localeCompare(b.texto));
   const filtro = descricoesFiltro.toLowerCase();
   const lista = filtro ? todas.filter(d=>d.texto.toLowerCase().includes(filtro)) : todas;
   const foraDoPadrao = todas.filter(d=>d.texto!==capitalizarTitulo(d.texto)).length;
+  const maiorValor = Math.max(1, ...lista.map(d=>Math.abs(d.liquido)));
 
   return `
     <div class="topbar">
@@ -25824,22 +25827,30 @@ function viewDescricoes(){
       <div class="filter-bar"><input type="text" id="descricoesBusca" placeholder="Buscar descrição..." value="${escapeHTML(descricoesFiltro)}" style="flex:1;"></div>
     </div>
     <div class="panel">
-      <div class="ledger-row head" style="grid-template-columns:1fr auto auto;">
-        <span>Descrição</span><span>Usos</span><span></span>
-      </div>
       <div class="panel-body">
-        ${lista.length ? lista.map(d=>`
-          <div class="ledger-row" style="grid-template-columns:1fr auto auto;align-items:center;">
-            <div class="desc-cell"><div>${escapeHTML(d.texto)}</div><div class="cat">${brl(d.total)} no total</div></div>
-            <span class="mono" style="font-size:12.5px;color:var(--text-soft);">${d.qtd}×</span>
-            <div class="row-actions">
-              <button class="icon-btn" data-action="renomear-descricao" data-texto="${escapeHTML(d.texto)}" title="Renomear (afeta os ${d.qtd} lançamento(s))">✎</button>
+        ${lista.length ? lista.map(d=>{
+          const cor = d.liquido>=0 ? 'var(--success)' : 'var(--danger)';
+          const pct = Math.max(2, Math.round(Math.abs(d.liquido)/maiorValor*100));
+          return `
+          <div style="padding:12px 4px;border-bottom:1px solid var(--line);">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:6px;">
+              <div style="min-width:0;">
+                <div style="font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHTML(d.texto)}</div>
+                <div style="font-size:11.5px;color:var(--text-soft);">${d.qtd}× · usado(a)</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+                <span class="mono" style="font-size:14px;font-weight:600;color:${cor};">${d.liquido>=0?'':'-'}${brl(Math.abs(d.liquido))}</span>
+                <button class="icon-btn" data-action="renomear-descricao" data-texto="${escapeHTML(d.texto)}" title="Renomear (afeta os ${d.qtd} lançamento(s))">✎</button>
+              </div>
+            </div>
+            <div style="height:6px;border-radius:3px;background:var(--line);overflow:hidden;">
+              <div style="height:100%;width:${pct}%;border-radius:3px;background:${cor};"></div>
             </div>
           </div>
-        `).join('') : `<div class="empty">Nenhuma descrição encontrada.</div>`}
+        `;}).join('') : `<div class="empty">Nenhuma descrição encontrada.</div>`}
       </div>
     </div>
-    <div class="note" style="margin-top:0;">Renomear aqui muda a descrição em TODOS os lançamentos e compras de cartão que usam exatamente esse texto — não afeta categoria, fornecedor, valor ou qualquer outro dado.</div>
+    <div class="note" style="margin-top:0;">Renomear aqui muda a descrição em TODOS os lançamentos e compras de cartão que usam exatamente esse texto — não afeta categoria, fornecedor, valor ou qualquer outro dado. A barra mostra o valor de cada descrição comparado com a de maior valor da lista.</div>
   `;
 }
 
