@@ -23260,7 +23260,10 @@ function attachViewHandlers(){
   // Padronizar Descrições
   document.getElementById('descricoesBusca')?.addEventListener('input', (e)=>{
     descricoesFiltro = e.target.value;
+    const posCursor = e.target.selectionStart;
     render();
+    const novoInput = document.getElementById('descricoesBusca');
+    if(novoInput){ novoInput.focus(); novoInput.setSelectionRange(posCursor, posCursor); }
   });
   document.querySelectorAll('[data-action="renomear-descricao"]').forEach(btn=>{
     btn.addEventListener('click', ()=>openRenomearDescricaoModal(btn.dataset.texto));
