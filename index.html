@@ -254,7 +254,7 @@
   }
   .ledger-row:last-child{border-bottom:none;}
   .ledger-row.head{color:var(--text-soft);font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;padding-top:7px;padding-bottom:7px;background:var(--bone);}
-  .ledger-row.compact{grid-template-columns:12px 1fr 100px auto;gap:10px;padding:5px 16px;font-size:11.5px;}
+  .ledger-row.compact{grid-template-columns:12px 1fr auto;gap:10px;padding:5px 16px;font-size:11.5px;}
   .ledger-row.compact .cat{font-size:10px;}
   .fornecedor-row{grid-template-columns:14px 1fr 160px 130px auto;}
   .ativo-patrimonial-row{grid-template-columns:14px 1fr 120px 120px 120px auto;}
@@ -5547,12 +5547,15 @@ function mesesComLancamentos(){
   (state.comprasCartao||[]).forEach(c=>{ if(c.data) meses.add(c.data.slice(0,7)); });
   return [...meses].sort().reverse();
 }
+// Só o mês atual pra frente — sem "Todos os meses" e sem mês passado, por pedido explícito: essas
+// duas telas (Todos os Lançamentos / Padronizar Descrições) ficam travadas no mês corrente.
 function opcoesMesFiltroHTML(mesSelecionado){
-  return `<option value="todos" ${mesSelecionado==='todos'?'selected':''}>Todos os meses</option>`
-    + mesesComLancamentos().map(m=>`<option value="${m}" ${m===mesSelecionado?'selected':''}>${competenciaLabel(m)}</option>`).join('');
+  const mesAtual = todayISO().slice(0,7);
+  const meses = new Set([mesAtual, ...mesesComLancamentos().filter(m=>m>=mesAtual)]);
+  return [...meses].sort().map(m=>`<option value="${m}" ${m===mesSelecionado?'selected':''}>${competenciaLabel(m)}</option>`).join('');
 }
 
-let todosLancMesFiltro = 'todos';
+let todosLancMesFiltro = todayISO().slice(0,7);
 function viewTodosLancamentos(){
   const hoje = todayISO();
   const dias = new Map();
@@ -7650,24 +7653,32 @@ function renderExtratoConteudo(contaId){
       : `<span title="Pendente de conciliação" style="color:var(--text-soft);">○</span>`;
   };
 
-  const linhaMobileHTML = ({ev, saldoApos}) => `
+  const linhaMobileHTML = ({ev, saldoApos}) => {
+    // Lançamento de pedido do VK Industrial: descrição hoje vem como "Pedido N° 2571 · parcela X".
+    // Padronizado a pedido do usuário: título vira sempre "Recebimento de Cliente", e o número do
+    // pedido (extraído do texto que já existe, sem precisar de campo novo) desce pra segunda linha,
+    // no lugar do nome do cliente.
+    const pedidoMatch = ev.origem==='vk' ? ev.descricao.match(/Pedido N[°º]\s*(\d+)/) : null;
+    const tituloExibido = pedidoMatch ? 'Recebimento de Cliente' : ev.descricao;
+    const linha2 = pedidoMatch ? `Pedido N° ${pedidoMatch[1]}${ev.fornecedor ? ` · ${escapeHTML(ev.fornecedor)}` : ''}` : (ev.fornecedor ? `<span style="text-transform:uppercase;">${escapeHTML(ev.fornecedor)}</span>` : escapeHTML(ev.categoria));
+    return `
     <div class="ledger-row compact" data-id="${ev.lancamentoId}" data-action="abrir-lancamento" style="cursor:pointer;">
       <span class="dot ${ev.tipo}"></span>
       <div class="desc-cell">
-        <div>${escapeHTML(ev.descricao)}${ev.formaRecebimento ? ` <span style="color:var(--text-soft);font-size:10.5px;">· parcela</span>` : ''}${ev.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Transferência</span>' : ''}${ev.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Investimento</span>' : ''}${ev.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Ativo Patrimonial</span>' : ''}${ev.observacao ? ' <span style="color:var(--text-soft);font-size:10.5px;" title="Tem observação">📝</span>' : ''}${ev.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${ev.lancamentoId}" style="cursor:pointer;font-size:10.5px;" title="Ver comprovante">📎</span>` : ''}${(ev.itens && ev.itens.length>1 && ev.itens.some(it=>it.categoria)) ? ` <span data-action="toggle-itens-detalhe" data-id="${ev.lancamentoId}" style="cursor:pointer;font-size:10.5px;color:var(--blue-accent);font-weight:600;" title="Ver itens e categorias">▾ ${ev.itens.length} itens</span>` : ''} ${badgeConciliacao(ev)}</div>
-        <div class="cat">${ev.fornecedor ? `<span style="text-transform:uppercase;">${escapeHTML(ev.fornecedor)}</span>` : escapeHTML(ev.categoria)}${extratoTodasContas ? ` · ${escapeHTML(nomeConta(ev.contaId))}` : ''}</div>
+        <div>${escapeHTML(tituloExibido)}${ev.formaRecebimento ? ` <span style="color:var(--text-soft);font-size:10.5px;">· parcela</span>` : ''}${ev.origem==='transferencia' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Transferência</span>' : ''}${ev.origem==='investimento' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Investimento</span>' : ''}${ev.origem==='ativo_patrimonial' ? ' <span style="color:var(--blue-accent);font-size:10.5px;">· Ativo Patrimonial</span>' : ''}${ev.observacao ? ' <span style="color:var(--text-soft);font-size:10.5px;" title="Tem observação">📝</span>' : ''}${ev.comprovanteFoto ? ` <span data-action="ver-comprovante" data-id="${ev.lancamentoId}" style="cursor:pointer;font-size:10.5px;" title="Ver comprovante">📎</span>` : ''}${(ev.itens && ev.itens.length>1 && ev.itens.some(it=>it.categoria)) ? ` <span data-action="toggle-itens-detalhe" data-id="${ev.lancamentoId}" style="cursor:pointer;font-size:10.5px;color:var(--blue-accent);font-weight:600;" title="Ver itens e categorias">▾ ${ev.itens.length} itens</span>` : ''} ${badgeConciliacao(ev)}</div>
+        <div class="cat">${linha2}${extratoTodasContas ? ` · ${escapeHTML(nomeConta(ev.contaId))}` : ''}</div>
       </div>
       <div style="text-align:right;">
         <span class="mono" style="font-weight:600;font-size:12.5px;color:${ev.tipo==='entrada'?'var(--success)':'var(--danger)'}">${ev.tipo==='entrada'?'+':'-'} ${brl(ev.valor)}</span>
         <div style="font-size:10px;color:var(--text-soft);">Saldo: <span style="color:${saldoApos<0?'var(--danger)':'inherit'};">${brl(saldoApos)}</span></div>
       </div>
-      <div class="row-actions">${ev.origem!=='transferencia' ? `<button class="icon-btn" data-action="editar" data-id="${ev.lancamentoId}" title="Editar">✎</button>` : ''}<button class="icon-btn" data-action="excluir" data-id="${ev.lancamentoId}" title="Excluir">✕</button></div>
     </div>
     ${(ev.itens && ev.itens.length>1 && ev.itens.some(it=>it.categoria)) ? `
     <div id="itensDetalhe_${ev.lancamentoId}" style="display:none;padding:6px 16px 10px 34px;background:var(--bone);">
       ${ev.itens.map(it=>`<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;"><span>${escapeHTML(it.nome)} <span style="color:var(--text-soft);">· ${escapeHTML(it.categoria||ev.categoria)}</span></span><span class="mono">${brl(it.valor)}</span></div>`).join('')}
     </div>` : ''}
   `;
+  };
 
   const gruposHTML = grupos.slice().reverse().map(g=>`
     <div class="panel extrato-dia">
@@ -25930,7 +25941,7 @@ function renomearDescricaoEmMassa(antiga, nova){
 }
 
 let descricoesFiltro = '';
-let descricoesMesFiltro = 'todos';
+let descricoesMesFiltro = todayISO().slice(0,7);
 function viewDescricoes(){
   const todas = mapaDescricoes(descricoesMesFiltro).sort((a,b)=> Math.abs(b.liquido)-Math.abs(a.liquido) || a.texto.localeCompare(b.texto));
   const filtro = descricoesFiltro.toLowerCase();
