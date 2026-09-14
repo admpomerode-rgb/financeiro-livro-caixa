@@ -5539,13 +5539,30 @@ function rowHTMLEstiloBluecoins(l){
   `;
 }
 
+// Meses (YYYY-MM) que têm pelo menos um lançamento, do mais recente pro mais antigo — usado pra
+// montar o seletor de mês tanto em "Todos os Lançamentos" quanto em "Padronizar Descrições".
+function mesesComLancamentos(){
+  const meses = new Set();
+  state.lancamentos.forEach(l=>{ const d = l.dataPagamento||l.dataVencimento; if(d) meses.add(d.slice(0,7)); });
+  (state.comprasCartao||[]).forEach(c=>{ if(c.data) meses.add(c.data.slice(0,7)); });
+  return [...meses].sort().reverse();
+}
+function opcoesMesFiltroHTML(mesSelecionado){
+  return `<option value="todos" ${mesSelecionado==='todos'?'selected':''}>Todos os meses</option>`
+    + mesesComLancamentos().map(m=>`<option value="${m}" ${m===mesSelecionado?'selected':''}>${competenciaLabel(m)}</option>`).join('');
+}
+
+let todosLancMesFiltro = 'todos';
 function viewTodosLancamentos(){
   const hoje = todayISO();
   const dias = new Map();
   // Histórico = já aconteceu (tem data de pagamento) ou já venceu (vencimento até hoje). Pendente
   // com vencimento no futuro é "agendado", não histórico — esse fica só nas telas de Contas a
   // Pagar/Receber, senão ele aparecia lá na frente da lista, empurrando o dia de hoje pra baixo.
-  [...state.lancamentos].filter(l=>(l.dataPagamento||l.dataVencimento||'')<=hoje).sort((a,b)=>(b.dataPagamento||b.dataVencimento||'').localeCompare(a.dataPagamento||a.dataVencimento||'')).forEach(l=>{
+  [...state.lancamentos]
+    .filter(l=>(l.dataPagamento||l.dataVencimento||'')<=hoje)
+    .filter(l=>todosLancMesFiltro==='todos' || (l.dataPagamento||l.dataVencimento||'').slice(0,7)===todosLancMesFiltro)
+    .sort((a,b)=>(b.dataPagamento||b.dataVencimento||'').localeCompare(a.dataPagamento||a.dataVencimento||'')).forEach(l=>{
     const dia = l.dataPagamento||l.dataVencimento||'sem-data';
     if(!dias.has(dia)) dias.set(dia, []);
     dias.get(dia).push(l);
@@ -5556,6 +5573,9 @@ function viewTodosLancamentos(){
   return `
     <div class="topbar">
       <div><h1>Todos os Lançamentos</h1><p>${[...dias.values()].reduce((s,arr)=>s+arr.length,0)} lançamento(s) já realizados ou vencidos · segure pra selecionar vários</p></div>
+    </div>
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="filter-bar"><select id="todosLancMesSelect">${opcoesMesFiltroHTML(todosLancMesFiltro)}</select></div>
     </div>
     <div class="panel">
       <div class="panel-body">
@@ -23326,7 +23346,17 @@ function attachViewHandlers(){
     });
   });
 
+  // Todos os Lançamentos
+  document.getElementById('todosLancMesSelect')?.addEventListener('change', (e)=>{
+    todosLancMesFiltro = e.target.value;
+    render();
+  });
+
   // Padronizar Descrições
+  document.getElementById('descricoesMesSelect')?.addEventListener('change', (e)=>{
+    descricoesMesFiltro = e.target.value;
+    render();
+  });
   document.getElementById('descricoesBusca')?.addEventListener('input', (e)=>{
     descricoesFiltro = e.target.value;
     const posCursor = e.target.selectionStart;
@@ -23345,7 +23375,7 @@ function attachViewHandlers(){
     });
   });
   document.getElementById('btnPadronizarTudoDescricao')?.addEventListener('click', async ()=>{
-    const todas = mapaDescricoes();
+    const todas = mapaDescricoes(descricoesMesFiltro);
     const foraDoPadrao = todas.filter(d=>d.texto!==capitalizarTitulo(d.texto));
     if(!foraDoPadrao.length) return;
     const confirmar = await avisoModal({
@@ -25868,7 +25898,7 @@ function aumentoPrecoFornecedor(nome){
 // Comparação é sempre pelo texto EXATO (sensível a maiúscula/minúscula) — é assim que duas
 // grafias diferentes da "mesma" descrição aparecem como itens separados na lista, pra você decidir
 // se quer unificar ou não.
-function mapaDescricoes(){
+function mapaDescricoes(mesFiltro){
   const mapa = new Map();
   const add = (desc, valor, tipo)=>{
     if(!desc) return;
@@ -25877,8 +25907,15 @@ function mapaDescricoes(){
     item.qtd++;
     if(tipo==='entrada') item.totalEntrada += (valor||0); else item.totalSaida += (valor||0);
   };
-  state.lancamentos.forEach(l=>add(l.descricao, l.valor, l.tipo));
-  (state.comprasCartao||[]).forEach(c=>add(c.descricao, c.valor, 'saida'));
+  state.lancamentos.forEach(l=>{
+    const d = l.dataPagamento||l.dataVencimento;
+    if(mesFiltro && mesFiltro!=='todos' && (!d || d.slice(0,7)!==mesFiltro)) return;
+    add(l.descricao, l.valor, l.tipo);
+  });
+  (state.comprasCartao||[]).forEach(c=>{
+    if(mesFiltro && mesFiltro!=='todos' && (!c.data || c.data.slice(0,7)!==mesFiltro)) return;
+    add(c.descricao, c.valor, 'saida');
+  });
   return [...mapa.values()].map(item=>({ ...item, liquido: item.totalEntrada-item.totalSaida, total: item.totalEntrada+item.totalSaida }));
 }
 
@@ -25893,8 +25930,9 @@ function renomearDescricaoEmMassa(antiga, nova){
 }
 
 let descricoesFiltro = '';
+let descricoesMesFiltro = 'todos';
 function viewDescricoes(){
-  const todas = mapaDescricoes().sort((a,b)=> Math.abs(b.liquido)-Math.abs(a.liquido) || a.texto.localeCompare(b.texto));
+  const todas = mapaDescricoes(descricoesMesFiltro).sort((a,b)=> Math.abs(b.liquido)-Math.abs(a.liquido) || a.texto.localeCompare(b.texto));
   const filtro = descricoesFiltro.toLowerCase();
   const lista = filtro ? todas.filter(d=>d.texto.toLowerCase().includes(filtro)) : todas;
   const foraDoPadrao = todas.filter(d=>d.texto!==capitalizarTitulo(d.texto)).length;
@@ -25902,11 +25940,14 @@ function viewDescricoes(){
 
   return `
     <div class="topbar">
-      <div><h1>Padronizar Descrições</h1><p>${todas.length} descrição(ões) distinta(s) em uso · renomeie pra corrigir todos os lançamentos de uma vez</p></div>
+      <div><h1>Padronizar Descrições</h1><p>${todas.length} descrição(ões) distinta(s) em uso${descricoesMesFiltro!=='todos'?' em '+competenciaLabel(descricoesMesFiltro):''} · renomeie pra corrigir todos os lançamentos de uma vez</p></div>
       ${foraDoPadrao>0 ? `<button class="btn ghost" id="btnPadronizarTudoDescricao">Padronizar todas pro formato Título (${foraDoPadrao})</button>` : ''}
     </div>
     <div class="panel" style="margin-bottom:14px;">
-      <div class="filter-bar"><input type="text" id="descricoesBusca" placeholder="Buscar descrição..." value="${escapeHTML(descricoesFiltro)}" style="flex:1;"></div>
+      <div class="filter-bar">
+        <select id="descricoesMesSelect">${opcoesMesFiltroHTML(descricoesMesFiltro)}</select>
+        <input type="text" id="descricoesBusca" placeholder="Buscar descrição..." value="${escapeHTML(descricoesFiltro)}" style="flex:1;">
+      </div>
     </div>
     <div class="panel">
       <div class="panel-body">
