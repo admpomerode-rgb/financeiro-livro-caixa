@@ -5549,6 +5549,28 @@ function mesesComLancamentos(){
 }
 // Só o mês atual pra frente — sem "Todos os meses" e sem mês passado, por pedido explícito: essas
 // duas telas (Todos os Lançamentos / Padronizar Descrições) ficam travadas no mês corrente.
+// Mesmo componente visual (.mes-nav, setas ‹ ›) já usado no resto do sistema (mesNavHTML), só que
+// reaproveitável pra qualquer filtro de mês local — usado em "Todos os Lançamentos" e "Padronizar
+// Descrições". A seta "anterior" fica desabilitada no mês atual porque essas duas telas não podem
+// voltar pra mês passado (regra pedida antes).
+function mesNavFiltroHTML(mesFiltro, idPrefix){
+  const [anoM, mesM] = mesFiltro.split('-').map(Number);
+  const nomeMes = new Date(anoM, mesM-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
+  const ehMesAtual = mesFiltro === todayISO().slice(0,7);
+  return `
+    <div class="mes-nav">
+      <button type="button" id="${idPrefix}Anterior" title="Mês anterior" ${ehMesAtual?'disabled style="opacity:.35;cursor:not-allowed;"':''}>‹</button>
+      <span class="mes-nav-label">${nomeMes}${ehMesAtual ? ' <span class="mes-nav-tag">atual</span>' : ''}</span>
+      <button type="button" id="${idPrefix}Proximo" title="Próximo mês">›</button>
+    </div>
+  `;
+}
+function mesFiltroSomado(mesFiltro, delta){
+  const [ano, mes] = mesFiltro.split('-').map(Number);
+  const d = new Date(ano, mes-1+delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+
 function opcoesMesFiltroHTML(mesSelecionado){
   const mesAtual = todayISO().slice(0,7);
   const meses = new Set([mesAtual, ...mesesComLancamentos().filter(m=>m>=mesAtual)]);
@@ -5578,7 +5600,7 @@ function viewTodosLancamentos(){
       <div><h1>Todos os Lançamentos</h1><p>${[...dias.values()].reduce((s,arr)=>s+arr.length,0)} lançamento(s) já realizados ou vencidos · segure pra selecionar vários</p></div>
     </div>
     <div class="panel" style="margin-bottom:14px;">
-      <div class="filter-bar"><select id="todosLancMesSelect">${opcoesMesFiltroHTML(todosLancMesFiltro)}</select></div>
+      <div class="filter-bar">${mesNavFiltroHTML(todosLancMesFiltro, 'todosLancMes')}</div>
     </div>
     <div class="panel">
       <div class="panel-body">
@@ -23358,14 +23380,26 @@ function attachViewHandlers(){
   });
 
   // Todos os Lançamentos
-  document.getElementById('todosLancMesSelect')?.addEventListener('change', (e)=>{
-    todosLancMesFiltro = e.target.value;
+  document.getElementById('todosLancMesAnterior')?.addEventListener('click', ()=>{
+    const anterior = mesFiltroSomado(todosLancMesFiltro, -1);
+    if(anterior < todayISO().slice(0,7)) return; // trava: não deixa voltar antes do mês atual
+    todosLancMesFiltro = anterior;
+    render();
+  });
+  document.getElementById('todosLancMesProximo')?.addEventListener('click', ()=>{
+    todosLancMesFiltro = mesFiltroSomado(todosLancMesFiltro, 1);
     render();
   });
 
   // Padronizar Descrições
-  document.getElementById('descricoesMesSelect')?.addEventListener('change', (e)=>{
-    descricoesMesFiltro = e.target.value;
+  document.getElementById('descricoesMesAnterior')?.addEventListener('click', ()=>{
+    const anterior = mesFiltroSomado(descricoesMesFiltro, -1);
+    if(anterior < todayISO().slice(0,7)) return;
+    descricoesMesFiltro = anterior;
+    render();
+  });
+  document.getElementById('descricoesMesProximo')?.addEventListener('click', ()=>{
+    descricoesMesFiltro = mesFiltroSomado(descricoesMesFiltro, 1);
     render();
   });
   document.getElementById('descricoesBusca')?.addEventListener('input', (e)=>{
@@ -25956,7 +25990,7 @@ function viewDescricoes(){
     </div>
     <div class="panel" style="margin-bottom:14px;">
       <div class="filter-bar">
-        <select id="descricoesMesSelect">${opcoesMesFiltroHTML(descricoesMesFiltro)}</select>
+        ${mesNavFiltroHTML(descricoesMesFiltro, 'descricoesMes')}
         <input type="text" id="descricoesBusca" placeholder="Buscar descrição..." value="${escapeHTML(descricoesFiltro)}" style="flex:1;">
       </div>
     </div>
