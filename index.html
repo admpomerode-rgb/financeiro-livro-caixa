@@ -5554,6 +5554,7 @@ function rowHTMLEstiloBluecoins(l){
         <div style="font-weight:600;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHTML(l.descricao)}</div>
         <div style="font-size:12px;color:var(--text-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${l.origem==='transferencia' ? 'Transferência' : escapeHTML(l.categoria||'')}</div>
         ${(l.tags && l.tags.length) ? `<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:5px;">${l.tags.map(t=>`<span style="font-size:10.5px;border:1px solid var(--line);border-radius:20px;padding:2px 8px;color:var(--text-soft);">${escapeHTML(t)}</span>`).join('')}</div>` : ''}
+        ${l.processoVinculado ? `<div style="margin-top:4px;"><span style="font-size:10.5px;border:1px solid var(--blue-accent);border-radius:20px;padding:2px 8px;color:var(--blue-accent);">🔗 ${escapeHTML(l.processoVinculado)}</span></div>` : ''}
       </div>
       <div style="text-align:right;flex-shrink:0;">
         <div style="font-weight:700;font-size:14.5px;color:${cor};">${l.tipo==='entrada'?'':'-'}${brl(valorEmAberto(l))}${confirmado?' <span style="font-size:12px;">✅</span>':' <span style="font-size:12px;" title="Pendente">⏳</span>'}</div>
@@ -7471,6 +7472,7 @@ function viewContas(){
             <div class="nome-wrap">
               <div class="nome">${escapeHTML(c.nome)}${c.principal?' <span style="color:var(--warn);font-size:12px;">★ principal</span>':''}</div>
               <div class="banco">${escapeHTML(c.banco || '—')} · ${c.tipo}</div>
+              ${c.contaPaiId ? `<div style="font-size:11px;color:var(--blue-accent);margin-top:2px;">↳ subconta de ${escapeHTML(nomeConta(c.contaPaiId))}</div>` : ''}
             </div>
           </div>
           <div class="saldo mono ${saldo>=0?'pos':'neg'}">${vm(brl(saldo))}${saldo<0?' <span style="font-size:11px;background:var(--danger);color:#fff;padding:1px 6px;border-radius:8px;">negativo</span>':''}</div>
@@ -28043,6 +28045,14 @@ function openContaModal(existing){
       <input type="text" inputmode="decimal" id="cSaldo" value="${existing ? existing.saldoInicial : '0'}">
     </div>
     <div class="field">
+      <label>Subconta de (opcional)</label>
+      <select id="cContaPai">
+        <option value="">— nenhuma (conta principal) —</option>
+        ${state.contas.filter(c=>!c.arquivada && c.id!==existing?.id && !c.contaPaiId).map(c=>`<option value="${c.id}" ${existing?.contaPaiId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}
+      </select>
+      <div class="note" style="margin-top:6px;">Igual às "caixinhas" do Nubank — uma subconta funciona como uma conta normal (tem saldo, entra em lançamento), só que agrupada visualmente dentro da conta principal escolhida aqui.</div>
+    </div>
+    <div class="field">
       <label>Limite de cheque especial / conta garantida (R$, opcional)</label>
       <input type="text" inputmode="decimal" id="cLimiteChequeEspecial" value="${existing&&existing.limiteChequeEspecial?existing.limiteChequeEspecial:''}" placeholder="0,00">
     </div>
@@ -28112,7 +28122,8 @@ function openContaModal(existing){
     const chavePix = document.getElementById('cChavePix').value.trim();
     const saldoMinimoAlertaRaw = document.getElementById('cSaldoMinimoAlerta').value.trim();
     const saldoMinimoAlerta = saldoMinimoAlertaRaw ? numBR(saldoMinimoAlertaRaw) : 0;
-    const payload = { nome, banco, bancoDominio, tipo: document.getElementById('cTipo').value, saldoInicial, cor: corAtual, limiteChequeEspecial, chavePix, saldoMinimoAlerta };
+    const contaPaiId = document.getElementById('cContaPai').value || null;
+    const payload = { nome, banco, bancoDominio, tipo: document.getElementById('cTipo').value, saldoInicial, cor: corAtual, limiteChequeEspecial, chavePix, saldoMinimoAlerta, contaPaiId };
     if(isEdit){ Object.assign(existing, payload); }
     else { state.contas.push({ id: uid(), ...payload }); }
     persist(); closeModal(); render();
@@ -28125,11 +28136,6 @@ function openContaModal(existing){
   });
 }
 
-// Depósito — dinheiro em papel/espécie indo pra uma conta bancária. Modelado como uma
-// transferência de verdade (2 lançamentos ligados, igual a qualquer outra transferência), só que
-// a origem é sempre a conta "Dinheiro em Espécie" — criada automaticamente na primeira vez que
-// for necessária. Um pagamento recebido em papel entra nessa conta como receita normal; o
-// Depósito é só o passo seguinte, de levar aquele dinheiro pra dentro do banco.
 function openTransferenciaModal(contaOrigemId, existingLancamento){
   const isEdit = !!existingLancamento;
   let parOrigem, parDestino;
@@ -28172,6 +28178,11 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
       <input type="checkbox" id="tEhDeposito" style="width:17px;height:17px;" ${isEdit && parOrigem.descricao.startsWith('Depósito')?'checked':''}>
       💵 É um depósito em espécie?
     </label>
+    <div class="field" style="margin-top:10px;">
+      <label>🔗 Vinculado a um processo (opcional)</label>
+      <input type="text" id="tProcessoVinculado" placeholder="Ex: Processo — Desinvestimento FII XPML11" value="${isEdit && parOrigem.processoVinculado ? escapeHTML(parOrigem.processoVinculado) : ''}">
+      <div class="note" style="margin-top:6px;">Pra lembrar depois por que essa transferência foi feita — ex: uma decisão registrada no Livro de Processos. É só texto livre, ainda não busca automaticamente lá.</div>
+    </div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       <button class="btn" id="btnSalvarTransferencia">${isEdit ? 'Salvar' : 'Transferir'}</button>
@@ -28196,11 +28207,12 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
     const base = descricaoExtra ? ' — ' + descricaoExtra : '';
     const ehDeposito = document.getElementById('tEhDeposito').checked;
     const palavra = ehDeposito ? 'Depósito' : 'Transferência';
+    const processoVinculado = document.getElementById('tProcessoVinculado').value.trim() || null;
     if(isEdit){
       parOrigem.contaId = origemId; parOrigem.valor = valor; parOrigem.dataVencimento = data; parOrigem.dataPagamento = data;
-      parOrigem.descricao = `${palavra} para ${nomeDestino}${base}`;
+      parOrigem.descricao = `${palavra} para ${nomeDestino}${base}`; parOrigem.processoVinculado = processoVinculado;
       parDestino.contaId = destinoId; parDestino.valor = valor; parDestino.dataVencimento = data; parDestino.dataPagamento = data;
-      parDestino.descricao = `${palavra} de ${nomeOrigem}${base}`;
+      parDestino.descricao = `${palavra} de ${nomeOrigem}${base}`; parDestino.processoVinculado = processoVinculado;
       persist(); closeModal(); render();
       showToast('Transferência atualizada');
       return;
@@ -28209,12 +28221,12 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
     state.lancamentos.push({
       id: uid(), tipo:'saida', categoria:'Transferência', descricao:`${palavra} para ${nomeDestino}${base}`,
       valor, contaId: origemId, status:'pago', dataVencimento: data, dataPagamento: data,
-      origem:'transferencia', transferenciaId: tid, criadoEm: new Date().toISOString()
+      origem:'transferencia', transferenciaId: tid, processoVinculado, criadoEm: new Date().toISOString()
     });
     state.lancamentos.push({
       id: uid(), tipo:'entrada', categoria:'Transferência', descricao:`${palavra} de ${nomeOrigem}${base}`,
       valor, contaId: destinoId, status:'recebido', dataVencimento: data, dataPagamento: data,
-      origem:'transferencia', transferenciaId: tid, criadoEm: new Date().toISOString()
+      origem:'transferencia', transferenciaId: tid, processoVinculado, criadoEm: new Date().toISOString()
     });
     persist(); closeModal(); render();
     showToast('Transferência realizada');
