@@ -26390,6 +26390,23 @@ function viewDiagnosticoDados(){
   const problemas = diagnosticoDadosOrfaos();
   const ordemGravidade = { critica:0, alta:1, media:2, baixa:3 };
   const corGravidade = { critica:'var(--danger)', alta:'var(--danger)', media:'var(--warn)', baixa:'var(--text-soft)' };
+  // Explicação em linguagem simples de cada tipo de problema — o que é, e por que vale a pena olhar.
+  const explicacoes = {
+    'Lançamento efetivado sem conta': 'Esse lançamento já foi marcado como pago/recebido, mas não tem nenhuma conta bancária vinculada. Isso pode fazer o saldo das suas contas ficar menor do que deveria (o dinheiro "sumiu" do controle de contas, mesmo estando registrado).',
+    'Lançamento aponta pra conta que não existe mais': 'Esse lançamento está vinculado a uma conta bancária que foi excluída do seu cadastro. O sistema mostra o nome errado (ou "Caixa") pra esse lançamento, porque não sabe mais qual conta era.',
+    'Categoria não existe mais no cadastro': 'A categoria usada nesse lançamento não existe mais na sua lista de categorias (foi apagada ou renomeada). Isso pode fazer esse lançamento sumir de relatórios que filtram por categoria, tipo o DRE.',
+    'Lançamento sem categoria': 'Esse lançamento não tem nenhuma categoria definida. Ele entra nos totais gerais, mas não aparece em nenhum relatório organizado por categoria.',
+    'Centro de custo não existe mais no cadastro': 'O centro de custo usado nesse lançamento não existe mais no seu cadastro. Relatórios por centro de custo vão ignorar esse lançamento.',
+    'Valor inválido (NaN/Infinity/ausente)': 'Esse lançamento tem um valor que não é um número válido. Isso É um problema sério — pode quebrar totais e somas em qualquer relatório que passe por ele.',
+    'Valor zero ou negativo': 'Esse lançamento tem valor zero ou negativo, o que normalmente não devia acontecer. Vale conferir se não foi um erro de digitação.',
+    'Pendente sem data de vencimento': 'Esse lançamento está como "pendente" mas não tem data de vencimento definida. Ele pode não aparecer certo em telas que organizam contas a pagar/receber por data.',
+    'Efetivado sem data de pagamento/recebimento': 'Esse lançamento já foi marcado como pago/recebido, mas não tem a data em que isso aconteceu. Isso pode fazer ele não aparecer em extratos ou relatórios de um mês específico.',
+    'Transferência sem conta definida': 'Essa transferência não tem conta de origem definida — o dinheiro não está vinculado a nenhuma conta sua.',
+    'Transferência com origem igual ao destino': 'Essa transferência foi feita da mesma conta pra ela mesma, o que não faz sentido (não é uma transferência de verdade).',
+    'Parcela sem conta própria (usa fallback da conta do lançamento)': 'Essa parcela de pagamento/recebimento não tem uma conta bancária própria salva — o sistema usa a conta atual do lançamento como se fosse a mesma, o que pode estar errado se a conta principal mudou depois. Gravidade baixa porque normalmente não causa problema, só vale conferir se a conta faz sentido.',
+    'Parcela aponta pra conta que não existe mais': 'Essa parcela específica está vinculada a uma conta bancária que já foi excluída do seu cadastro.',
+    'Lançamento do VK sem vkPedidoId (idempotência quebrada)': 'Esse lançamento veio do VK Industrial mas não tem o identificador único do pedido. Isso é importante porque é esse identificador que evita o sistema importar o mesmo pedido duas vezes — sem ele, existe risco de duplicação numa sincronização futura.',
+  };
   const porTipo = new Map();
   problemas.forEach(p=>{ if(!porTipo.has(p.tipo)) porTipo.set(p.tipo, []); porTipo.get(p.tipo).push(p); });
   const tiposOrdenados = [...porTipo.entries()].sort((a,b)=>ordemGravidade[a[1][0].gravidade]-ordemGravidade[b[1][0].gravidade]);
@@ -26401,6 +26418,7 @@ function viewDiagnosticoDados(){
     ${!problemas.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum problema encontrado. 🎉</div></div>` : tiposOrdenados.map(([tipo, lista])=>`
       <div class="panel" style="margin-bottom:14px;">
         <div class="panel-head"><h2 style="color:${corGravidade[lista[0].gravidade]};">${tipo}</h2><span style="font-size:12px;color:var(--text-soft);">${lista.length} ocorrência(s) · gravidade: ${lista[0].gravidade}</span></div>
+        ${explicacoes[tipo] ? `<div class="note" style="margin:0 16px 10px;">${explicacoes[tipo]}</div>` : ''}
         <div class="panel-body">
           ${lista.slice(0,30).map(p=>`<div class="ledger-row compact" data-id="${p.id}" data-action="abrir-lancamento" style="grid-template-columns:1fr;cursor:pointer;"><span style="font-size:12.5px;">${escapeHTML(p.descricao)}</span></div>`).join('')}
           ${lista.length>30 ? `<div class="empty">+ ${lista.length-30} outro(s), não exibido(s) aqui.</div>` : ''}
