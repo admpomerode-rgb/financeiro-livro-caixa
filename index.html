@@ -26658,11 +26658,11 @@ function viewProvisionamentos(){
       <button class="btn" id="btnNovoProvisionamento">+ Novo Provisionamento</button>
     </div>
     <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
-      <div class="card"><div class="label">Total futuro</div><div class="value mono">${vm(brl(totalFuturo))}</div></div>
-      <div class="card"><div class="label">Já reservado</div><div class="value mono pos">${vm(brl(totalReservado))}</div></div>
-      <div class="card"><div class="label">Falta reservar</div><div class="value mono ${totalAReservar>0?'neg':''}">${vm(brl(totalAReservar))}</div></div>
-      <div class="card"><div class="label">Reserva mensal necessária</div><div class="value mono">${vm(brl(reservaMensalTotal))}</div></div>
-      <div class="card"><div class="label">Em risco</div><div class="value mono ${emRisco>0?'neg':''}">${emRisco}</div></div>
+      <div class="card"><div class="label">Total futuro</div><div class="value mono" style="font-size:16px;">${vm(brl(totalFuturo))}</div></div>
+      <div class="card"><div class="label">Já reservado</div><div class="value mono pos" style="font-size:16px;">${vm(brl(totalReservado))}</div></div>
+      <div class="card"><div class="label">Falta reservar</div><div class="value mono ${totalAReservar>0?'neg':''}" style="font-size:16px;">${vm(brl(totalAReservar))}</div></div>
+      <div class="card"><div class="label">Reserva mensal necessária</div><div class="value mono" style="font-size:16px;">${vm(brl(reservaMensalTotal))}</div></div>
+      <div class="card"><div class="label">Em risco</div><div class="value mono ${emRisco>0?'neg':''}" style="font-size:16px;">${emRisco}</div></div>
       <div class="card"><div class="label">Próximo vencimento</div><div class="value" style="font-size:14px;">${proximo ? `${escapeHTML(proximo.p.nome)}<br><span class="mono" style="font-size:12px;color:var(--text-soft);">${fmtDate(proximo.p.proximoVencimento)} · falta ${brl(Math.max(0,proximo.meta-proximo.realizado))}</span>` : '—'}</div></div>
     </div>
     <div class="filter-bar" style="margin-bottom:14px;">
@@ -26699,13 +26699,14 @@ function viewProvListaAba(lista){
 let provMatrizAno = Number(todayISO().slice(0,4));
 function viewProvMatrizAba(ativos){
   const ano = provMatrizAno;
+  const ehMobile = typeof window!=='undefined' && window.innerWidth <= 900;
   const meses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
   const linhas = ativos.map(x=>{
     const ocorrencias = mesesOcorrenciaProvisionamento(x.p, ano);
     const porMes = meses.map((_,i)=>{
       const m = i+1;
       const previsto = ocorrencias.includes(m) ? metaReservaProvisionamento(x.p)/ocorrencias.length : 0;
-      const reservadoMes = reservasDoProvisionamento(x.p.id,'realizada').filter(r=>r.data && r.data.slice(0,4)==String(ano) && Number(r.data.slice(5,7))===m).reduce((s,r)=>s+r.valor,0);
+      const reservadoMes = reservasDoProvisionamento(x.p.id,'realizada').filter(r=>(r.mesReferencia||(r.data||'').slice(0,7))===`${ano}-${String(m).padStart(2,'0')}`).reduce((s,r)=>s+r.valor,0);
       const chave = `${ano}-${String(m).padStart(2,'0')}`;
       const vencido = previsto>0 && chave < todayISO().slice(0,7) && reservadoMes<previsto;
       const coberto = previsto>0 && reservadoMes>=previsto;
@@ -26716,14 +26717,45 @@ function viewProvMatrizAba(ativos){
   });
   const totaisColuna = meses.map((_,i)=>linhas.reduce((s,l)=>s+l.porMes[i].previsto,0));
   const totalGeral = totaisColuna.reduce((a,b)=>a+b,0);
-  return `
+  const legenda = `<div class="note" style="margin-top:8px;">🟢 coberto · 🟡 mês atual ainda em risco · 🔴 vencido sem cobrir. O valor de cada mês é a meta de reserva dividida pelo número de ocorrências daquele provisionamento no ano.</div>`;
+  const navAno = `
     <div class="panel" style="margin-bottom:14px;">
       <div class="filter-bar" style="align-items:center;">
         <button class="btn ghost sm" id="provMatrizAnoAnterior">‹</button>
         <strong style="min-width:60px;text-align:center;">${ano}</strong>
         <button class="btn ghost sm" id="provMatrizAnoProximo">›</button>
       </div>
-    </div>
+    </div>`;
+
+  if(ehMobile){
+    // No celular, uma tabela de 12 colunas fica ilegível — em vez disso, um card por
+    // provisionamento com só os meses que TÊM valor previsto naquele ano, em lista vertical.
+    return `
+      ${navAno}
+      ${!linhas.length ? `<div class="panel"><div class="empty">Nenhum provisionamento ativo.</div></div>` : linhas.map(l=>{
+        const mesesComValor = l.porMes.map((c,i)=>({...c, nome:meses[i]})).filter(c=>c.temValor);
+        return `
+          <div class="panel" style="margin-bottom:12px;">
+            <div class="panel-head"><h2 style="font-size:14px;">${escapeHTML(l.p.nome)}</h2><span class="mono" style="font-size:12.5px;font-weight:700;">${brl(l.totalLinha)}</span></div>
+            <div class="panel-body">
+              ${mesesComValor.length ? mesesComValor.map(c=>{
+                const cor = c.coberto ? 'var(--success)' : c.vencido ? 'var(--danger)' : c.risco ? 'var(--warn)' : 'var(--ink)';
+                return `<div style="display:flex;justify-content:space-between;padding:7px 4px;border-bottom:1px solid var(--line);font-size:12.5px;">
+                  <span>${c.nome}/${ano}</span>
+                  <span class="mono" style="color:${cor};font-weight:600;">${brl(c.previsto)}${c.reservadoMes>0?` <span style="font-size:10.5px;color:var(--text-soft);">(${brl(c.reservadoMes)} reservado)</span>`:''}</span>
+                </div>`;
+              }).join('') : `<div class="empty">Sem ocorrência nesse ano.</div>`}
+            </div>
+          </div>
+        `;
+      }).join('')}
+      <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="display:flex;justify-content:space-between;font-weight:700;padding:10px 4px;"><span>Total do ano</span><span class="mono">${brl(totalGeral)}</span></div></div>
+      ${legenda}
+    `;
+  }
+
+  return `
+    ${navAno}
     <div class="panel" style="overflow-x:auto;">
       <table style="width:100%;border-collapse:collapse;font-size:11.5px;white-space:nowrap;">
         <thead><tr>
@@ -26751,7 +26783,7 @@ function viewProvMatrizAba(ativos){
         </tr></tfoot>` : ''}
       </table>
     </div>
-    <div class="note" style="margin-top:8px;">🟢 coberto · 🟡 mês atual ainda em risco · 🔴 vencido sem cobrir. O valor de cada mês é a meta de reserva dividida pelo número de ocorrências daquele provisionamento no ano.</div>
+    ${legenda}
   `;
 }
 let provCalendarioMes = todayISO().slice(0,7);
@@ -26905,6 +26937,17 @@ function openRegistrarReservaModal(provisionamentoId){
   if(!p) return;
   const meta = metaReservaProvisionamento(p);
   const realizado = totalReservadoProvisionamento(p.id,'realizada');
+  const hojeYM = todayISO().slice(0,7);
+  const limiteYM = p.dataFim ? p.dataFim.slice(0,7) : (()=>{ const d=new Date(); d.setFullYear(d.getFullYear()+5); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; })();
+  const opcoesMes = [];
+  let cursor = hojeYM;
+  while(cursor<=limiteYM && opcoesMes.length<72){
+    opcoesMes.push(cursor);
+    const [a,m] = cursor.split('-').map(Number);
+    const d = new Date(a, m, 1);
+    cursor = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  }
+  const mesReferenciaPadrao = p.proximoVencimento && p.proximoVencimento.slice(0,7)>=hojeYM ? p.proximoVencimento.slice(0,7) : hojeYM;
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
     <h3>Registrar reserva — ${escapeHTML(p.nome)}</h3>
@@ -26918,7 +26961,12 @@ function openRegistrarReservaModal(provisionamentoId){
     </div>
     <div class="field-row">
       <div class="field"><label>Valor (R$)</label><input type="text" inputmode="decimal" id="rsvValor" placeholder="0,00"></div>
-      <div class="field"><label>Data</label><input type="date" id="rsvData" value="${todayISO()}"></div>
+      <div class="field"><label>Data (quando você está fazendo isso)</label><input type="date" id="rsvData" value="${todayISO()}"></div>
+    </div>
+    <div class="field">
+      <label>Para qual mês essa reserva conta?</label>
+      <select id="rsvMesReferencia">${opcoesMes.map(m=>`<option value="${m}" ${m===mesReferenciaPadrao?'selected':''}>${competenciaLabel(m)}</option>`).join('')}</select>
+      <div class="note" style="margin-top:6px;">Você pode reservar hoje pra um vencimento de vários meses à frente — ex: já separar dinheiro pra fatura que só vence daqui 8 meses. Isso aparece certinho na Matriz Mensal, no mês escolhido aqui, não no mês em que você registrou.</div>
     </div>
     <div id="rsvGrupoRealizada" style="display:none;">
       <div class="field-row">
@@ -26954,6 +27002,7 @@ function openRegistrarReservaModal(provisionamentoId){
     try{
       const valor = numBR(document.getElementById('rsvValor').value);
       const data = document.getElementById('rsvData').value || todayISO();
+      const mesReferencia = document.getElementById('rsvMesReferencia').value;
       if(isNaN(valor) || valor<=0){ showToast('Preencha um valor válido'); return; }
       const contaOrigemId = document.getElementById('rsvContaOrigem')?.value || null;
       const contaDestinoId = document.getElementById('rsvContaDestino')?.value || null;
@@ -26976,7 +27025,7 @@ function openRegistrarReservaModal(provisionamentoId){
 
       if(!state.reservasProvisionamento) state.reservasProvisionamento = [];
       state.reservasProvisionamento.push({
-        id: uid(), provisionamentoId: p.id, data, valor, tipo: tipoAtual,
+        id: uid(), provisionamentoId: p.id, data, valor, tipo: tipoAtual, mesReferencia,
         contaOrigemId: tipoAtual==='realizada'?contaOrigemId:null, contaDestinoId: tipoAtual==='realizada'?contaDestinoId:null,
         transferenciaId, observacao, criadoEm: new Date().toISOString()
       });
@@ -27023,7 +27072,7 @@ function openDetalheProvisionamentoModal(provisionamentoId){
     <div class="panel-body" style="border-top:1px solid var(--line);max-height:220px;overflow-y:auto;">
       ${historico.length ? historico.map(r=>`
         <div style="display:flex;justify-content:space-between;padding:8px 4px;border-bottom:1px solid var(--line);font-size:12.5px;">
-          <span>${fmtDate(r.data)} · ${r.tipo==='realizada'?'💰 Realizada':'📝 Planejada'}${r.observacao?' — '+escapeHTML(r.observacao):''}</span>
+          <span>${fmtDate(r.data)} · ${r.tipo==='realizada'?'💰 Realizada':'📝 Planejada'}${r.mesReferencia && r.mesReferencia!==(r.data||'').slice(0,7) ? ` (pra ${competenciaLabel(r.mesReferencia)})` : ''}${r.observacao?' — '+escapeHTML(r.observacao):''}</span>
           <span class="mono" style="font-weight:600;">${brl(r.valor)}</span>
         </div>
       `).join('') : `<div class="empty">Nenhuma reserva registrada ainda.</div>`}
