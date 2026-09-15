@@ -717,6 +717,7 @@
         <div class="nav-item" data-view="descricoes" title="Padronizar Descrições"><span class="nav-dot"></span><span class="nav-abbr">DS</span><span class="nav-label">Padronizar Descrições</span></div>
         <div class="nav-item" data-view="todos-lancamentos" title="Todos os Lançamentos"><span class="nav-dot"></span><span class="nav-abbr">TL</span><span class="nav-label">Todos os Lançamentos</span></div>
         <div class="nav-item" data-view="diagnostico-dados" title="Diagnóstico de Dados"><span class="nav-dot"></span><span class="nav-abbr">DD</span><span class="nav-label">Diagnóstico de Dados</span></div>
+        <div class="nav-item" data-view="provisionamentos" title="Provisionamentos"><span class="nav-dot"></span><span class="nav-abbr">PV</span><span class="nav-label">Provisionamentos</span></div>
         <div class="nav-item" data-view="recorrencias" title="Lançamentos Recorrentes"><span class="nav-dot"></span><span class="nav-abbr">RC</span><span class="nav-label">Recorrentes</span></div>
         <div class="nav-item" data-view="metas" title="Metas de Reserva"><span class="nav-dot"></span><span class="nav-abbr">MT</span><span class="nav-label">Metas de Reserva</span></div>
         <div class="nav-item" data-view="integracoes" title="Central de Integrações"><span class="nav-dot"></span><span class="nav-abbr">IN</span><span class="nav-label">Central de Integrações</span></div>
@@ -1714,6 +1715,7 @@ function moreItensDef(){
     { view:'descricoes', icone:'📝', nome:'Padronizar Descrições', grupo:'Cadastros e Configurações' },
     { view:'todos-lancamentos', icone:'📜', nome:'Todos os Lançamentos', grupo:'Operacional' },
     { view:'diagnostico-dados', icone:'🩺', nome:'Diagnóstico de Dados', grupo:'Cadastros e Configurações' },
+    { view:'provisionamentos', icone:'🗓️', nome:'Provisionamentos', grupo:'Operacional' },
     { view:'recorrencias', icone:'🔁', nome:'Recorrentes', grupo:'Cadastros e Configurações' },
     { view:'metas', icone:'🎯', nome:'Metas de Reserva', grupo:'Cadastros e Configurações' },
     { view:'integracoes', icone:'🔌', nome:'Central de Integrações', grupo:'Cadastros e Configurações', badge:()=>(state.vkAprovacoes||[]).length+(state.faturasPendentes||[]).length },
@@ -1847,6 +1849,7 @@ function render(){
   else if(currentView==='descricao-detalhe') main.innerHTML = viewDescricaoDetalhe();
   else if(currentView==='todos-lancamentos') main.innerHTML = viewTodosLancamentos();
   else if(currentView==='diagnostico-dados') main.innerHTML = viewDiagnosticoDados();
+  else if(currentView==='provisionamentos') main.innerHTML = viewProvisionamentos();
   else if(currentView==='recorrencias') main.innerHTML = viewRecorrencias();
   else if(currentView==='metas') main.innerHTML = viewMetasReserva();
   else if(currentView==='simulacao') main.innerHTML = viewSimulacao();
@@ -23701,6 +23704,110 @@ function attachViewHandlers(){
     });
   });
 
+  // Provisionamentos
+  document.getElementById('btnNovoProvisionamento')?.addEventListener('click', ()=>openProvisionamentoModal());
+  document.querySelectorAll('[data-prov-aba]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ provAbaAtiva = btn.dataset.provAba; render(); });
+  });
+  document.getElementById('provMatrizAnoAnterior')?.addEventListener('click', ()=>{ provMatrizAno--; render(); });
+  document.getElementById('provMatrizAnoProximo')?.addEventListener('click', ()=>{ provMatrizAno++; render(); });
+  document.getElementById('provCalMesAnterior')?.addEventListener('click', ()=>{
+    const [a,m] = provCalendarioMes.split('-').map(Number);
+    const d = new Date(a, m-2, 1);
+    provCalendarioMes = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    render();
+  });
+  document.getElementById('provCalMesProximo')?.addEventListener('click', ()=>{
+    const [a,m] = provCalendarioMes.split('-').map(Number);
+    const d = new Date(a, m, 1);
+    provCalendarioMes = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    render();
+  });
+  if(document.getElementById('simResultado')){
+    calcularESimular();
+    ['simValor','simMargem','simReservado','simVencimento'].forEach(idc=>{
+      document.getElementById(idc)?.addEventListener('input', calcularESimular);
+    });
+    document.getElementById('btnAplicarSimulacao')?.addEventListener('click', async ()=>{
+      const provId = document.getElementById('simAplicarEm').value;
+      if(!provId){ showToast('Escolha um provisionamento pra aplicar a simulação'); return; }
+      const p = (state.provisionamentos||[]).find(x=>x.id===provId);
+      if(!p) return;
+      const confirmar = await avisoModal({
+        titulo: 'Aplicar simulação?',
+        mensagem: `Isso vai atualizar o valor previsto, margem e vencimento de "${escapeHTML(p.nome)}" com os números que você simulou.`,
+        tipo:'aviso', textoConfirmar:'Aplicar', textoCancelar:'Cancelar'
+      });
+      if(!confirmar) return;
+      p.valorPrevisto = numBR(document.getElementById('simValor').value)||p.valorPrevisto;
+      p.margemSeguranca = numBR(document.getElementById('simMargem').value)||0;
+      p.proximoVencimento = document.getElementById('simVencimento').value || p.proximoVencimento;
+      p.atualizadoEm = new Date().toISOString();
+      persist(); render();
+      showToast('Simulação aplicada ao provisionamento');
+    });
+  }
+  document.querySelectorAll('[data-prov-status]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ provFiltroStatus = btn.dataset.provStatus; render(); });
+  });
+  document.getElementById('provBusca')?.addEventListener('input', (e)=>{
+    provFiltroTexto = e.target.value;
+    const posCursor = e.target.selectionStart;
+    render();
+    const novoInput = document.getElementById('provBusca');
+    if(novoInput){ novoInput.focus(); novoInput.setSelectionRange(posCursor, posCursor); }
+  });
+  document.querySelectorAll('[data-action="ver-provisionamento"]').forEach(el=>{
+    el.addEventListener('click', ()=>openDetalheProvisionamentoModal(el.dataset.id));
+  });
+  document.querySelectorAll('[data-action="prov-reservar"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openRegistrarReservaModal(btn.dataset.id));
+  });
+  document.querySelectorAll('[data-action="prov-editar"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const p = (state.provisionamentos||[]).find(x=>x.id===btn.dataset.id);
+      if(p) openProvisionamentoModal(p);
+    });
+  });
+  document.querySelectorAll('[data-action="prov-duplicar"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const p = (state.provisionamentos||[]).find(x=>x.id===btn.dataset.id);
+      if(!p) return;
+      const copia = { ...p, id: uid(), nome: p.nome+' (cópia)', status:'ativo', pagamentoLancamentoId:null, criadoEm: new Date().toISOString(), atualizadoEm: new Date().toISOString() };
+      state.provisionamentos.push(copia);
+      persist(); render();
+      showToast('Provisionamento duplicado');
+    });
+  });
+  document.querySelectorAll('[data-action="prov-arquivar"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const p = (state.provisionamentos||[]).find(x=>x.id===btn.dataset.id);
+      if(!p) return;
+      p.status = p.status==='arquivado' ? 'ativo' : 'arquivado';
+      p.atualizadoEm = new Date().toISOString();
+      persist(); render();
+      showToast(p.status==='arquivado' ? 'Provisionamento arquivado' : 'Provisionamento desarquivado');
+    });
+  });
+  document.querySelectorAll('[data-action="prov-excluir"]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const p = (state.provisionamentos||[]).find(x=>x.id===btn.dataset.id);
+      if(!p) return;
+      const qtdReservas = reservasDoProvisionamento(p.id).length;
+      const confirmar = await avisoModal({
+        titulo: 'Excluir provisionamento',
+        mensagem: `Excluir "${escapeHTML(p.nome)}"?${qtdReservas ? ` Isso também apaga o histórico de ${qtdReservas} reserva(s) registrada(s) nele.` : ''}`,
+        explicacao: 'Isso não mexe em nenhuma transferência ou lançamento real que já foi criado a partir daqui — só apaga o planejamento e o registro de acompanhamento.',
+        tipo:'perigo', textoConfirmar:'Excluir'
+      });
+      if(!confirmar) return;
+      state.provisionamentos = state.provisionamentos.filter(x=>x.id!==p.id);
+      state.reservasProvisionamento = (state.reservasProvisionamento||[]).filter(r=>r.provisionamentoId!==p.id);
+      persist(); render();
+      showToast('Provisionamento excluído');
+    });
+  });
+
   // Todos os Lançamentos
   document.getElementById('btnBaixarPdfTodosLanc')?.addEventListener('click', ()=>{
     const dataDe = document.getElementById('todosLancPdfDe').value;
@@ -26420,6 +26527,672 @@ function diagnosticoDadosOrfaos(){
   });
 
   return problemas;
+}
+
+/* ============================== PROVISIONAMENTOS E RESERVAS FUTURAS ==============================
+   Coleções novas (dentro do mesmo state.contas/lancamentos existente, sem criar Firestore paralelo):
+   state.provisionamentos = [{ id, nome, descricao, categoria, tipo, periodicidade, valorPrevisto,
+     margemSeguranca, dataInicio, proximoVencimento, dataFim, contaDestinoId, status('ativo'|'arquivado'),
+     pagamentoLancamentoId, criadoEm, atualizadoEm }]
+   state.reservasProvisionamento = [{ id, provisionamentoId, data, valor, tipo('planejada'|'realizada'),
+     contaOrigemId, contaDestinoId, transferenciaId, observacao, criadoEm }]
+   Reserva PLANEJADA nunca mexe em conta/lançamento — é só intenção. Só a REALIZADA pode virar uma
+   transferência de verdade (com confirmação), usando o mesmo mecanismo de transferência já existente. */
+
+function metaReservaProvisionamento(p){
+  const margem = p.margemSeguranca || 0;
+  return Math.round((p.valorPrevisto||0) * (1 + margem/100) * 100) / 100;
+}
+function reservasDoProvisionamento(provisionamentoId, tipo){
+  return (state.reservasProvisionamento||[]).filter(r=>r.provisionamentoId===provisionamentoId && (!tipo || r.tipo===tipo));
+}
+function totalReservadoProvisionamento(provisionamentoId, tipo){
+  return reservasDoProvisionamento(provisionamentoId, tipo).reduce((s,r)=>s+(r.valor||0),0);
+}
+// Meses inteiros entre hoje e o vencimento (mínimo 1, pra nunca dividir por zero) — datas locais,
+// sem passar por toISOString, pra não sofrer o problema de virada de dia perto da meia-noite.
+function mesesAteVencimento(proximoVencimento){
+  if(!proximoVencimento) return 1;
+  const hoje = todayISO();
+  if(proximoVencimento<=hoje) return 0;
+  const [ah,mh] = hoje.split('-').map(Number);
+  const [av,mv] = proximoVencimento.split('-').map(Number);
+  const meses = (av-ah)*12 + (mv-mh);
+  return Math.max(1, meses);
+}
+function reservaMensalNecessaria(p){
+  const meta = metaReservaProvisionamento(p);
+  const realizado = totalReservadoProvisionamento(p.id, 'realizada');
+  const faltante = Math.max(0, meta - realizado);
+  if(faltante<=0) return 0;
+  const meses = mesesAteVencimento(p.proximoVencimento);
+  if(!meses || meses<=0) return faltante; // vence esse mês (ou já venceu) — precisa do restante inteiro agora
+  const valor = faltante / meses;
+  return (isNaN(valor) || !isFinite(valor)) ? 0 : Math.round(valor*100)/100;
+}
+// Status calculado — nunca lido de um campo salvo, sempre recalculado na hora (evita ficar
+// desatualizado se uma reserva for editada/excluída depois).
+function statusProvisionamento(p){
+  if(p.status==='arquivado') return 'arquivado';
+  if(p.pagamentoLancamentoId) return 'pago';
+  const hoje = todayISO();
+  const meta = metaReservaProvisionamento(p);
+  const realizado = totalReservadoProvisionamento(p.id, 'realizada');
+  const faltante = Math.max(0, meta - realizado);
+  const vencido = p.proximoVencimento && p.proximoVencimento < hoje;
+  if(faltante<=0.004) return vencido ? 'concluido' : 'coberto';
+  if(vencido) return 'vencido';
+  const diasRestantes = p.proximoVencimento ? Math.round((new Date(p.proximoVencimento+'T12:00:00') - new Date(hoje+'T12:00:00'))/86400000) : 999;
+  if(diasRestantes<=30 && faltante>meta*0.3) return 'em_risco';
+  const planejado = totalReservadoProvisionamento(p.id, 'planejada');
+  if(realizado<=0.004 && planejado<=0.004) return 'planejado';
+  if(realizado>0 && realizado<meta) return diasRestantes<=60 ? 'em_atencao' : 'parcialmente_reservado';
+  return 'em_dia';
+}
+const ROTULO_STATUS_PROV = {
+  planejado:'Planejado', em_dia:'Em dia', parcialmente_reservado:'Parcialmente reservado',
+  em_atencao:'Em atenção', em_risco:'Em risco', vencido:'Vencido', coberto:'Coberto',
+  pago:'Pago', concluido:'Concluído', arquivado:'Arquivado'
+};
+const COR_STATUS_PROV = {
+  planejado:'var(--text-soft)', em_dia:'var(--success)', parcialmente_reservado:'var(--warn)',
+  em_atencao:'var(--warn)', em_risco:'var(--danger)', vencido:'var(--danger)', coberto:'var(--success)',
+  pago:'var(--success)', concluido:'var(--text-soft)', arquivado:'var(--text-soft)'
+};
+
+// Em quais meses (1-12) de um ano um provisionamento tem valor previsto — usado pela Matriz e pelo
+// Calendário. Baseado no tipo/periodicidade e no próximo vencimento (o "mês-base" da recorrência).
+function mesesOcorrenciaProvisionamento(p, ano){
+  if(!p.proximoVencimento) return [];
+  const [av, mv] = p.proximoVencimento.split('-').map(Number);
+  const passo = { 'Mensal':1, 'Bimestral':2, 'Trimestral':3, 'Semestral':6, 'Anual':12 }[p.tipo];
+  const limiteFim = p.dataFim || null;
+  const dentroDoLimite = (a,m)=> !limiteFim || `${a}-${String(m).padStart(2,'0')}-01` <= limiteFim;
+  if(!passo){
+    // Eventual, Parcelado, Sazonal, Personalizado — sem recorrência automática, só o mês do vencimento cadastrado
+    return (av===ano) ? [mv] : [];
+  }
+  const meses = [];
+  // anda pra frente e pra trás a partir do mês-base, marcando as ocorrências que caem no ano pedido
+  for(let k=-60; k<=60; k++){
+    const totalMeses = (mv-1) + k*passo;
+    const a = av + Math.floor(totalMeses/12);
+    const m = ((totalMeses%12)+12)%12 + 1;
+    if(a===ano && a>=av && dentroDoLimite(a,m)) meses.push(m);
+  }
+  return [...new Set(meses)].sort((a,b)=>a-b);
+}
+
+let provFiltroStatus = 'todos';
+let provAbaAtiva = 'lista';
+let provFiltroTexto = '';
+function viewProvisionamentos(){
+  const hoje = todayISO();
+  const todosProv = (state.provisionamentos||[]).map(p=>({ p, status: statusProvisionamento(p), meta: metaReservaProvisionamento(p), realizado: totalReservadoProvisionamento(p.id,'realizada'), planejado: totalReservadoProvisionamento(p.id,'planejada') }));
+  const ativos = todosProv.filter(x=>x.p.status!=='arquivado');
+
+  let lista = provFiltroStatus==='todos' ? ativos
+    : provFiltroStatus==='arquivados' ? todosProv.filter(x=>x.p.status==='arquivado')
+    : ativos.filter(x=>x.status===provFiltroStatus);
+  if(provFiltroTexto.trim()){
+    const t = provFiltroTexto.trim().toLowerCase();
+    lista = lista.filter(x=>(x.p.nome||'').toLowerCase().includes(t) || (x.p.descricao||'').toLowerCase().includes(t));
+  }
+  lista.sort((a,b)=>(a.p.proximoVencimento||'9999').localeCompare(b.p.proximoVencimento||'9999'));
+
+  const totalFuturo = ativos.reduce((s,x)=>s+x.meta,0);
+  const totalReservado = ativos.reduce((s,x)=>s+x.realizado,0);
+  const totalAReservar = Math.max(0, totalFuturo-totalReservado);
+  const reservaMensalTotal = ativos.reduce((s,x)=>s+reservaMensalNecessaria(x.p),0);
+  const emRisco = ativos.filter(x=>x.status==='em_risco'||x.status==='vencido').length;
+  const proximo = [...ativos].filter(x=>x.p.proximoVencimento>=hoje).sort((a,b)=>a.p.proximoVencimento.localeCompare(b.p.proximoVencimento))[0];
+
+  const statusBtns = [
+    ['todos','Todos'], ['em_dia','Ativos'], ['em_atencao','Em atenção'], ['em_risco','Em risco'],
+    ['concluido','Concluídos'], ['vencido','Vencidos'], ['arquivados','Arquivados']
+  ];
+
+  return `
+    <div class="topbar">
+      <div><h1>Provisionamentos e Reservas Futuras</h1><p>Planeje despesas futuras, acompanhe reservas e saiba quanto precisa separar para cada vencimento.</p></div>
+      <button class="btn" id="btnNovoProvisionamento">+ Novo Provisionamento</button>
+    </div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
+      <div class="card"><div class="label">Total futuro</div><div class="value mono">${vm(brl(totalFuturo))}</div></div>
+      <div class="card"><div class="label">Já reservado</div><div class="value mono pos">${vm(brl(totalReservado))}</div></div>
+      <div class="card"><div class="label">Falta reservar</div><div class="value mono ${totalAReservar>0?'neg':''}">${vm(brl(totalAReservar))}</div></div>
+      <div class="card"><div class="label">Reserva mensal necessária</div><div class="value mono">${vm(brl(reservaMensalTotal))}</div></div>
+      <div class="card"><div class="label">Em risco</div><div class="value mono ${emRisco>0?'neg':''}">${emRisco}</div></div>
+      <div class="card"><div class="label">Próximo vencimento</div><div class="value" style="font-size:14px;">${proximo ? `${escapeHTML(proximo.p.nome)}<br><span class="mono" style="font-size:12px;color:var(--text-soft);">${fmtDate(proximo.p.proximoVencimento)} · falta ${brl(Math.max(0,proximo.meta-proximo.realizado))}</span>` : '—'}</div></div>
+    </div>
+    <div class="filter-bar" style="margin-bottom:14px;">
+      ${[['lista','📋 Lista'],['matriz','📊 Matriz Mensal'],['calendario','📅 Calendário'],['simulador','🧮 Simulador'],['relatorios','📈 Relatórios']].map(([v,l])=>`<button class="btn ${provAbaAtiva===v?'':'ghost'} sm" data-prov-aba="${v}">${l}</button>`).join('')}
+    </div>
+    ${provAbaAtiva==='lista' ? viewProvListaAba(lista) : ''}
+    ${provAbaAtiva==='matriz' ? viewProvMatrizAba(ativos) : ''}
+    ${provAbaAtiva==='calendario' ? viewProvCalendarioAba(ativos) : ''}
+    ${provAbaAtiva==='simulador' ? viewProvSimuladorAba() : ''}
+    ${provAbaAtiva==='relatorios' ? viewProvRelatoriosAba(ativos) : ''}
+  `;
+}
+function viewProvListaAba(lista){
+  const statusBtns = [
+    ['todos','Todos'], ['em_dia','Ativos'], ['em_atencao','Em atenção'], ['em_risco','Em risco'],
+    ['concluido','Concluídos'], ['vencido','Vencidos'], ['arquivados','Arquivados']
+  ];
+  return `
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="filter-bar" style="flex-wrap:wrap;">
+        ${statusBtns.map(([v,l])=>`<button class="btn ${provFiltroStatus===v?'':'ghost'} sm" data-prov-status="${v}">${l}</button>`).join('')}
+      </div>
+      <div class="filter-bar" style="margin-top:8px;">
+        <input type="text" id="provBusca" placeholder="Buscar por nome ou descrição..." value="${escapeHTML(provFiltroTexto)}" style="flex:1;">
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-body">
+        ${lista.length ? lista.map(x=>provRowHTML(x)).join('') : `<div class="empty">Nenhum provisionamento ${provFiltroStatus==='todos'?'cadastrado ainda':'nessa situação'}.</div>`}
+      </div>
+    </div>
+  `;
+}
+let provMatrizAno = Number(todayISO().slice(0,4));
+function viewProvMatrizAba(ativos){
+  const ano = provMatrizAno;
+  const meses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  const linhas = ativos.map(x=>{
+    const ocorrencias = mesesOcorrenciaProvisionamento(x.p, ano);
+    const porMes = meses.map((_,i)=>{
+      const m = i+1;
+      const previsto = ocorrencias.includes(m) ? metaReservaProvisionamento(x.p)/ocorrencias.length : 0;
+      const reservadoMes = reservasDoProvisionamento(x.p.id,'realizada').filter(r=>r.data && r.data.slice(0,4)==String(ano) && Number(r.data.slice(5,7))===m).reduce((s,r)=>s+r.valor,0);
+      const chave = `${ano}-${String(m).padStart(2,'0')}`;
+      const vencido = previsto>0 && chave < todayISO().slice(0,7) && reservadoMes<previsto;
+      const coberto = previsto>0 && reservadoMes>=previsto;
+      const risco = previsto>0 && !coberto && !vencido && chave===todayISO().slice(0,7);
+      return { previsto, reservadoMes, vencido, coberto, risco, temValor: previsto>0 };
+    });
+    return { p: x.p, porMes, totalLinha: porMes.reduce((s,c)=>s+c.previsto,0) };
+  });
+  const totaisColuna = meses.map((_,i)=>linhas.reduce((s,l)=>s+l.porMes[i].previsto,0));
+  const totalGeral = totaisColuna.reduce((a,b)=>a+b,0);
+  return `
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="filter-bar" style="align-items:center;">
+        <button class="btn ghost sm" id="provMatrizAnoAnterior">‹</button>
+        <strong style="min-width:60px;text-align:center;">${ano}</strong>
+        <button class="btn ghost sm" id="provMatrizAnoProximo">›</button>
+      </div>
+    </div>
+    <div class="panel" style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:11.5px;white-space:nowrap;">
+        <thead><tr>
+          <th style="text-align:left;padding:8px;position:sticky;left:0;background:var(--bone);">Provisionamento</th>
+          ${meses.map(m=>`<th style="padding:8px;text-align:right;">${m}</th>`).join('')}
+          <th style="padding:8px;text-align:right;font-weight:700;">Total</th>
+        </tr></thead>
+        <tbody>
+          ${linhas.length ? linhas.map(l=>`
+            <tr style="border-top:1px solid var(--line);">
+              <td style="padding:8px;font-weight:600;position:sticky;left:0;background:var(--card-bg,#fff);">${escapeHTML(l.p.nome)}</td>
+              ${l.porMes.map(c=>{
+                if(!c.temValor) return `<td style="padding:8px;text-align:right;color:var(--line);">—</td>`;
+                const cor = c.coberto ? 'var(--success)' : c.vencido ? 'var(--danger)' : c.risco ? 'var(--warn)' : 'var(--ink)';
+                return `<td style="padding:8px;text-align:right;color:${cor};" title="Previsto ${brl(c.previsto)} · Reservado ${brl(c.reservadoMes)}">${brl(c.previsto)}</td>`;
+              }).join('')}
+              <td style="padding:8px;text-align:right;font-weight:700;">${brl(l.totalLinha)}</td>
+            </tr>
+          `).join('') : `<tr><td colspan="14" style="padding:20px;text-align:center;color:var(--text-soft);">Nenhum provisionamento ativo.</td></tr>`}
+        </tbody>
+        ${linhas.length ? `<tfoot><tr style="border-top:2px solid var(--line);font-weight:700;">
+          <td style="padding:8px;position:sticky;left:0;background:var(--bone);">Total</td>
+          ${totaisColuna.map(t=>`<td style="padding:8px;text-align:right;">${brl(t)}</td>`).join('')}
+          <td style="padding:8px;text-align:right;">${brl(totalGeral)}</td>
+        </tr></tfoot>` : ''}
+      </table>
+    </div>
+    <div class="note" style="margin-top:8px;">🟢 coberto · 🟡 mês atual ainda em risco · 🔴 vencido sem cobrir. O valor de cada mês é a meta de reserva dividida pelo número de ocorrências daquele provisionamento no ano.</div>
+  `;
+}
+let provCalendarioMes = todayISO().slice(0,7);
+function viewProvCalendarioAba(ativos){
+  const [ano, mes] = provCalendarioMes.split('-').map(Number);
+  const nomeMes = new Date(ano, mes-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
+  const diasNoMes = new Date(ano, mes, 0).getDate();
+  const primeiroDiaSemana = new Date(ano, mes-1, 1).getDay();
+  const porDia = {};
+  ativos.forEach(x=>{
+    if(x.p.proximoVencimento && x.p.proximoVencimento.slice(0,7)===provCalendarioMes){
+      const dia = Number(x.p.proximoVencimento.slice(8,10));
+      if(!porDia[dia]) porDia[dia] = [];
+      porDia[dia].push(x);
+    }
+  });
+  const diasSemana = ['D','S','T','Q','Q','S','S'];
+  let celulas = '';
+  for(let i=0;i<primeiroDiaSemana;i++) celulas += `<div></div>`;
+  for(let d=1;d<=diasNoMes;d++){
+    const itens = porDia[d]||[];
+    const hojeMarcado = `${provCalendarioMes}-${String(d).padStart(2,'0')}`===todayISO();
+    celulas += `
+      <div style="border:1px solid var(--line);border-radius:6px;min-height:70px;padding:5px;${hojeMarcado?'border-color:var(--blue-accent);border-width:2px;':''}">
+        <div style="font-size:11px;color:var(--text-soft);font-weight:${hojeMarcado?'700':'400'};">${d}</div>
+        ${itens.map(x=>`<div data-action="ver-provisionamento" data-id="${x.p.id}" style="cursor:pointer;font-size:10px;margin-top:3px;padding:2px 4px;border-radius:4px;background:${COR_STATUS_PROV[x.status]}22;color:${COR_STATUS_PROV[x.status]};font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHTML(x.p.nome)} — ${brl(x.meta)}">${escapeHTML(x.p.nome)}</div>`).join('')}
+      </div>
+    `;
+  }
+  return `
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="filter-bar" style="align-items:center;">
+        <button class="btn ghost sm" id="provCalMesAnterior">‹</button>
+        <strong style="min-width:160px;text-align:center;text-transform:capitalize;">${nomeMes}</strong>
+        <button class="btn ghost sm" id="provCalMesProximo">›</button>
+      </div>
+    </div>
+    <div class="panel">
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:6px;">
+        ${diasSemana.map(d=>`<div style="text-align:center;font-size:10.5px;font-weight:700;color:var(--text-soft);">${d}</div>`).join('')}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;">${celulas}</div>
+    </div>
+  `;
+}
+function provRowHTML(x){
+  const { p, status, meta, realizado } = x;
+  const falta = Math.max(0, meta-realizado);
+  const pct = meta>0 ? Math.min(100, Math.round(realizado/meta*100)) : 0;
+  return `
+    <div class="ledger-row" style="grid-template-columns:1fr auto auto;align-items:center;padding:12px 4px;">
+      <div data-action="ver-provisionamento" data-id="${p.id}" style="cursor:pointer;min-width:0;">
+        <div style="font-weight:600;font-size:14px;">${escapeHTML(p.nome)}</div>
+        <div style="font-size:11.5px;color:var(--text-soft);">${escapeHTML(p.categoria||'Sem categoria')} · ${p.tipo||''} · vence ${p.proximoVencimento?fmtDate(p.proximoVencimento):'—'} · ${nomeConta(p.contaDestinoId)}</div>
+        <div style="height:5px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:6px;max-width:260px;">
+          <div style="height:100%;width:${pct}%;border-radius:3px;background:${COR_STATUS_PROV[status]};"></div>
+        </div>
+        <div style="font-size:11px;color:var(--text-soft);margin-top:3px;">${brl(realizado)} de ${brl(meta)} reservado(s) — falta ${brl(falta)}</div>
+      </div>
+      <div style="text-align:right;">
+        <span style="font-size:11px;font-weight:700;color:${COR_STATUS_PROV[status]};border:1px solid ${COR_STATUS_PROV[status]};border-radius:20px;padding:3px 10px;">${ROTULO_STATUS_PROV[status]}</span>
+      </div>
+      <div class="row-actions">
+        <button class="icon-btn" data-action="prov-reservar" data-id="${p.id}" title="Registrar reserva">💰</button>
+        <button class="icon-btn" data-action="prov-editar" data-id="${p.id}" title="Editar">✎</button>
+        <button class="icon-btn" data-action="prov-duplicar" data-id="${p.id}" title="Duplicar">⧉</button>
+        <button class="icon-btn" data-action="prov-arquivar" data-id="${p.id}" title="${p.status==='arquivado'?'Desarquivar':'Arquivar'}">🗄️</button>
+        <button class="icon-btn" data-action="prov-excluir" data-id="${p.id}" title="Excluir">✕</button>
+      </div>
+    </div>
+  `;
+}
+
+function openProvisionamentoModal(existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit?'Editar':'Novo'} Provisionamento</h3>
+    <div class="field"><label>Nome</label><input type="text" id="pvNome" placeholder="Ex: IPVA do carro" value="${isEdit?escapeHTML(existing.nome):''}"></div>
+    <div class="field"><label>Descrição (opcional)</label><input type="text" id="pvDescricao" value="${isEdit?escapeHTML(existing.descricao||''):''}"></div>
+    <div class="field-row">
+      <div class="field"><label>Categoria</label>
+        <select id="pvCategoria">
+          <option value="">— sem categoria —</option>
+          ${listaCategorias('saida').map(c=>`<option value="${escapeHTML(c.nome)}" ${isEdit&&existing.categoria===c.nome?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Tipo</label>
+        <select id="pvTipo">
+          ${['Mensal','Bimestral','Trimestral','Semestral','Anual','Eventual','Parcelado','Sazonal','Personalizado'].map(t=>`<option ${isEdit&&existing.tipo===t?'selected':''}>${t}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Valor previsto (R$)</label><input type="text" inputmode="decimal" id="pvValor" value="${isEdit?existing.valorPrevisto:''}" placeholder="0,00"></div>
+      <div class="field"><label>Margem de segurança (%, opcional)</label><input type="text" inputmode="decimal" id="pvMargem" value="${isEdit?(existing.margemSeguranca||''):''}" placeholder="0"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Próximo vencimento</label><input type="date" id="pvVencimento" value="${isEdit?existing.proximoVencimento||'':''}"></div>
+      <div class="field"><label>Data final (opcional)</label><input type="date" id="pvDataFim" value="${isEdit?existing.dataFim||'':''}"></div>
+    </div>
+    <div class="field"><label>Conta ou caixinha de destino (opcional)</label>
+      <select id="pvContaDestino">
+        <option value="">— nenhuma —</option>
+        ${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}" ${isEdit&&existing.contaDestinoId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field"><label>Observações (opcional)</label><textarea id="pvObservacoes" rows="2">${isEdit?escapeHTML(existing.observacoes||''):''}</textarea></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarProvisionamento">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarProvisionamento').addEventListener('click', ()=>{
+    const btnClick = document.getElementById('btnSalvarProvisionamento');
+    if(btnClick.disabled) return;
+    btnClick.disabled = true;
+    try{
+      const nome = document.getElementById('pvNome').value.trim();
+      const valorPrevisto = numBR(document.getElementById('pvValor').value);
+      const proximoVencimento = document.getElementById('pvVencimento').value;
+      if(!nome){ showToast('Preencha o nome'); return; }
+      if(isNaN(valorPrevisto) || valorPrevisto<=0){ showToast('Preencha um valor previsto válido'); return; }
+      if(!proximoVencimento){ showToast('Preencha a data do próximo vencimento'); return; }
+      const payload = {
+        nome, descricao: document.getElementById('pvDescricao').value.trim(),
+        categoria: document.getElementById('pvCategoria').value || null,
+        tipo: document.getElementById('pvTipo').value,
+        valorPrevisto, margemSeguranca: numBR(document.getElementById('pvMargem').value)||0,
+        proximoVencimento, dataFim: document.getElementById('pvDataFim').value || null,
+        contaDestinoId: document.getElementById('pvContaDestino').value || null,
+        observacoes: document.getElementById('pvObservacoes').value.trim(),
+        atualizadoEm: new Date().toISOString()
+      };
+      if(!state.provisionamentos) state.provisionamentos = [];
+      if(isEdit){ Object.assign(existing, payload); }
+      else { state.provisionamentos.push({ id: uid(), status:'ativo', pagamentoLancamentoId:null, criadoEm: new Date().toISOString(), ...payload }); }
+      persist(); closeModal(); render();
+      showToast(isEdit?'Provisionamento atualizado':'Provisionamento criado');
+    }finally{
+      const btnFim = document.getElementById('btnSalvarProvisionamento');
+      if(btnFim) btnFim.disabled = false;
+    }
+  });
+}
+
+function openRegistrarReservaModal(provisionamentoId){
+  const p = (state.provisionamentos||[]).find(x=>x.id===provisionamentoId);
+  if(!p) return;
+  const meta = metaReservaProvisionamento(p);
+  const realizado = totalReservadoProvisionamento(p.id,'realizada');
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Registrar reserva — ${escapeHTML(p.nome)}</h3>
+    <div class="note" style="margin-top:0;">Já reservado (realizado): ${brl(realizado)} de ${brl(meta)} · falta ${brl(Math.max(0,meta-realizado))}</div>
+    <div class="field">
+      <label>Tipo de reserva</label>
+      <div class="toggle-row" id="rsvTipoToggle">
+        <button type="button" data-tipo="planejada" class="active">Planejada (só anotação)</button>
+        <button type="button" data-tipo="realizada">Realizada (dinheiro já separado)</button>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Valor (R$)</label><input type="text" inputmode="decimal" id="rsvValor" placeholder="0,00"></div>
+      <div class="field"><label>Data</label><input type="date" id="rsvData" value="${todayISO()}"></div>
+    </div>
+    <div id="rsvGrupoRealizada" style="display:none;">
+      <div class="field-row">
+        <div class="field"><label>Conta de origem</label>
+          <select id="rsvContaOrigem"><option value="">— nenhuma —</option>${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}">${escapeHTML(c.nome)} (${brl(saldoConta(c.id))})</option>`).join('')}</select>
+        </div>
+        <div class="field"><label>Conta/caixinha de destino</label>
+          <select id="rsvContaDestino">${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}" ${p.contaDestinoId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
+        </div>
+      </div>
+      <div class="note" style="margin-top:0;">Se preencher origem e destino diferentes, ao salvar eu pergunto se você quer que eu já crie a transferência de verdade entre as duas contas (com confirmação) — sem isso, fica só um registro de que o dinheiro está separado, sem mexer no saldo.</div>
+    </div>
+    <div class="field"><label>Observação (opcional)</label><input type="text" id="rsvObservacao"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarReservaProv">Registrar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  let tipoAtual = 'planejada';
+  document.getElementById('rsvTipoToggle').addEventListener('click', (e)=>{
+    const btn = e.target.closest('button[data-tipo]');
+    if(!btn) return;
+    tipoAtual = btn.dataset.tipo;
+    document.querySelectorAll('#rsvTipoToggle button').forEach(b=>b.classList.toggle('active', b===btn));
+    document.getElementById('rsvGrupoRealizada').style.display = tipoAtual==='realizada' ? 'block' : 'none';
+  });
+  document.getElementById('btnSalvarReservaProv').addEventListener('click', async ()=>{
+    const btnClick = document.getElementById('btnSalvarReservaProv');
+    if(btnClick.disabled) return;
+    btnClick.disabled = true;
+    try{
+      const valor = numBR(document.getElementById('rsvValor').value);
+      const data = document.getElementById('rsvData').value || todayISO();
+      if(isNaN(valor) || valor<=0){ showToast('Preencha um valor válido'); return; }
+      const contaOrigemId = document.getElementById('rsvContaOrigem')?.value || null;
+      const contaDestinoId = document.getElementById('rsvContaDestino')?.value || null;
+      const observacao = document.getElementById('rsvObservacao').value.trim();
+      let transferenciaId = null;
+
+      if(tipoAtual==='realizada' && contaOrigemId && contaDestinoId && contaOrigemId!==contaDestinoId){
+        const confirmar = await avisoModal({
+          titulo: 'Criar transferência de verdade?',
+          mensagem: `Isso vai transferir ${brl(valor)} de "${nomeConta(contaOrigemId)}" para "${nomeConta(contaDestinoId)}", igual a uma transferência normal do sistema.`,
+          explicacao: 'Se cancelar, a reserva fica registrada como "realizada" (pra efeito de acompanhamento do provisionamento), mas o dinheiro não é fisicamente movido entre as contas — você pode mover manualmente depois, ou não precisar, se ele já está separado de algum outro jeito.',
+          tipo:'aviso', textoConfirmar:'Sim, transferir', textoCancelar:'Não, só registrar'
+        });
+        if(confirmar){
+          transferenciaId = uid();
+          state.lancamentos.push({ id: uid(), tipo:'saida', categoria:'Transferência', descricao:`Transferência para ${nomeConta(contaDestinoId)} — Reserva: ${p.nome}`, valor, contaId: contaOrigemId, status:'pago', dataVencimento: data, dataPagamento: data, origem:'transferencia', transferenciaId, criadoEm: new Date().toISOString() });
+          state.lancamentos.push({ id: uid(), tipo:'entrada', categoria:'Transferência', descricao:`Transferência de ${nomeConta(contaOrigemId)} — Reserva: ${p.nome}`, valor, contaId: contaDestinoId, status:'recebido', dataVencimento: data, dataPagamento: data, origem:'transferencia', transferenciaId, criadoEm: new Date().toISOString() });
+        }
+      }
+
+      if(!state.reservasProvisionamento) state.reservasProvisionamento = [];
+      state.reservasProvisionamento.push({
+        id: uid(), provisionamentoId: p.id, data, valor, tipo: tipoAtual,
+        contaOrigemId: tipoAtual==='realizada'?contaOrigemId:null, contaDestinoId: tipoAtual==='realizada'?contaDestinoId:null,
+        transferenciaId, observacao, criadoEm: new Date().toISOString()
+      });
+      persist(); closeModal(); render();
+      showToast(`Reserva ${tipoAtual==='realizada'?'realizada':'planejada'} registrada`);
+    }finally{
+      const btnFim = document.getElementById('btnSalvarReservaProv');
+      if(btnFim) btnFim.disabled = false;
+    }
+  });
+}
+
+function openDetalheProvisionamentoModal(provisionamentoId){
+  const p = (state.provisionamentos||[]).find(x=>x.id===provisionamentoId);
+  if(!p) return;
+  const status = statusProvisionamento(p);
+  const meta = metaReservaProvisionamento(p);
+  const realizado = totalReservadoProvisionamento(p.id,'realizada');
+  const planejado = totalReservadoProvisionamento(p.id,'planejada');
+  const pct = meta>0 ? Math.min(100, Math.round(realizado/meta*100)) : 0;
+  const historico = reservasDoProvisionamento(p.id).sort((a,b)=>(b.data||'').localeCompare(a.data||''));
+  const lancPago = p.pagamentoLancamentoId ? state.lancamentos.find(l=>l.id===p.pagamentoLancamentoId) : null;
+  const modal = document.getElementById('modalContent');
+  modal.className = 'modal modal-wide';
+  modal.innerHTML = `
+    <h3>${escapeHTML(p.nome)} <span style="font-size:11px;font-weight:700;color:${COR_STATUS_PROV[status]};border:1px solid ${COR_STATUS_PROV[status]};border-radius:20px;padding:3px 10px;margin-left:6px;">${ROTULO_STATUS_PROV[status]}</span></h3>
+    ${p.descricao ? `<p style="font-size:12.5px;color:var(--text-soft);margin-top:-6px;">${escapeHTML(p.descricao)}</p>` : ''}
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin:12px 0;">
+      <div class="card"><div class="label">Valor previsto</div><div class="value mono" style="font-size:15px;">${brl(p.valorPrevisto)}</div></div>
+      <div class="card"><div class="label">Meta de reserva</div><div class="value mono" style="font-size:15px;">${brl(meta)}</div></div>
+      <div class="card"><div class="label">Planejado</div><div class="value mono" style="font-size:15px;">${brl(planejado)}</div></div>
+      <div class="card"><div class="label">Realizado</div><div class="value mono pos" style="font-size:15px;">${brl(realizado)}</div></div>
+      <div class="card"><div class="label">Reserva mensal necessária</div><div class="value mono" style="font-size:15px;">${brl(reservaMensalNecessaria(p))}</div></div>
+    </div>
+    <div style="height:8px;border-radius:4px;background:var(--line);overflow:hidden;margin-bottom:4px;">
+      <div style="height:100%;width:${pct}%;border-radius:4px;background:${COR_STATUS_PROV[status]};"></div>
+    </div>
+    <div style="font-size:12px;color:var(--text-soft);margin-bottom:14px;">${brl(realizado)} de ${brl(meta)} reservados de verdade (${pct}%) ${planejado>0?` · + ${brl(planejado)} planejado (não é dinheiro real ainda)`:''}</div>
+    <div style="font-size:12.5px;color:var(--text-soft);margin-bottom:14px;">
+      Categoria: ${escapeHTML(p.categoria||'—')} · Tipo: ${escapeHTML(p.tipo||'—')} · Vencimento: ${p.proximoVencimento?fmtDate(p.proximoVencimento):'—'} · Conta destino: ${nomeConta(p.contaDestinoId)}
+      ${lancPago ? `<br>💳 Pago em ${fmtDate(lancPago.dataPagamento)} — <span data-action="abrir-lancamento" data-id="${lancPago.id}" style="color:var(--blue-accent);cursor:pointer;">ver lançamento</span>` : ''}
+    </div>
+    <label style="font-size:12.5px;font-weight:600;display:block;margin-bottom:6px;">Histórico de reservas</label>
+    <div class="panel-body" style="border-top:1px solid var(--line);max-height:220px;overflow-y:auto;">
+      ${historico.length ? historico.map(r=>`
+        <div style="display:flex;justify-content:space-between;padding:8px 4px;border-bottom:1px solid var(--line);font-size:12.5px;">
+          <span>${fmtDate(r.data)} · ${r.tipo==='realizada'?'💰 Realizada':'📝 Planejada'}${r.observacao?' — '+escapeHTML(r.observacao):''}</span>
+          <span class="mono" style="font-weight:600;">${brl(r.valor)}</span>
+        </div>
+      `).join('') : `<div class="empty">Nenhuma reserva registrada ainda.</div>`}
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Fechar</button>
+      ${!lancPago ? `<button class="btn ghost" id="btnRegistrarPagamentoProv">💳 Registrar pagamento</button>` : ''}
+      <button class="btn" id="btnDetalheReservar">💰 Registrar reserva</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnDetalheReservar').addEventListener('click', ()=>openRegistrarReservaModal(p.id));
+  document.getElementById('btnRegistrarPagamentoProv')?.addEventListener('click', ()=>openRegistrarPagamentoProvModal(p.id));
+  modal.querySelectorAll('[data-action="abrir-lancamento"]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const lanc = state.lancamentos.find(x=>x.id===el.dataset.id);
+      if(!lanc) return;
+      closeModal();
+      setTimeout(()=>openLancamentoModal(lanc.tipo, lanc), 50);
+    });
+  });
+}
+
+function openRegistrarPagamentoProvModal(provisionamentoId){
+  const p = (state.provisionamentos||[]).find(x=>x.id===provisionamentoId);
+  if(!p) return;
+  const meta = metaReservaProvisionamento(p);
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Registrar pagamento — ${escapeHTML(p.nome)}</h3>
+    <div class="note" style="margin-top:0;">Isso cria UM lançamento de despesa real e vincula ao provisionamento — não duplica nem cria reserva nova.</div>
+    <div class="field-row">
+      <div class="field"><label>Valor pago (R$)</label><input type="text" inputmode="decimal" id="pgValor" value="${meta}"></div>
+      <div class="field"><label>Data</label><input type="date" id="pgData" value="${todayISO()}"></div>
+    </div>
+    <div class="field"><label>Conta de pagamento</label>
+      <select id="pgConta">${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}" ${p.contaDestinoId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarPagamentoProv">Registrar pagamento</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnConfirmarPagamentoProv').addEventListener('click', ()=>{
+    const btnClick = document.getElementById('btnConfirmarPagamentoProv');
+    if(btnClick.disabled) return;
+    btnClick.disabled = true;
+    try{
+      const valor = numBR(document.getElementById('pgValor').value);
+      const data = document.getElementById('pgData').value || todayISO();
+      const contaId = document.getElementById('pgConta').value;
+      if(isNaN(valor) || valor<=0){ showToast('Preencha um valor válido'); return; }
+      if(!contaId){ showToast('Escolha a conta'); return; }
+      const novoId = uid();
+      state.lancamentos.push({
+        id: novoId, tipo:'saida', categoria: p.categoria || 'Outros', descricao: `Pagamento — ${p.nome}`,
+        valor, contaId, status:'pago', dataVencimento: data, dataPagamento: data,
+        observacao: `Pagamento vinculado ao provisionamento "${p.nome}"`, criadoEm: new Date().toISOString()
+      });
+      p.pagamentoLancamentoId = novoId;
+      p.atualizadoEm = new Date().toISOString();
+      registrarLog('Pagamento de provisionamento registrado', `"${p.nome}" — ${brl(valor)}`);
+      persist(); closeModal(); render();
+      showToast('Pagamento registrado e vinculado');
+    }finally{
+      const btnFim = document.getElementById('btnConfirmarPagamentoProv');
+      if(btnFim) btnFim.disabled = false;
+    }
+  });
+}
+
+function viewProvSimuladorAba(){
+  return `
+    <div class="panel">
+      <div class="panel-head"><h2>Simulador</h2></div>
+      <div class="note" style="margin-top:0;">Isso é só uma calculadora — nada aqui é salvo, a menos que você use "Aplicar num provisionamento" no final.</div>
+      <div class="field-row">
+        <div class="field"><label>Valor da despesa (R$)</label><input type="text" inputmode="decimal" id="simValor" value="1000"></div>
+        <div class="field"><label>Margem de segurança (%)</label><input type="text" inputmode="decimal" id="simMargem" value="0"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Já reservado (R$)</label><input type="text" inputmode="decimal" id="simReservado" value="0"></div>
+        <div class="field"><label>Vencimento</label><input type="date" id="simVencimento" value="${todayISO()}"></div>
+      </div>
+      <div id="simResultado" class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:14px;"></div>
+      <div class="field" style="margin-top:14px;">
+        <label>Aplicar num provisionamento existente (opcional)</label>
+        <select id="simAplicarEm">
+          <option value="">— nenhum, é só simulação —</option>
+          ${(state.provisionamentos||[]).filter(p=>p.status!=='arquivado').map(p=>`<option value="${p.id}">${escapeHTML(p.nome)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="modal-actions" style="justify-content:flex-start;">
+        <button class="btn ghost" id="btnAplicarSimulacao">Aplicar essa simulação no provisionamento escolhido</button>
+      </div>
+    </div>
+  `;
+}
+function calcularESimular(){
+  const valor = numBR(document.getElementById('simValor').value)||0;
+  const margem = numBR(document.getElementById('simMargem').value)||0;
+  const reservado = numBR(document.getElementById('simReservado').value)||0;
+  const vencimento = document.getElementById('simVencimento').value;
+  const meta = Math.round(valor*(1+margem/100)*100)/100;
+  const restante = Math.max(0, meta-reservado);
+  const mensal = reservaMensalNecessaria({ valorPrevisto:valor, margemSeguranca:margem, proximoVencimento:vencimento, id:'__sim__' });
+  // como '__sim__' nunca tem reserva real cadastrada, calculamos a reserva mensal manualmente aqui
+  // considerando o "já reservado" digitado, em vez de reusar a função (que buscaria reservas do id)
+  const meses = mesesAteVencimento(vencimento);
+  const mensalReal = restante<=0 ? 0 : (meses<=0 ? restante : Math.round((restante/meses)*100)/100);
+  const dataMeta = mensalReal>0 ? `~${Math.ceil(restante/mensalReal)} mes(es), no ritmo calculado` : 'já atingida';
+  document.getElementById('simResultado').innerHTML = `
+    <div class="card"><div class="label">Meta de reserva</div><div class="value mono" style="font-size:16px;">${brl(meta)}</div></div>
+    <div class="card"><div class="label">Falta reservar</div><div class="value mono ${restante>0?'neg':'pos'}" style="font-size:16px;">${brl(restante)}</div></div>
+    <div class="card"><div class="label">Reserva mensal necessária</div><div class="value mono" style="font-size:16px;">${brl(mensalReal)}</div></div>
+    <div class="card"><div class="label">Atinge a meta em</div><div class="value" style="font-size:14px;">${dataMeta}</div></div>
+  `;
+}
+function viewProvRelatoriosAba(ativos){
+  const hoje = todayISO();
+  const porCategoria = {};
+  ativos.forEach(x=>{
+    const cat = x.p.categoria||'Sem categoria';
+    if(!porCategoria[cat]) porCategoria[cat] = { meta:0, realizado:0 };
+    porCategoria[cat].meta += x.meta; porCategoria[cat].realizado += x.realizado;
+  });
+  const emRisco = ativos.filter(x=>x.status==='em_risco');
+  const vencidos = ativos.filter(x=>x.status==='vencido');
+  const proximos = [...ativos].filter(x=>x.p.proximoVencimento>=hoje).sort((a,b)=>a.p.proximoVencimento.localeCompare(b.p.proximoVencimento)).slice(0,8);
+  return `
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="panel-head"><h2>Planejado × Realizado por categoria</h2></div>
+      <div class="panel-body">
+        ${Object.entries(porCategoria).length ? Object.entries(porCategoria).map(([cat,v])=>`
+          <div class="ledger-row" style="grid-template-columns:1fr auto auto;">
+            <span>${escapeHTML(cat)}</span>
+            <span class="mono">${brl(v.realizado)} / ${brl(v.meta)}</span>
+            <span class="mono" style="color:var(--text-soft);">${v.meta>0?Math.round(v.realizado/v.meta*100):0}%</span>
+          </div>
+        `).join('') : `<div class="empty">Sem dados ainda.</div>`}
+      </div>
+    </div>
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="panel-head"><h2>Em risco (${emRisco.length}) e vencidos (${vencidos.length})</h2></div>
+      <div class="panel-body">
+        ${[...emRisco,...vencidos].length ? [...emRisco,...vencidos].map(x=>`
+          <div class="ledger-row" style="grid-template-columns:1fr auto;">
+            <span>${escapeHTML(x.p.nome)} <span style="color:${COR_STATUS_PROV[x.status]};font-size:11px;">(${ROTULO_STATUS_PROV[x.status]})</span></span>
+            <span class="mono neg">falta ${brl(Math.max(0,x.meta-x.realizado))}</span>
+          </div>
+        `).join('') : `<div class="empty">Nenhum em risco ou vencido. 🎉</div>`}
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Próximos vencimentos</h2></div>
+      <div class="panel-body">
+        ${proximos.length ? proximos.map(x=>`
+          <div class="ledger-row" style="grid-template-columns:1fr auto auto;">
+            <span>${escapeHTML(x.p.nome)}</span>
+            <span class="mono" style="color:var(--text-soft);">${fmtDate(x.p.proximoVencimento)}</span>
+            <span class="mono">${brl(x.meta)}</span>
+          </div>
+        `).join('') : `<div class="empty">Nenhum vencimento futuro cadastrado.</div>`}
+      </div>
+    </div>
+  `;
 }
 
 function viewDiagnosticoDados(){
