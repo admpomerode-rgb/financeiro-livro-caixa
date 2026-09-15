@@ -681,6 +681,9 @@
       </div>
       <div class="sub">Administração Financeira</div>
     </div>
+    <button id="btnAbrirBuscaGlobal" style="display:flex;align-items:center;gap:8px;width:calc(100% - 24px);margin:10px 12px 6px;padding:9px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bone);color:var(--text-soft);font-size:13px;cursor:pointer;text-align:left;">
+      🔍 Buscar...
+    </button>
     <nav class="nav" id="nav">
       <div class="nav-group" style="--group-accent:var(--blue-accent);">
         <div class="nav-section-label">Operacional</div>
@@ -696,19 +699,22 @@
         <div class="nav-item" data-view="comissoes" title="Comissões"><span class="nav-dot"></span><span class="nav-abbr">CM</span><span class="nav-label">Comissões</span></div>
         <div class="nav-item" data-view="vendas" title="Vendas"><span class="nav-dot"></span><span class="nav-abbr">VD</span><span class="nav-label">Vendas</span></div>
         <div class="nav-item" data-view="centros-custo" title="Centro de Custos"><span class="nav-dot"></span><span class="nav-abbr">CC</span><span class="nav-label">Centro de Custos</span></div>
+        <div class="nav-item" data-view="provisionamentos" title="Provisionamentos"><span class="nav-dot"></span><span class="nav-abbr">PV</span><span class="nav-label">Provisionamentos</span></div>
+        <div class="nav-item" data-view="recorrencias" title="Lançamentos Recorrentes"><span class="nav-dot"></span><span class="nav-abbr">RC</span><span class="nav-label">Recorrentes</span></div>
+        <div class="nav-item" data-view="metas" title="Metas de Reserva"><span class="nav-dot"></span><span class="nav-abbr">MT</span><span class="nav-label">Metas de Reserva</span></div>
+        <div class="nav-item" data-view="veiculos" title="Meus Carros"><span class="nav-dot"></span><span class="nav-abbr">MC</span><span class="nav-label">Meus Carros</span></div>
+        <div class="nav-item" data-view="orcamento" title="Orçamento e Planejamento"><span class="nav-dot"></span><span class="nav-abbr">OR</span><span class="nav-label">Orçamento e Planejamento</span></div>
+        <div class="nav-item" data-view="retiradas" title="Central de Retiradas"><span class="nav-dot"></span><span class="nav-abbr">RT</span><span class="nav-label">Central de Retiradas</span></div>
       </div>
       <div class="nav-group" style="--group-accent:var(--success);">
         <div class="nav-section-label">Análise</div>
         <div class="nav-item" data-view="relatorios" title="Relatórios"><span class="nav-dot"></span><span class="nav-abbr">RL</span><span class="nav-label">Relatórios</span></div>
-        <div class="nav-item" data-view="busca-global" title="Busca Global"><span class="nav-dot"></span><span class="nav-abbr">BG</span><span class="nav-label">Busca Global</span></div>
         <div class="nav-item" data-view="central-decisao" title="Central de Decisão"><span class="nav-dot"></span><span class="nav-abbr">CD</span><span class="nav-label">Central de Decisão</span></div>
-        <div class="nav-item" data-view="veiculos" title="Meus Carros"><span class="nav-dot"></span><span class="nav-abbr">MC</span><span class="nav-label">Meus Carros</span></div>
         <div class="nav-item" data-view="capex" title="Central de CAPEX"><span class="nav-dot"></span><span class="nav-abbr">CX</span><span class="nav-label">Central de CAPEX</span></div>
-        <div class="nav-item" data-view="retiradas" title="Central de Retiradas"><span class="nav-dot"></span><span class="nav-abbr">RT</span><span class="nav-label">Central de Retiradas</span></div>
         <div class="nav-item" data-view="pendencias" title="Central de Pendências"><span class="nav-dot"></span><span class="nav-abbr">PD</span><span class="nav-label">Central de Pendências</span></div>
         <div class="nav-item" data-view="navegacao-objetivo" title="O Que Você Quer Fazer?"><span class="nav-dot"></span><span class="nav-abbr">OB</span><span class="nav-label">O Que Você Quer Fazer?</span></div>
-        <div class="nav-item" data-view="orcamento" title="Orçamento e Planejamento"><span class="nav-dot"></span><span class="nav-abbr">OR</span><span class="nav-label">Orçamento e Planejamento</span></div>
         <div class="nav-item" data-view="simulacao" title="Simulação &quot;E Se&quot;"><span class="nav-dot"></span><span class="nav-abbr">SE</span><span class="nav-label">Simulação "E Se"</span></div>
+        <div class="nav-item" data-view="diagnostico-dados" title="Diagnóstico de Dados"><span class="nav-dot"></span><span class="nav-abbr">DD</span><span class="nav-label">Diagnóstico de Dados</span></div>
       </div>
       <div class="nav-group" style="--group-accent:#7B5CD6;">
         <div class="nav-section-label">Cadastros e Configurações</div>
@@ -716,10 +722,6 @@
         <div class="nav-item" data-view="fornecedores" title="Fornecedores"><span class="nav-dot"></span><span class="nav-abbr">FN</span><span class="nav-label">Fornecedores</span></div>
         <div class="nav-item" data-view="descricoes" title="Padronizar Descrições"><span class="nav-dot"></span><span class="nav-abbr">DS</span><span class="nav-label">Padronizar Descrições</span></div>
         <div class="nav-item" data-view="todos-lancamentos" title="Todos os Lançamentos"><span class="nav-dot"></span><span class="nav-abbr">TL</span><span class="nav-label">Todos os Lançamentos</span></div>
-        <div class="nav-item" data-view="diagnostico-dados" title="Diagnóstico de Dados"><span class="nav-dot"></span><span class="nav-abbr">DD</span><span class="nav-label">Diagnóstico de Dados</span></div>
-        <div class="nav-item" data-view="provisionamentos" title="Provisionamentos"><span class="nav-dot"></span><span class="nav-abbr">PV</span><span class="nav-label">Provisionamentos</span></div>
-        <div class="nav-item" data-view="recorrencias" title="Lançamentos Recorrentes"><span class="nav-dot"></span><span class="nav-abbr">RC</span><span class="nav-label">Recorrentes</span></div>
-        <div class="nav-item" data-view="metas" title="Metas de Reserva"><span class="nav-dot"></span><span class="nav-abbr">MT</span><span class="nav-label">Metas de Reserva</span></div>
         <div class="nav-item" data-view="integracoes" title="Central de Integrações"><span class="nav-dot"></span><span class="nav-abbr">IN</span><span class="nav-label">Central de Integrações</span></div>
         <div class="nav-item" data-view="configuracoes" title="Configurações do Sistema"><span class="nav-dot"></span><span class="nav-abbr">CF</span><span class="nav-label">Configurações</span></div>
       </div>
@@ -1154,10 +1156,12 @@ function encontrarCampoUndefined(obj, caminho){
 function limparUndefined(obj){
   return JSON.parse(JSON.stringify(obj));
 }
+let salvamentoEmAndamento = false;
 function salvarStateNoFirestore(){
   const campoRuim = encontrarCampoUndefined(state, '');
   if(campoRuim) console.warn('Campo com valor undefined encontrado em state (removido antes de salvar):', campoRuim);
-  return DOC_REF.set(limparUndefined(state));
+  salvamentoEmAndamento = true;
+  return DOC_REF.set(limparUndefined(state)).finally(()=>{ salvamentoEmAndamento = false; });
 }
 function persist(){
   clearTimeout(saveTimeout);
@@ -1170,14 +1174,22 @@ function persist(){
     });
   }, 500);
 }
-// Se a página for fechada ou recarregada (F5) enquanto ainda há uma gravação pendente pelo
-// debounce acima, força o salvamento imediato — sem isso, mudanças feitas nos últimos 500ms
-// podem nunca chegar a ser salvas, e o F5 as perde de verdade (elas nunca existiram no servidor).
-window.addEventListener('beforeunload', ()=>{
+// IMPORTANTE: o beforeunload NÃO consegue garantir que uma gravação assíncrona no Firestore
+// termine antes da página fechar de verdade — o navegador não espera Promise nenhuma aqui. Por
+// isso, em vez de só "tentar salvar e torcer", usamos o mecanismo padrão e confiável do próprio
+// navegador: se ainda tem gravação pendente ou em andamento, mostramos o aviso nativo "sair sem
+// salvar as alterações?" — isso SIM pausa o fechamento de verdade até você decidir, dando tempo
+// real pro salvamento terminar em segundo plano. Sem isso, um F5 rápido logo depois de cadastrar
+// algo podia perder o que acabou de ser criado (só existia na memória, nunca chegou no servidor).
+window.addEventListener('beforeunload', (e)=>{
   if(saveTimeoutPendente){
     clearTimeout(saveTimeout);
     saveTimeoutPendente = false;
-    salvarStateNoFirestore().catch(e=>console.error('Erro ao salvar no Firestore (beforeunload):', e));
+    salvarStateNoFirestore().catch(e2=>console.error('Erro ao salvar no Firestore (beforeunload):', e2));
+  }
+  if(saveTimeoutPendente || salvamentoEmAndamento){
+    e.preventDefault();
+    e.returnValue = '';
   }
 });
 
@@ -1598,6 +1610,7 @@ document.getElementById('btnToggleSidebar').addEventListener('click', ()=>{
   document.getElementById('btnToggleSidebar').title = collapsed ? 'Expandir menu' : 'Minimizar menu';
   atualizarInfoAcessosSistema();
 });
+document.getElementById('btnAbrirBuscaGlobal').addEventListener('click', ()=>abrirBuscaGlobalModal());
 
 /* ---------------- Seleção múltipla de lançamentos (estilo Bluecoins) ---------------- */
 let selecaoLancIds = new Set();
@@ -1708,16 +1721,16 @@ function moreItensDef(){
     { view:'retiradas', icone:'💸', nome:'Central de Retiradas', grupo:'Operacional' },
     { view:'pendencias', icone:'🔔', nome:'Central de Pendências', grupo:'Análise', badge:()=>state.lancamentos.filter(l=>l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento<todayISO()).length },
     { view:'navegacao-objetivo', icone:'🧭', nome:'O Que Você Quer Fazer?', grupo:'Análise' },
-    { view:'orcamento', icone:'🗂️', nome:'Orçamento e Planejamento', grupo:'Análise' },
+    { view:'orcamento', icone:'🗂️', nome:'Orçamento e Planejamento', grupo:'Operacional' },
     { view:'simulacao', icone:'🔮', nome:'Simulação "E Se"', grupo:'Análise' },
     { view:'categorias', icone:'🏷️', nome:'Categorias', grupo:'Cadastros e Configurações' },
     { view:'fornecedores', icone:'🚚', nome:'Fornecedores', grupo:'Cadastros e Configurações' },
     { view:'descricoes', icone:'📝', nome:'Padronizar Descrições', grupo:'Cadastros e Configurações' },
     { view:'todos-lancamentos', icone:'📜', nome:'Todos os Lançamentos', grupo:'Operacional' },
-    { view:'diagnostico-dados', icone:'🩺', nome:'Diagnóstico de Dados', grupo:'Cadastros e Configurações' },
+    { view:'diagnostico-dados', icone:'🩺', nome:'Diagnóstico de Dados', grupo:'Análise' },
     { view:'provisionamentos', icone:'🗓️', nome:'Provisionamentos', grupo:'Operacional' },
-    { view:'recorrencias', icone:'🔁', nome:'Recorrentes', grupo:'Cadastros e Configurações' },
-    { view:'metas', icone:'🎯', nome:'Metas de Reserva', grupo:'Cadastros e Configurações' },
+    { view:'recorrencias', icone:'🔁', nome:'Recorrentes', grupo:'Operacional' },
+    { view:'metas', icone:'🎯', nome:'Metas de Reserva', grupo:'Operacional' },
     { view:'integracoes', icone:'🔌', nome:'Central de Integrações', grupo:'Cadastros e Configurações', badge:()=>(state.vkAprovacoes||[]).length+(state.faturasPendentes||[]).length },
     { view:'configuracoes', icone:'⚙️', nome:'Configurações', grupo:'Cadastros e Configurações' },
   ];
@@ -1790,8 +1803,9 @@ document.getElementById('moreBusca').addEventListener('input', (e)=>renderMoreDr
 document.querySelector('.more-drawer-sheet').addEventListener('click', (e)=>{
   const item = e.target.closest('.more-item[data-view]');
   if(!item) return;
-  currentView = item.dataset.view;
   moreDrawer.classList.remove('open');
+  if(item.dataset.view==='busca-global'){ abrirBuscaGlobalModal(); return; }
+  currentView = item.dataset.view;
   render();
 });
 document.getElementById('btnBackupMobile').addEventListener('click', ()=>{
@@ -1870,7 +1884,6 @@ function render(){
   else if(currentView==='orcamentos-processos') main.innerHTML = viewOrcamentosProcessos();
   else if(currentView==='configuracoes') main.innerHTML = viewConfiguracoes();
   else if(currentView==='configuracao-detalhe') main.innerHTML = viewConfiguracaoDetalhe();
-  else if(currentView==='busca-global') main.innerHTML = viewBuscaGlobal();
   else if(currentView==='central-decisao') main.innerHTML = viewCentralDecisao();
   else if(currentView==='veiculos') main.innerHTML = viewVeiculos();
   else if(currentView==='veiculos-visao-geral') main.innerHTML = viewVeiculosVisaoGeral();
@@ -24974,27 +24987,6 @@ function attachViewHandlers(){
       bindReportInner();
     });
   });
-  const buscaGlobalInput = document.getElementById('buscaGlobalInput');
-  if(buscaGlobalInput){
-    const atualizarBuscaGlobal = ()=>{
-      buscaGlobalTermo = buscaGlobalInput.value;
-      const container = document.getElementById('buscaGlobalResultados');
-      container.innerHTML = montarResultadosBuscaGlobal();
-      container.querySelectorAll('[data-action="abrir-lancamento-busca"]').forEach(el=>{
-        el.addEventListener('click', ()=>{
-          const l = state.lancamentos.find(x=>x.id===el.dataset.id);
-          if(l) openLancamentoModal(l.tipo, l);
-        });
-      });
-      container.querySelectorAll('[data-action="ir-fornecedores"]').forEach(el=>el.addEventListener('click', ()=>{ currentView='fornecedores'; render(); }));
-      container.querySelectorAll('[data-action="ir-comissoes"]').forEach(el=>el.addEventListener('click', ()=>{ currentView='comissoes'; render(); }));
-      container.querySelectorAll('[data-action="ir-contas"]').forEach(el=>el.addEventListener('click', ()=>{ currentView='contas'; render(); }));
-      container.querySelectorAll('[data-action="ver-ativo-patrimonial"]').forEach(el=>{
-        el.addEventListener('click', ()=>{ ativoPatrimonialDetalheId = el.dataset.id; currentView='ativo-detalhe'; render(); });
-      });
-    };
-    buscaGlobalInput.addEventListener('input', atualizarBuscaGlobal);
-  }
   document.querySelectorAll('.limite-credito-cliente-input').forEach(inp=>{
     inp.addEventListener('change', ()=>{
       const valor = numBR(inp.value);
@@ -26346,12 +26338,49 @@ function viewCentralDecisao(){
   `;
 }
 
-function viewBuscaGlobal(){
-  return `
-    <div class="topbar"><div><h1>Busca Global</h1><p>Busque por pessoa, cliente ou fornecedor e ache tudo relacionado — lançamentos, contratos, ativos, comissões</p></div></div>
-    <input type="text" id="buscaGlobalInput" value="${escapeHTML(buscaGlobalTermo)}" placeholder="Digite um nome..." autofocus style="width:100%;padding:12px 14px;border:2px solid var(--blue-accent);border-radius:10px;font-size:15px;box-sizing:border-box;margin-bottom:16px;">
-    <div id="buscaGlobalResultados">${montarResultadosBuscaGlobal()}</div>
-  `;
+function abrirBuscaGlobalModal(){
+  const modal = document.getElementById('modalContent');
+  modal.className = 'modal modal-wide';
+  const render = ()=>{
+    modal.innerHTML = `
+      <h3>🔍 Busca Global</h3>
+      <p style="font-size:12.5px;color:var(--text-soft);margin-top:-8px;">Busque por pessoa, cliente ou fornecedor e ache tudo relacionado — lançamentos, contratos, ativos, comissões.</p>
+      <input type="text" id="buscaGlobalInput" value="${escapeHTML(buscaGlobalTermo)}" placeholder="Digite um nome..." style="width:100%;padding:12px 14px;border:2px solid var(--blue-accent);border-radius:10px;font-size:15px;box-sizing:border-box;margin:10px 0 16px;">
+      <div id="buscaGlobalResultados" style="max-height:55vh;overflow-y:auto;">${montarResultadosBuscaGlobal()}</div>
+      <div class="modal-actions"><button class="btn ghost" id="btnCancelarModal">Fechar</button></div>
+    `;
+    document.getElementById('modalOverlay').classList.add('open');
+    document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+    const input = document.getElementById('buscaGlobalInput');
+    const posCursor = input.value.length;
+    input.focus();
+    input.setSelectionRange(posCursor, posCursor);
+    input.addEventListener('input', (e)=>{
+      buscaGlobalTermo = e.target.value;
+      const posCursor2 = e.target.selectionStart;
+      const container = document.getElementById('buscaGlobalResultados');
+      container.innerHTML = montarResultadosBuscaGlobal();
+      wireResultadosBuscaGlobal(container);
+      document.getElementById('buscaGlobalInput').focus();
+      document.getElementById('buscaGlobalInput').setSelectionRange(posCursor2, posCursor2);
+    });
+    wireResultadosBuscaGlobal(document.getElementById('buscaGlobalResultados'));
+  };
+  render();
+}
+function wireResultadosBuscaGlobal(container){
+  container.querySelectorAll('[data-action="abrir-lancamento-busca"]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const l = state.lancamentos.find(x=>x.id===el.dataset.id);
+      if(l){ closeModal(); setTimeout(()=>openLancamentoModal(l.tipo, l), 50); }
+    });
+  });
+  container.querySelectorAll('[data-action="ir-fornecedores"]').forEach(el=>el.addEventListener('click', ()=>{ closeModal(); currentView='fornecedores'; render(); }));
+  container.querySelectorAll('[data-action="ir-comissoes"]').forEach(el=>el.addEventListener('click', ()=>{ closeModal(); currentView='comissoes'; render(); }));
+  container.querySelectorAll('[data-action="ir-contas"]').forEach(el=>el.addEventListener('click', ()=>{ closeModal(); currentView='contas'; render(); }));
+  container.querySelectorAll('[data-action="ver-ativo-patrimonial"]').forEach(el=>{
+    el.addEventListener('click', ()=>{ closeModal(); ativoPatrimonialDetalheId = el.dataset.id; currentView='ativo-detalhe'; render(); });
+  });
 }
 
 function montarResultadosBuscaGlobal(){
@@ -26539,9 +26568,22 @@ function diagnosticoDadosOrfaos(){
    Reserva PLANEJADA nunca mexe em conta/lançamento — é só intenção. Só a REALIZADA pode virar uma
    transferência de verdade (com confirmação), usando o mesmo mecanismo de transferência já existente. */
 
+function ocorrenciasPorAno(tipo){
+  return { 'Mensal':12, 'Bimestral':6, 'Trimestral':4, 'Semestral':2, 'Anual':1 }[tipo] || 1;
+}
+// Valor previsto "efetivo" de UMA ocorrência: se modoValor='dividido', os R$150 cadastrados são o
+// total do ano, repartido pelas ocorrências (ex: 150/12 = 12,50 por mês); se 'integral' (padrão),
+// os R$150 valem inteiros em cada vencimento (ex: 150 todo mês = 1.800/ano).
+function valorPrevistoEfetivo(p){
+  if(p.modoValor==='dividido'){
+    const n = ocorrenciasPorAno(p.tipo);
+    return Math.round(((p.valorPrevisto||0)/n)*100)/100;
+  }
+  return p.valorPrevisto||0;
+}
 function metaReservaProvisionamento(p){
   const margem = p.margemSeguranca || 0;
-  return Math.round((p.valorPrevisto||0) * (1 + margem/100) * 100) / 100;
+  return Math.round(valorPrevistoEfetivo(p) * (1 + margem/100) * 100) / 100;
 }
 function reservasDoProvisionamento(provisionamentoId, tipo){
   return (state.reservasProvisionamento||[]).filter(r=>r.provisionamentoId===provisionamentoId && (!tipo || r.tipo===tipo));
@@ -26705,7 +26747,7 @@ function viewProvMatrizAba(ativos){
     const ocorrencias = mesesOcorrenciaProvisionamento(x.p, ano);
     const porMes = meses.map((_,i)=>{
       const m = i+1;
-      const previsto = ocorrencias.includes(m) ? metaReservaProvisionamento(x.p)/ocorrencias.length : 0;
+      const previsto = ocorrencias.includes(m) ? metaReservaProvisionamento(x.p) : 0;
       const reservadoMes = reservasDoProvisionamento(x.p.id,'realizada').filter(r=>(r.mesReferencia||(r.data||'').slice(0,7))===`${ano}-${String(m).padStart(2,'0')}`).reduce((s,r)=>s+r.valor,0);
       const chave = `${ano}-${String(m).padStart(2,'0')}`;
       const vencido = previsto>0 && chave < todayISO().slice(0,7) && reservadoMes<previsto;
@@ -26770,7 +26812,10 @@ function viewProvMatrizAba(ativos){
               ${l.porMes.map(c=>{
                 if(!c.temValor) return `<td style="padding:8px;text-align:right;color:var(--line);">—</td>`;
                 const cor = c.coberto ? 'var(--success)' : c.vencido ? 'var(--danger)' : c.risco ? 'var(--warn)' : 'var(--ink)';
-                return `<td style="padding:8px;text-align:right;color:${cor};" title="Previsto ${brl(c.previsto)} · Reservado ${brl(c.reservadoMes)}">${brl(c.previsto)}</td>`;
+                return `<td style="padding:8px;text-align:right;color:${cor};">
+                  <div>${brl(c.previsto)}</div>
+                  ${c.reservadoMes>0 ? `<div style="font-size:9.5px;color:var(--text-soft);font-weight:400;">${c.coberto?'✓ ':''}${brl(c.reservadoMes)} reservado</div>` : ''}
+                </td>`;
               }).join('')}
               <td style="padding:8px;text-align:right;font-weight:700;">${brl(l.totalLinha)}</td>
             </tr>
@@ -26881,6 +26926,14 @@ function openProvisionamentoModal(existing){
       <div class="field"><label>Valor previsto (R$)</label><input type="text" inputmode="decimal" id="pvValor" value="${isEdit?existing.valorPrevisto:''}" placeholder="0,00"></div>
       <div class="field"><label>Margem de segurança (%, opcional)</label><input type="text" inputmode="decimal" id="pvMargem" value="${isEdit?(existing.margemSeguranca||''):''}" placeholder="0"></div>
     </div>
+    <div class="field">
+      <label>Esse valor se aplica como?</label>
+      <div class="toggle-row" id="pvModoValorToggle">
+        <button type="button" data-modo="integral" class="${(!isEdit || existing.modoValor!=='dividido')?'active':''}">Integral em cada vencimento</button>
+        <button type="button" data-modo="dividido" class="${isEdit && existing.modoValor==='dividido'?'active':''}">Dividir entre as ocorrências do ano</button>
+      </div>
+      <div class="note" id="pvModoValorNota" style="margin-top:6px;"></div>
+    </div>
     <div class="field-row">
       <div class="field"><label>Próximo vencimento</label><input type="date" id="pvVencimento" value="${isEdit?existing.proximoVencimento||'':''}"></div>
       <div class="field"><label>Data final (opcional)</label><input type="date" id="pvDataFim" value="${isEdit?existing.dataFim||'':''}"></div>
@@ -26899,6 +26952,28 @@ function openProvisionamentoModal(existing){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  let modoValorAtual = isEdit && existing.modoValor==='dividido' ? 'dividido' : 'integral';
+  const atualizarNotaModoValor = ()=>{
+    const valor = numBR(document.getElementById('pvValor').value)||0;
+    const tipo = document.getElementById('pvTipo').value;
+    const n = ocorrenciasPorAno(tipo);
+    const nota = document.getElementById('pvModoValorNota');
+    if(modoValorAtual==='dividido'){
+      nota.textContent = `Ex: ${brl(valor)} por ano ÷ ${n} ocorrência(s) = ${brl(n?valor/n:valor)} reservado por vencimento.`;
+    } else {
+      nota.textContent = `Ex: ${brl(valor)} inteiro(s) em cada vencimento (total do ano: ${brl(valor*n)}).`;
+    }
+  };
+  document.getElementById('pvModoValorToggle').addEventListener('click', (e)=>{
+    const btn = e.target.closest('button[data-modo]');
+    if(!btn) return;
+    modoValorAtual = btn.dataset.modo;
+    document.querySelectorAll('#pvModoValorToggle button').forEach(b=>b.classList.toggle('active', b===btn));
+    atualizarNotaModoValor();
+  });
+  document.getElementById('pvValor').addEventListener('input', atualizarNotaModoValor);
+  document.getElementById('pvTipo').addEventListener('change', atualizarNotaModoValor);
+  atualizarNotaModoValor();
   document.getElementById('btnSalvarProvisionamento').addEventListener('click', ()=>{
     const btnClick = document.getElementById('btnSalvarProvisionamento');
     if(btnClick.disabled) return;
@@ -26913,7 +26988,7 @@ function openProvisionamentoModal(existing){
       const payload = {
         nome, descricao: document.getElementById('pvDescricao').value.trim(),
         categoria: document.getElementById('pvCategoria').value || null,
-        tipo: document.getElementById('pvTipo').value,
+        tipo: document.getElementById('pvTipo').value, modoValor: modoValorAtual,
         valorPrevisto, margemSeguranca: numBR(document.getElementById('pvMargem').value)||0,
         proximoVencimento, dataFim: document.getElementById('pvDataFim').value || null,
         contaDestinoId: document.getElementById('pvContaDestino').value || null,
