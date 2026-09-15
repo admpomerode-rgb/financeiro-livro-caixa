@@ -26338,11 +26338,15 @@ function diagnosticoDadosOrfaos(){
     }
 
     // Categoria referenciada não existe mais no cadastro (categoria root, sem considerar subcategoria)
-    if(l.categoria){
+    // Transferência usa a categoria fixa "Transferência" de propósito — nunca fica cadastrada como
+    // categoria normal, então não faz sentido checar ela aqui (senão toda transferência vira "falso positivo").
+    if(l.origem==='transferencia'){
+      // nada a checar aqui pra transferência
+    } else if(l.categoria){
       const raiz = l.categoria.split(' / ')[0];
       const existe = l.tipo==='entrada' ? idsCategoriasEntrada.has(raiz) : idsCategoriasSaida.has(raiz);
       if(!existe) add('Categoria não existe mais no cadastro', 'media', l.id, `${rotulo} — categoria "${l.categoria}"`);
-    } else if(l.origem!=='transferencia'){
+    } else {
       add('Lançamento sem categoria', 'baixa', l.id, rotulo);
     }
 
