@@ -799,6 +799,7 @@
     <div class="more-drawer-grid" id="moreDrawerGrid"></div>
     <div class="more-scroll-fade"></div>
     <div class="more-drawer-footer">
+      <div id="acessosSistemaInfo" style="padding:8px 4px 4px;font-size:11px;color:var(--text-soft);border-top:1px solid var(--line);margin-bottom:6px;"></div>
       <button id="btnBackupMobile"><span class="footer-icon">⇅</span> Backup / Restaurar</button>
       <button id="btnSairMobile"><span class="footer-icon">⎋</span> Sair</button>
     </div>
@@ -1756,10 +1757,30 @@ document.getElementById('bottomNav').addEventListener('click', (e)=>{
   currentView = item.dataset.view;
   render();
 });
+function atualizarInfoAcessosSistema(){
+  const el = document.getElementById('acessosSistemaInfo');
+  if(!el) return;
+  const ac = state.acessos;
+  if(!ac || !ac.total){ el.innerHTML = ''; return; }
+  const fmtDuracao = (seg)=>{
+    if(!seg) return 'poucos segundos';
+    const min = Math.floor(seg/60);
+    if(min<1) return `${seg}s`;
+    if(min<60) return `${min} min`;
+    const h = Math.floor(min/60), m = min%60;
+    return `${h}h${m>0?' '+m+'min':''}`;
+  };
+  const ultimo = ac.ultimo;
+  el.innerHTML = `
+    <div>📊 <strong>${ac.total}</strong> acesso(s) ao sistema, ao todo</div>
+    ${ultimo ? `<div style="margin-top:3px;">🕑 Última sessão: ${fmtDate(ultimo.data)} às ${new Date(ultimo.data).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} · online por ${fmtDuracao(ultimo.duracaoSegundos)}</div>` : ''}
+  `;
+}
 document.getElementById('btnAbrirMais').addEventListener('click', ()=>{
   moreDrawer.classList.add('open');
   document.getElementById('moreBusca').value = '';
   renderMoreDrawerGrid('');
+  atualizarInfoAcessosSistema();
 });
 document.getElementById('btnFecharMais').addEventListener('click', ()=>moreDrawer.classList.remove('open'));
 moreDrawer.addEventListener('click', (e)=>{ if(e.target===moreDrawer) moreDrawer.classList.remove('open'); });
@@ -31602,6 +31623,35 @@ document.getElementById('fileImport').addEventListener('change', (e)=>{
 });
 
 /* ---------------- Autenticação / Init ---------------- */
+// Contador de acessos ao sistema (soma de todos os usuários, desde sempre — mora dentro do
+// mesmo documento compartilhado do state, por isso já soma todo mundo automaticamente) e registro
+// da última sessão (quem, quando, e por quanto tempo ficou online). A duração é uma ESTIMATIVA:
+// atualizada a cada minuto enquanto a aba está aberta, e mais uma vez ao fechar — não é um
+// cronômetro perfeito (ex: computador hiberna com a aba aberta ainda conta como "online").
+let sessaoIniciadaEm = null;
+let acessoHeartbeatInterval = null;
+function registrarAcessoSistema(){
+  if(!state.acessos) state.acessos = { total: 0, ultimo: null };
+  state.acessos.total = (state.acessos.total||0) + 1;
+  sessaoIniciadaEm = Date.now();
+  state.acessos.ultimo = {
+    usuario: auth.currentUser?.email || 'desconhecido',
+    data: new Date().toISOString(),
+    duracaoSegundos: 0
+  };
+  persist();
+  if(acessoHeartbeatInterval) clearInterval(acessoHeartbeatInterval);
+  acessoHeartbeatInterval = setInterval(()=>{
+    if(!sessaoIniciadaEm || !state.acessos?.ultimo) return;
+    state.acessos.ultimo.duracaoSegundos = Math.round((Date.now()-sessaoIniciadaEm)/1000);
+    persist();
+  }, 60000);
+}
+window.addEventListener('beforeunload', ()=>{
+  if(!sessaoIniciadaEm || !state.acessos?.ultimo) return;
+  state.acessos.ultimo.duracaoSegundos = Math.round((Date.now()-sessaoIniciadaEm)/1000);
+  salvarStateNoFirestore().catch(e=>console.error('Erro ao salvar registro de acesso ao fechar:', e));
+});
 let dadosCarregados = false;
 auth.onAuthStateChanged(async user=>{
   const loginOverlay = document.getElementById('loginOverlay');
@@ -31613,6 +31663,7 @@ auth.onAuthStateChanged(async user=>{
     try{
       state = await carregarDados();
       dadosCarregados = true;
+      registrarAcessoSistema();
       aplicarTemaCor(state.temaCor);
       aplicarModoEscuro(state.modoEscuro);
       initCalculadoraFlutuante();
