@@ -19896,7 +19896,7 @@ async function sincronizarProcessos(){
         : ativo.ocorrencias.some(o=>o.processoId===p.id && o.patrimonioSeq==null);
       if(jaImportado) return;
       ativo.ocorrencias.push({
-        id: uid(), processoId: p.id, processoNome: p.titulo || p.nome || '',
+        id: uid(), processoId: p.id, processoNome: p.title || '',
         texto: p.decisaoFinal, data: p.dataDecisao || todayISO(), origem: 'processo',
         patrimonioSeq: p.patrimonioVinculoSeq != null ? p.patrimonioVinculoSeq : null
       });
@@ -19905,12 +19905,12 @@ async function sincronizarProcessos(){
       // na ficha do ativo além de só registrar o histórico acima.
       if(p.patrimonioAcao === 'observacao'){
         ativo.emObservacao = {
-          motivo: p.decisaoFinal, processoId: p.id, processoNome: p.titulo || p.nome || '',
+          motivo: p.decisaoFinal, processoId: p.id, processoNome: p.title || '',
           data: p.dataDecisao || todayISO()
         };
       } else if(p.patrimonioAcao === 'sugerir_baixa'){
         ativo.sugestaoBaixa = {
-          motivo: p.decisaoFinal, processoId: p.id, processoNome: p.titulo || p.nome || '',
+          motivo: p.decisaoFinal, processoId: p.id, processoNome: p.title || '',
           data: p.dataDecisao || todayISO()
         };
       }
@@ -19928,7 +19928,7 @@ async function sincronizarProcessos(){
       if(jaLancado) return;
       state.lancamentos.push({
         id: uid(), tipo:'saida', categoria:'Fornecedores',
-        descricao: `${c.descricao || p.titulo || 'Compra'}${c.fornecedor ? ' — '+c.fornecedor : ''} (Livro de Processos${p.titulo ? ' — '+p.titulo : ''})`,
+        descricao: `${c.descricao || p.title || 'Compra'}${c.fornecedor ? ' — '+c.fornecedor : ''} (Livro de Processos${p.title ? ' — '+p.title : ''})`,
         valor: Number(c.valor)||0, status:'pendente',
         dataVencimento: c.data || todayISO(), contaId: null,
         numeroNota: c.notaFiscal || null,
@@ -19943,10 +19943,10 @@ async function sincronizarProcessos(){
         if(!jaNaFila && !jaVirouAtivo && !jaDispensado){
           state.comprasProcessosPendentes.push({
             id: uid(), processoId: p.id, compraSeq: c.seq,
-            nome: c.descricao || p.titulo || 'Ativo vindo de processo',
+            nome: c.descricao || p.title || 'Ativo vindo de processo',
             fornecedor: c.fornecedor || '', notaFiscal: c.notaFiscal || '',
             valorAquisicao: Number(c.valor)||0, dataAquisicao: c.data || todayISO(),
-            processoTitulo: p.titulo || '', orcamentoDocId: c.orcamentoDocId || null
+            processoTitulo: p.title || '', orcamentoDocId: c.orcamentoDocId || null
           });
         }
       }
@@ -28151,7 +28151,11 @@ async function buscarProcessosParaVincular(){
     if(!auth.currentUser) await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
     const db = processosFirebaseApp.firestore();
     const snap = await db.collection('processos').get({ source: 'server' });
-    return snap.docs.map(d=>({ id: d.id, titulo: d.data().titulo || d.data().nome || '(sem título)' }));
+    return snap.docs.map(d=>{
+      const p = d.data();
+      const numero = p.number ? `#${String(p.number).padStart(4,'0')} — ` : '';
+      return { id: d.id, titulo: `${numero}${p.title || '(sem título)'}` };
+    });
   }catch(e){
     console.error('Falha ao buscar processos pra vincular:', e);
     showToast('Não consegui buscar os processos — confira a conexão/configuração');
