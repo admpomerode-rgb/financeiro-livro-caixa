@@ -739,7 +739,6 @@
       <button type="button" data-novo="saida"><span class="dropdown-dot" style="background:var(--danger);"></span> Nova despesa</button>
       <button type="button" data-novo="recorrente"><span class="dropdown-dot" style="background:#7B5CD6;"></span> Despesa recorrente</button>
       <button type="button" data-novo="transferencia"><span class="dropdown-dot" style="background:var(--blue-accent);"></span> Transferência entre contas</button>
-      <button type="button" data-novo="deposito"><span class="dropdown-dot" style="background:#2E9E5B;"></span> 💵 Depósito em espécie</button>
       <button type="button" data-novo="investimento"><span class="dropdown-dot" style="background:var(--warn);"></span> Aplicação financeira</button>
       <button type="button" data-novo="qrnota"><span class="dropdown-dot" style="background:#00A884;"></span> 🧾 Ler nota fiscal (QR Code)</button>
       <button type="button" data-novo="notafiscalpdf"><span class="dropdown-dot" style="background:#3B6FE0;"></span> 📄 Importar nota fiscal (PDF/foto)</button>
@@ -21138,7 +21137,6 @@ function dropdownNovoHTML(){
         <button type="button" data-novo="saida"><span class="dropdown-dot" style="background:var(--danger);"></span> Nova despesa</button>
         <button type="button" data-novo="recorrente"><span class="dropdown-dot" style="background:#7B5CD6;"></span> Despesa recorrente</button>
         <button type="button" data-novo="transferencia" ${state.contas.length<2?'disabled title="Crie pelo menos 2 contas para transferir"':''}><span class="dropdown-dot" style="background:var(--blue-accent);"></span> Transferência entre contas</button>
-        <button type="button" data-novo="deposito"><span class="dropdown-dot" style="background:#2E9E5B;"></span> 💵 Depósito em espécie</button>
         <button type="button" data-novo="investimento"><span class="dropdown-dot" style="background:var(--warn);"></span> Aplicação financeira</button>
         <button type="button" data-novo="qrnota"><span class="dropdown-dot" style="background:#00A884;"></span> 🧾 Ler nota fiscal (QR Code)</button>
         <button type="button" data-novo="notafiscalpdf"><span class="dropdown-dot" style="background:#3B6FE0;"></span> 📄 Importar nota fiscal (PDF/foto)</button>
@@ -22319,7 +22317,6 @@ function attachViewHandlers(){
         setNovoMenuAberto(false);
         const novoTipo = btn.dataset.novo;
         if(novoTipo==='transferencia') openTransferenciaModal();
-        else if(novoTipo==='deposito') openDepositoModal();
         else if(novoTipo==='recorrente') openRecorrenciaModal();
         else if(novoTipo==='investimento') openEscolherContaInvestirModal();
         else if(novoTipo==='qrnota') openLerQRNotaModal();
@@ -28133,86 +28130,6 @@ function openContaModal(existing){
 // a origem é sempre a conta "Dinheiro em Espécie" — criada automaticamente na primeira vez que
 // for necessária. Um pagamento recebido em papel entra nessa conta como receita normal; o
 // Depósito é só o passo seguinte, de levar aquele dinheiro pra dentro do banco.
-function contaDinheiroEspecie(){
-  let conta = state.contas.find(c=>c.tipo==='especie');
-  if(!conta){
-    conta = { id: uid(), nome:'Dinheiro em Espécie', banco:'Caixa físico', tipo:'especie', saldoInicial:0, cor: CONTA_CORES[state.contas.length % CONTA_CORES.length] };
-    state.contas.push(conta);
-  }
-  return conta;
-}
-function openDepositoModal(){
-  const origem = contaDinheiroEspecie();
-  const contasBancarias = state.contas.filter(c=>c.id!==origem.id);
-  const modal = document.getElementById('modalContent');
-  modal.innerHTML = `
-    <h3>Depósito em espécie</h3>
-    <div class="note" style="margin-top:0;">Leva um valor que está em "${escapeHTML(origem.nome)}" pra dentro de uma conta bancária — funciona como uma transferência normal.</div>
-    <div class="field-row">
-      <div class="field">
-        <label>De (origem)</label>
-        <input type="text" value="${escapeHTML(origem.nome)}" disabled style="background:var(--bone);color:var(--text-soft);">
-      </div>
-      <div class="field">
-        <label>Para (conta bancária)</label>
-        <select id="dpConta">${contasBancarias.length ? contasBancarias.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('') : '<option value="">Cadastre uma conta bancária primeiro</option>'}</select>
-      </div>
-    </div>
-    <div class="field-row">
-      <div class="field">
-        <label>Valor (R$)</label>
-        <input type="text" inputmode="decimal" id="dpValor" placeholder="0,00">
-      </div>
-      <div class="field">
-        <label>Data</label>
-        <input type="date" id="dpData" value="${todayISO()}">
-      </div>
-    </div>
-    <div class="field">
-      <label>Descrição (opcional)</label>
-      <input type="text" id="dpDescricao" placeholder="Ex: Depósito do caixa da loja">
-    </div>
-    <div class="modal-actions">
-      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
-      <button class="btn" id="btnSalvarDeposito">Depositar</button>
-    </div>
-  `;
-  document.getElementById('modalOverlay').classList.add('open');
-  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  document.getElementById('btnSalvarDeposito').addEventListener('click', ()=>{
-    const btn_btnSalvarDeposito_Click = document.getElementById('btnSalvarDeposito');
-    if(btn_btnSalvarDeposito_Click.disabled) return;
-    btn_btnSalvarDeposito_Click.disabled = true;
-    try{
-    const destinoId = document.getElementById('dpConta').value;
-    const valor = numBR(document.getElementById('dpValor').value);
-    const data = document.getElementById('dpData').value;
-    const descricaoExtra = document.getElementById('dpDescricao').value.trim();
-    if(!destinoId){ showToast('Cadastre uma conta bancária primeiro'); return; }
-    if(isNaN(valor) || valor<=0){ showToast('Informe um valor válido'); return; }
-    if(!data){ showToast('Informe a data'); return; }
-    const nomeDestino = nomeConta(destinoId);
-    const base = descricaoExtra ? ' — ' + descricaoExtra : '';
-    const tid = uid();
-    state.lancamentos.push({
-      id: uid(), tipo:'saida', categoria:'Transferência', descricao:`Depósito para ${nomeDestino}${base}`,
-      valor, contaId: origem.id, status:'pago', dataVencimento: data, dataPagamento: data,
-      origem:'transferencia', transferenciaId: tid, criadoEm: new Date().toISOString()
-    });
-    state.lancamentos.push({
-      id: uid(), tipo:'entrada', categoria:'Transferência', descricao:`Depósito de ${origem.nome}${base}`,
-      valor, contaId: destinoId, status:'recebido', dataVencimento: data, dataPagamento: data,
-      origem:'transferencia', transferenciaId: tid, criadoEm: new Date().toISOString()
-    });
-    persist(); closeModal(); render();
-    showToast('Depósito realizado');
-  
-    }finally{
-      const btn_btnSalvarDeposito_Fim = document.getElementById('btnSalvarDeposito');
-      if(btn_btnSalvarDeposito_Fim) btn_btnSalvarDeposito_Fim.disabled = false;
-    }
-  });
-}
 function openTransferenciaModal(contaOrigemId, existingLancamento){
   const isEdit = !!existingLancamento;
   let parOrigem, parDestino;
@@ -28251,6 +28168,10 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
       <label>Descrição (opcional)</label>
       <input type="text" id="tDescricao" placeholder="Ex: Reforço de caixa da loja" value="${escapeHTML(descricaoExtraExistente)}">
     </div>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;font-size:13.5px;margin-top:10px;">
+      <input type="checkbox" id="tEhDeposito" style="width:17px;height:17px;" ${isEdit && parOrigem.descricao.startsWith('Depósito')?'checked':''}>
+      💵 É um depósito em espécie?
+    </label>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       <button class="btn" id="btnSalvarTransferencia">${isEdit ? 'Salvar' : 'Transferir'}</button>
@@ -28273,23 +28194,25 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
     if(!data){ showToast('Informe a data'); return; }
     const nomeOrigem = nomeConta(origemId), nomeDestino = nomeConta(destinoId);
     const base = descricaoExtra ? ' — ' + descricaoExtra : '';
+    const ehDeposito = document.getElementById('tEhDeposito').checked;
+    const palavra = ehDeposito ? 'Depósito' : 'Transferência';
     if(isEdit){
       parOrigem.contaId = origemId; parOrigem.valor = valor; parOrigem.dataVencimento = data; parOrigem.dataPagamento = data;
-      parOrigem.descricao = `Transferência para ${nomeDestino}${base}`;
+      parOrigem.descricao = `${palavra} para ${nomeDestino}${base}`;
       parDestino.contaId = destinoId; parDestino.valor = valor; parDestino.dataVencimento = data; parDestino.dataPagamento = data;
-      parDestino.descricao = `Transferência de ${nomeOrigem}${base}`;
+      parDestino.descricao = `${palavra} de ${nomeOrigem}${base}`;
       persist(); closeModal(); render();
       showToast('Transferência atualizada');
       return;
     }
     const tid = uid();
     state.lancamentos.push({
-      id: uid(), tipo:'saida', categoria:'Transferência', descricao:`Transferência para ${nomeDestino}${base}`,
+      id: uid(), tipo:'saida', categoria:'Transferência', descricao:`${palavra} para ${nomeDestino}${base}`,
       valor, contaId: origemId, status:'pago', dataVencimento: data, dataPagamento: data,
       origem:'transferencia', transferenciaId: tid, criadoEm: new Date().toISOString()
     });
     state.lancamentos.push({
-      id: uid(), tipo:'entrada', categoria:'Transferência', descricao:`Transferência de ${nomeOrigem}${base}`,
+      id: uid(), tipo:'entrada', categoria:'Transferência', descricao:`${palavra} de ${nomeOrigem}${base}`,
       valor, contaId: destinoId, status:'recebido', dataVencimento: data, dataPagamento: data,
       origem:'transferencia', transferenciaId: tid, criadoEm: new Date().toISOString()
     });
@@ -31318,7 +31241,6 @@ function avisoModal({ titulo, mensagem, explicacao='', tipo='aviso', textoConfir
         if(state.contas.length<2){ showToast('Crie pelo menos 2 contas pra transferir'); return; }
         openTransferenciaModal();
       }
-      else if(novoTipo==='deposito') openDepositoModal();
       else if(novoTipo==='recorrente') openRecorrenciaModal();
       else if(novoTipo==='investimento') openEscolherContaInvestirModal();
       else if(novoTipo==='qrnota') openLerQRNotaModal();
