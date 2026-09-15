@@ -724,6 +724,7 @@
       </div>
     </nav>
     <div class="sidebar-footer">
+      <div id="acessosSistemaInfo" style="padding:6px 4px 10px;font-size:11px;color:var(--text-soft);border-bottom:1px solid var(--line);margin-bottom:8px;"></div>
       <button id="btnAbrirCalcSidebar"><span class="footer-icon">🧮</span><span class="footer-label">Calculadora</span></button>
       <button id="btnBackup" style="margin-top:8px;"><span class="footer-icon">⇅</span><span class="footer-label">Backup / Restaurar</span></button>
       <button id="btnSair" style="margin-top:8px;"><span class="footer-icon">⎋</span><span class="footer-label">Sair</span></button>
@@ -799,7 +800,6 @@
     <div class="more-drawer-grid" id="moreDrawerGrid"></div>
     <div class="more-scroll-fade"></div>
     <div class="more-drawer-footer">
-      <div id="acessosSistemaInfo" style="padding:8px 4px 4px;font-size:11px;color:var(--text-soft);border-top:1px solid var(--line);margin-bottom:6px;"></div>
       <button id="btnBackupMobile"><span class="footer-icon">⇅</span> Backup / Restaurar</button>
       <button id="btnSairMobile"><span class="footer-icon">⎋</span> Sair</button>
     </div>
@@ -1595,6 +1595,7 @@ document.getElementById('btnToggleSidebar').addEventListener('click', ()=>{
   const collapsed = sidebarEl.classList.toggle('collapsed');
   localStorage.setItem(SIDEBAR_KEY, collapsed ? '1' : '0');
   document.getElementById('btnToggleSidebar').title = collapsed ? 'Expandir menu' : 'Minimizar menu';
+  atualizarInfoAcessosSistema();
 });
 
 /* ---------------- Seleção múltipla de lançamentos (estilo Bluecoins) ---------------- */
@@ -1780,7 +1781,6 @@ document.getElementById('btnAbrirMais').addEventListener('click', ()=>{
   moreDrawer.classList.add('open');
   document.getElementById('moreBusca').value = '';
   renderMoreDrawerGrid('');
-  atualizarInfoAcessosSistema();
 });
 document.getElementById('btnFecharMais').addEventListener('click', ()=>moreDrawer.classList.remove('open'));
 moreDrawer.addEventListener('click', (e)=>{ if(e.target===moreDrawer) moreDrawer.classList.remove('open'); });
@@ -26373,10 +26373,11 @@ function diagnosticoDadosOrfaos(){
     }
 
     // Categoria referenciada não existe mais no cadastro (categoria root, sem considerar subcategoria)
-    // Transferência usa a categoria fixa "Transferência" de propósito — nunca fica cadastrada como
-    // categoria normal, então não faz sentido checar ela aqui (senão toda transferência vira "falso positivo").
-    if(l.origem==='transferencia'){
-      // nada a checar aqui pra transferência
+    // Transferência usa a categoria fixa "Transferência", e movimento de capital de investimento
+    // (compra/venda/resgate de ativo) usa a categoria fixa "Investimentos" — as duas de propósito,
+    // nunca precisam estar cadastradas como categoria normal (senão vira "falso positivo" aqui).
+    if(l.origem==='transferencia' || (l.categoria==='Investimentos' && l.origem==='investimento')){
+      // nada a checar aqui — categoria fixa de propósito
     } else if(l.categoria){
       const raiz = l.categoria.split(' / ')[0];
       const existe = l.tipo==='entrada' ? idsCategoriasEntrada.has(raiz) : idsCategoriasSaida.has(raiz);
@@ -29928,7 +29929,7 @@ function publicarNotaCorretagem(nota){
   }
   if(totalVendas>0){
     state.lancamentos.push({
-      id: uid(), tipo:'entrada', categoria:'Outros',
+      id: uid(), tipo:'entrada', categoria:'Investimentos',
       descricao: `Venda de ativos${corretora ? ' — '+corretora : ''} (nota de corretagem)${sufixoNota}`,
       valor: Math.round(totalVendas*100)/100, contaId: contaBancariaId, status: statusEntrada,
       dataVencimento: dataDebito, dataPagamento,
@@ -31640,11 +31641,13 @@ function registrarAcessoSistema(){
     duracaoSegundos: 0
   };
   persist();
+  atualizarInfoAcessosSistema();
   if(acessoHeartbeatInterval) clearInterval(acessoHeartbeatInterval);
   acessoHeartbeatInterval = setInterval(()=>{
     if(!sessaoIniciadaEm || !state.acessos?.ultimo) return;
     state.acessos.ultimo.duracaoSegundos = Math.round((Date.now()-sessaoIniciadaEm)/1000);
     persist();
+    atualizarInfoAcessosSistema();
   }, 60000);
 }
 window.addEventListener('beforeunload', ()=>{
