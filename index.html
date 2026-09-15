@@ -716,6 +716,7 @@
         <div class="nav-item" data-view="fornecedores" title="Fornecedores"><span class="nav-dot"></span><span class="nav-abbr">FN</span><span class="nav-label">Fornecedores</span></div>
         <div class="nav-item" data-view="descricoes" title="Padronizar Descrições"><span class="nav-dot"></span><span class="nav-abbr">DS</span><span class="nav-label">Padronizar Descrições</span></div>
         <div class="nav-item" data-view="todos-lancamentos" title="Todos os Lançamentos"><span class="nav-dot"></span><span class="nav-abbr">TL</span><span class="nav-label">Todos os Lançamentos</span></div>
+        <div class="nav-item" data-view="diagnostico-dados" title="Diagnóstico de Dados"><span class="nav-dot"></span><span class="nav-abbr">DD</span><span class="nav-label">Diagnóstico de Dados</span></div>
         <div class="nav-item" data-view="recorrencias" title="Lançamentos Recorrentes"><span class="nav-dot"></span><span class="nav-abbr">RC</span><span class="nav-label">Recorrentes</span></div>
         <div class="nav-item" data-view="metas" title="Metas de Reserva"><span class="nav-dot"></span><span class="nav-abbr">MT</span><span class="nav-label">Metas de Reserva</span></div>
         <div class="nav-item" data-view="integracoes" title="Central de Integrações"><span class="nav-dot"></span><span class="nav-abbr">IN</span><span class="nav-label">Central de Integrações</span></div>
@@ -1711,6 +1712,7 @@ function moreItensDef(){
     { view:'fornecedores', icone:'🚚', nome:'Fornecedores', grupo:'Cadastros e Configurações' },
     { view:'descricoes', icone:'📝', nome:'Padronizar Descrições', grupo:'Cadastros e Configurações' },
     { view:'todos-lancamentos', icone:'📜', nome:'Todos os Lançamentos', grupo:'Operacional' },
+    { view:'diagnostico-dados', icone:'🩺', nome:'Diagnóstico de Dados', grupo:'Cadastros e Configurações' },
     { view:'recorrencias', icone:'🔁', nome:'Recorrentes', grupo:'Cadastros e Configurações' },
     { view:'metas', icone:'🎯', nome:'Metas de Reserva', grupo:'Cadastros e Configurações' },
     { view:'integracoes', icone:'🔌', nome:'Central de Integrações', grupo:'Cadastros e Configurações', badge:()=>(state.vkAprovacoes||[]).length+(state.faturasPendentes||[]).length },
@@ -1824,6 +1826,7 @@ function render(){
   else if(currentView==='descricoes') main.innerHTML = viewDescricoes();
   else if(currentView==='descricao-detalhe') main.innerHTML = viewDescricaoDetalhe();
   else if(currentView==='todos-lancamentos') main.innerHTML = viewTodosLancamentos();
+  else if(currentView==='diagnostico-dados') main.innerHTML = viewDiagnosticoDados();
   else if(currentView==='recorrencias') main.innerHTML = viewRecorrencias();
   else if(currentView==='metas') main.innerHTML = viewMetasReserva();
   else if(currentView==='simulacao') main.innerHTML = viewSimulacao();
@@ -1881,7 +1884,7 @@ function totaisRealizados(){
   return { entradas, saidas, saldo: entradas-saidas };
 }
 function totaisMesAtual(){
-  const now = new Date(); const ym = now.toISOString().slice(0,7);
+  const now = new Date(); const ym = todayISO().slice(0,7);
   let entradas=0, saidas=0;
   state.lancamentos.forEach(l=>{
     const ref = (l.dataPagamento || l.dataVencimento || '').slice(0,7);
@@ -1929,7 +1932,11 @@ function ultimaMovimentacaoConta(contaId){
   const eventos = movimentosRealizados().filter(ev=>ev.contaId===contaId).sort((a,b)=>(b.data||'').localeCompare(a.data||''));
   return eventos[0] || null;
 }
-function nomeConta(contaId){ return state.contas.find(c=>c.id===contaId)?.nome || 'Caixa'; }
+function nomeConta(contaId){
+  if(!contaId) return 'Caixa';
+  const conta = state.contas.find(c=>c.id===contaId);
+  return conta ? conta.nome : 'Conta removida';
+}
 function corConta(contaId){ return state.contas.find(c=>c.id===contaId)?.cor || CONTA_CORES[0]; }
 
 /* --- Cartões de crédito --- */
@@ -2232,6 +2239,10 @@ function openCentralAtualizacaoModal(){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnSalvarAtualizacoes').addEventListener('click', async ()=>{
+    const btn_btnSalvarAtualizacoes_Click = document.getElementById('btnSalvarAtualizacoes');
+    if(btn_btnSalvarAtualizacoes_Click.disabled) return;
+    btn_btnSalvarAtualizacoes_Click.disabled = true;
+    try{
     const dataPosicao = document.getElementById('atlzDataPosicao').value || todayISO();
     const observacao = document.getElementById('atlzObservacao').value.trim();
     const campos = [...document.querySelectorAll('.atlz-novo-valor')].filter(inp=>inp.value.trim()!=='');
@@ -2272,6 +2283,11 @@ function openCentralAtualizacaoModal(){
     });
     persist(); closeModal(); render();
     showToast(`${qtd} posição(ões) atualizada(s)`);
+  
+    }finally{
+      const btn_btnSalvarAtualizacoes_Fim = document.getElementById('btnSalvarAtualizacoes');
+      if(btn_btnSalvarAtualizacoes_Fim) btn_btnSalvarAtualizacoes_Fim.disabled = false;
+    }
   });
 }
 
@@ -4023,6 +4039,10 @@ function openDocumentoVeiculoModal(veiculoId, existing){
     persist(); closeModal(); render();
   });
   document.getElementById('btnSalvarDocumentoVeiculo').addEventListener('click', ()=>{
+    const btn_btnSalvarDocumentoVeiculo_Click = document.getElementById('btnSalvarDocumentoVeiculo');
+    if(btn_btnSalvarDocumentoVeiculo_Click.disabled) return;
+    btn_btnSalvarDocumentoVeiculo_Click.disabled = true;
+    try{
     const dados = {
       tipo: document.getElementById('dvTipo').value, descricao: document.getElementById('dvDescricao').value.trim(),
       vencimento: document.getElementById('dvVencimento').value || null, valor: numBR(document.getElementById('dvValor').value) || 0,
@@ -4032,6 +4052,11 @@ function openDocumentoVeiculoModal(veiculoId, existing){
     else { state.veiculoDocumentos.push({ id:uid(), veiculoId, ...dados }); }
     persist(); closeModal(); render();
     showToast(isEdit?'Documento atualizado':'Documento adicionado');
+  
+    }finally{
+      const btn_btnSalvarDocumentoVeiculo_Fim = document.getElementById('btnSalvarDocumentoVeiculo');
+      if(btn_btnSalvarDocumentoVeiculo_Fim) btn_btnSalvarDocumentoVeiculo_Fim.disabled = false;
+    }
   });
 }
 
@@ -5559,7 +5584,7 @@ function mesNavFiltroHTML(mesFiltro, idPrefix){
   const ehMesAtual = mesFiltro === todayISO().slice(0,7);
   return `
     <div class="mes-nav">
-      <button type="button" id="${idPrefix}Anterior" title="Mês anterior" ${ehMesAtual?'disabled style="opacity:.35;cursor:not-allowed;"':''}>‹</button>
+      <button type="button" id="${idPrefix}Anterior" title="Mês anterior">‹</button>
       <span class="mes-nav-label">${nomeMes}${ehMesAtual ? ' <span class="mes-nav-tag">atual</span>' : ''}</span>
       <button type="button" id="${idPrefix}Proximo" title="Próximo mês">›</button>
     </div>
@@ -5578,6 +5603,59 @@ function opcoesMesFiltroHTML(mesSelecionado){
 }
 
 let todosLancMesFiltro = todayISO().slice(0,7);
+function gerarTodosLancamentosPDF(dataDe, dataAte){
+  const docPdf = criarPDF();
+  const M = 18, W = 210 - M*2;
+  const INK=[11,15,20], SOFT=[91,100,114], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61];
+
+  const lista = state.lancamentos
+    .filter(l=>{ const d = l.dataPagamento||l.dataVencimento||''; return d>=dataDe && d<=dataAte; })
+    .sort((a,b)=>(a.dataPagamento||a.dataVencimento||'').localeCompare(b.dataPagamento||b.dataVencimento||''));
+  const totalEntrada = lista.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+l.valor,0);
+  const totalSaida = lista.filter(l=>l.tipo==='saida').reduce((s,l)=>s+l.valor,0);
+
+  const desenharCabecalhoTabelaTL = (yIni)=>{
+    let yy = yIni;
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10); docPdf.setTextColor(...SUCCESS);
+    docPdf.text('Total de Entradas', M, yy); docPdf.text(brl(totalEntrada), M+W, yy, { align:'right' }); yy += 6;
+    docPdf.setTextColor(...DANGER);
+    docPdf.text('Total de Saídas', M, yy); docPdf.text(brl(totalSaida), M+W, yy, { align:'right' }); yy += 6;
+    docPdf.setTextColor(...INK);
+    docPdf.text('Saldo do período', M, yy); docPdf.text(brl(totalEntrada-totalSaida), M+W, yy, { align:'right' }); yy += 5;
+    docPdf.setDrawColor(...LINEC); docPdf.line(M, yy, M+W, yy);
+    yy += 7;
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(8); docPdf.setTextColor(...SOFT);
+    docPdf.text('DATA', M, yy); docPdf.text('DESCRIÇÃO', M+22, yy); docPdf.text('CONTA', M+120, yy); docPdf.text('VALOR', M+W, yy, { align:'right' });
+    yy += 4;
+    docPdf.setDrawColor(...LINEC); docPdf.line(M, yy, M+W, yy);
+    yy += 5;
+    return yy;
+  };
+
+  let y = pdfCabecalho(docPdf, {
+    relatorio: 'Todos os Lançamentos',
+    subtitulo: `Período: ${fmtDate(dataDe)} até ${fmtDate(dataAte)} · ${lista.length} lançamento(s)`,
+    desenharCabecalhoTabela: desenharCabecalhoTabelaTL
+  });
+
+  lista.forEach(l=>{
+    y = pdfChecarQuebra(docPdf, y);
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...INK);
+    docPdf.text(fmtDate(l.dataPagamento||l.dataVencimento), M, y);
+    const desc = (l.descricao||'').length>42 ? l.descricao.slice(0,42)+'…' : (l.descricao||'');
+    docPdf.text(desc, M+22, y);
+    docPdf.setTextColor(...SOFT);
+    docPdf.text((nomeConta(l.contaId)||'—').slice(0,20), M+120, y);
+    docPdf.setTextColor(...(l.tipo==='entrada'?SUCCESS:DANGER));
+    docPdf.text(`${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}`, M+W, y, { align:'right' });
+    y += 5.5;
+  });
+
+  pdfNumerarPaginas(docPdf);
+  docPdf.save(`todos-os-lancamentos-${dataDe}-a-${dataAte}.pdf`);
+  showToast('PDF baixado');
+}
+
 function viewTodosLancamentos(){
   const hoje = todayISO();
   const dias = new Map();
@@ -5601,6 +5679,12 @@ function viewTodosLancamentos(){
     </div>
     <div class="panel" style="margin-bottom:14px;">
       <div class="filter-bar">${mesNavFiltroHTML(todosLancMesFiltro, 'todosLancMes')}</div>
+      <div class="filter-bar" style="align-items:flex-end;margin-top:10px;">
+        <div class="field" style="margin:0;max-width:130px;"><label style="font-size:10.5px;">De</label><input type="date" id="todosLancPdfDe" value="${todosLancMesFiltro}-01" style="padding:6px 8px;font-size:12px;"></div>
+        <div class="field" style="margin:0;max-width:130px;"><label style="font-size:10.5px;">Até</label><input type="date" id="todosLancPdfAte" value="${(()=>{const [a,m]=todosLancMesFiltro.split('-').map(Number); return `${todosLancMesFiltro}-${String(new Date(a,m,0).getDate()).padStart(2,'0')}`;})()}" style="padding:6px 8px;font-size:12px;"></div>
+        <button class="btn ghost sm" id="btnBaixarPdfTodosLanc">📄 Baixar PDF</button>
+      </div>
+      <div class="note" style="margin-top:8px;margin-bottom:0;">Por padrão baixa o mês inteiro que está sendo exibido — mude "De"/"Até" pra gerar um período diferente.</div>
     </div>
     <div class="panel">
       <div class="panel-body">
@@ -6581,6 +6665,10 @@ function openAdicionarOrcamentoModal(categoriaExistente){
     showToast('Categoria removida do orçamento');
   });
   document.getElementById('btnSalvarOrcamentoModal').addEventListener('click', ()=>{
+    const btn_btnSalvarOrcamentoModal_Click = document.getElementById('btnSalvarOrcamentoModal');
+    if(btn_btnSalvarOrcamentoModal_Click.disabled) return;
+    btn_btnSalvarOrcamentoModal_Click.disabled = true;
+    try{
     const cat = document.getElementById('orcCategoriaSelect').value;
     const valor = numBR(document.getElementById('orcValorInput').value);
     const alerta = parseInt(document.getElementById('orcAlertaInput').value) || 80;
@@ -6592,6 +6680,11 @@ function openAdicionarOrcamentoModal(categoriaExistente){
     state.orcamentoAlertaPct[cat] = alerta;
     persist(); closeModal(); render();
     showToast(isEdit ? 'Orçamento atualizado' : 'Categoria adicionada ao orçamento');
+  
+    }finally{
+      const btn_btnSalvarOrcamentoModal_Fim = document.getElementById('btnSalvarOrcamentoModal');
+      if(btn_btnSalvarOrcamentoModal_Fim) btn_btnSalvarOrcamentoModal_Fim.disabled = false;
+    }
   });
 }
 
@@ -6734,6 +6827,10 @@ function openCenarioModal(cenario){
     document.getElementById('modalOverlay').classList.add('open');
     document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
     document.getElementById('btnConfirmarCenario').addEventListener('click', ()=>{
+      const btnCenFuncClick = document.getElementById('btnConfirmarCenario');
+      if(btnCenFuncClick.disabled) return;
+      btnCenFuncClick.disabled = true;
+      try{
       const salario = numBR(document.getElementById('cenSalario').value);
       const encargos = numBR(document.getElementById('cenEncargos').value) || 0;
       if(isNaN(salario) || salario<=0){ showToast('Informe o salário'); return; }
@@ -6743,6 +6840,10 @@ function openCenarioModal(cenario){
       state.simulacaoAtual.push({ id:uid(), descricao:`Contratação — ${nome} (${brl(salario)} + ${encargos}% encargos)`, tipo:'saida', valor:Math.round(custoTotal*100)/100, data:document.getElementById('cenData').value||hoje, recorrente:true, parcelas:null });
       persist(); closeModal(); render();
       showToast('Cenário adicionado à simulação');
+      }finally{
+        const btnCenFuncFim = document.getElementById('btnConfirmarCenario');
+        if(btnCenFuncFim) btnCenFuncFim.disabled = false;
+      }
     });
   } else if(cenario==='faturamento' || cenario==='reajuste'){
     const mediaAtual = mediaReceitaMensalRecente();
@@ -6755,6 +6856,10 @@ function openCenarioModal(cenario){
     document.getElementById('modalOverlay').classList.add('open');
     document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
     document.getElementById('btnConfirmarCenario').addEventListener('click', ()=>{
+      const btnCenFatClick = document.getElementById('btnConfirmarCenario');
+      if(btnCenFatClick.disabled) return;
+      btnCenFatClick.disabled = true;
+      try{
       const variacaoPct = numBR(document.getElementById('cenVariacao').value);
       if(isNaN(variacaoPct) || variacaoPct===0){ showToast('Informe uma variação diferente de zero'); return; }
       if(mediaAtual<=0){ showToast('Não há receita recente suficiente pra calcular essa simulação'); return; }
@@ -6763,6 +6868,10 @@ function openCenarioModal(cenario){
       state.simulacaoAtual.push({ id:uid(), descricao:`${cenario==='reajuste'?'Reajuste de preço':'Variação de faturamento'} de ${variacaoPct>0?'+':''}${variacaoPct}%`, tipo: delta>=0?'entrada':'saida', valor:Math.round(Math.abs(delta)*100)/100, data:document.getElementById('cenData').value||hoje, recorrente:true, parcelas:null });
       persist(); closeModal(); render();
       showToast('Cenário adicionado à simulação');
+      }finally{
+        const btnCenFatFim = document.getElementById('btnConfirmarCenario');
+        if(btnCenFatFim) btnCenFatFim.disabled = false;
+      }
     });
   } else if(cenario==='maquina'){
     modal.innerHTML = `
@@ -6777,6 +6886,10 @@ function openCenarioModal(cenario){
     document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
     document.getElementById('cenForma').addEventListener('change', (e)=>{ document.getElementById('cenParcelasWrap').style.display = e.target.value==='parcelado'?'block':'none'; });
     document.getElementById('btnConfirmarCenario').addEventListener('click', ()=>{
+      const btnCenMaqClick = document.getElementById('btnConfirmarCenario');
+      if(btnCenMaqClick.disabled) return;
+      btnCenMaqClick.disabled = true;
+      try{
       const valor = numBR(document.getElementById('cenValor').value);
       if(isNaN(valor) || valor<=0){ showToast('Informe o valor'); return; }
       const parcelado = document.getElementById('cenForma').value==='parcelado';
@@ -6791,6 +6904,10 @@ function openCenarioModal(cenario){
       state.simulacaoAtual.push({ id:uid(), descricao:`Compra — ${nome}${parcelado?` (${parcelas}x)`:' (à vista)'}`, tipo:'saida', valor:valorItem, data:document.getElementById('cenData').value||hoje, recorrente:false, parcelas });
       persist(); closeModal(); render();
       showToast('Cenário adicionado à simulação');
+      }finally{
+        const btnCenMaqFim = document.getElementById('btnConfirmarCenario');
+        if(btnCenMaqFim) btnCenMaqFim.disabled = false;
+      }
     });
   } else if(cenario==='atraso'){
     modal.innerHTML = `
@@ -6802,6 +6919,10 @@ function openCenarioModal(cenario){
     document.getElementById('modalOverlay').classList.add('open');
     document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
     document.getElementById('btnConfirmarCenario').addEventListener('click', ()=>{
+      const btnCenAtrClick = document.getElementById('btnConfirmarCenario');
+      if(btnCenAtrClick.disabled) return;
+      btnCenAtrClick.disabled = true;
+      try{
       const valor = numBR(document.getElementById('cenValor').value);
       const dias = numBR(document.getElementById('cenDias').value);
       if(isNaN(valor) || valor<=0 || isNaN(dias) || dias<=0){ showToast('Preencha valor e dias de atraso'); return; }
@@ -6812,6 +6933,10 @@ function openCenarioModal(cenario){
       state.simulacaoAtual.push({ id:uid(), descricao:`Atraso de recebimento — recuperado ${mesesDeslocados} mês(es) depois`, tipo:'entrada', valor:Math.round(valor*100)/100, data:dataRecuperacao.toISOString().slice(0,10), recorrente:false, parcelas:null });
       persist(); closeModal(); render();
       showToast('Cenário adicionado à simulação');
+      }finally{
+        const btnCenAtrFim = document.getElementById('btnConfirmarCenario');
+        if(btnCenAtrFim) btnCenAtrFim.disabled = false;
+      }
     });
   }
 }
@@ -6870,6 +6995,10 @@ function openItemSimulacaoModal(){
     });
   });
   document.getElementById('btnSalvarItemSimulacao').addEventListener('click', ()=>{
+    const btn_btnSalvarItemSimulacao_Click = document.getElementById('btnSalvarItemSimulacao');
+    if(btn_btnSalvarItemSimulacao_Click.disabled) return;
+    btn_btnSalvarItemSimulacao_Click.disabled = true;
+    try{
     const descricao = document.getElementById('simDescricao').value.trim();
     const valor = numBR(document.getElementById('simValor').value);
     if(!descricao || isNaN(valor) || valor<=0){ showToast('Preencha descrição e valor válido'); return; }
@@ -6887,6 +7016,11 @@ function openItemSimulacaoModal(){
     });
     persist(); closeModal(); render();
     showToast('Item adicionado à simulação');
+  
+    }finally{
+      const btn_btnSalvarItemSimulacao_Fim = document.getElementById('btnSalvarItemSimulacao');
+      if(btn_btnSalvarItemSimulacao_Fim) btn_btnSalvarItemSimulacao_Fim.disabled = false;
+    }
   });
 }
 
@@ -8626,12 +8760,21 @@ function openImportarFaturaModal(cartaoId, faturaPendenteId){
   if(faturaEmRevisao){
     pintarItens();
     document.getElementById('btnSalvarFatura').addEventListener('click', ()=>{
+    const btn_btnSalvarFatura_Click = document.getElementById('btnSalvarFatura');
+    if(btn_btnSalvarFatura_Click.disabled) return;
+    btn_btnSalvarFatura_Click.disabled = true;
+    try{
       faturaEmRevisao.itens = lerItensDoDOM();
       faturaEmRevisao.atualizadoEm = new Date().toISOString();
       registrarLog('Fatura editada', `Fatura de ${cartaoAlvo.nome} atualizada (segue aguardando revisão)`);
       persist(); closeModal(); render();
       showToast('Alterações salvas — a fatura segue aguardando revisão');
-    });
+    
+    }finally{
+      const btn_btnSalvarFatura_Fim = document.getElementById('btnSalvarFatura');
+      if(btn_btnSalvarFatura_Fim) btn_btnSalvarFatura_Fim.disabled = false;
+    }
+  });
     document.getElementById('btnPublicarFatura').addEventListener('click', ()=>{
       faturaEmRevisao.itens = lerItensDoDOM();
       publicarFaturaCartao(faturaEmRevisao);
@@ -8672,6 +8815,10 @@ function openImportarFaturaModal(cartaoId, faturaPendenteId){
   });
 
   document.getElementById('btnConfirmarFatura').addEventListener('click', ()=>{
+    const btn_btnConfirmarFatura_Click = document.getElementById('btnConfirmarFatura');
+    if(btn_btnConfirmarFatura_Click.disabled) return;
+    btn_btnConfirmarFatura_Click.disabled = true;
+    try{
     const itens = lerItensDoDOM().filter(it=>it.descricao && it.valor);
     if(!itens.length){ showToast('Adicione ao menos um lançamento válido'); return; }
     if(!state.faturasPendentes) state.faturasPendentes = [];
@@ -8683,6 +8830,11 @@ function openImportarFaturaModal(cartaoId, faturaPendenteId){
     document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view==='cartoes'));
     render();
     showToast('Fatura salva — revise e publique no painel "Faturas aguardando revisão"');
+  
+    }finally{
+      const btn_btnConfirmarFatura_Fim = document.getElementById('btnConfirmarFatura');
+      if(btn_btnConfirmarFatura_Fim) btn_btnConfirmarFatura_Fim.disabled = false;
+    }
   });
 }
 
@@ -10983,11 +11135,11 @@ function renderRollingForecast(){
   const proximos12 = Array.from({length:12},(_,i)=>{
     const d = new Date(anoAtual, mesAtual-1+i, 1);
     const mesRef = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-    const jaFechado = mesRef < hoje.toISOString().slice(0,7);
-    if(jaFechado || (i===0 && mesRef===hoje.toISOString().slice(0,7))){
+    const jaFechado = mesRef < todayISO().slice(0,7);
+    if(jaFechado || (i===0 && mesRef===todayISO().slice(0,7))){
       // mês corrente ou já passado — usa o real, não projeta
       const real = resultadoOperacionalPeriodo(`${mesRef}-01`, `${mesRef}-31`);
-      return { mesRef, receita: real.receitaTotal, despesa: real.despesaTotal, projetado: i>0 ? false : (mesRef===hoje.toISOString().slice(0,7)) };
+      return { mesRef, receita: real.receitaTotal, despesa: real.despesaTotal, projetado: i>0 ? false : (mesRef===todayISO().slice(0,7)) };
     }
     const receitaProjetada = Math.max(0, receitaMedia + tendenciaReceita*i);
     const despesaProjetada = Math.max(0, despesaMedia + tendenciaDespesa*i);
@@ -11696,6 +11848,10 @@ function openEmprestimoModal(existing){
     persist(); closeModal(); render();
   });
   document.getElementById('btnSalvarEmprestimo').addEventListener('click', ()=>{
+    const btn_btnSalvarEmprestimo_Click = document.getElementById('btnSalvarEmprestimo');
+    if(btn_btnSalvarEmprestimo_Click.disabled) return;
+    btn_btnSalvarEmprestimo_Click.disabled = true;
+    try{
     const nome = document.getElementById('empNome').value.trim();
     const valorTotal = numBR(document.getElementById('empValorTotal').value);
     const valorParcela = numBR(document.getElementById('empValorParcela').value);
@@ -11712,6 +11868,11 @@ function openEmprestimoModal(existing){
     else state.emprestimos.push({ id: uid(), ...payload });
     persist(); closeModal(); render();
     showToast(isEdit?'Empréstimo atualizado':'Empréstimo cadastrado');
+  
+    }finally{
+      const btn_btnSalvarEmprestimo_Fim = document.getElementById('btnSalvarEmprestimo');
+      if(btn_btnSalvarEmprestimo_Fim) btn_btnSalvarEmprestimo_Fim.disabled = false;
+    }
   });
 }
 
@@ -17473,6 +17634,10 @@ function openProjetoCapexModal(existing){
     showToast('Projeto excluído');
   });
   document.getElementById('btnSalvarProjetoCapex').addEventListener('click', ()=>{
+    const btn_btnSalvarProjetoCapex_Click = document.getElementById('btnSalvarProjetoCapex');
+    if(btn_btnSalvarProjetoCapex_Click.disabled) return;
+    btn_btnSalvarProjetoCapex_Click.disabled = true;
+    try{
     const nome = document.getElementById('cpNome').value.trim();
     if(!nome){ showToast('Dê um nome ao projeto'); return; }
     const dados = {
@@ -17487,6 +17652,11 @@ function openProjetoCapexModal(existing){
     else { state.capexProjetos.push({ id:uid(), ...dados, criadoEm:new Date().toISOString() }); }
     persist(); closeModal(); render();
     showToast(isEdit?'Projeto atualizado':'Projeto criado');
+  
+    }finally{
+      const btn_btnSalvarProjetoCapex_Fim = document.getElementById('btnSalvarProjetoCapex');
+      if(btn_btnSalvarProjetoCapex_Fim) btn_btnSalvarProjetoCapex_Fim.disabled = false;
+    }
   });
 }
 
@@ -18018,6 +18188,10 @@ function openAtivoPatrimonialModal(existing, prefillPendente){
     });
   }
   document.getElementById('btnSalvarAtivoPatrimonial').addEventListener('click', ()=>{
+    const btn_btnSalvarAtivoPatrimonial_Click = document.getElementById('btnSalvarAtivoPatrimonial');
+    if(btn_btnSalvarAtivoPatrimonial_Click.disabled) return;
+    btn_btnSalvarAtivoPatrimonial_Click.disabled = true;
+    try{
     const nome = document.getElementById('apNome').value.trim();
     const categoria = document.getElementById('apCategoria').value;
     const numeroPatrimonio = document.getElementById('apNumeroPatrimonio').value.trim();
@@ -18067,6 +18241,11 @@ function openAtivoPatrimonialModal(existing, prefillPendente){
     }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Ativo atualizado' : 'Ativo cadastrado');
+  
+    }finally{
+      const btn_btnSalvarAtivoPatrimonial_Fim = document.getElementById('btnSalvarAtivoPatrimonial');
+      if(btn_btnSalvarAtivoPatrimonial_Fim) btn_btnSalvarAtivoPatrimonial_Fim.disabled = false;
+    }
   });
   if(isEdit){
     const btnExcluirModal = document.createElement('button');
@@ -18336,6 +18515,10 @@ function openReavaliacaoModal(ativo){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnSalvarReavaliacao').addEventListener('click', ()=>{
+    const btn_btnSalvarReavaliacao_Click = document.getElementById('btnSalvarReavaliacao');
+    if(btn_btnSalvarReavaliacao_Click.disabled) return;
+    btn_btnSalvarReavaliacao_Click.disabled = true;
+    try{
     const valorLaudo = numBR(document.getElementById('rvValor').value);
     const data = document.getElementById('rvData').value || todayISO();
     const observacao = document.getElementById('rvObs').value.trim();
@@ -18345,6 +18528,11 @@ function openReavaliacaoModal(ativo){
     registrarLog('Reavaliação de ativo registrada', `"${ativo.nome}" — novo valor ${brl(valorLaudo)}`);
     persist(); closeModal(); render();
     showToast('Reavaliação registrada');
+  
+    }finally{
+      const btn_btnSalvarReavaliacao_Fim = document.getElementById('btnSalvarReavaliacao');
+      if(btn_btnSalvarReavaliacao_Fim) btn_btnSalvarReavaliacao_Fim.disabled = false;
+    }
   });
 }
 
@@ -18402,6 +18590,10 @@ function openManutencaoModal(ativo){
   const chk = document.getElementById('mnDescontarConta');
   chk.addEventListener('change', ()=>{ document.getElementById('mnContaGrupo').style.display = chk.checked ? 'block' : 'none'; });
   document.getElementById('btnSalvarManutencao').addEventListener('click', ()=>{
+    const btn_btnSalvarManutencao_Click = document.getElementById('btnSalvarManutencao');
+    if(btn_btnSalvarManutencao_Click.disabled) return;
+    btn_btnSalvarManutencao_Click.disabled = true;
+    try{
     const descricao = document.getElementById('mnDescricao').value.trim();
     const data = document.getElementById('mnData').value || todayISO();
     const custoRaw = document.getElementById('mnCusto').value.trim();
@@ -18423,6 +18615,11 @@ function openManutencaoModal(ativo){
     }
     persist(); closeModal(); render();
     showToast('Manutenção registrada');
+  
+    }finally{
+      const btn_btnSalvarManutencao_Fim = document.getElementById('btnSalvarManutencao');
+      if(btn_btnSalvarManutencao_Fim) btn_btnSalvarManutencao_Fim.disabled = false;
+    }
   });
 }
 
@@ -18440,6 +18637,10 @@ function openOcorrenciaModal(ativo){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnSalvarOcorrencia').addEventListener('click', ()=>{
+    const btn_btnSalvarOcorrencia_Click = document.getElementById('btnSalvarOcorrencia');
+    if(btn_btnSalvarOcorrencia_Click.disabled) return;
+    btn_btnSalvarOcorrencia_Click.disabled = true;
+    try{
     const texto = document.getElementById('ocTexto').value.trim();
     const data = document.getElementById('ocData').value || todayISO();
     if(!texto){ showToast('Escreva o comentário'); return; }
@@ -18447,6 +18648,11 @@ function openOcorrenciaModal(ativo){
     ativo.ocorrencias.push({ id: uid(), texto, data, origem:'manual' });
     persist(); closeModal(); render();
     showToast('Ocorrência registrada');
+  
+    }finally{
+      const btn_btnSalvarOcorrencia_Fim = document.getElementById('btnSalvarOcorrencia');
+      if(btn_btnSalvarOcorrencia_Fim) btn_btnSalvarOcorrencia_Fim.disabled = false;
+    }
   });
 }
 
@@ -18491,6 +18697,10 @@ function openBaixaModal(ativo, prefill){
   const chkEntrada = document.getElementById('bxRegistrarEntrada');
   chkEntrada.addEventListener('change', ()=>{ document.getElementById('bxContaGrupo').style.display = chkEntrada.checked ? 'block' : 'none'; });
   document.getElementById('btnSalvarBaixa').addEventListener('click', async ()=>{
+    const btn_btnSalvarBaixa_Click = document.getElementById('btnSalvarBaixa');
+    if(btn_btnSalvarBaixa_Click.disabled) return;
+    btn_btnSalvarBaixa_Click.disabled = true;
+    try{
     const motivo = selMotivo.value;
     const data = document.getElementById('bxData').value || todayISO();
     const observacao = document.getElementById('bxObservacao').value.trim();
@@ -18512,6 +18722,11 @@ function openBaixaModal(ativo, prefill){
     }
     persist(); closeModal(); render();
     showToast('Baixa registrada');
+  
+    }finally{
+      const btn_btnSalvarBaixa_Fim = document.getElementById('btnSalvarBaixa');
+      if(btn_btnSalvarBaixa_Fim) btn_btnSalvarBaixa_Fim.disabled = false;
+    }
   });
 }
 
@@ -18667,15 +18882,24 @@ function openMesclarCategoriaModal(tipo, catId, catNome){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnConfirmarMesclar').addEventListener('click', ()=>{
+    const btn_btnConfirmarMesclar_Click = document.getElementById('btnConfirmarMesclar');
+    if(btn_btnConfirmarMesclar_Click.disabled) return;
+    btn_btnConfirmarMesclar_Click.disabled = true;
+    try{
     const destino = document.getElementById('mesclarDestino').value;
     const pertence = l => l.categoria===catNome || (l.categoria||'').startsWith(catNome+' / ');
     let movidos = 0;
     state.lancamentos.forEach(l=>{ if(l.tipo===tipo && pertence(l)){ l.categoria = destino; movidos++; } });
     state.comprasCartao.forEach(p=>{ if(tipo==='saida' && pertence(p)){ p.categoria = destino; movidos++; } });
-    state.categorias[tipo] = state.categorias[tipo].filter(c=>c.id!==catId);
+    state.categorias[tipo] = (state.categorias[tipo]||[]).filter(c=>c.id!==catId);
     registrarLog('Categorias mescladas', `"${catNome}" mesclada em "${destino}" — ${movidos} registro(s) movido(s)`);
     persist(); closeModal(); render();
     showToast(`"${catNome}" mesclada em "${destino}" (${movidos} registro(s) movido(s))`);
+  
+    }finally{
+      const btn_btnConfirmarMesclar_Fim = document.getElementById('btnConfirmarMesclar');
+      if(btn_btnConfirmarMesclar_Fim) btn_btnConfirmarMesclar_Fim.disabled = false;
+    }
   });
 }
 // Duplicar = cria uma categoria nova com a mesma cor/ícone/subcategorias (só a estrutura, sem
@@ -18685,6 +18909,7 @@ function duplicarCategoria(tipo, catId){
   if(!original) return;
   let nomeNovo = original.nome + ' (cópia)', i = 2;
   while(listaCategorias(tipo).some(c=>c.nome===nomeNovo)){ nomeNovo = `${original.nome} (cópia ${i})`; i++; }
+  if(!state.categorias[tipo]) state.categorias[tipo] = [];
   state.categorias[tipo].push({
     id: uid(), nome: nomeNovo, cor: original.cor, icone: original.icone,
     subcategorias: (original.subcategorias||[]).map(s=>({ id:uid(), nome:s.nome })),
@@ -19818,6 +20043,10 @@ function openAprovarOrcamentoModal(o, respostaAtual){
   `;
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnConfirmarAprovacaoOrc').addEventListener('click', ()=>{
+    const btn_btnConfirmarAprovacaoOrc_Click = document.getElementById('btnConfirmarAprovacaoOrc');
+    if(btn_btnConfirmarAprovacaoOrc_Click.disabled) return;
+    btn_btnConfirmarAprovacaoOrc_Click.disabled = true;
+    try{
     const loja = document.getElementById('apvLoja').value.trim();
     const descricao = document.getElementById('apvDescricao').value.trim();
     const valor = parseFloat(document.getElementById('apvValor').value.replace(',','.'))||0;
@@ -19827,6 +20056,11 @@ function openAprovarOrcamentoModal(o, respostaAtual){
       resposta: respostaAtual,
       detalhesCompra: { loja, descricao, valor, link }
     });
+  
+    }finally{
+      const btn_btnConfirmarAprovacaoOrc_Fim = document.getElementById('btnConfirmarAprovacaoOrc');
+      if(btn_btnConfirmarAprovacaoOrc_Fim) btn_btnConfirmarAprovacaoOrc_Fim.disabled = false;
+    }
   });
   document.getElementById('modalOverlay').classList.add('open');
 }
@@ -20021,6 +20255,10 @@ function openNovoOrcamentoManualModal(){
   document.getElementById('btnOrcManualAddItem').addEventListener('click', addLinha);
 
   document.getElementById('btnSalvarOrcamentoManual').addEventListener('click', ()=>{
+    const btn_btnSalvarOrcamentoManual_Click = document.getElementById('btnSalvarOrcamentoManual');
+    if(btn_btnSalvarOrcamentoManual_Click.disabled) return;
+    btn_btnSalvarOrcamentoManual_Click.disabled = true;
+    try{
     const linhas = [...itensWrap.querySelectorAll('.orc-manual-item-row')];
     const itens = linhas.map(l=>({
       descricao: l.querySelector('.orc-manual-item-desc').value.trim(),
@@ -20042,6 +20280,11 @@ function openNovoOrcamentoManualModal(){
     });
     persist(); closeModal(); render();
     showToast('Orçamento manual criado');
+  
+    }finally{
+      const btn_btnSalvarOrcamentoManual_Fim = document.getElementById('btnSalvarOrcamentoManual');
+      if(btn_btnSalvarOrcamentoManual_Fim) btn_btnSalvarOrcamentoManual_Fim.disabled = false;
+    }
   });
 }
 
@@ -20999,6 +21242,10 @@ function abrirQuitarModal(id){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnConfirmarQuitar').addEventListener('click', ()=>{
+    const btnQuitarClick = document.getElementById('btnConfirmarQuitar');
+    if(btnQuitarClick.disabled) return;
+    btnQuitarClick.disabled = true;
+    try{
     const valorInformado = numBR(document.getElementById('qtValor').value);
     const data = document.getElementById('qtData').value || todayISO();
     const contaId = document.getElementById('qtConta').value;
@@ -21023,6 +21270,10 @@ function abrirQuitarModal(id){
       persist(); closeModal(); render();
       showToast(`Registrado — restam ${brl(novaFalta)} pendente(s) nesse mesmo lançamento`);
       if(formaRecebimento==='pix' && l.origem==='vk' && l.vkPedidoId) avisarVKPedidoPagoPix(l.vkPedidoId);
+    }
+    }finally{
+      const btnQuitarFim = document.getElementById('btnConfirmarQuitar');
+      if(btnQuitarFim) btnQuitarFim.disabled = false;
     }
   });
 }
@@ -21110,6 +21361,10 @@ function openMarcarPagoLoteModal(lancs){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnConfirmarLotePago').addEventListener('click', ()=>{
+    const btnLoteClick = document.getElementById('btnConfirmarLotePago');
+    if(btnLoteClick.disabled) return;
+    btnLoteClick.disabled = true;
+    try{
     const data = document.getElementById('loteData').value || todayISO();
     const contaPadrao = document.getElementById('loteConta').value;
     lancs.forEach(l=>{
@@ -21124,6 +21379,10 @@ function openMarcarPagoLoteModal(lancs){
     registrarLog('Marcado como pago/recebido em lote', `${lancs.length} lançamento(s)`);
     limparSelecaoLanc(); persist(); closeModal(); render();
     showToast(`${lancs.length} lançamento(s) confirmado(s)`);
+    }finally{
+      const btnLoteFim = document.getElementById('btnConfirmarLotePago');
+      if(btnLoteFim) btnLoteFim.disabled = false;
+    }
   });
 }
 
@@ -21141,12 +21400,21 @@ function openAlterarDescricaoLoteModal(lancs){
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('loteDescricao').focus();
   document.getElementById('btnConfirmarLoteDesc').addEventListener('click', ()=>{
+    const btn_btnConfirmarLoteDesc_Click = document.getElementById('btnConfirmarLoteDesc');
+    if(btn_btnConfirmarLoteDesc_Click.disabled) return;
+    btn_btnConfirmarLoteDesc_Click.disabled = true;
+    try{
     const nova = document.getElementById('loteDescricao').value.trim();
     if(!nova){ showToast('Digite a nova descrição'); return; }
     lancs.forEach(l=>{ l.descricao = nova; });
     registrarLog('Descrição alterada em lote', `${lancs.length} lançamento(s) renomeado(s) para "${nova}"`);
     limparSelecaoLanc(); persist(); closeModal(); render();
     showToast(`Descrição alterada em ${lancs.length} lançamento(s)`);
+  
+    }finally{
+      const btn_btnConfirmarLoteDesc_Fim = document.getElementById('btnConfirmarLoteDesc');
+      if(btn_btnConfirmarLoteDesc_Fim) btn_btnConfirmarLoteDesc_Fim.disabled = false;
+    }
   });
 }
 
@@ -21162,12 +21430,21 @@ function openAlterarCategoriaLoteModal(lancs, tipo){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnConfirmarLoteCat').addEventListener('click', ()=>{
+    const btn_btnConfirmarLoteCat_Click = document.getElementById('btnConfirmarLoteCat');
+    if(btn_btnConfirmarLoteCat_Click.disabled) return;
+    btn_btnConfirmarLoteCat_Click.disabled = true;
+    try{
     const nova = document.getElementById('loteCategoria').value;
     let mudou = 0;
     lancs.forEach(l=>{ if(l.categoria!==nova){ l.categoria = nova; mudou++; } });
     registrarLog('Categoria alterada em lote', `${mudou} lançamento(s) movido(s) para "${nova}"`);
     limparSelecaoLanc(); persist(); closeModal(); render();
     showToast(mudou ? `Categoria alterada em ${mudou} lançamento(s)` : 'Os selecionados já estavam nessa categoria');
+  
+    }finally{
+      const btn_btnConfirmarLoteCat_Fim = document.getElementById('btnConfirmarLoteCat');
+      if(btn_btnConfirmarLoteCat_Fim) btn_btnConfirmarLoteCat_Fim.disabled = false;
+    }
   });
 }
 
@@ -21903,13 +22180,22 @@ function attachViewHandlers(){
       document.getElementById('cfgAprovAtivo')?.addEventListener('change', salvarAprovConfig);
       document.getElementById('cfgAprovLimite')?.addEventListener('change', salvarAprovConfig);
       document.getElementById('btnSalvarDashConfig')?.addEventListener('click', ()=>{
+    const btn_btnSalvarDashConfig_Click = document.getElementById('btnSalvarDashConfig');
+    if(btn_btnSalvarDashConfig_Click.disabled) return;
+    btn_btnSalvarDashConfig_Click.disabled = true;
+    try{
         const cidade = document.getElementById('cfgDashCidade').value.trim() || 'Pomerode';
         const ativos = document.getElementById('cfgDashAtivos').value.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean);
         const token = document.getElementById('cfgDashToken').value.trim();
         state.dashboardConfig = { cidade, ativos: ativos.length?ativos:['PETR4','VALE3','ITUB4'], brapiToken: token };
         persist();
         showToast('Configuração do widget salva — atualiza ao voltar pro Dashboard');
-      });
+      
+    }finally{
+      const btn_btnSalvarDashConfig_Fim = document.getElementById('btnSalvarDashConfig');
+      if(btn_btnSalvarDashConfig_Fim) btn_btnSalvarDashConfig_Fim.disabled = false;
+    }
+  });
       document.getElementById('cfgModoEscuro')?.addEventListener('change', (e)=>{
         state.modoEscuro = e.target.checked;
         aplicarModoEscuro(state.modoEscuro);
@@ -23177,7 +23463,9 @@ function attachViewHandlers(){
     });
   });
   document.getElementById('btnNovoMarcoLinhaTempo')?.addEventListener('click', ()=>openNovoMarcoModal());
-  document.getElementById('btnRegistrarFoto')?.addEventListener('click', ()=>registrarFotoFinanceiraAgora());
+  document.getElementById('btnRegistrarFoto')?.addEventListener('click', ()=>{
+    registrarFotoFinanceiraAgora();
+  });
   document.querySelectorAll('[data-action="excluir-foto-financeira"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       state.fotosFinanceiras = state.fotosFinanceiras.filter(f=>f.id!==btn.dataset.id);
@@ -23380,10 +23668,15 @@ function attachViewHandlers(){
   });
 
   // Todos os Lançamentos
+  document.getElementById('btnBaixarPdfTodosLanc')?.addEventListener('click', ()=>{
+    const dataDe = document.getElementById('todosLancPdfDe').value;
+    const dataAte = document.getElementById('todosLancPdfAte').value;
+    if(!dataDe || !dataAte){ showToast('Preencha as duas datas'); return; }
+    if(dataDe > dataAte){ showToast('A data "De" não pode ser depois da data "Até"'); return; }
+    gerarTodosLancamentosPDF(dataDe, dataAte);
+  });
   document.getElementById('todosLancMesAnterior')?.addEventListener('click', ()=>{
-    const anterior = mesFiltroSomado(todosLancMesFiltro, -1);
-    if(anterior < todayISO().slice(0,7)) return; // trava: não deixa voltar antes do mês atual
-    todosLancMesFiltro = anterior;
+    todosLancMesFiltro = mesFiltroSomado(todosLancMesFiltro, -1);
     render();
   });
   document.getElementById('todosLancMesProximo')?.addEventListener('click', ()=>{
@@ -23393,9 +23686,7 @@ function attachViewHandlers(){
 
   // Padronizar Descrições
   document.getElementById('descricoesMesAnterior')?.addEventListener('click', ()=>{
-    const anterior = mesFiltroSomado(descricoesMesFiltro, -1);
-    if(anterior < todayISO().slice(0,7)) return;
-    descricoesMesFiltro = anterior;
+    descricoesMesFiltro = mesFiltroSomado(descricoesMesFiltro, -1);
     render();
   });
   document.getElementById('descricoesMesProximo')?.addEventListener('click', ()=>{
@@ -23531,7 +23822,7 @@ function attachViewHandlers(){
               return;
             }
             if(!(await avisoModal({mensagem: `Excluir a categoria "${cat.nome}"${(cat.subcategorias||[]).length?' e suas subcategorias':''}?`, tipo:'perigo', textoConfirmar:'Excluir'}))) return;
-            state.categorias[tipo] = state.categorias[tipo].filter(c=>c.id!==id);
+            state.categorias[tipo] = (state.categorias[tipo]||[]).filter(c=>c.id!==id);
             persist(); paintCategorias(); showToast('Categoria excluída');
           } else if(acao==='editar-sub'){
             const cat = listaCategorias(btn.dataset.tipo).find(c=>c.id===btn.dataset.catId);
@@ -23896,9 +24187,18 @@ function attachViewHandlers(){
     });
     document.getElementById('btnDarBaixa')?.addEventListener('click', ()=>openBaixaModal(ativoDetalheAtual));
     document.getElementById('btnConfirmarSugestaoBaixa')?.addEventListener('click', ()=>{
+    const btn_btnConfirmarSugestaoBaixa_Click = document.getElementById('btnConfirmarSugestaoBaixa');
+    if(btn_btnConfirmarSugestaoBaixa_Click.disabled) return;
+    btn_btnConfirmarSugestaoBaixa_Click.disabled = true;
+    try{
       const s = ativoDetalheAtual.sugestaoBaixa;
       openBaixaModal(ativoDetalheAtual, { observacao: s ? s.motivo : '' });
-    });
+    
+    }finally{
+      const btn_btnConfirmarSugestaoBaixa_Fim = document.getElementById('btnConfirmarSugestaoBaixa');
+      if(btn_btnConfirmarSugestaoBaixa_Fim) btn_btnConfirmarSugestaoBaixa_Fim.disabled = false;
+    }
+  });
     document.getElementById('btnDescartarSugestaoBaixa')?.addEventListener('click', async ()=>{
       if(!(await avisoModal({mensagem: 'Descartar esta sugestão de baixa? O ativo continua ativo normalmente.', tipo:'perigo', textoConfirmar:'Confirmar'}))) return;
       ativoDetalheAtual.sugestaoBaixa = null;
@@ -25107,10 +25407,19 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     abrirQuitarModal(existing.id);
   });
   document.getElementById('btnAprovarDespesa')?.addEventListener('click', ()=>{
+    const btn_btnAprovarDespesa_Click = document.getElementById('btnAprovarDespesa');
+    if(btn_btnAprovarDespesa_Click.disabled) return;
+    btn_btnAprovarDespesa_Click.disabled = true;
+    try{
     existing.aprovacao = 'aprovada';
     registrarLog('Despesa aprovada', `"${existing.descricao}" — ${brl(existing.valor)} liberada para pagamento`);
     persist(); closeModal(); render();
     showToast('Despesa aprovada — agora pode ser paga normalmente');
+  
+    }finally{
+      const btn_btnAprovarDespesa_Fim = document.getElementById('btnAprovarDespesa');
+      if(btn_btnAprovarDespesa_Fim) btn_btnAprovarDespesa_Fim.disabled = false;
+    }
   });
   let comprovanteAtual = existing?.comprovanteFoto || null;
   document.getElementById('btnAnexarComprovante').addEventListener('click', ()=>document.getElementById('fComprovanteInput').click());
@@ -25294,6 +25603,28 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     const descricao = document.getElementById('fDescricao').value.trim() || categoria;
     const valor = valorTravado ? existing.valor : numBR(document.getElementById('fValor').value);
     if(!valor || isNaN(valor) || valor<=0){ showToast('Preencha um valor válido'); return; }
+
+    // Aviso de possível duplicidade: mesmo tipo, valor e descrição, lançado HOJE — não bloqueia,
+    // só avisa, porque pode ser coincidência real (duas vendas diferentes do mesmo valor, por
+    // exemplo). Só compara com o que foi criado hoje pra não incomodar em contas recorrentes que
+    // repetem todo mês com o mesmo valor.
+    if(!isEdit){
+      const hojeDupe = todayISO();
+      const possivelDuplicata = state.lancamentos.find(l=>
+        l.tipo===tipo && l.valor===valor &&
+        (l.descricao||'').trim().toLowerCase()===descricao.trim().toLowerCase() &&
+        (l.criadoEm||'').slice(0,10)===hojeDupe
+      );
+      if(possivelDuplicata){
+        const confirmarDuplicata = await avisoModal({
+          titulo: 'Isso pode já estar lançado',
+          mensagem: `Já existe um lançamento igual criado hoje: "${escapeHTML(possivelDuplicata.descricao)}" — ${brl(possivelDuplicata.valor)}.`,
+          explicacao: 'Se foi sem querer (ex: clicou duas vezes, ou esqueceu que já tinha lançado), cancele. Se são duas coisas diferentes que só coincidem em valor e nome, pode continuar normalmente.',
+          tipo: 'aviso', textoConfirmar: 'Lançar mesmo assim', textoCancelar: 'Cancelar'
+        });
+        if(!confirmarDuplicata) return;
+      }
+    }
 
     if(formaPagtoAtual==='cartao'){
       const cartaoId = document.getElementById('fCartaoSelect').value;
@@ -25723,6 +26054,10 @@ function openAcaoFinanceiraModal(existing){
     persist(); closeModal(); render();
   });
   document.getElementById('btnSalvarAcaoFinanceira').addEventListener('click', ()=>{
+    const btn_btnSalvarAcaoFinanceira_Click = document.getElementById('btnSalvarAcaoFinanceira');
+    if(btn_btnSalvarAcaoFinanceira_Click.disabled) return;
+    btn_btnSalvarAcaoFinanceira_Click.disabled = true;
+    try{
     const acao = document.getElementById('afAcao').value.trim();
     if(!acao){ showToast('Descreva a ação'); return; }
     const dados = {
@@ -25734,6 +26069,11 @@ function openAcaoFinanceiraModal(existing){
     else { state.acoesFinanceiras.push({ id:uid(), ...dados, origemRecomendacao:null, criadoEm:new Date().toISOString() }); }
     persist(); closeModal(); render();
     showToast(isEdit?'Ação atualizada':'Ação criada');
+  
+    }finally{
+      const btn_btnSalvarAcaoFinanceira_Fim = document.getElementById('btnSalvarAcaoFinanceira');
+      if(btn_btnSalvarAcaoFinanceira_Fim) btn_btnSalvarAcaoFinanceira_Fim.disabled = false;
+    }
   });
 }
 /* ====================== FIM CENTRAL DE AÇÕES ====================== */
@@ -25976,6 +26316,96 @@ function renomearDescricaoEmMassa(antiga, nova){
 
 let descricoesFiltro = '';
 let descricoesMesFiltro = todayISO().slice(0,7);
+// Diagnóstico de dados órfãos/inconsistentes (auditoria, item 9) — SÓ LEITURA. Não corrige nada
+// sozinho; apenas lista os problemas encontrados pra você decidir o que fazer com cada um.
+function diagnosticoDadosOrfaos(){
+  const problemas = [];
+  const add = (tipo, gravidade, id, descricao)=>problemas.push({ tipo, gravidade, id, descricao });
+
+  const idsContas = new Set(state.contas.map(c=>c.id));
+  const idsCategoriasEntrada = new Set(listaCategorias('entrada').map(c=>c.nome));
+  const idsCategoriasSaida = new Set(listaCategorias('saida').map(c=>c.nome));
+  const centrosValidos = new Set(state.centrosCusto||[]);
+
+  state.lancamentos.forEach(l=>{
+    const finalizado = l.status==='pago' || l.status==='recebido';
+    const rotulo = `${l.descricao||'(sem descrição)'} — ${brl(l.valor||0)}`;
+
+    // Conta inexistente ou ausente num lançamento já efetivado (dinheiro já saiu/entrou de algum lugar)
+    if(finalizado && l.origem!=='transferencia'){
+      if(!l.contaId) add('Lançamento efetivado sem conta', 'alta', l.id, rotulo);
+      else if(!idsContas.has(l.contaId)) add('Lançamento aponta pra conta que não existe mais', 'alta', l.id, `${rotulo} (contaId: ${l.contaId})`);
+    }
+
+    // Categoria referenciada não existe mais no cadastro (categoria root, sem considerar subcategoria)
+    if(l.categoria){
+      const raiz = l.categoria.split(' / ')[0];
+      const existe = l.tipo==='entrada' ? idsCategoriasEntrada.has(raiz) : idsCategoriasSaida.has(raiz);
+      if(!existe) add('Categoria não existe mais no cadastro', 'media', l.id, `${rotulo} — categoria "${l.categoria}"`);
+    } else if(l.origem!=='transferencia'){
+      add('Lançamento sem categoria', 'baixa', l.id, rotulo);
+    }
+
+    // Centro de custo referenciado não existe mais
+    if(l.centroCusto && centrosValidos.size && !centrosValidos.has(l.centroCusto)){
+      add('Centro de custo não existe mais no cadastro', 'baixa', l.id, `${rotulo} — centro "${l.centroCusto}"`);
+    }
+
+    // Valor inválido
+    if(l.valor===undefined || l.valor===null || isNaN(l.valor) || !isFinite(l.valor)){
+      add('Valor inválido (NaN/Infinity/ausente)', 'critica', l.id, rotulo);
+    } else if(l.valor<=0){
+      add('Valor zero ou negativo', 'media', l.id, rotulo);
+    }
+
+    // Pendente sem vencimento
+    if(l.status==='pendente' && !l.dataVencimento) add('Pendente sem data de vencimento', 'media', l.id, rotulo);
+    // Efetivado sem data de pagamento
+    if(finalizado && !l.dataPagamento) add('Efetivado sem data de pagamento/recebimento', 'media', l.id, rotulo);
+
+    // Transferência incompleta ou com origem = destino
+    if(l.origem==='transferencia'){
+      if(!l.contaId) add('Transferência sem conta definida', 'alta', l.id, rotulo);
+      if(l.contaDestinoId && l.contaDestinoId===l.contaId) add('Transferência com origem igual ao destino', 'critica', l.id, rotulo);
+    }
+
+    // Parcela (histórico de recebimento/pagamento) sem conta própria
+    (l.historicoRecebimentos||[]).forEach((h,i)=>{
+      if(!h.contaId) add('Parcela sem conta própria (usa fallback da conta do lançamento)', 'baixa', l.id, `${rotulo} — parcela #${i+1} de ${fmtDate(h.data)}`);
+      else if(!idsContas.has(h.contaId)) add('Parcela aponta pra conta que não existe mais', 'media', l.id, `${rotulo} — parcela #${i+1}`);
+    });
+
+    // Registro vindo do VK sem o identificador único (quebra a idempotência da sincronização)
+    if(l.origem==='vk' && !l.vkPedidoId) add('Lançamento do VK sem vkPedidoId (idempotência quebrada)', 'alta', l.id, rotulo);
+  });
+
+  return problemas;
+}
+
+function viewDiagnosticoDados(){
+  const problemas = diagnosticoDadosOrfaos();
+  const ordemGravidade = { critica:0, alta:1, media:2, baixa:3 };
+  const corGravidade = { critica:'var(--danger)', alta:'var(--danger)', media:'var(--warn)', baixa:'var(--text-soft)' };
+  const porTipo = new Map();
+  problemas.forEach(p=>{ if(!porTipo.has(p.tipo)) porTipo.set(p.tipo, []); porTipo.get(p.tipo).push(p); });
+  const tiposOrdenados = [...porTipo.entries()].sort((a,b)=>ordemGravidade[a[1][0].gravidade]-ordemGravidade[b[1][0].gravidade]);
+
+  return `
+    <div class="topbar">
+      <div><h1>Diagnóstico de Dados</h1><p>${problemas.length} situação(ões) encontrada(s) · isso só lista, não corrige nada sozinho</p></div>
+    </div>
+    ${!problemas.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum problema encontrado. 🎉</div></div>` : tiposOrdenados.map(([tipo, lista])=>`
+      <div class="panel" style="margin-bottom:14px;">
+        <div class="panel-head"><h2 style="color:${corGravidade[lista[0].gravidade]};">${tipo}</h2><span style="font-size:12px;color:var(--text-soft);">${lista.length} ocorrência(s) · gravidade: ${lista[0].gravidade}</span></div>
+        <div class="panel-body">
+          ${lista.slice(0,30).map(p=>`<div class="ledger-row compact" data-id="${p.id}" data-action="abrir-lancamento" style="grid-template-columns:1fr;cursor:pointer;"><span style="font-size:12.5px;">${escapeHTML(p.descricao)}</span></div>`).join('')}
+          ${lista.length>30 ? `<div class="empty">+ ${lista.length-30} outro(s), não exibido(s) aqui.</div>` : ''}
+        </div>
+      </div>
+    `).join('')}
+  `;
+}
+
 function viewDescricoes(){
   const todas = mapaDescricoes(descricoesMesFiltro).sort((a,b)=> Math.abs(b.liquido)-Math.abs(a.liquido) || a.texto.localeCompare(b.texto));
   const filtro = descricoesFiltro.toLowerCase();
@@ -26039,12 +26469,21 @@ function openRenomearDescricaoModal(textoAtual){
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('novaDescricaoInput').focus();
   document.getElementById('btnConfirmarRenomearDescricao').addEventListener('click', ()=>{
+    const btn_btnConfirmarRenomearDescricao_Click = document.getElementById('btnConfirmarRenomearDescricao');
+    if(btn_btnConfirmarRenomearDescricao_Click.disabled) return;
+    btn_btnConfirmarRenomearDescricao_Click.disabled = true;
+    try{
     const nova = document.getElementById('novaDescricaoInput').value.trim();
     if(!nova){ showToast('Digite a nova descrição'); return; }
     const afetados = renomearDescricaoEmMassa(textoAtual, nova);
     registrarLog('Descrição padronizada', `"${textoAtual}" → "${nova}" (${afetados} lançamento(s))`);
     persist(); closeModal(); render();
     showToast(`${afetados} lançamento(s) atualizado(s)`);
+  
+    }finally{
+      const btn_btnConfirmarRenomearDescricao_Fim = document.getElementById('btnConfirmarRenomearDescricao');
+      if(btn_btnConfirmarRenomearDescricao_Fim) btn_btnConfirmarRenomearDescricao_Fim.disabled = false;
+    }
   });
 }
 
@@ -26220,6 +26659,10 @@ function openFornecedorModal(existing){
     }
   });
   document.getElementById('btnSalvarFornecedor').addEventListener('click', ()=>{
+    const btn_btnSalvarFornecedor_Click = document.getElementById('btnSalvarFornecedor');
+    if(btn_btnSalvarFornecedor_Click.disabled) return;
+    btn_btnSalvarFornecedor_Click.disabled = true;
+    try{
     const nome = document.getElementById('fnNome').value.trim();
     if(!nome){ showToast('Digite o nome do fornecedor'); return; }
     if(!state.fornecedores) state.fornecedores = [];
@@ -26246,6 +26689,11 @@ function openFornecedorModal(existing){
     }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Fornecedor atualizado' : 'Fornecedor cadastrado');
+  
+    }finally{
+      const btn_btnSalvarFornecedor_Fim = document.getElementById('btnSalvarFornecedor');
+      if(btn_btnSalvarFornecedor_Fim) btn_btnSalvarFornecedor_Fim.disabled = false;
+    }
   });
 }
 
@@ -26416,6 +26864,10 @@ function openRecorrenciaModal(existing, contaPreSelecionadaId){
     });
   });
   document.getElementById('btnSalvarRecorrencia').addEventListener('click', ()=>{
+    const btn_btnSalvarRecorrencia_Click = document.getElementById('btnSalvarRecorrencia');
+    if(btn_btnSalvarRecorrencia_Click.disabled) return;
+    btn_btnSalvarRecorrencia_Click.disabled = true;
+    try{
     const descricao = document.getElementById('rcDescricao').value.trim();
     const valor = numBR(document.getElementById('rcValor').value);
     const diaVencimento = parseInt(document.getElementById('rcDia').value);
@@ -26434,6 +26886,11 @@ function openRecorrenciaModal(existing, contaPreSelecionadaId){
     gerarLancamentosRecorrentes();
     closeModal(); render();
     showToast(isEdit?'Recorrência atualizada':'Recorrência cadastrada');
+  
+    }finally{
+      const btn_btnSalvarRecorrencia_Fim = document.getElementById('btnSalvarRecorrencia');
+      if(btn_btnSalvarRecorrencia_Fim) btn_btnSalvarRecorrencia_Fim.disabled = false;
+    }
   });
 }
 
@@ -26603,6 +27060,10 @@ function openRetiradaModal(existing){
     showToast('Retirada excluída');
   });
   document.getElementById('btnSalvarRetirada').addEventListener('click', ()=>{
+    const btn_btnSalvarRetirada_Click = document.getElementById('btnSalvarRetirada');
+    if(btn_btnSalvarRetirada_Click.disabled) return;
+    btn_btnSalvarRetirada_Click.disabled = true;
+    try{
     const tipo = document.getElementById('rtTipo').value;
     const data = document.getElementById('rtData').value;
     const socioId = document.getElementById('rtSocio')?.value || null;
@@ -26624,6 +27085,11 @@ function openRetiradaModal(existing){
     }
     persist(); closeModal(); render();
     showToast(isEdit?'Retirada atualizada':'Retirada registrada');
+  
+    }finally{
+      const btn_btnSalvarRetirada_Fim = document.getElementById('btnSalvarRetirada');
+      if(btn_btnSalvarRetirada_Fim) btn_btnSalvarRetirada_Fim.disabled = false;
+    }
   });
 }
 /* ====================== FIM CENTRAL DE RETIRADAS ====================== */
@@ -26918,6 +27384,10 @@ function openOrcamentoCentroCustoModal(){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnSalvarOrcamentoCentroCusto').addEventListener('click', ()=>{
+    const btn_btnSalvarOrcamentoCentroCusto_Click = document.getElementById('btnSalvarOrcamentoCentroCusto');
+    if(btn_btnSalvarOrcamentoCentroCusto_Click.disabled) return;
+    btn_btnSalvarOrcamentoCentroCusto_Click.disabled = true;
+    try{
     const novo = {};
     document.querySelectorAll('.occ-input').forEach(inp=>{
       const v = numBR(inp.value);
@@ -26926,6 +27396,11 @@ function openOrcamentoCentroCustoModal(){
     state.orcamentoCentrosCusto = novo;
     persist(); closeModal(); render();
     showToast('Orçamentos salvos');
+  
+    }finally{
+      const btn_btnSalvarOrcamentoCentroCusto_Fim = document.getElementById('btnSalvarOrcamentoCentroCusto');
+      if(btn_btnSalvarOrcamentoCentroCusto_Fim) btn_btnSalvarOrcamentoCentroCusto_Fim.disabled = false;
+    }
   });
 }
 
@@ -27193,12 +27668,21 @@ function openSalvarCenarioLabModal(){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnConfirmarSalvarCenarioLab').addEventListener('click', ()=>{
+    const btn_btnConfirmarSalvarCenarioLab_Click = document.getElementById('btnConfirmarSalvarCenarioLab');
+    if(btn_btnConfirmarSalvarCenarioLab_Click.disabled) return;
+    btn_btnConfirmarSalvarCenarioLab_Click.disabled = true;
+    try{
     const nome = document.getElementById('cenarioLabNome').value.trim();
     if(!nome){ showToast('Dê um nome ao cenário'); return; }
     if(!state.cenariosLaboratorio) state.cenariosLaboratorio = [];
     state.cenariosLaboratorio.push({ id:uid(), nome, itens: JSON.parse(JSON.stringify(itensAtuais)), criadoEm: new Date().toISOString() });
     persist(); closeModal(); render();
     showToast('Cenário salvo');
+  
+    }finally{
+      const btn_btnConfirmarSalvarCenarioLab_Fim = document.getElementById('btnConfirmarSalvarCenarioLab');
+      if(btn_btnConfirmarSalvarCenarioLab_Fim) btn_btnConfirmarSalvarCenarioLab_Fim.disabled = false;
+    }
   });
 }
 
@@ -27215,6 +27699,10 @@ function openNovoMarcoModal(){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnConfirmarMarco').addEventListener('click', ()=>{
+    const btn_btnConfirmarMarco_Click = document.getElementById('btnConfirmarMarco');
+    if(btn_btnConfirmarMarco_Click.disabled) return;
+    btn_btnConfirmarMarco_Click.disabled = true;
+    try{
     const data = document.getElementById('marcoData').value;
     const descricao = document.getElementById('marcoDescricao').value.trim();
     if(!data || !descricao){ showToast('Preencha a data e a descrição'); return; }
@@ -27222,6 +27710,11 @@ function openNovoMarcoModal(){
     state.marcosLinhaTempo.push({ id:uid(), data, descricao });
     persist(); closeModal(); render();
     showToast('Marco registrado');
+  
+    }finally{
+      const btn_btnConfirmarMarco_Fim = document.getElementById('btnConfirmarMarco');
+      if(btn_btnConfirmarMarco_Fim) btn_btnConfirmarMarco_Fim.disabled = false;
+    }
   });
 }
 
@@ -27277,6 +27770,10 @@ function openNovaAutomacaoModal(){
   document.getElementById('autoTipo').addEventListener('change', renderCampos);
   renderCampos();
   document.getElementById('btnSalvarAutomacao').addEventListener('click', ()=>{
+    const btn_btnSalvarAutomacao_Click = document.getElementById('btnSalvarAutomacao');
+    if(btn_btnSalvarAutomacao_Click.disabled) return;
+    btn_btnSalvarAutomacao_Click.disabled = true;
+    try{
     const tipo = document.getElementById('autoTipo').value;
     let regra = { id:uid(), tipo, ativo:true };
     if(tipo==='separar_percentual_receita'){
@@ -27306,6 +27803,11 @@ function openNovaAutomacaoModal(){
     state.automacoes.push(regra);
     persist(); closeModal(); render();
     showToast('Automação criada');
+  
+    }finally{
+      const btn_btnSalvarAutomacao_Fim = document.getElementById('btnSalvarAutomacao');
+      if(btn_btnSalvarAutomacao_Fim) btn_btnSalvarAutomacao_Fim.disabled = false;
+    }
   });
 }
 
@@ -27323,6 +27825,10 @@ function openNovaDecisaoModal(){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnSalvarDecisao').addEventListener('click', ()=>{
+    const btn_btnSalvarDecisao_Click = document.getElementById('btnSalvarDecisao');
+    if(btn_btnSalvarDecisao_Click.disabled) return;
+    btn_btnSalvarDecisao_Click.disabled = true;
+    try{
     const titulo = document.getElementById('decTitulo').value.trim();
     const valorPrevisto = numBR(document.getElementById('decValorPrevisto').value);
     if(!titulo || isNaN(valorPrevisto) || valorPrevisto<=0){ showToast('Preencha título e valor previsto'); return; }
@@ -27330,6 +27836,11 @@ function openNovaDecisaoModal(){
     state.decisoesFinanceiras.push({ id:uid(), titulo, descricao:document.getElementById('decDescricao').value.trim(), valorPrevisto, valorRealizado:null, data:todayISO() });
     persist(); closeModal(); render();
     showToast('Decisão registrada');
+  
+    }finally{
+      const btn_btnSalvarDecisao_Fim = document.getElementById('btnSalvarDecisao');
+      if(btn_btnSalvarDecisao_Fim) btn_btnSalvarDecisao_Fim.disabled = false;
+    }
   });
 }
 function openRegistrarRealizadoDecisaoModal(id){
@@ -27347,11 +27858,20 @@ function openRegistrarRealizadoDecisaoModal(id){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnSalvarRealizado').addEventListener('click', ()=>{
+    const btn_btnSalvarRealizado_Click = document.getElementById('btnSalvarRealizado');
+    if(btn_btnSalvarRealizado_Click.disabled) return;
+    btn_btnSalvarRealizado_Click.disabled = true;
+    try{
     const valor = numBR(document.getElementById('decValorRealizado').value);
     if(isNaN(valor) || valor<0){ showToast('Informe um valor válido'); return; }
     d.valorRealizado = valor;
     persist(); closeModal(); render();
     showToast('Resultado registrado');
+  
+    }finally{
+      const btn_btnSalvarRealizado_Fim = document.getElementById('btnSalvarRealizado');
+      if(btn_btnSalvarRealizado_Fim) btn_btnSalvarRealizado_Fim.disabled = false;
+    }
   });
 }
 
@@ -27372,6 +27892,10 @@ function openMetasFinanceirasModal(){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnSalvarMetasFinanceiras').addEventListener('click', ()=>{
+    const btn_btnSalvarMetasFinanceiras_Click = document.getElementById('btnSalvarMetasFinanceiras');
+    if(btn_btnSalvarMetasFinanceiras_Click.disabled) return;
+    btn_btnSalvarMetasFinanceiras_Click.disabled = true;
+    try{
     state.metasFinanceirasMes = {
       faturamento: numBR(document.getElementById('mfFaturamento').value) || 0,
       lucro: numBR(document.getElementById('mfLucro').value) || 0,
@@ -27379,6 +27903,11 @@ function openMetasFinanceirasModal(){
     };
     persist(); closeModal(); render();
     showToast('Metas financeiras atualizadas');
+  
+    }finally{
+      const btn_btnSalvarMetasFinanceiras_Fim = document.getElementById('btnSalvarMetasFinanceiras');
+      if(btn_btnSalvarMetasFinanceiras_Fim) btn_btnSalvarMetasFinanceiras_Fim.disabled = false;
+    }
   });
 }
 
@@ -27428,6 +27957,10 @@ function openMetaModal(existing){
     document.getElementById('mtValorManualGrupo').style.display = mtConta.value ? 'none' : 'block';
   });
   document.getElementById('btnSalvarMeta').addEventListener('click', ()=>{
+    const btn_btnSalvarMeta_Click = document.getElementById('btnSalvarMeta');
+    if(btn_btnSalvarMeta_Click.disabled) return;
+    btn_btnSalvarMeta_Click.disabled = true;
+    try{
     const nome = document.getElementById('mtNome').value.trim();
     const valorAlvo = numBR(document.getElementById('mtValorAlvo').value);
     if(!nome || isNaN(valorAlvo) || valorAlvo<=0){ showToast('Preencha nome e valor alvo válido'); return; }
@@ -27446,6 +27979,11 @@ function openMetaModal(existing){
     else { state.metasReserva.push({ id: uid(), criadoEm: new Date().toISOString(), ...payload }); }
     persist(); closeModal(); render();
     showToast(isEdit?'Meta atualizada':'Meta cadastrada');
+  
+    }finally{
+      const btn_btnSalvarMeta_Fim = document.getElementById('btnSalvarMeta');
+      if(btn_btnSalvarMeta_Fim) btn_btnSalvarMeta_Fim.disabled = false;
+    }
   });
 }
 
@@ -27539,6 +28077,10 @@ function openContaModal(existing){
   paintBankPreview();
 
   document.getElementById('btnSalvarConta').addEventListener('click', ()=>{
+    const btn_btnSalvarConta_Click = document.getElementById('btnSalvarConta');
+    if(btn_btnSalvarConta_Click.disabled) return;
+    btn_btnSalvarConta_Click.disabled = true;
+    try{
     const nome = document.getElementById('cNome').value.trim();
     const saldoInicial = numBR(document.getElementById('cSaldo').value);
     if(!nome || isNaN(saldoInicial)){ showToast('Preencha nome e saldo inicial'); return; }
@@ -27556,6 +28098,11 @@ function openContaModal(existing){
     else { state.contas.push({ id: uid(), ...payload }); }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Conta atualizada' : 'Conta criada');
+  
+    }finally{
+      const btn_btnSalvarConta_Fim = document.getElementById('btnSalvarConta');
+      if(btn_btnSalvarConta_Fim) btn_btnSalvarConta_Fim.disabled = false;
+    }
   });
 }
 
@@ -27611,6 +28158,10 @@ function openDepositoModal(){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnSalvarDeposito').addEventListener('click', ()=>{
+    const btn_btnSalvarDeposito_Click = document.getElementById('btnSalvarDeposito');
+    if(btn_btnSalvarDeposito_Click.disabled) return;
+    btn_btnSalvarDeposito_Click.disabled = true;
+    try{
     const destinoId = document.getElementById('dpConta').value;
     const valor = numBR(document.getElementById('dpValor').value);
     const data = document.getElementById('dpData').value;
@@ -27633,6 +28184,11 @@ function openDepositoModal(){
     });
     persist(); closeModal(); render();
     showToast('Depósito realizado');
+  
+    }finally{
+      const btn_btnSalvarDeposito_Fim = document.getElementById('btnSalvarDeposito');
+      if(btn_btnSalvarDeposito_Fim) btn_btnSalvarDeposito_Fim.disabled = false;
+    }
   });
 }
 function openTransferenciaModal(contaOrigemId, existingLancamento){
@@ -27681,6 +28237,10 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnSalvarTransferencia').addEventListener('click', ()=>{
+    const btnTransfClick = document.getElementById('btnSalvarTransferencia');
+    if(btnTransfClick.disabled) return; // já está processando um clique anterior — ignora o segundo
+    btnTransfClick.disabled = true;
+    try{
     const origemId = document.getElementById('tOrigem').value;
     const destinoId = document.getElementById('tDestino').value;
     const valor = numBR(document.getElementById('tValor').value);
@@ -27713,6 +28273,10 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
     });
     persist(); closeModal(); render();
     showToast('Transferência realizada');
+    }finally{
+      const btnTransfFim = document.getElementById('btnSalvarTransferencia');
+      if(btnTransfFim) btnTransfFim.disabled = false;
+    }
   });
 }
 
@@ -27792,6 +28356,10 @@ function openVeiculoModal(existing){
     persist(); closeModal(); currentView='veiculos'; render();
   });
   document.getElementById('btnSalvarVeiculo').addEventListener('click', ()=>{
+    const btn_btnSalvarVeiculo_Click = document.getElementById('btnSalvarVeiculo');
+    if(btn_btnSalvarVeiculo_Click.disabled) return;
+    btn_btnSalvarVeiculo_Click.disabled = true;
+    try{
     const nome = document.getElementById('vcNome').value.trim();
     if(!nome){ showToast('Dê um apelido pro veículo'); return; }
     const dados = {
@@ -27824,6 +28392,11 @@ function openVeiculoModal(existing){
     else { const id = uid(); state.veiculos.push({ id, ...dados }); veiculoSelecionadoId = id; }
     persist(); closeModal(); currentView='veiculos'; render();
     showToast(isEdit?'Veículo atualizado':'Veículo cadastrado');
+  
+    }finally{
+      const btn_btnSalvarVeiculo_Fim = document.getElementById('btnSalvarVeiculo');
+      if(btn_btnSalvarVeiculo_Fim) btn_btnSalvarVeiculo_Fim.disabled = false;
+    }
   });
 }
 
@@ -27869,6 +28442,10 @@ function openAbastecimentoModal(veiculoId, existing){
     persist(); closeModal(); render();
   });
   document.getElementById('btnSalvarAbastecimento').addEventListener('click', ()=>{
+    const btn_btnSalvarAbastecimento_Click = document.getElementById('btnSalvarAbastecimento');
+    if(btn_btnSalvarAbastecimento_Click.disabled) return;
+    btn_btnSalvarAbastecimento_Click.disabled = true;
+    try{
     const data = document.getElementById('abData').value;
     const km = numBR(document.getElementById('abKm').value) || 0;
     const litros = numBR(document.getElementById('abLitros').value) || 0;
@@ -27890,6 +28467,11 @@ function openAbastecimentoModal(veiculoId, existing){
     }
     persist(); closeModal(); render();
     showToast(isEdit?'Abastecimento atualizado':'Abastecimento registrado');
+  
+    }finally{
+      const btn_btnSalvarAbastecimento_Fim = document.getElementById('btnSalvarAbastecimento');
+      if(btn_btnSalvarAbastecimento_Fim) btn_btnSalvarAbastecimento_Fim.disabled = false;
+    }
   });
 }
 
@@ -27934,6 +28516,10 @@ function openVeiculoRegistroModal(veiculoId, tipoRegistro, existing){
     persist(); closeModal(); render();
   });
   document.getElementById('btnSalvarRegistroVeiculo').addEventListener('click', ()=>{
+    const btn_btnSalvarRegistroVeiculo_Click = document.getElementById('btnSalvarRegistroVeiculo');
+    if(btn_btnSalvarRegistroVeiculo_Click.disabled) return;
+    btn_btnSalvarRegistroVeiculo_Click.disabled = true;
+    try{
     const data = document.getElementById('vrData').value;
     const descricao = document.getElementById('vrDescricao').value.trim();
     const valor = numBR(document.getElementById('vrValor').value) || 0;
@@ -27953,6 +28539,11 @@ function openVeiculoRegistroModal(veiculoId, tipoRegistro, existing){
     }
     persist(); closeModal(); render();
     showToast(isEdit?'Registro atualizado':'Registro salvo');
+  
+    }finally{
+      const btn_btnSalvarRegistroVeiculo_Fim = document.getElementById('btnSalvarRegistroVeiculo');
+      if(btn_btnSalvarRegistroVeiculo_Fim) btn_btnSalvarRegistroVeiculo_Fim.disabled = false;
+    }
   });
 }
 
@@ -27979,6 +28570,10 @@ function openLeituraModal(veiculoId, existing){
     persist(); closeModal(); render();
   });
   document.getElementById('btnSalvarLeitura').addEventListener('click', ()=>{
+    const btn_btnSalvarLeitura_Click = document.getElementById('btnSalvarLeitura');
+    if(btn_btnSalvarLeitura_Click.disabled) return;
+    btn_btnSalvarLeitura_Click.disabled = true;
+    try{
     const data = document.getElementById('ltData').value;
     const km = numBR(document.getElementById('ltKm').value) || 0;
     if(!data || km<=0){ showToast('Preencha a data e o km'); return; }
@@ -27986,6 +28581,11 @@ function openLeituraModal(veiculoId, existing){
     else { state.veiculoLeituras.push({ id:uid(), veiculoId, data, km }); }
     persist(); closeModal(); render();
     showToast('Leitura registrada');
+  
+    }finally{
+      const btn_btnSalvarLeitura_Fim = document.getElementById('btnSalvarLeitura');
+      if(btn_btnSalvarLeitura_Fim) btn_btnSalvarLeitura_Fim.disabled = false;
+    }
   });
 }
 
@@ -28024,6 +28624,10 @@ function openLembreteVeiculoModal(veiculoId, existing){
     persist(); closeModal(); render();
   });
   document.getElementById('btnSalvarLembreteVeiculo').addEventListener('click', ()=>{
+    const btn_btnSalvarLembreteVeiculo_Click = document.getElementById('btnSalvarLembreteVeiculo');
+    if(btn_btnSalvarLembreteVeiculo_Click.disabled) return;
+    btn_btnSalvarLembreteVeiculo_Click.disabled = true;
+    try{
     const descricao = document.getElementById('lbDescricao').value.trim();
     const tipo = document.getElementById('lbTipo').value;
     if(!descricao){ showToast('Descreva o lembrete'); return; }
@@ -28037,6 +28641,11 @@ function openLembreteVeiculoModal(veiculoId, existing){
     else { state.veiculoLembretes.push({ id:uid(), veiculoId, descricao, categoria, tipo, kmAlvo, dataAlvo, valor, ativo:true }); }
     persist(); closeModal(); render();
     showToast(isEdit?'Lembrete atualizado':'Lembrete criado');
+  
+    }finally{
+      const btn_btnSalvarLembreteVeiculo_Fim = document.getElementById('btnSalvarLembreteVeiculo');
+      if(btn_btnSalvarLembreteVeiculo_Fim) btn_btnSalvarLembreteVeiculo_Fim.disabled = false;
+    }
   });
 }
 
@@ -28142,6 +28751,10 @@ function openCartaoModal(existing){
     document.querySelectorAll('#ccCorPick span').forEach(s=>s.classList.toggle('sel', s.dataset.cor===corAtual));
   });
   document.getElementById('btnSalvarCartao').addEventListener('click', ()=>{
+    const btn_btnSalvarCartao_Click = document.getElementById('btnSalvarCartao');
+    if(btn_btnSalvarCartao_Click.disabled) return;
+    btn_btnSalvarCartao_Click.disabled = true;
+    try{
     const nome = document.getElementById('ccNome').value.trim();
     const limite = numBR(document.getElementById('ccLimite').value);
     const diaFechamento = parseInt(document.getElementById('ccFechamento').value);
@@ -28165,6 +28778,11 @@ function openCartaoModal(existing){
     else { state.cartoes.push({ id: uid(), ...payload }); }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Cartão atualizado' : 'Cartão criado');
+  
+    }finally{
+      const btn_btnSalvarCartao_Fim = document.getElementById('btnSalvarCartao');
+      if(btn_btnSalvarCartao_Fim) btn_btnSalvarCartao_Fim.disabled = false;
+    }
   });
 }
 
@@ -28243,6 +28861,10 @@ function openEditarCompraCartaoModal(compraId){
     document.getElementById('btnAnexarComprovanteEc').textContent = '📎 Anexar foto';
   });
   document.getElementById('btnSalvarEdicaoCompra').addEventListener('click', ()=>{
+    const btn_btnSalvarEdicaoCompra_Click = document.getElementById('btnSalvarEdicaoCompra');
+    if(btn_btnSalvarEdicaoCompra_Click.disabled) return;
+    btn_btnSalvarEdicaoCompra_Click.disabled = true;
+    try{
     const descricao = document.getElementById('ecDescricao').value.trim();
     const valor = numBR(document.getElementById('ecValor').value);
     const data = document.getElementById('ecData').value;
@@ -28256,6 +28878,11 @@ function openEditarCompraCartaoModal(compraId){
     if(novaCompetencia!==competenciaAntiga) sincronizarLancamentoAbertoFatura(p.cartaoId, novaCompetencia);
     persist(); closeModal(); render();
     showToast('Despesa atualizada');
+  
+    }finally{
+      const btn_btnSalvarEdicaoCompra_Fim = document.getElementById('btnSalvarEdicaoCompra');
+      if(btn_btnSalvarEdicaoCompra_Fim) btn_btnSalvarEdicaoCompra_Fim.disabled = false;
+    }
   });
 }
 
@@ -28306,6 +28933,10 @@ function openCompraCartaoModal(cartaoId){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnSalvarCompra').addEventListener('click', ()=>{
+    const btn_btnSalvarCompra_Click = document.getElementById('btnSalvarCompra');
+    if(btn_btnSalvarCompra_Click.disabled) return;
+    btn_btnSalvarCompra_Click.disabled = true;
+    try{
     const descricao = document.getElementById('pcDescricao').value.trim();
     const valorTotal = numBR(document.getElementById('pcValor').value);
     const data = document.getElementById('pcData').value;
@@ -28330,6 +28961,11 @@ function openCompraCartaoModal(cartaoId){
     persist(); closeModal(); render();
     const avisoLimite = checarLimiteCategoria(cartaoId, [...competenciasAfetadas][0], categoria);
     showToast(avisoLimite || (parcelas>1 ? `Compra lançada em ${parcelas}x` : 'Compra lançada'));
+  
+    }finally{
+      const btn_btnSalvarCompra_Fim = document.getElementById('btnSalvarCompra');
+      if(btn_btnSalvarCompra_Fim) btn_btnSalvarCompra_Fim.disabled = false;
+    }
   });
 }
 
@@ -28361,6 +28997,10 @@ function openTransformarContaSubcontaModal(contaId){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnConfirmarTransformar').addEventListener('click', ()=>{
+    const btn_btnConfirmarTransformar_Click = document.getElementById('btnConfirmarTransformar');
+    if(btn_btnConfirmarTransformar_Click.disabled) return;
+    btn_btnConfirmarTransformar_Click.disabled = true;
+    try{
     let contaDestinoId = document.getElementById('tcsContaDestino').value;
     const nomeSubconta = document.getElementById('tcsNomeSubconta').value.trim() || conta.nome;
     if(contaDestinoId==='__nova__'){
@@ -28384,6 +29024,11 @@ function openTransformarContaSubcontaModal(contaId){
     currentView = 'ativos-inv'; invContaId = contaDestinoId;
     render();
     showToast(`Pronto — "${nomeSubconta}" agora é uma subconta dentro de "${contaDestino.nome}"`);
+  
+    }finally{
+      const btn_btnConfirmarTransformar_Fim = document.getElementById('btnConfirmarTransformar');
+      if(btn_btnConfirmarTransformar_Fim) btn_btnConfirmarTransformar_Fim.disabled = false;
+    }
   });
 }
 
@@ -28401,10 +29046,19 @@ function openMetaInvestimentoModal(){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnSalvarMetaInv').addEventListener('click', ()=>{
+    const btn_btnSalvarMetaInv_Click = document.getElementById('btnSalvarMetaInv');
+    if(btn_btnSalvarMetaInv_Click.disabled) return;
+    btn_btnSalvarMetaInv_Click.disabled = true;
+    try{
     const valor = numBR(document.getElementById('metaInvValor').value) || 0;
     state.metaInvestimento = valor;
     persist(); closeModal(); render();
     showToast(valor>0 ? 'Meta definida' : 'Meta removida');
+  
+    }finally{
+      const btn_btnSalvarMetaInv_Fim = document.getElementById('btnSalvarMetaInv');
+      if(btn_btnSalvarMetaInv_Fim) btn_btnSalvarMetaInv_Fim.disabled = false;
+    }
   });
 }
 
@@ -28518,6 +29172,10 @@ function openContaInvestimentoModal(existing){
   }
   syncOutro();
   document.getElementById('btnSalvarContaInv').addEventListener('click', ()=>{
+    const btn_btnSalvarContaInv_Click = document.getElementById('btnSalvarContaInv');
+    if(btn_btnSalvarContaInv_Click.disabled) return;
+    btn_btnSalvarContaInv_Click.disabled = true;
+    try{
     const nome = document.getElementById('ciNome').value.trim();
     if(!nome){ showToast('Informe o nome da conta'); return; }
     const opt = instSelect.options[instSelect.selectedIndex];
@@ -28529,6 +29187,11 @@ function openContaInvestimentoModal(existing){
     else { state.contasInvestimento.push({ id: uid(), ...payload }); }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Conta atualizada' : 'Conta criada');
+  
+    }finally{
+      const btn_btnSalvarContaInv_Fim = document.getElementById('btnSalvarContaInv');
+      if(btn_btnSalvarContaInv_Fim) btn_btnSalvarContaInv_Fim.disabled = false;
+    }
   });
 }
 
@@ -28815,11 +29478,20 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     pintarOperacoes();
 
     document.getElementById('btnSalvarNota').addEventListener('click', ()=>{
+    const btn_btnSalvarNota_Click = document.getElementById('btnSalvarNota');
+    if(btn_btnSalvarNota_Click.disabled) return;
+    btn_btnSalvarNota_Click.disabled = true;
+    try{
       Object.assign(notaEmRevisao, coletarNotaFormulario(), { atualizadoEm: new Date().toISOString() });
       registrarLog('Nota de corretagem editada', `Nota${notaEmRevisao.corretora?' — '+notaEmRevisao.corretora:''} de ${notaEmRevisao.dataPregao} atualizada (segue aguardando aprovação)`);
       persist(); closeModal(); render();
       showToast('Alterações salvas — a nota segue aguardando aprovação');
-    });
+    
+    }finally{
+      const btn_btnSalvarNota_Fim = document.getElementById('btnSalvarNota');
+      if(btn_btnSalvarNota_Fim) btn_btnSalvarNota_Fim.disabled = false;
+    }
+  });
     document.getElementById('btnPublicarNota').addEventListener('click', ()=>{
       Object.assign(notaEmRevisao, coletarNotaFormulario(), { atualizadoEm: new Date().toISOString() });
       publicarNotaCorretagem(notaEmRevisao);
@@ -29587,6 +30259,10 @@ function openInvestirModal(contaBancariaId){
   corretoraSelect.addEventListener('change', ()=>{ corretoraOutro.style.display = corretoraSelect.value==='Outro / não listado' ? 'block' : 'none'; });
 
   document.getElementById('btnSalvarInvestimento').addEventListener('click', ()=>{
+    const btn_btnSalvarInvestimento_Click = document.getElementById('btnSalvarInvestimento');
+    if(btn_btnSalvarInvestimento_Click.disabled) return;
+    btn_btnSalvarInvestimento_Click.disabled = true;
+    try{
     let valorTotal, nomeAtivo, ativoPayload;
 
     if(tipoInv==='rendafixa'){
@@ -29641,6 +30317,11 @@ function openInvestirModal(contaBancariaId){
 
     persist(); closeModal(); render();
     showToast(`Investimento de ${brl(valorTotal)} realizado`);
+  
+    }finally{
+      const btn_btnSalvarInvestimento_Fim = document.getElementById('btnSalvarInvestimento');
+      if(btn_btnSalvarInvestimento_Fim) btn_btnSalvarInvestimento_Fim.disabled = false;
+    }
   });
 }
 
@@ -29774,6 +30455,10 @@ function openAtivoModal(existing, contaId){
   });
 
   document.getElementById('btnSalvarAtivo').addEventListener('click', ()=>{
+    const btn_btnSalvarAtivo_Click = document.getElementById('btnSalvarAtivo');
+    if(btn_btnSalvarAtivo_Click.disabled) return;
+    btn_btnSalvarAtivo_Click.disabled = true;
+    try{
     const tipoAtivo = tipoSelect.value;
     const subContaId = (aiSubconta.value && aiSubconta.value!=='__nova__') ? aiSubconta.value : null;
     let payload = { tipoAtivo, contaId, subContaId };
@@ -29812,6 +30497,11 @@ function openAtivoModal(existing, contaId){
     else { state.ativosInvestimento.push({ id: uid(), ...payload }); }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Ativo atualizado' : 'Ativo adicionado');
+  
+    }finally{
+      const btn_btnSalvarAtivo_Fim = document.getElementById('btnSalvarAtivo');
+      if(btn_btnSalvarAtivo_Fim) btn_btnSalvarAtivo_Fim.disabled = false;
+    }
   });
 }
 
@@ -29833,6 +30523,10 @@ function openPrevisaoGastoModal(existing){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnSalvarPrevisaoGasto').addEventListener('click', ()=>{
+    const btn_btnSalvarPrevisaoGasto_Click = document.getElementById('btnSalvarPrevisaoGasto');
+    if(btn_btnSalvarPrevisaoGasto_Click.disabled) return;
+    btn_btnSalvarPrevisaoGasto_Click.disabled = true;
+    try{
     const descricao = document.getElementById('pgDescricao').value.trim();
     const valorEstimado = numBR(document.getElementById('pgValor').value);
     const dataPrevista = document.getElementById('pgData').value;
@@ -29849,6 +30543,11 @@ function openPrevisaoGastoModal(existing){
     document.getElementById('reportPanel').innerHTML = renderPrevisaoSaldoFuturo();
     bindReportInner();
     showToast(existing ? 'Previsão atualizada' : 'Previsão adicionada');
+  
+    }finally{
+      const btn_btnSalvarPrevisaoGasto_Fim = document.getElementById('btnSalvarPrevisaoGasto');
+      if(btn_btnSalvarPrevisaoGasto_Fim) btn_btnSalvarPrevisaoGasto_Fim.disabled = false;
+    }
   });
 }
 
@@ -29981,6 +30680,10 @@ function abrirLiberarValoresModal(itens, tituloContexto){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnConfirmarLiberar').addEventListener('click', ()=>{
+    const btn_btnConfirmarLiberar_Click = document.getElementById('btnConfirmarLiberar');
+    if(btn_btnConfirmarLiberar_Click.disabled) return;
+    btn_btnConfirmarLiberar_Click.disabled = true;
+    try{
     const contaId = document.getElementById('lvConta').value;
     const data = document.getElementById('lvData').value || todayISO();
     let liberados = 0, jaResolvidos = 0, naoEncontrados = 0;
@@ -30005,6 +30708,11 @@ function abrirLiberarValoresModal(itens, tituloContexto){
     if(jaResolvidos>0) partes.push(`${jaResolvidos} já estava(m) resolvido(s)`);
     if(naoEncontrados>0) partes.push(`${naoEncontrados} pedido(s) ainda aguardando aprovação no financeiro — libere a aprovação primeiro`);
     showToast(partes.join(' · '));
+  
+    }finally{
+      const btn_btnConfirmarLiberar_Fim = document.getElementById('btnConfirmarLiberar');
+      if(btn_btnConfirmarLiberar_Fim) btn_btnConfirmarLiberar_Fim.disabled = false;
+    }
   });
 }
 
@@ -30044,6 +30752,10 @@ function openResgateModal(ativoId){
   atualizarPreview();
 
   document.getElementById('btnConfirmarResgate').addEventListener('click', ()=>{
+    const btn_btnConfirmarResgate_Click = document.getElementById('btnConfirmarResgate');
+    if(btn_btnConfirmarResgate_Click.disabled) return;
+    btn_btnConfirmarResgate_Click.disabled = true;
+    try{
     const valorRetornado = numBR(rgValorEl.value);
     const contaId = document.getElementById('rgConta').value;
     const dataResgate = document.getElementById('rgData').value || todayISO();
@@ -30080,6 +30792,11 @@ function openResgateModal(ativoId){
     registrarLog('Resgate de renda fixa registrado', `"${a.nome}" — retornou ${brl(valorRetornado)} (rendimento ${brl(rendimento)})`);
     persist(); closeModal(); render();
     showToast('Resgate lançado na conta');
+  
+    }finally{
+      const btn_btnConfirmarResgate_Fim = document.getElementById('btnConfirmarResgate');
+      if(btn_btnConfirmarResgate_Fim) btn_btnConfirmarResgate_Fim.disabled = false;
+    }
   });
 }
 
@@ -30148,6 +30865,10 @@ function openCategoriaModal(tipo, existing){
     marcarSwatchAtivo();
   });
   document.getElementById('btnSalvarCategoria').addEventListener('click', ()=>{
+    const btn_btnSalvarCategoria_Click = document.getElementById('btnSalvarCategoria');
+    if(btn_btnSalvarCategoria_Click.disabled) return;
+    btn_btnSalvarCategoria_Click.disabled = true;
+    try{
     const nome = document.getElementById('catNome').value.trim();
     const icone = document.getElementById('catIcone').value.trim();
     const ehFinanceira = document.getElementById('catEhFinanceira').checked;
@@ -30177,10 +30898,16 @@ function openCategoriaModal(tipo, existing){
         });
       }
     } else {
+      if(!state.categorias[tipo]) state.categorias[tipo] = [];
       state.categorias[tipo].push({ id: uid(), nome, cor: corSelecionada, icone, subcategorias: [], ehFinanceira, ehCapital, tipoCusto, centroCustoDefault, naoOperacional, favorita:false });
     }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Categoria atualizada' : 'Categoria criada');
+  
+    }finally{
+      const btn_btnSalvarCategoria_Fim = document.getElementById('btnSalvarCategoria');
+      if(btn_btnSalvarCategoria_Fim) btn_btnSalvarCategoria_Fim.disabled = false;
+    }
   });
 }
 
@@ -30208,6 +30935,10 @@ function openSubcategoriaModal(tipo, categoriaId, existing){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnSalvarSubcategoria').addEventListener('click', ()=>{
+    const btn_btnSalvarSubcategoria_Click = document.getElementById('btnSalvarSubcategoria');
+    if(btn_btnSalvarSubcategoria_Click.disabled) return;
+    btn_btnSalvarSubcategoria_Click.disabled = true;
+    try{
     const nome = document.getElementById('subNome').value.trim();
     const ehCapital = document.getElementById('subEhCapital').checked;
     if(!nome){ showToast('Informe o nome da subcategoria'); return; }
@@ -30226,6 +30957,11 @@ function openSubcategoriaModal(tipo, categoriaId, existing){
     }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Subcategoria atualizada' : 'Subcategoria criada');
+  
+    }finally{
+      const btn_btnSalvarSubcategoria_Fim = document.getElementById('btnSalvarSubcategoria');
+      if(btn_btnSalvarSubcategoria_Fim) btn_btnSalvarSubcategoria_Fim.disabled = false;
+    }
   });
 }
 
@@ -30284,6 +31020,10 @@ function openVendedorModal(existing){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnSalvarVendedor').addEventListener('click', ()=>{
+    const btn_btnSalvarVendedor_Click = document.getElementById('btnSalvarVendedor');
+    if(btn_btnSalvarVendedor_Click.disabled) return;
+    btn_btnSalvarVendedor_Click.disabled = true;
+    try{
     const nome = document.getElementById('vNome').value.trim();
     const comissaoPadrao = numBR(document.getElementById('vComissaoPadrao').value);
     const metaMensalRaw = document.getElementById('vMetaMensal').value.trim();
@@ -30296,6 +31036,11 @@ function openVendedorModal(existing){
     else { state.vendedores.push({ id: uid(), nome, comissaoPadrao, metaMensal }); }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Vendedor atualizado' : 'Vendedor criado');
+  
+    }finally{
+      const btn_btnSalvarVendedor_Fim = document.getElementById('btnSalvarVendedor');
+      if(btn_btnSalvarVendedor_Fim) btn_btnSalvarVendedor_Fim.disabled = false;
+    }
   });
 }
 
@@ -30324,6 +31069,10 @@ function openComissaoManualModal(){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnSalvarComissaoManual').addEventListener('click', ()=>{
+    const btn_btnSalvarComissaoManual_Click = document.getElementById('btnSalvarComissaoManual');
+    if(btn_btnSalvarComissaoManual_Click.disabled) return;
+    btn_btnSalvarComissaoManual_Click.disabled = true;
+    try{
     const vendedorId = document.getElementById('cmVendedor').value;
     const descricao = document.getElementById('cmDescricao').value.trim();
     const valorBase = numBR(document.getElementById('cmValorBase').value);
@@ -30332,6 +31081,11 @@ function openComissaoManualModal(){
     state.comissoesManuais.push({ id: uid(), vendedorId, descricao, valorBase, data });
     persist(); closeModal(); render();
     showToast('Comissão manual adicionada — apareça na lista de pendentes do período');
+  
+    }finally{
+      const btn_btnSalvarComissaoManual_Fim = document.getElementById('btnSalvarComissaoManual');
+      if(btn_btnSalvarComissaoManual_Fim) btn_btnSalvarComissaoManual_Fim.disabled = false;
+    }
   });
 }
 
@@ -30359,6 +31113,10 @@ function openAtualizarValorSubcontaModal(subconta){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnSalvarValorSubconta').addEventListener('click', ()=>{
+    const btn_btnSalvarValorSubconta_Click = document.getElementById('btnSalvarValorSubconta');
+    if(btn_btnSalvarValorSubconta_Click.disabled) return;
+    btn_btnSalvarValorSubconta_Click.disabled = true;
+    try{
     const novoValor = numBR(document.getElementById('avsNovoValor').value);
     if(isNaN(novoValor) || novoValor<0){ showToast('Informe um valor válido'); return; }
     const delta = Math.round((novoValor - valorAtual)*100)/100;
@@ -30371,6 +31129,11 @@ function openAtualizarValorSubcontaModal(subconta){
     registrarLog('Valor da subconta de investimento atualizado', `"${subconta.nome}" — ${brl(valorAtual)} → ${brl(novoValor)}`);
     persist(); closeModal(); render();
     showToast('Valor da subconta atualizado');
+  
+    }finally{
+      const btn_btnSalvarValorSubconta_Fim = document.getElementById('btnSalvarValorSubconta');
+      if(btn_btnSalvarValorSubconta_Fim) btn_btnSalvarValorSubconta_Fim.disabled = false;
+    }
   });
 }
 
@@ -30392,11 +31155,20 @@ function openAtualizarValorModal(a){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnSalvarValorAtivo').addEventListener('click', ()=>{
+    const btn_btnSalvarValorAtivo_Click = document.getElementById('btnSalvarValorAtivo');
+    if(btn_btnSalvarValorAtivo_Click.disabled) return;
+    btn_btnSalvarValorAtivo_Click.disabled = true;
+    try{
     const novoValor = numBR(document.getElementById('avNovoValor').value);
     if(isNaN(novoValor) || novoValor<0){ showToast('Informe um valor válido'); return; }
     a.valorAtualManual = novoValor;
     persist(); closeModal(); render();
     showToast('Valor atualizado');
+  
+    }finally{
+      const btn_btnSalvarValorAtivo_Fim = document.getElementById('btnSalvarValorAtivo');
+      if(btn_btnSalvarValorAtivo_Fim) btn_btnSalvarValorAtivo_Fim.disabled = false;
+    }
   });
 }
 
@@ -30549,7 +31321,12 @@ document.getElementById('btnBackup').addEventListener('click', ()=>{
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnFecharBackup').addEventListener('click', closeModal);
   document.getElementById('btnExportar').addEventListener('click', ()=>{
-    const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
+    // A senha de login no VK Industrial não deve sair num arquivo que pode ser enviado por e-mail,
+    // salvo num pendrive, etc. — ela continua funcionando normalmente dentro do app (não mexemos
+    // em state.vkConfig de verdade, só numa cópia usada pra gerar o arquivo exportado).
+    const estadoParaExportar = JSON.parse(JSON.stringify(state));
+    if(estadoParaExportar.vkConfig) delete estadoParaExportar.vkConfig.senha;
+    const blob = new Blob([JSON.stringify(estadoParaExportar, null, 2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = `livrocaixa-backup-${todayISO()}.json`;
