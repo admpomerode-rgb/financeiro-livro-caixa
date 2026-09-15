@@ -5554,7 +5554,7 @@ function rowHTMLEstiloBluecoins(l){
         <div style="font-weight:600;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHTML(l.descricao)}</div>
         <div style="font-size:12px;color:var(--text-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${l.origem==='transferencia' ? 'Transferência' : escapeHTML(l.categoria||'')}</div>
         ${(l.tags && l.tags.length) ? `<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:5px;">${l.tags.map(t=>`<span style="font-size:10.5px;border:1px solid var(--line);border-radius:20px;padding:2px 8px;color:var(--text-soft);">${escapeHTML(t)}</span>`).join('')}</div>` : ''}
-        ${l.processoVinculado ? `<div style="margin-top:4px;"><span style="font-size:10.5px;border:1px solid var(--blue-accent);border-radius:20px;padding:2px 8px;color:var(--blue-accent);">🔗 ${escapeHTML(l.processoVinculado)}</span></div>` : ''}
+        ${l.processoVinculadoTitulo ? `<div style="margin-top:4px;"><span style="font-size:10.5px;border:1px solid var(--blue-accent);border-radius:20px;padding:2px 8px;color:var(--blue-accent);">🔗 ${escapeHTML(l.processoVinculadoTitulo)}</span></div>` : ''}
       </div>
       <div style="text-align:right;flex-shrink:0;">
         <div style="font-weight:700;font-size:14.5px;color:${cor};">${l.tipo==='entrada'?'':'-'}${brl(valorEmAberto(l))}${confirmado?' <span style="font-size:12px;">✅</span>':' <span style="font-size:12px;" title="Pendente">⏳</span>'}</div>
@@ -28136,6 +28136,70 @@ function openContaModal(existing){
   });
 }
 
+// Busca a lista de processos ao vivo no Firestore do Livro de Processos, pra virar um seletor de
+// verdade (em vez de você ter que digitar o nome do processo). Autentica do mesmo jeito que a
+// sincronização normal já faz.
+async function buscarProcessosParaVincular(){
+  const cfg = state.processosConfig;
+  if(!cfg || !cfg.firebaseConfig || !cfg.email || !cfg.senha){
+    showToast('Configure a integração com o Livro de Processos primeiro (Central de Integrações)');
+    return null;
+  }
+  try{
+    if(!processosFirebaseApp) processosFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'livro-processos');
+    const auth = processosFirebaseApp.auth();
+    if(!auth.currentUser) await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
+    const db = processosFirebaseApp.firestore();
+    const snap = await db.collection('processos').get({ source: 'server' });
+    return snap.docs.map(d=>({ id: d.id, titulo: d.data().titulo || d.data().nome || '(sem título)' }));
+  }catch(e){
+    console.error('Falha ao buscar processos pra vincular:', e);
+    showToast('Não consegui buscar os processos — confira a conexão/configuração');
+    return null;
+  }
+}
+
+// Escreve um andamento de verdade de volta no processo, no Firestore do Livro de Processos,
+// quando uma transferência vinculada a ele é feita. Formato confirmado lendo o código-fonte real
+// do Livro de Processos: cada processo tem um array "events" (o histórico/timeline que aparece na
+// tela dele), e cada evento tem seq (número sequencial dentro do processo), kind, description,
+// date, status, replyTo e attachments — esse é exatamente o mesmo formato que o próprio Livro de
+// Processos usa quando lança um andamento automático (ex: aviso de prazo vencido). Usei
+// kind:'livro_caixa' (um valor que não existe em nenhuma checagem do código deles) pra não ser
+// confundido com nenhum tipo especial de andamento (decisão, transferência de setor, etc.) —
+// aparece na timeline como um andamento comum, através da descrição.
+// Por segurança, uma falha aqui NUNCA desfaz nem impede a transferência — ela já foi salva no
+// Livro Caixa antes disso rodar.
+async function notificarProcessoTransferencia(processoId, valor, nomeContaDestino){
+  const cfg = state.processosConfig;
+  if(!cfg || !cfg.firebaseConfig) return;
+  try{
+    if(!processosFirebaseApp) processosFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'livro-processos');
+    const auth = processosFirebaseApp.auth();
+    if(!auth.currentUser) await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
+    const db = processosFirebaseApp.firestore();
+    const docRef = db.collection('processos').doc(processoId);
+    const snap = await docRef.get({ source: 'server' });
+    if(!snap.exists) return;
+    const proc = snap.data();
+    const events = proc.events || [];
+    const novoEvento = {
+      seq: events.length + 1,
+      kind: 'livro_caixa',
+      sectorAtTime: proc.sectorId || null,
+      description: `Transferido ${brl(valor)} para a conta "${nomeContaDestino}", vinculada a este processo (via Livro Caixa).`,
+      date: new Date().toISOString(),
+      status: 'realizado',
+      replyTo: null,
+      attachments: [],
+    };
+    await docRef.update({ events: [...events, novoEvento] });
+  }catch(e){
+    console.error('Falha ao notificar o processo sobre a transferência:', e);
+    showToast('Transferência salva, mas não consegui avisar o Livro de Processos');
+  }
+}
+
 function openTransferenciaModal(contaOrigemId, existingLancamento){
   const isEdit = !!existingLancamento;
   let parOrigem, parDestino;
@@ -28180,8 +28244,9 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
     </label>
     <div class="field" style="margin-top:10px;">
       <label>🔗 Vinculado a um processo (opcional)</label>
-      <input type="text" id="tProcessoVinculado" placeholder="Ex: Processo — Desinvestimento FII XPML11" value="${isEdit && parOrigem.processoVinculado ? escapeHTML(parOrigem.processoVinculado) : ''}">
-      <div class="note" style="margin-top:6px;">Pra lembrar depois por que essa transferência foi feita — ex: uma decisão registrada no Livro de Processos. É só texto livre, ainda não busca automaticamente lá.</div>
+      <input type="hidden" id="tProcessoVinculadoId" value="${isEdit && parOrigem.processoVinculadoId ? parOrigem.processoVinculadoId : ''}">
+      <button type="button" class="btn ghost" id="tBtnVincularProcesso" style="width:100%;">${isEdit && parOrigem.processoVinculadoTitulo ? '🔗 '+escapeHTML(parOrigem.processoVinculadoTitulo) : '🔗 Vincular a um processo'}</button>
+      <div class="note" style="margin-top:6px;">Ao vincular, uma transferência que já foi salva registra um aviso lá no processo (se o Livro de Processos estiver configurado). Não é obrigatório.</div>
     </div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
@@ -28190,6 +28255,29 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  let processoVinculadoTituloAtual = isEdit ? (parOrigem.processoVinculadoTitulo || '') : '';
+  document.getElementById('tBtnVincularProcesso').addEventListener('click', async ()=>{
+    const btnVinc = document.getElementById('tBtnVincularProcesso');
+    const textoOriginal = btnVinc.textContent;
+    btnVinc.textContent = 'Buscando processos...';
+    btnVinc.disabled = true;
+    const processos = await buscarProcessosParaVincular();
+    btnVinc.disabled = false;
+    btnVinc.textContent = textoOriginal;
+    if(!processos) return;
+    abrirSeletorBusca({
+      titulo: 'Vincular a um processo',
+      itens: processos.map(p=>({ value:p.id, label:p.titulo })),
+      valorAtual: document.getElementById('tProcessoVinculadoId').value,
+      permitirNenhum: true,
+      onSelecionar: (id)=>{
+        document.getElementById('tProcessoVinculadoId').value = id;
+        const p = processos.find(x=>x.id===id);
+        processoVinculadoTituloAtual = p ? p.titulo : '';
+        btnVinc.textContent = p ? '🔗 '+p.titulo : '🔗 Vincular a um processo';
+      }
+    });
+  });
   document.getElementById('btnSalvarTransferencia').addEventListener('click', ()=>{
     const btnTransfClick = document.getElementById('btnSalvarTransferencia');
     if(btnTransfClick.disabled) return; // já está processando um clique anterior — ignora o segundo
@@ -28207,29 +28295,32 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
     const base = descricaoExtra ? ' — ' + descricaoExtra : '';
     const ehDeposito = document.getElementById('tEhDeposito').checked;
     const palavra = ehDeposito ? 'Depósito' : 'Transferência';
-    const processoVinculado = document.getElementById('tProcessoVinculado').value.trim() || null;
+    const processoVinculadoId = document.getElementById('tProcessoVinculadoId').value || null;
+    const processoVinculadoTitulo = processoVinculadoId ? processoVinculadoTituloAtual : null;
     if(isEdit){
       parOrigem.contaId = origemId; parOrigem.valor = valor; parOrigem.dataVencimento = data; parOrigem.dataPagamento = data;
-      parOrigem.descricao = `${palavra} para ${nomeDestino}${base}`; parOrigem.processoVinculado = processoVinculado;
+      parOrigem.descricao = `${palavra} para ${nomeDestino}${base}`; parOrigem.processoVinculadoId = processoVinculadoId; parOrigem.processoVinculadoTitulo = processoVinculadoTitulo;
       parDestino.contaId = destinoId; parDestino.valor = valor; parDestino.dataVencimento = data; parDestino.dataPagamento = data;
-      parDestino.descricao = `${palavra} de ${nomeOrigem}${base}`; parDestino.processoVinculado = processoVinculado;
+      parDestino.descricao = `${palavra} de ${nomeOrigem}${base}`; parDestino.processoVinculadoId = processoVinculadoId; parDestino.processoVinculadoTitulo = processoVinculadoTitulo;
       persist(); closeModal(); render();
       showToast('Transferência atualizada');
+      if(processoVinculadoId) notificarProcessoTransferencia(processoVinculadoId, valor, nomeDestino);
       return;
     }
     const tid = uid();
     state.lancamentos.push({
       id: uid(), tipo:'saida', categoria:'Transferência', descricao:`${palavra} para ${nomeDestino}${base}`,
       valor, contaId: origemId, status:'pago', dataVencimento: data, dataPagamento: data,
-      origem:'transferencia', transferenciaId: tid, processoVinculado, criadoEm: new Date().toISOString()
+      origem:'transferencia', transferenciaId: tid, processoVinculadoId, processoVinculadoTitulo, criadoEm: new Date().toISOString()
     });
     state.lancamentos.push({
       id: uid(), tipo:'entrada', categoria:'Transferência', descricao:`${palavra} de ${nomeOrigem}${base}`,
       valor, contaId: destinoId, status:'recebido', dataVencimento: data, dataPagamento: data,
-      origem:'transferencia', transferenciaId: tid, processoVinculado, criadoEm: new Date().toISOString()
+      origem:'transferencia', transferenciaId: tid, processoVinculadoId, processoVinculadoTitulo, criadoEm: new Date().toISOString()
     });
     persist(); closeModal(); render();
     showToast('Transferência realizada');
+    if(processoVinculadoId) notificarProcessoTransferencia(processoVinculadoId, valor, nomeDestino);
     }finally{
       const btnTransfFim = document.getElementById('btnSalvarTransferencia');
       if(btnTransfFim) btnTransfFim.disabled = false;
