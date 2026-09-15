@@ -5328,12 +5328,6 @@ function viewDashboard(){
     <div class="topbar dash-topbar">
       <div class="dash-titulo"><h1>Dashboard</h1><p>Visão geral da saúde financeira da empresa</p></div>
     </div>
-    ${painelOQueMudouHTML()}
-    ${cardCentroComandoCompactoHTML()}
-    ${cardCentralDecisaoCompactoHTML()}
-    <div style="display:flex;justify-content:flex-end;margin-bottom:6px;">
-      <button id="btnToggleModoVisualizacao" class="btn ghost sm">${state.modoVisualizacao==='simples'?'📊 Ver tudo':'⚡ Modo simples'}</button>
-    </div>
     ${mesNavHTML()}
 
     <div class="dash-hero-row">
@@ -5362,6 +5356,13 @@ function viewDashboard(){
       <div class="dash-acao" style="display:flex;gap:8px;align-items:center;">
         ${dropdownNovoHTML()}
       </div>
+    </div>
+
+    ${painelOQueMudouHTML()}
+    ${cardCentroComandoCompactoHTML()}
+    ${cardCentralDecisaoCompactoHTML()}
+    <div style="display:flex;justify-content:flex-end;margin-bottom:6px;">
+      <button id="btnToggleModoVisualizacao" class="btn ghost sm">${state.modoVisualizacao==='simples'?'📊 Ver tudo':'⚡ Modo simples'}</button>
     </div>
 
     <div class="cards cards-compact">
@@ -7507,6 +7508,7 @@ function viewContas(){
         <div class="dash-acao" style="display:flex;gap:8px;align-items:center;">
           ${dropdownNovoHTML()}
         </div>
+        <button class="btn ghost sm" id="btnGerenciarCategoriasConta">🏷️ Categorias de conta</button>
         <button class="btn ghost sm" id="btnExtratoConsolidadoPDF">📄 Extrato consolidado</button>
         <button class="btn ghost sm" id="btnIrOndeDinheiro">🧭 Onde meu dinheiro está</button>
         <div class="card saldo" style="padding:12px 18px;"><div class="label">Saldo total</div><div class="value mono ${total>=0?'pos':'neg'}" style="font-size:20px;">${vm(brl(total))}</div></div>
@@ -7521,10 +7523,22 @@ function viewContas(){
       <button class="btn ghost sm" id="btnToggleModoCompacto">${modoCompactoContas?'▤ Ver detalhado':'▦ Ver compacto'}</button>
       ${arquivadas.length ? `<button class="btn ghost sm" id="btnToggleArquivadas">${mostrarContasArquivadas?'Ocultar':'Mostrar'} arquivadas (${arquivadas.length})</button>` : ''}
     </div>
-    <div class="conta-cards ${modoCompactoContas?'conta-cards-compacto':''}" id="contaCardsWrap">
-      ${listaExibida.map(cardHTML).join('')}
-      <div class="add-conta-card" id="btnNovaConta">+ Adicionar conta</div>
-    </div>
+    ${(()=>{
+      // Agrupa em linhas por categoria de conta (criada pelo usuário, ex: "Vinculadas a processo",
+      // "Dinheiro em espécie"). Conta sem categoria cai no grupo "Sem categoria" no fim. O botão de
+      // "+ Adicionar conta" fica só na última linha, pra não repetir em cada grupo.
+      const categorias = state.categoriasContas || [];
+      const grupos = categorias.map(cat=>({ cat, contas: listaExibida.filter(c=>c.categoriaContaId===cat.id) })).filter(g=>g.contas.length);
+      const semCategoria = listaExibida.filter(c=>!c.categoriaContaId || !categorias.some(cat=>cat.id===c.categoriaContaId));
+      grupos.push({ cat: null, contas: semCategoria });
+      return grupos.map((g,i)=>`
+        ${categorias.length ? `<div class="dash-section-label">${g.cat ? escapeHTML(g.cat.nome) : 'Sem categoria'}</div>` : ''}
+        <div class="conta-cards ${modoCompactoContas?'conta-cards-compacto':''}" id="contaCardsWrap${i}">
+          ${g.contas.map(cardHTML).join('')}
+          ${i===grupos.length-1 ? `<div class="add-conta-card" id="btnNovaConta">+ Adicionar conta</div>` : ''}
+        </div>
+      `).join('');
+    })()}
     ${mostrarContasArquivadas && arquivadas.length ? `
     <div class="dash-section-label">Contas arquivadas</div>
     <div class="conta-cards">
@@ -24320,6 +24334,7 @@ function attachViewHandlers(){
     render();
   });
   const btnIrOndeDinheiro = document.getElementById('btnIrOndeDinheiro');
+  document.getElementById('btnGerenciarCategoriasConta')?.addEventListener('click', openCategoriasContaModal);
   if(btnIrOndeDinheiro) btnIrOndeDinheiro.addEventListener('click', ()=>{
     relatorioAtivo = 'onde_dinheiro';
     currentView = 'relatorio-detalhe';
@@ -28009,6 +28024,81 @@ function openMetaModal(existing){
 }
 
 
+function openCategoriasContaModal(){
+  const modal = document.getElementById('modalContent');
+  const render = ()=>{
+    const categorias = state.categoriasContas || [];
+    modal.innerHTML = `
+      <h3>Categorias de conta bancária</h3>
+      <div class="note" style="margin-top:0;">Agrupa suas contas em linhas separadas na tela de Contas Bancárias — ex: "Vinculadas a processo", "Dinheiro em espécie", "Contas normais".</div>
+      <div style="display:flex;gap:8px;margin:12px 0;">
+        <input type="text" id="novaCategoriaContaInput" placeholder="Nome da nova categoria" style="flex:1;">
+        <button class="btn" id="btnAddCategoriaConta">+ Criar</button>
+      </div>
+      <div class="panel-body" style="border-top:1px solid var(--line);">
+        ${categorias.length ? categorias.map(cat=>`
+          <div class="ledger-row" style="grid-template-columns:1fr auto;align-items:center;">
+            <span>${escapeHTML(cat.nome)} <span style="color:var(--text-soft);font-size:11.5px;">(${state.contas.filter(c=>c.categoriaContaId===cat.id).length} conta(s))</span></span>
+            <div class="row-actions">
+              <button class="icon-btn" data-action="renomear-cat-conta" data-id="${cat.id}" title="Renomear">✎</button>
+              <button class="icon-btn" data-action="excluir-cat-conta" data-id="${cat.id}" title="Excluir">✕</button>
+            </div>
+          </div>
+        `).join('') : `<div class="empty">Nenhuma categoria criada ainda.</div>`}
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="btnFecharCategoriasConta">Fechar</button>
+      </div>
+    `;
+    document.getElementById('modalOverlay').classList.add('open');
+    document.getElementById('btnFecharCategoriasConta').addEventListener('click', closeModal);
+    document.getElementById('btnAddCategoriaConta').addEventListener('click', ()=>{
+      const input = document.getElementById('novaCategoriaContaInput');
+      const nome = input.value.trim();
+      if(!nome){ showToast('Digite um nome pra categoria'); return; }
+      if(!state.categoriasContas) state.categoriasContas = [];
+      state.categoriasContas.push({ id: uid(), nome });
+      persist(); render();
+    });
+    modal.querySelectorAll('[data-action="renomear-cat-conta"]').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const cat = (state.categoriasContas||[]).find(c=>c.id===btn.dataset.id);
+        if(!cat) return;
+        const modalInner = document.getElementById('modalContent');
+        modalInner.innerHTML = `
+          <h3>Renomear categoria</h3>
+          <div class="field"><label>Nome</label><input type="text" id="renomearCatContaInput" value="${escapeHTML(cat.nome)}"></div>
+          <div class="modal-actions">
+            <button class="btn ghost" id="btnCancelarRenomearCat">Cancelar</button>
+            <button class="btn" id="btnConfirmarRenomearCat">Salvar</button>
+          </div>
+        `;
+        document.getElementById('btnCancelarRenomearCat').addEventListener('click', render);
+        document.getElementById('btnConfirmarRenomearCat').addEventListener('click', ()=>{
+          const novoNome = document.getElementById('renomearCatContaInput').value.trim();
+          if(!novoNome){ showToast('Digite um nome'); return; }
+          cat.nome = novoNome;
+          persist(); render();
+        });
+      });
+    });
+    modal.querySelectorAll('[data-action="excluir-cat-conta"]').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const confirmar = await avisoModal({
+          titulo: 'Excluir categoria',
+          mensagem: 'As contas que usam essa categoria não são excluídas — elas só voltam a aparecer em "Sem categoria".',
+          tipo: 'perigo', textoConfirmar: 'Excluir categoria'
+        });
+        if(!confirmar) return;
+        state.categoriasContas = (state.categoriasContas||[]).filter(c=>c.id!==btn.dataset.id);
+        state.contas.forEach(c=>{ if(c.categoriaContaId===btn.dataset.id) c.categoriaContaId = null; });
+        persist(); render();
+      });
+    });
+  };
+  render();
+}
+
 function openContaModal(existing){
   const isEdit = !!existing;
   const modal = document.getElementById('modalContent');
@@ -28051,6 +28141,14 @@ function openContaModal(existing){
         ${state.contas.filter(c=>!c.arquivada && c.id!==existing?.id && !c.contaPaiId).map(c=>`<option value="${c.id}" ${existing?.contaPaiId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}
       </select>
       <div class="note" style="margin-top:6px;">Igual às "caixinhas" do Nubank — uma subconta funciona como uma conta normal (tem saldo, entra em lançamento), só que agrupada visualmente dentro da conta principal escolhida aqui.</div>
+    </div>
+    <div class="field">
+      <label>Categoria da conta (opcional)</label>
+      <select id="cCategoriaConta">
+        <option value="">— sem categoria —</option>
+        ${(state.categoriasContas||[]).map(cat=>`<option value="${cat.id}" ${existing?.categoriaContaId===cat.id?'selected':''}>${escapeHTML(cat.nome)}</option>`).join('')}
+      </select>
+      <div class="note" style="margin-top:6px;">Agrupa as contas em linhas separadas na tela de Contas Bancárias (ex: "Vinculadas a processo", "Dinheiro em espécie"). Crie categorias no botão "🏷️ Categorias de conta", na tela de Contas.</div>
     </div>
     <div class="field">
       <label>Limite de cheque especial / conta garantida (R$, opcional)</label>
@@ -28154,11 +28252,12 @@ function openContaModal(existing){
     const saldoMinimoAlertaRaw = document.getElementById('cSaldoMinimoAlerta').value.trim();
     const saldoMinimoAlerta = saldoMinimoAlertaRaw ? numBR(saldoMinimoAlertaRaw) : 0;
     const contaPaiId = document.getElementById('cContaPai').value || null;
+    const categoriaContaId = document.getElementById('cCategoriaConta').value || null;
     const processoVinculadoId = document.getElementById('cProcessoVinculadoId').value || null;
     const processoVinculadoTitulo = processoVinculadoId ? contaProcessoTituloAtual : null;
     const processoVinculadoNumero = processoVinculadoId ? (contaProcessoNumeroAtual||null) : null;
     const vinculoMudou = processoVinculadoId && processoVinculadoId !== (existing?.processoVinculadoId||null);
-    const payload = { nome, banco, bancoDominio, tipo: document.getElementById('cTipo').value, saldoInicial, cor: corAtual, limiteChequeEspecial, chavePix, saldoMinimoAlerta, contaPaiId, processoVinculadoId, processoVinculadoTitulo, processoVinculadoNumero };
+    const payload = { nome, banco, bancoDominio, tipo: document.getElementById('cTipo').value, saldoInicial, cor: corAtual, limiteChequeEspecial, chavePix, saldoMinimoAlerta, contaPaiId, categoriaContaId, processoVinculadoId, processoVinculadoTitulo, processoVinculadoNumero };
     const idContaSalva = isEdit ? existing.id : uid();
     if(isEdit){ Object.assign(existing, payload); }
     else { state.contas.push({ id: idContaSalva, ...payload }); }
