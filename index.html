@@ -28065,6 +28065,12 @@ function openContaModal(existing){
       <input type="text" inputmode="decimal" id="cSaldoMinimoAlerta" value="${existing&&existing.saldoMinimoAlerta?existing.saldoMinimoAlerta:''}" placeholder="0,00">
     </div>
     <div class="field">
+      <label>🔗 Vinculada a um processo (opcional)</label>
+      <input type="hidden" id="cProcessoVinculadoId" value="${existing?.processoVinculadoId||''}">
+      <button type="button" class="btn ghost" id="cBtnVincularProcesso" style="width:100%;">${existing?.processoVinculadoTitulo ? '🔗 '+escapeHTML(existing.processoVinculadoTitulo) : '🔗 Vincular a um processo'}</button>
+      <div class="note" style="margin-top:6px;">Ao vincular (ou trocar), um aviso é registrado nos Andamentos daquele processo, no Livro de Processos.</div>
+    </div>
+    <div class="field">
       <label>Cor de identificação</label>
       <div class="color-pick" id="cCorPick">
         ${CONTA_CORES.map(c=>`<span style="background:${c}" data-cor="${c}" class="${c===corSelecionada?'sel':''}"></span>`).join('')}
@@ -28077,6 +28083,31 @@ function openContaModal(existing){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  let contaProcessoTituloAtual = existing?.processoVinculadoTitulo || '';
+  let contaProcessoNumeroAtual = existing?.processoVinculadoNumero || '';
+  document.getElementById('cBtnVincularProcesso').addEventListener('click', async ()=>{
+    const btnVinc = document.getElementById('cBtnVincularProcesso');
+    const textoOriginal = btnVinc.textContent;
+    btnVinc.textContent = 'Buscando processos...';
+    btnVinc.disabled = true;
+    const processos = await buscarProcessosParaVincular();
+    btnVinc.disabled = false;
+    btnVinc.textContent = textoOriginal;
+    if(!processos) return;
+    abrirSeletorBusca({
+      titulo: 'Vincular conta a um processo',
+      itens: processos.map(p=>({ value:p.id, label:p.titulo })),
+      valorAtual: document.getElementById('cProcessoVinculadoId').value,
+      permitirNenhum: true,
+      onSelecionar: (id)=>{
+        document.getElementById('cProcessoVinculadoId').value = id;
+        const p = processos.find(x=>x.id===id);
+        contaProcessoTituloAtual = p ? p.titulo : '';
+        contaProcessoNumeroAtual = p ? (p.numero||'') : '';
+        btnVinc.textContent = p ? '🔗 '+p.titulo : '🔗 Vincular a um processo';
+      }
+    });
+  });
   let corAtual = corSelecionada;
   document.getElementById('cCorPick').addEventListener('click', (e)=>{
     const el = e.target.closest('span[data-cor]');
@@ -28123,11 +28154,17 @@ function openContaModal(existing){
     const saldoMinimoAlertaRaw = document.getElementById('cSaldoMinimoAlerta').value.trim();
     const saldoMinimoAlerta = saldoMinimoAlertaRaw ? numBR(saldoMinimoAlertaRaw) : 0;
     const contaPaiId = document.getElementById('cContaPai').value || null;
-    const payload = { nome, banco, bancoDominio, tipo: document.getElementById('cTipo').value, saldoInicial, cor: corAtual, limiteChequeEspecial, chavePix, saldoMinimoAlerta, contaPaiId };
+    const processoVinculadoId = document.getElementById('cProcessoVinculadoId').value || null;
+    const processoVinculadoTitulo = processoVinculadoId ? contaProcessoTituloAtual : null;
+    const processoVinculadoNumero = processoVinculadoId ? (contaProcessoNumeroAtual||null) : null;
+    const vinculoMudou = processoVinculadoId && processoVinculadoId !== (existing?.processoVinculadoId||null);
+    const payload = { nome, banco, bancoDominio, tipo: document.getElementById('cTipo').value, saldoInicial, cor: corAtual, limiteChequeEspecial, chavePix, saldoMinimoAlerta, contaPaiId, processoVinculadoId, processoVinculadoTitulo, processoVinculadoNumero };
+    const idContaSalva = isEdit ? existing.id : uid();
     if(isEdit){ Object.assign(existing, payload); }
-    else { state.contas.push({ id: uid(), ...payload }); }
+    else { state.contas.push({ id: idContaSalva, ...payload }); }
     persist(); closeModal(); render();
     showToast(isEdit ? 'Conta atualizada' : 'Conta criada');
+    if(vinculoMudou) notificarProcessoContaVinculada(processoVinculadoId, nome, saldoConta(idContaSalva));
   
     }finally{
       const btn_btnSalvarConta_Fim = document.getElementById('btnSalvarConta');
@@ -28139,6 +28176,43 @@ function openContaModal(existing){
 // Busca a lista de processos ao vivo no Firestore do Livro de Processos, pra virar um seletor de
 // verdade (em vez de você ter que digitar o nome do processo). Autentica do mesmo jeito que a
 // sincronização normal já faz.
+// Escreve um andamento de volta no processo quando uma CONTA (não um lançamento) é vinculada a
+// ele — mesmo mecanismo e mesmo formato de evento que notificarProcessoTransferencia. Também grava
+// um campo "contaVinculadaLivroCaixa" com o saldo da conta nesse momento — é um retrato (snapshot),
+// não atualiza sozinho depois; atualiza de novo quando você reabrir e salvar a conta.
+async function notificarProcessoContaVinculada(processoId, nomeContaVinculada, saldoContaVinculada){
+  const cfg = state.processosConfig;
+  if(!cfg || !cfg.firebaseConfig) return;
+  try{
+    if(!processosFirebaseApp) processosFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'livro-processos');
+    const auth = processosFirebaseApp.auth();
+    if(!auth.currentUser) await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
+    const db = processosFirebaseApp.firestore();
+    const docRef = db.collection('processos').doc(processoId);
+    const snap = await docRef.get({ source: 'server' });
+    if(!snap.exists) return;
+    const proc = snap.data();
+    const events = proc.events || [];
+    const novoEvento = {
+      seq: events.length + 1,
+      kind: 'livro_caixa',
+      sectorAtTime: proc.sectorId || null,
+      description: `A conta "${nomeContaVinculada}" foi vinculada a este processo, no Livro Caixa (saldo no momento do vínculo: ${brl(saldoContaVinculada)}).`,
+      date: new Date().toISOString(),
+      status: 'realizado',
+      replyTo: null,
+      attachments: [],
+    };
+    await docRef.update({
+      events: [...events, novoEvento],
+      contaVinculadaLivroCaixa: { nome: nomeContaVinculada, saldo: saldoContaVinculada, atualizadoEm: new Date().toISOString() }
+    });
+  }catch(e){
+    console.error('Falha ao notificar o processo sobre o vínculo da conta:', e);
+    showToast('Conta salva, mas não consegui avisar o Livro de Processos');
+  }
+}
+
 async function buscarProcessosParaVincular(){
   const cfg = state.processosConfig;
   if(!cfg || !cfg.firebaseConfig || !cfg.email || !cfg.senha){
@@ -28153,8 +28227,8 @@ async function buscarProcessosParaVincular(){
     const snap = await db.collection('processos').get({ source: 'server' });
     return snap.docs.map(d=>{
       const p = d.data();
-      const numero = p.number ? `#${String(p.number).padStart(4,'0')} — ` : '';
-      return { id: d.id, titulo: `${numero}${p.title || '(sem título)'}` };
+      const numeroFmt = p.number ? `#${String(p.number).padStart(4,'0')}` : null;
+      return { id: d.id, numero: numeroFmt, tituloBase: p.title || '(sem título)', titulo: `${numeroFmt?numeroFmt+' — ':''}${p.title || '(sem título)'}` };
     });
   }catch(e){
     console.error('Falha ao buscar processos pra vincular:', e);
@@ -28260,6 +28334,7 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   let processoVinculadoTituloAtual = isEdit ? (parOrigem.processoVinculadoTitulo || '') : '';
+  let processoVinculadoNumeroAtual = isEdit ? (parOrigem.processoVinculadoNumero || '') : '';
   document.getElementById('tBtnVincularProcesso').addEventListener('click', async ()=>{
     const btnVinc = document.getElementById('tBtnVincularProcesso');
     const textoOriginal = btnVinc.textContent;
@@ -28278,6 +28353,7 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
         document.getElementById('tProcessoVinculadoId').value = id;
         const p = processos.find(x=>x.id===id);
         processoVinculadoTituloAtual = p ? p.titulo : '';
+        processoVinculadoNumeroAtual = p ? (p.numero || '') : '';
         btnVinc.textContent = p ? '🔗 '+p.titulo : '🔗 Vincular a um processo';
       }
     });
@@ -28296,16 +28372,18 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
     if(isNaN(valor) || valor<=0){ showToast('Informe um valor válido'); return; }
     if(!data){ showToast('Informe a data'); return; }
     const nomeOrigem = nomeConta(origemId), nomeDestino = nomeConta(destinoId);
-    const base = descricaoExtra ? ' — ' + descricaoExtra : '';
-    const ehDeposito = document.getElementById('tEhDeposito').checked;
-    const palavra = ehDeposito ? 'Depósito' : 'Transferência';
     const processoVinculadoId = document.getElementById('tProcessoVinculadoId').value || null;
     const processoVinculadoTitulo = processoVinculadoId ? processoVinculadoTituloAtual : null;
+    const processoVinculadoNumero = processoVinculadoId ? (processoVinculadoNumeroAtual || null) : null;
+    const sufixoProcesso = processoVinculadoNumero ? ` (Processo ${processoVinculadoNumero})` : '';
+    const base = (descricaoExtra ? ' — ' + descricaoExtra : '') + sufixoProcesso;
+    const ehDeposito = document.getElementById('tEhDeposito').checked;
+    const palavra = ehDeposito ? 'Depósito' : 'Transferência';
     if(isEdit){
       parOrigem.contaId = origemId; parOrigem.valor = valor; parOrigem.dataVencimento = data; parOrigem.dataPagamento = data;
-      parOrigem.descricao = `${palavra} para ${nomeDestino}${base}`; parOrigem.processoVinculadoId = processoVinculadoId; parOrigem.processoVinculadoTitulo = processoVinculadoTitulo;
+      parOrigem.descricao = `${palavra} para ${nomeDestino}${base}`; parOrigem.processoVinculadoId = processoVinculadoId; parOrigem.processoVinculadoTitulo = processoVinculadoTitulo; parOrigem.processoVinculadoNumero = processoVinculadoNumero;
       parDestino.contaId = destinoId; parDestino.valor = valor; parDestino.dataVencimento = data; parDestino.dataPagamento = data;
-      parDestino.descricao = `${palavra} de ${nomeOrigem}${base}`; parDestino.processoVinculadoId = processoVinculadoId; parDestino.processoVinculadoTitulo = processoVinculadoTitulo;
+      parDestino.descricao = `${palavra} de ${nomeOrigem}${base}`; parDestino.processoVinculadoId = processoVinculadoId; parDestino.processoVinculadoTitulo = processoVinculadoTitulo; parDestino.processoVinculadoNumero = processoVinculadoNumero;
       persist(); closeModal(); render();
       showToast('Transferência atualizada');
       if(processoVinculadoId) notificarProcessoTransferencia(processoVinculadoId, valor, nomeDestino);
@@ -28315,12 +28393,12 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
     state.lancamentos.push({
       id: uid(), tipo:'saida', categoria:'Transferência', descricao:`${palavra} para ${nomeDestino}${base}`,
       valor, contaId: origemId, status:'pago', dataVencimento: data, dataPagamento: data,
-      origem:'transferencia', transferenciaId: tid, processoVinculadoId, processoVinculadoTitulo, criadoEm: new Date().toISOString()
+      origem:'transferencia', transferenciaId: tid, processoVinculadoId, processoVinculadoTitulo, processoVinculadoNumero, criadoEm: new Date().toISOString()
     });
     state.lancamentos.push({
       id: uid(), tipo:'entrada', categoria:'Transferência', descricao:`${palavra} de ${nomeOrigem}${base}`,
       valor, contaId: destinoId, status:'recebido', dataVencimento: data, dataPagamento: data,
-      origem:'transferencia', transferenciaId: tid, processoVinculadoId, processoVinculadoTitulo, criadoEm: new Date().toISOString()
+      origem:'transferencia', transferenciaId: tid, processoVinculadoId, processoVinculadoTitulo, processoVinculadoNumero, criadoEm: new Date().toISOString()
     });
     persist(); closeModal(); render();
     showToast('Transferência realizada');
