@@ -7514,6 +7514,11 @@ function viewContas(){
             </div>
           </div>
           <div class="saldo mono ${saldo>=0?'pos':'neg'}">${vm(brl(saldo))}${saldo<0?' <span style="font-size:11px;background:var(--danger);color:#fff;padding:1px 6px;border-radius:8px;">negativo</span>':''}</div>
+          ${(()=>{
+            const provsDaConta = (state.provisionamentos||[]).filter(p=>p.status!=='arquivado' && p.contaDestinoId===c.id);
+            const totalProvisionado = provsDaConta.reduce((s,p)=>s+totalReservadoProvisionamento(p.id,'realizada'),0);
+            return totalProvisionado>0 ? `<div style="font-size:11px;color:var(--text-soft);margin-top:2px;">🗓️ ${vm(brl(totalProvisionado))} provisionado(s) (${provsDaConta.length})</div>` : '';
+          })()}
           ${variacaoPct!==null ? `<div style="font-size:11px;color:${variacaoPct>=0?'var(--success)':'var(--danger)'};margin-top:2px;">${variacaoPct>=0?'▲':'▼'} ${Math.abs(variacaoPct).toFixed(1)}% vs mês passado</div>` : ''}
           ${!modoCompactoContas ? `
           <div style="display:flex;align-items:flex-end;gap:1.5px;height:26px;margin-top:8px;" title="Saldo nos últimos 30 dias">
@@ -9318,6 +9323,7 @@ function viewRelatorios(){
     { id:'canal_venda', icone:'🛒', nome:'Receita por Canal de Venda', desc:'Compara receita, participação e ticket médio entre canais de venda' , cat:'Vendas, Clientes e Comercial' },
     { id:'comissoes', icone:'🤝', nome:'Desempenho Comercial e Comissões', desc:'Comissões por vendedor, metas e ticket médio (abre a tela de Comissões)' , cat:'Vendas, Clientes e Comercial' },
     { id:'orcamento', icone:'🎯', nome:'Orçado vs. Realizado', desc:'Comparativo entre o planejado e o executado por categoria (abre Orçamento e Planejamento)' , cat:'Planejamento, Metas e Decisões' },
+    { id:'provisionamentos', icone:'🗓️', nome:'Provisionamentos e Reservas Futuras', desc:'Planejado x realizado por categoria, em risco, vencidos e próximos vencimentos (abre Provisionamentos)', viewDireta:'provisionamentos' , cat:'Planejamento, Metas e Decisões' },
     { id:'rolling_forecast', icone:'🔁', nome:'Rolling Forecast 12 Meses', desc:'Projeção contínua dos próximos 12 meses, sempre recalculada a partir de hoje, com base no seu histórico recente' , cat:'Crescimento e Projeções' },
     { id:'centro_lucro', icone:'🏢', nome:'Centro de Lucro / Unidade de Negócio', desc:'Resultado (receita − despesa) completo por centro de custo, lado a lado' , cat:'Produtos e Margem' },
     { id:'yoy', icone:'📅', nome:'Comparativo Ano a Ano', desc:'Mês a mês desse ano lado a lado com o mesmo mês do ano passado, com % de crescimento' , cat:'Crescimento e Projeções' },
@@ -22396,6 +22402,7 @@ function attachViewHandlers(){
   document.querySelectorAll('[data-goto]').forEach(el=>{
     el.addEventListener('click', ()=>{
       currentView = el.dataset.goto;
+      if(currentView==='provisionamentos') provAbaAtiva = 'relatorios';
       document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view===currentView));
       render();
     });
@@ -26938,12 +26945,21 @@ function openProvisionamentoModal(existing){
       <div class="field"><label>Próximo vencimento</label><input type="date" id="pvVencimento" value="${isEdit?existing.proximoVencimento||'':''}"></div>
       <div class="field"><label>Data final (opcional)</label><input type="date" id="pvDataFim" value="${isEdit?existing.dataFim||'':''}"></div>
     </div>
-    <div class="field"><label>Conta ou caixinha de destino (opcional)</label>
-      <select id="pvContaDestino">
-        <option value="">— nenhuma —</option>
-        ${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}" ${isEdit&&existing.contaDestinoId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}
-      </select>
+    <div class="field-row">
+      <div class="field"><label>Conta de origem (de onde sai o dinheiro)</label>
+        <select id="pvContaOrigem">
+          <option value="">— nenhuma —</option>
+          ${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}" ${isEdit&&existing.contaOrigemId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Conta ou caixinha de destino (opcional)</label>
+        <select id="pvContaDestino">
+          <option value="">— nenhuma —</option>
+          ${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}" ${isEdit&&existing.contaDestinoId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}
+        </select>
+      </div>
     </div>
+    <div class="note" style="margin-top:0;">Ao registrar uma reserva realizada, essas duas contas já vêm pré-selecionadas (dá pra trocar na hora, se precisar).</div>
     <div class="field"><label>Observações (opcional)</label><textarea id="pvObservacoes" rows="2">${isEdit?escapeHTML(existing.observacoes||''):''}</textarea></div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
@@ -26991,6 +27007,7 @@ function openProvisionamentoModal(existing){
         tipo: document.getElementById('pvTipo').value, modoValor: modoValorAtual,
         valorPrevisto, margemSeguranca: numBR(document.getElementById('pvMargem').value)||0,
         proximoVencimento, dataFim: document.getElementById('pvDataFim').value || null,
+        contaOrigemId: document.getElementById('pvContaOrigem').value || null,
         contaDestinoId: document.getElementById('pvContaDestino').value || null,
         observacoes: document.getElementById('pvObservacoes').value.trim(),
         atualizadoEm: new Date().toISOString()
@@ -27046,7 +27063,7 @@ function openRegistrarReservaModal(provisionamentoId){
     <div id="rsvGrupoRealizada" style="display:none;">
       <div class="field-row">
         <div class="field"><label>Conta de origem</label>
-          <select id="rsvContaOrigem"><option value="">— nenhuma —</option>${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}">${escapeHTML(c.nome)} (${brl(saldoConta(c.id))})</option>`).join('')}</select>
+          <select id="rsvContaOrigem"><option value="">— nenhuma —</option>${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}" ${p.contaOrigemId===c.id?'selected':''}>${escapeHTML(c.nome)} (${brl(saldoConta(c.id))})</option>`).join('')}</select>
         </div>
         <div class="field"><label>Conta/caixinha de destino</label>
           <select id="rsvContaDestino">${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}" ${p.contaDestinoId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
@@ -27093,8 +27110,8 @@ function openRegistrarReservaModal(provisionamentoId){
         });
         if(confirmar){
           transferenciaId = uid();
-          state.lancamentos.push({ id: uid(), tipo:'saida', categoria:'Transferência', descricao:`Transferência para ${nomeConta(contaDestinoId)} — Reserva: ${p.nome}`, valor, contaId: contaOrigemId, status:'pago', dataVencimento: data, dataPagamento: data, origem:'transferencia', transferenciaId, criadoEm: new Date().toISOString() });
-          state.lancamentos.push({ id: uid(), tipo:'entrada', categoria:'Transferência', descricao:`Transferência de ${nomeConta(contaOrigemId)} — Reserva: ${p.nome}`, valor, contaId: contaDestinoId, status:'recebido', dataVencimento: data, dataPagamento: data, origem:'transferencia', transferenciaId, criadoEm: new Date().toISOString() });
+          state.lancamentos.push({ id: uid(), tipo:'saida', categoria:'Transferência', descricao:`Saldos Provisionados — ${p.nome} (para ${nomeConta(contaDestinoId)})`, valor, contaId: contaOrigemId, status:'pago', dataVencimento: data, dataPagamento: data, origem:'transferencia', transferenciaId, criadoEm: new Date().toISOString() });
+          state.lancamentos.push({ id: uid(), tipo:'entrada', categoria:'Transferência', descricao:`Saldos Provisionados — ${p.nome} (de ${nomeConta(contaOrigemId)})`, valor, contaId: contaDestinoId, status:'recebido', dataVencimento: data, dataPagamento: data, origem:'transferencia', transferenciaId, criadoEm: new Date().toISOString() });
         }
       }
 
