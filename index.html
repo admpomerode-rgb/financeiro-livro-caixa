@@ -18899,7 +18899,7 @@ function viewUsinaSolar(){
         ${leituras.length ? leituras.slice(0,20).map(l=>`
           <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto auto;">
             <span class="dot entrada"></span>
-            <span style="font-size:13px;">${fmtDate(l.data)} <span style="color:var(--text-soft);font-size:11px;">(${l.periodo})</span></span>
+            <div class="desc-cell"><div style="font-size:13px;">${fmtDate(l.data)} <span style="color:var(--text-soft);font-size:11px;">(${l.periodo})</span></div>${l.deltaUltimoRegistro!=null?`<div class="cat">${l.deltaUltimoRegistro>=0?'+':''}${l.deltaUltimoRegistro.toFixed(1)} kWh desde ${fmtDate(l.dataRegistroAnterior)}</div>`:''}</div>
             <span class="mono" style="font-weight:600;">${l.geracaoKwh} kWh</span>
             <button class="icon-btn" data-action="excluir-leitura-solar" data-id="${l.id}" title="Excluir">✕</button>
           </div>
@@ -32584,6 +32584,28 @@ function openRegistrarGeracaoSolarModal(){
     const rendaReais = numBR(document.getElementById('gsRenda').value) || 0;
     if(isNaN(geracaoKwh) || geracaoKwh<=0){ showToast('Preencha a geração em kWh'); return; }
     if(!state.usinaLeituras) state.usinaLeituras = [];
+
+    // Pra leitura tipo "mês", o número que você digita é o acumulado do mês até aquele dia (é o
+    // que o app mostra na aba "Mês"). Se já existir um registro desse mesmo mês, em vez de criar
+    // um segundo registro (que somaria errado nos relatórios), atualiza o mesmo registro com o
+    // valor novo e guarda a diferença — assim o histórico mostra quanto foi gerado entre as duas
+    // conferências, sem duplicar o total do mês.
+    const existente = periodo==='mes' ? state.usinaLeituras.find(l=>l.periodo==='mes' && l.data.slice(0,7)===data.slice(0,7)) : null;
+    if(existente){
+      const delta = geracaoKwh - existente.geracaoKwh;
+      const dataAnterior = existente.data, valorAnterior = existente.geracaoKwh;
+      existente.data = data;
+      existente.geracaoKwh = geracaoKwh;
+      existente.rendaReais = rendaReais || existente.rendaReais;
+      existente.deltaUltimoRegistro = delta;
+      existente.dataRegistroAnterior = dataAnterior;
+      persist(); closeModal(); render();
+      showToast(delta>=0
+        ? `Atualizado: +${delta.toFixed(1)} kWh gerados desde ${fmtDate(dataAnterior)} (${valorAnterior} → ${geracaoKwh})`
+        : `Atualizado (valor menor que o registro de ${fmtDate(dataAnterior)} — confira se não é um novo mês)`);
+      return;
+    }
+
     state.usinaLeituras.push({ id: uid(), data, periodo, geracaoKwh, rendaReais, criadoEm: new Date().toISOString() });
     registrarLog('Geração solar registrada', `${fmtDate(data)} — ${geracaoKwh} kWh`);
     persist(); closeModal(); render();
