@@ -582,6 +582,10 @@
   }
 
   @media (max-width: 900px){
+    .conta-cards-compacto .conta-card{flex-wrap:wrap;}
+    .conta-cards-compacto .conta-card-footer{width:100%;margin-top:8px !important;}
+    .conta-cards-compacto .conta-card-footer .dropdown-wrap{display:none;}
+    .conta-cards-compacto .conta-card-footer button[data-action="ver-extrato"]{flex:1;}
     .cards{grid-template-columns:repeat(2,1fr);}
     .card{padding:14px;}
     .card .value{font-size:17px;}
@@ -894,6 +898,7 @@ const CONTA_CORES = ['#3B6FE0','#1E9E6B','#D98F2B','#8A5CF6','#D5473F','#0F9BB0'
 const CATEGORIA_CORES = ['#3B6FE0','#1E9E6B','#D98F2B','#8A5CF6','#D5473F','#0F9BB0','#E0507A','#6B7280'];
 const BANCOS_BR = [
   { nome: 'Banco Inter', dominio: 'bancointer.com.br' },
+  { nome: 'Nubank', dominio: 'nubank.com.br' },
   { nome: 'PicPay', dominio: 'picpay.com' },
   { nome: 'Rico', dominio: 'rico.com.vc' },
   { nome: 'XP', dominio: 'xpi.com.br' },
@@ -7567,9 +7572,9 @@ function viewContas(){
           <div class="card-top">
             ${bankLogoHTML(c, 38)}
             <div class="nome-wrap">
-              <div class="nome">${escapeHTML(c.nome)}${c.principal?' <span style="color:var(--warn);font-size:12px;">★ principal</span>':''}</div>
+              <div class="nome" style="${c.contaPaiId?'color:var(--blue-accent);':''}">${c.contaPaiId?'↳ ':''}${escapeHTML(c.nome)}${c.principal?' <span style="color:var(--warn);font-size:12px;">★ principal</span>':''}</div>
               <div class="banco">${escapeHTML(c.banco || '—')} · ${c.tipo}</div>
-              ${c.contaPaiId ? `<div style="font-size:11px;color:var(--blue-accent);margin-top:2px;">↳ subconta de ${escapeHTML(nomeConta(c.contaPaiId))}</div>` : ''}
+              ${c.contaPaiId ? `<div style="font-size:11px;color:var(--text-soft);margin-top:2px;">subconta de ${escapeHTML(nomeConta(c.contaPaiId))}</div>` : ''}
             </div>
           </div>
           <div class="saldo mono ${saldo>=0?'pos':'neg'}">${vm(brl(saldo))}${saldo<0?' <span style="font-size:11px;background:var(--danger);color:#fff;padding:1px 6px;border-radius:8px;">negativo</span>':''}</div>
@@ -26954,7 +26959,7 @@ function viewProvMatrizAba(ativos){
         const mesesComValor = l.porMes.map((c,i)=>({...c, nome:meses[i]})).filter(c=>c.temValor);
         return `
           <div class="panel" style="margin-bottom:12px;">
-            <div class="panel-head" style="padding:0 16px;"><h2 style="font-size:14px;">${escapeHTML(l.p.nome)}</h2><span class="mono" style="font-size:12.5px;font-weight:700;">${brl(l.totalLinha)}</span></div>
+            <div class="panel-head" style="padding:14px 16px;"><h2 style="font-size:14px;">${escapeHTML(l.p.nome)}</h2><span class="mono" style="font-size:12.5px;font-weight:700;">${brl(l.totalLinha)}</span></div>
             <div class="panel-body" style="padding:0 4px;">
               ${mesesComValor.length ? mesesComValor.map(c=>{
                 return `<div class="${c.pago?'prov-matriz-pago-cell':''}" style="padding:10px 14px;border-bottom:1px solid var(--line);font-size:12.5px;${c.pago?'cursor:pointer;':''}" ${c.pago?`data-action="abrir-lancamento-prov" data-id="${c.lancPagoId}"`:''}>
