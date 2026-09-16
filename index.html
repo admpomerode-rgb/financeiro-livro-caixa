@@ -106,7 +106,7 @@
   .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:28px;}
   .card{background:var(--white);border:1px solid var(--line);border-radius:10px;padding:18px 18px;min-width:0;overflow:hidden;}
   .card .label{font-size:11.5px;color:var(--text-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;}
-  .card .value{font-size:24px;font-weight:600;overflow-wrap:break-word;}
+  .card .value{font-size:18px;font-weight:600;overflow-wrap:break-word;}
   .card.saldo .value{font-size:28px;}
   .value.pos{color:var(--success);}
   .value.neg{color:var(--danger);}
@@ -727,7 +727,7 @@
       </div>
     </nav>
     <div class="sidebar-footer">
-      <div id="acessosSistemaInfo" style="padding:6px 4px 10px;font-size:11px;color:var(--text-soft);border-bottom:1px solid var(--line);margin-bottom:8px;"></div>
+      <div id="acessosSistemaInfo" style="padding:6px 12px 10px;font-size:11px;color:var(--text-soft);border-bottom:1px solid var(--line);margin-bottom:8px;"></div>
       <button id="btnAbrirCalcSidebar"><span class="footer-icon">🧮</span><span class="footer-label">Calculadora</span></button>
       <button id="btnBackup" style="margin-top:8px;"><span class="footer-icon">⇅</span><span class="footer-label">Backup / Restaurar</span></button>
       <button id="btnSair" style="margin-top:8px;"><span class="footer-icon">⎋</span><span class="footer-label">Sair</span></button>
@@ -5586,7 +5586,7 @@ function rowHTMLEstiloBluecoins(l){
   const dataRef = l.dataPagamento || l.dataVencimento;
   const saldoHistorico = (confirmado && l.contaId && dataRef) ? saldoContaEmData(l.contaId, dataRef) : null;
   return `
-    <div class="ledger-row" data-id="${l.id}" data-action="abrir-lancamento" style="display:grid;grid-template-columns:40px 1fr auto;gap:12px;align-items:start;padding:10px 4px;cursor:pointer;">
+    <div class="ledger-row" data-id="${l.id}" data-action="abrir-lancamento" style="display:grid;grid-template-columns:40px 1fr auto;gap:12px;align-items:start;padding:10px 16px;cursor:pointer;">
       <div style="width:40px;height:40px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0;">${icone}</div>
       <div style="min-width:0;">
         <div style="font-weight:600;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHTML(l.descricao)}</div>
@@ -5731,7 +5731,7 @@ function viewTodosLancamentos(){
           const dt = new Date(ano, mes-1, d, 12);
           const totalDia = itens.reduce((s,l)=>s+(l.tipo==='entrada'?l.valor:-l.valor),0);
           return `
-            <div style="display:flex;justify-content:space-between;padding:10px 4px;background:var(--bone);font-size:12.5px;font-weight:600;color:var(--text-soft);">
+            <div style="display:flex;justify-content:space-between;padding:10px 16px;background:var(--bone);font-size:12.5px;font-weight:600;color:var(--text-soft);">
               <span>${diasSemana[dt.getDay()]} · ${d} de ${meses[mes-1]} de ${ano}</span>
               <span class="mono" style="color:${totalDia>=0?'var(--success)':'var(--danger)'};">${totalDia>=0?'':'-'}${brl(Math.abs(totalDia))}</span>
             </div>
@@ -7951,14 +7951,6 @@ function renderExtratoConteudo(contaId){
           <div style="font-size:10.5px;color:var(--text-soft);margin-top:4px;">Entradas ${brl(v.entradas)} · Saídas ${brl(v.saidas)}</div>
         </div>
       `).join('')}
-    </div>` : ''}
-
-    ${analisePeriodo.length ? `
-    <div class="panel" style="margin-bottom:14px;">
-      <div class="panel-head"><h2>🧠 Análise</h2></div>
-      <div class="panel-body" style="padding:0;">
-        ${analisePeriodo.map(a=>`<div class="ledger-row compact" style="grid-template-columns:1fr;font-size:12px;">${a}</div>`).join('')}
-      </div>
     </div>` : ''}
 
     ${ehMobile ? (grupos.length ? gruposHTML : `<div class="panel"><div class="empty">${extratoBuscaTermo ? 'Nenhuma movimentação encontrada para essa busca neste mês.' : 'Nenhuma movimentação neste mês.'}</div></div>`) : (grupos.length ? `
@@ -26801,11 +26793,11 @@ function viewProvisionamentos(){
       <button class="btn" id="btnNovoProvisionamento">+ Novo Provisionamento</button>
     </div>
     <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
-      <div class="card"><div class="label">Total futuro</div><div class="value mono" style="font-size:16px;">${vm(brl(totalFuturo))}</div></div>
-      <div class="card"><div class="label">Já reservado</div><div class="value mono pos" style="font-size:16px;">${vm(brl(totalReservado))}</div></div>
-      <div class="card"><div class="label">Falta reservar</div><div class="value mono ${totalAReservar>0?'neg':''}" style="font-size:16px;">${vm(brl(totalAReservar))}</div></div>
-      <div class="card"><div class="label">Reserva mensal necessária</div><div class="value mono" style="font-size:16px;">${vm(brl(reservaMensalTotal))}</div></div>
-      <div class="card"><div class="label">Em risco</div><div class="value mono ${emRisco>0?'neg':''}" style="font-size:16px;">${emRisco}</div></div>
+      <div class="card"><div class="label">Total futuro</div><div class="value mono">${vm(brl(totalFuturo))}</div></div>
+      <div class="card"><div class="label">Já reservado</div><div class="value mono pos">${vm(brl(totalReservado))}</div></div>
+      <div class="card"><div class="label">Falta reservar</div><div class="value mono ${totalAReservar>0?'neg':''}">${vm(brl(totalAReservar))}</div></div>
+      <div class="card"><div class="label">Reserva mensal necessária</div><div class="value mono">${vm(brl(reservaMensalTotal))}</div></div>
+      <div class="card"><div class="label">Em risco</div><div class="value mono ${emRisco>0?'neg':''}">${emRisco}</div></div>
       <div class="card"><div class="label">Próximo vencimento</div><div class="value" style="font-size:14px;">${proximo ? `${escapeHTML(proximo.p.nome)}<br><span class="mono" style="font-size:12px;color:var(--text-soft);">${fmtDate(proximo.p.proximoVencimento)} · falta ${brl(Math.max(0,proximo.meta-proximo.realizado))}</span>` : '—'}</div></div>
     </div>
     <div class="filter-bar" style="margin-bottom:14px;">
@@ -26887,15 +26879,15 @@ function viewProvMatrizAba(ativos){
         const mesesComValor = l.porMes.map((c,i)=>({...c, nome:meses[i]})).filter(c=>c.temValor);
         return `
           <div class="panel" style="margin-bottom:12px;">
-            <div class="panel-head"><h2 style="font-size:14px;">${escapeHTML(l.p.nome)}</h2><span class="mono" style="font-size:12.5px;font-weight:700;">${brl(l.totalLinha)}</span></div>
-            <div class="panel-body">
+            <div class="panel-head" style="padding:0 16px;"><h2 style="font-size:14px;">${escapeHTML(l.p.nome)}</h2><span class="mono" style="font-size:12.5px;font-weight:700;">${brl(l.totalLinha)}</span></div>
+            <div class="panel-body" style="padding:0 4px;">
               ${mesesComValor.length ? mesesComValor.map(c=>{
-                return `<div class="${c.pago?'prov-matriz-pago-cell':''}" style="padding:7px 4px;border-bottom:1px solid var(--line);font-size:12.5px;${c.pago?'cursor:pointer;':''}" ${c.pago?`data-action="abrir-lancamento-prov" data-id="${c.lancPagoId}"`:''}>
-                  <div style="display:flex;justify-content:space-between;">
+                return `<div class="${c.pago?'prov-matriz-pago-cell':''}" style="padding:10px 14px;border-bottom:1px solid var(--line);font-size:12.5px;${c.pago?'cursor:pointer;':''}" ${c.pago?`data-action="abrir-lancamento-prov" data-id="${c.lancPagoId}"`:''}>
+                  <div style="display:flex;justify-content:space-between;gap:10px;">
                     <span>${c.nome}/${ano}${c.pago?' ✅':''}${c.semPrevisto?' <span style="color:var(--text-soft);font-size:10.5px;">(sem previsão)</span>':''}</span>
                     <span class="mono" style="color:var(--ink);font-weight:600;">${brl(c.valorExibir)}</span>
                   </div>
-                  ${!c.pago && c.previsto>0 ? `<div style="display:flex;justify-content:flex-end;gap:10px;font-size:10.5px;margin-top:2px;">
+                  ${!c.pago && c.previsto>0 ? `<div style="display:flex;justify-content:flex-end;gap:14px;font-size:10.5px;margin-top:4px;">
                     ${c.reservadoMes>0?`<span class="mono" style="color:var(--success);">${brl(c.reservadoMes)} reservado</span>`:''}
                     ${c.falta>0?`<span class="mono" style="color:var(--danger);">${brl(c.falta)} falta</span>`:''}
                   </div>` : ''}
@@ -26907,9 +26899,9 @@ function viewProvMatrizAba(ativos){
       }).join('')}
       <div class="panel" style="margin-bottom:14px;">
         <div class="panel-body">
-          <div style="display:flex;justify-content:space-between;padding:5px 4px;"><span>Previsto no ano</span><span class="mono" style="color:var(--ink);font-weight:700;">${brl(totalGeral)}</span></div>
-          <div style="display:flex;justify-content:space-between;padding:5px 4px;"><span>Já provisionado</span><span class="mono" style="color:var(--success);font-weight:700;">${brl(totalReservadoGeral)}</span></div>
-          <div style="display:flex;justify-content:space-between;padding:5px 4px;"><span>Falta provisionar</span><span class="mono" style="color:var(--danger);font-weight:700;">${brl(totalFaltaGeral)}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:8px 16px;"><span>Previsto no ano</span><span class="mono" style="color:var(--ink);font-weight:700;">${brl(totalGeral)}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:8px 16px;"><span>Já provisionado</span><span class="mono" style="color:var(--success);font-weight:700;">${brl(totalReservadoGeral)}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:8px 16px;"><span>Falta provisionar</span><span class="mono" style="color:var(--danger);font-weight:700;">${brl(totalFaltaGeral)}</span></div>
         </div>
       </div>
       ${legenda}
@@ -27008,7 +27000,7 @@ function provRowHTML(x){
   const falta = Math.max(0, meta-realizado);
   const pct = meta>0 ? Math.min(100, Math.round(realizado/meta*100)) : 0;
   return `
-    <div class="ledger-row" style="grid-template-columns:1fr auto auto;align-items:center;padding:12px 4px;">
+    <div class="ledger-row" style="grid-template-columns:1fr auto auto;align-items:center;padding:12px 16px;">
       <div data-action="ver-provisionamento" data-id="${p.id}" style="cursor:pointer;min-width:0;">
         <div style="font-weight:600;font-size:14px;">${escapeHTML(p.nome)}</div>
         <div style="font-size:11.5px;color:var(--text-soft);">${escapeHTML(p.categoria||'Sem categoria')} · ${p.tipo||''} · vence ${p.proximoVencimento?fmtDate(p.proximoVencimento):'—'} · ${nomeConta(p.contaDestinoId)}</div>
@@ -27271,7 +27263,7 @@ function openDetalheProvisionamentoModal(provisionamentoId){
     <label style="font-size:12.5px;font-weight:600;display:block;margin-bottom:6px;">Histórico de reservas</label>
     <div class="panel-body" style="border-top:1px solid var(--line);max-height:220px;overflow-y:auto;">
       ${historico.length ? historico.map(r=>`
-        <div style="display:flex;justify-content:space-between;padding:8px 4px;border-bottom:1px solid var(--line);font-size:12.5px;">
+        <div style="display:flex;justify-content:space-between;padding:8px 14px;border-bottom:1px solid var(--line);font-size:12.5px;">
           <span>${fmtDate(r.data)} · ${r.tipo==='realizada'?'💰 Realizada':'📝 Planejada'}${r.mesReferencia && r.mesReferencia!==(r.data||'').slice(0,7) ? ` (pra ${competenciaLabel(r.mesReferencia)})` : ''}${r.observacao?' — '+escapeHTML(r.observacao):''}</span>
           <span class="mono" style="font-weight:600;">${brl(r.valor)}</span>
         </div>
@@ -27388,9 +27380,9 @@ function calcularESimular(){
   const mensalReal = restante<=0 ? 0 : (meses<=0 ? restante : Math.round((restante/meses)*100)/100);
   const dataMeta = mensalReal>0 ? `~${Math.ceil(restante/mensalReal)} mes(es), no ritmo calculado` : 'já atingida';
   document.getElementById('simResultado').innerHTML = `
-    <div class="card"><div class="label">Meta de reserva</div><div class="value mono" style="font-size:16px;">${brl(meta)}</div></div>
-    <div class="card"><div class="label">Falta reservar</div><div class="value mono ${restante>0?'neg':'pos'}" style="font-size:16px;">${brl(restante)}</div></div>
-    <div class="card"><div class="label">Reserva mensal necessária</div><div class="value mono" style="font-size:16px;">${brl(mensalReal)}</div></div>
+    <div class="card"><div class="label">Meta de reserva</div><div class="value mono">${brl(meta)}</div></div>
+    <div class="card"><div class="label">Falta reservar</div><div class="value mono ${restante>0?'neg':'pos'}">${brl(restante)}</div></div>
+    <div class="card"><div class="label">Reserva mensal necessária</div><div class="value mono">${brl(mensalReal)}</div></div>
     <div class="card"><div class="label">Atinge a meta em</div><div class="value" style="font-size:14px;">${dataMeta}</div></div>
   `;
 }
@@ -27510,7 +27502,7 @@ function viewDescricoes(){
           const cor = d.liquido>=0 ? 'var(--success)' : 'var(--danger)';
           const pct = Math.max(2, Math.round(Math.abs(d.liquido)/maiorValor*100));
           return `
-          <div style="padding:12px 4px;border-bottom:1px solid var(--line);">
+          <div style="padding:12px 14px;border-bottom:1px solid var(--line);">
             <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:6px;">
               <div data-action="ver-lancamentos-descricao" data-texto="${escapeHTML(d.texto)}" style="min-width:0;cursor:pointer;">
                 <div style="font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHTML(d.texto)}</div>
@@ -29430,7 +29422,14 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
     parDestino = par.find(l=>l.tipo==='entrada');
   }
   const origemId = isEdit ? parOrigem.contaId : (contaOrigemId || state.contas[0].id);
-  const destinoPadrao = isEdit ? parDestino.contaId : (state.contas.find(c=>c.id!==origemId)?.id || state.contas[0].id);
+  // Regra: subconta só transfere pra própria conta mãe (igual a uma caixinha do Nubank — pra
+  // mandar dinheiro pra outro banco, primeiro tem que voltar pra conta principal). Se a origem for
+  // subconta, o destino fica travado só na conta mãe; senão, qualquer conta menos a própria origem.
+  const contaOrigemObj = state.contas.find(c=>c.id===origemId);
+  const opcoesDestino = contaOrigemObj?.contaPaiId
+    ? state.contas.filter(c=>c.id===contaOrigemObj.contaPaiId)
+    : state.contas.filter(c=>c.id!==origemId);
+  const destinoPadrao = isEdit ? parDestino.contaId : (opcoesDestino[0]?.id || state.contas[0].id);
   const descricaoExtraExistente = isEdit ? (parOrigem.descricao.split(' — ').slice(1).join(' — ') || '') : '';
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
@@ -29442,7 +29441,8 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
       </div>
       <div class="field">
         <label>Para (destino)</label>
-        <select id="tDestino">${state.contas.map(c=>`<option value="${c.id}" ${destinoPadrao===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
+        <select id="tDestino">${opcoesDestino.map(c=>`<option value="${c.id}" ${destinoPadrao===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
+        <div class="note" id="tDestinoNota" style="margin-top:6px;${contaOrigemObj?.contaPaiId?'':'display:none;'}">Essa é uma subconta — só pode transferir de volta pra própria conta principal. Pra mandar pra outro banco, primeiro resgate pra "${escapeHTML(nomeConta(contaOrigemObj?.contaPaiId))}" e depois transfira de lá.</div>
       </div>
     </div>
     <div class="field-row">
@@ -29476,6 +29476,15 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('tOrigem').addEventListener('change', (e)=>{
+    const novaOrigemId = e.target.value;
+    const contaObj = state.contas.find(c=>c.id===novaOrigemId);
+    const opcoes = contaObj?.contaPaiId ? state.contas.filter(c=>c.id===contaObj.contaPaiId) : state.contas.filter(c=>c.id!==novaOrigemId);
+    const selectDestino = document.getElementById('tDestino');
+    selectDestino.innerHTML = opcoes.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('');
+    document.getElementById('tDestinoNota').style.display = contaObj?.contaPaiId ? 'block' : 'none';
+    document.getElementById('tDestinoNota').textContent = contaObj?.contaPaiId ? `Essa é uma subconta — só pode transferir de volta pra própria conta principal. Pra mandar pra outro banco, primeiro resgate pra "${nomeConta(contaObj.contaPaiId)}" e depois transfira de lá.` : '';
+  });
   let processoVinculadoTituloAtual = isEdit ? (parOrigem.processoVinculadoTitulo || '') : '';
   let processoVinculadoNumeroAtual = isEdit ? (parOrigem.processoVinculadoNumero || '') : '';
   document.getElementById('tBtnVincularProcesso').addEventListener('click', async ()=>{
@@ -29512,6 +29521,8 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
     const data = document.getElementById('tData').value;
     const descricaoExtra = document.getElementById('tDescricao').value.trim();
     if(origemId===destinoId){ showToast('Escolha contas diferentes para origem e destino'); return; }
+    const contaOrigemCheck = state.contas.find(c=>c.id===origemId);
+    if(contaOrigemCheck?.contaPaiId && contaOrigemCheck.contaPaiId!==destinoId){ showToast(`Subconta só pode transferir pra própria conta principal ("${nomeConta(contaOrigemCheck.contaPaiId)}")`); return; }
     if(isNaN(valor) || valor<=0){ showToast('Informe um valor válido'); return; }
     if(!data){ showToast('Informe a data'); return; }
     const nomeOrigem = nomeConta(origemId), nomeDestino = nomeConta(destinoId);
