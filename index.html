@@ -597,12 +597,17 @@
   .bottom-nav{
     display:none;position:fixed;left:0;right:0;bottom:0;z-index:60;
     background:#0B0F14;border-top:1px solid #1C2330;
-    padding:8px 4px calc(8px + env(safe-area-inset-bottom));
+    padding:8px 2px calc(8px + env(safe-area-inset-bottom));
     justify-content:space-around;align-items:center;
   }
   .bottom-nav-item{
-    display:flex;flex-direction:column;align-items:center;gap:3px;flex:1;
-    color:#7B8492;font-size:10.5px;font-weight:600;cursor:pointer;padding:4px 2px;
+    display:flex;flex-direction:column;align-items:center;gap:3px;flex:1;min-width:0;
+    color:#7B8492;font-size:10.5px;font-weight:600;cursor:pointer;padding:4px 1px;
+  }
+  .bottom-nav-item .bn-label{white-space:nowrap;}
+  @media (max-width:380px){
+    .bottom-nav-item{font-size:9px;}
+    .bottom-nav-item .bn-icon{font-size:17px;}
   }
   .bottom-nav-item .bn-icon{font-size:19px;line-height:1;color:#7B8492;}
   .bottom-nav-item .bn-badge{position:absolute;top:-6px;right:-9px;background:var(--danger);color:#fff;font-size:9px;font-weight:700;border-radius:8px;min-width:15px;height:15px;display:flex;align-items:center;justify-content:center;padding:0 3px;}
@@ -782,6 +787,7 @@
         <div class="nav-item" data-view="pagar" title="Contas a Pagar"><span class="nav-dot"></span><span class="nav-abbr">CP</span><span class="nav-label">Contas a Pagar</span></div>
         <div class="nav-item" data-view="receber" title="Contas a Receber"><span class="nav-dot"></span><span class="nav-abbr">CR</span><span class="nav-label">Contas a Receber</span></div>
         <div class="nav-item" data-view="fluxo" title="Fluxo de Caixa"><span class="nav-dot"></span><span class="nav-abbr">FC</span><span class="nav-label">Fluxo de Caixa</span></div>
+        <div class="nav-item" data-view="todos-lancamentos" title="Todos os Lançamentos"><span class="nav-dot"></span><span class="nav-abbr">TL</span><span class="nav-label">Todos os Lançamentos</span></div>
         <div class="nav-item" data-view="contas" title="Contas Bancárias"><span class="nav-dot"></span><span class="nav-abbr">CB</span><span class="nav-label">Contas Bancárias</span></div>
         <div class="nav-item" data-view="cartoes" title="Cartões de Crédito"><span class="nav-dot"></span><span class="nav-abbr">CC</span><span class="nav-label">Cartões de Crédito</span></div>
         <div class="nav-item" data-view="ativos" title="Ativos Patrimoniais"><span class="nav-dot"></span><span class="nav-abbr">AP</span><span class="nav-label">Ativos Patrimoniais</span></div>
@@ -812,7 +818,6 @@
         <div class="nav-item" data-view="categorias" title="Categorias"><span class="nav-dot"></span><span class="nav-abbr">CT</span><span class="nav-label">Categorias</span></div>
         <div class="nav-item" data-view="fornecedores" title="Fornecedores"><span class="nav-dot"></span><span class="nav-abbr">FN</span><span class="nav-label">Fornecedores</span></div>
         <div class="nav-item" data-view="descricoes" title="Padronizar Descrições"><span class="nav-dot"></span><span class="nav-abbr">DS</span><span class="nav-label">Padronizar Descrições</span></div>
-        <div class="nav-item" data-view="todos-lancamentos" title="Todos os Lançamentos"><span class="nav-dot"></span><span class="nav-abbr">TL</span><span class="nav-label">Todos os Lançamentos</span></div>
         <div class="nav-item" data-view="integracoes" title="Central de Integrações"><span class="nav-dot"></span><span class="nav-abbr">IN</span><span class="nav-label">Central de Integrações</span></div>
         <div class="nav-item" data-view="configuracoes" title="Configurações do Sistema"><span class="nav-dot"></span><span class="nav-abbr">CF</span><span class="nav-label">Configurações</span></div>
       </div>
@@ -881,6 +886,7 @@
   <div class="bottom-nav-item" data-view="pagar"><span class="bn-icon" style="position:relative;">↑<span class="bn-badge" id="bnBadgePagar" style="display:none;"></span></span><span class="bn-label">Pagar</span></div>
   <div class="bottom-nav-item" data-view="receber"><span class="bn-icon" style="position:relative;">↓<span class="bn-badge" id="bnBadgeReceber" style="display:none;"></span></span><span class="bn-label">Receber</span></div>
   <div class="bottom-nav-item" data-view="fluxo"><span class="bn-icon">≋</span><span class="bn-label">Fluxo</span></div>
+  <div class="bottom-nav-item" data-view="todos-lancamentos"><span class="bn-icon">📜</span><span class="bn-label">Lançamentos</span></div>
   <div class="bottom-nav-item" id="btnAbrirMais"><span class="bn-icon">⋯</span><span class="bn-label">Mais</span></div>
 </nav>
 
@@ -1819,7 +1825,6 @@ function moreItensDef(){
     { view:'categorias', icone:'🏷️', nome:'Categorias', grupo:'Cadastros e Configurações' },
     { view:'fornecedores', icone:'🚚', nome:'Fornecedores', grupo:'Cadastros e Configurações' },
     { view:'descricoes', icone:'📝', nome:'Padronizar Descrições', grupo:'Cadastros e Configurações' },
-    { view:'todos-lancamentos', icone:'📜', nome:'Todos os Lançamentos', grupo:'Operacional' },
     { view:'diagnostico-dados', icone:'🩺', nome:'Diagnóstico de Dados', grupo:'Análise' },
     { view:'provisionamentos', icone:'🗓️', nome:'Provisionamentos', grupo:'Operacional' },
     { view:'recorrencias', icone:'🔁', nome:'Recorrentes', grupo:'Operacional' },
@@ -5805,6 +5810,13 @@ function opcoesMesFiltroHTML(mesSelecionado){
 }
 
 let todosLancMesFiltro = todayISO().slice(0,7);
+let __todosLancBusca = '';
+let __todosLancTipo = 'todos';
+let __todosLancCategoria = '';
+let __todosLancContaId = '';
+let __todosLancStatus = '';
+let __todosLancFiltrosAbertos = false;
+let __todosLancVisao = 'cronologico';
 function gerarTodosLancamentosPDF(dataDe, dataAte){
   const docPdf = criarPDF();
   const M = 18, W = 210 - M*2;
@@ -5860,14 +5872,44 @@ function gerarTodosLancamentosPDF(dataDe, dataAte){
 
 function viewTodosLancamentos(){
   const hoje = todayISO();
-  const dias = new Map();
   // Histórico = já aconteceu (tem data de pagamento) ou já venceu (vencimento até hoje). Pendente
   // com vencimento no futuro é "agendado", não histórico — esse fica só nas telas de Contas a
   // Pagar/Receber, senão ele aparecia lá na frente da lista, empurrando o dia de hoje pra baixo.
-  [...state.lancamentos]
+  let listaBase = [...state.lancamentos]
     .filter(l=>(l.dataPagamento||l.dataVencimento||'')<=hoje)
-    .filter(l=>todosLancMesFiltro==='todos' || (l.dataPagamento||l.dataVencimento||'').slice(0,7)===todosLancMesFiltro)
-    .sort((a,b)=>(b.dataPagamento||b.dataVencimento||'').localeCompare(a.dataPagamento||a.dataVencimento||'')).forEach(l=>{
+    .filter(l=>todosLancMesFiltro==='todos' || (l.dataPagamento||l.dataVencimento||'').slice(0,7)===todosLancMesFiltro);
+
+  // Filtro rápido Todos/Entradas/Saídas
+  if(__todosLancTipo==='entradas') listaBase = listaBase.filter(l=>l.tipo==='entrada');
+  else if(__todosLancTipo==='saidas') listaBase = listaBase.filter(l=>l.tipo==='saida');
+
+  // Filtros do painel "⚙ Filtros"
+  if(__todosLancCategoria) listaBase = listaBase.filter(l=>l.categoria===__todosLancCategoria);
+  if(__todosLancContaId) listaBase = listaBase.filter(l=>l.contaId===__todosLancContaId);
+  if(__todosLancStatus){
+    listaBase = listaBase.filter(l=>{
+      if(__todosLancStatus==='atrasado') return l.status==='pendente' && l.dataVencimento && l.dataVencimento<hoje;
+      if(__todosLancStatus==='pendente') return l.status==='pendente' && (!l.dataVencimento || l.dataVencimento>=hoje);
+      if(__todosLancStatus==='confirmado') return l.status==='pago' || l.status==='recebido';
+      if(__todosLancStatus==='cancelado') return l.status==='cancelado';
+      return true;
+    });
+  }
+
+  // Busca — procura em descrição, fornecedor, observação, categoria e nome da conta (o número do
+  // pedido/NF já costuma estar embutido na própria descrição, ex: "Pedido Nº 2574")
+  if(__todosLancBusca.trim()){
+    const termo = __todosLancBusca.trim().toLowerCase();
+    listaBase = listaBase.filter(l=>{
+      const alvo = [l.descricao, l.fornecedor, l.observacao, l.categoria, nomeConta(l.contaId)].filter(Boolean).join(' ').toLowerCase();
+      return alvo.includes(termo);
+    });
+  }
+
+  listaBase.sort((a,b)=>(b.dataPagamento||b.dataVencimento||'').localeCompare(a.dataPagamento||a.dataVencimento||''));
+
+  const dias = new Map();
+  listaBase.forEach(l=>{
     const dia = l.dataPagamento||l.dataVencimento||'sem-data';
     if(!dias.has(dia)) dias.set(dia, []);
     dias.get(dia).push(l);
@@ -5875,22 +5917,101 @@ function viewTodosLancamentos(){
   const diasSemana = ['DOM','SEG','TER','QUA','QUI','SEX','SAB'];
   const meses = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 
+  // Resumo do topo — calculado em cima da MESMA lista filtrada que está sendo exibida
+  const qtd = listaBase.length;
+  const entradasTotal = listaBase.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+l.valor,0);
+  const saidasTotal = listaBase.filter(l=>l.tipo==='saida').reduce((s,l)=>s+l.valor,0);
+  const resultado = entradasTotal - saidasTotal;
+
+  const categoriasDisponiveis = [...new Set(state.lancamentos.map(l=>l.categoria).filter(Boolean))].sort();
+  const temFiltroExtra = __todosLancCategoria || __todosLancContaId || __todosLancStatus;
+
   return `
     <div class="topbar">
-      <div><h1>Todos os Lançamentos</h1><p>${[...dias.values()].reduce((s,arr)=>s+arr.length,0)} lançamento(s) já realizados ou vencidos · segure pra selecionar vários</p></div>
+      <div><h1>Todos os Lançamentos</h1><p style="margin:0;">Consulte, filtre e gerencie todas as movimentações financeiras.</p></div>
+      <button class="btn ghost sm" id="btnBaixarPdfTodosLanc">📄 Exportar PDF</button>
     </div>
-    <div class="panel" style="margin-bottom:14px;">
-      <div class="filter-bar">${mesNavFiltroHTML(todosLancMesFiltro, 'todosLancMes')}</div>
-      <div class="filter-bar" style="align-items:flex-end;margin-top:10px;">
-        <div class="field" style="margin:0;max-width:130px;"><label style="font-size:10.5px;">De</label><input type="date" id="todosLancPdfDe" value="${todosLancMesFiltro}-01" style="padding:6px 8px;font-size:12px;"></div>
-        <div class="field" style="margin:0;max-width:130px;"><label style="font-size:10.5px;">Até</label><input type="date" id="todosLancPdfAte" value="${(()=>{const [a,m]=todosLancMesFiltro.split('-').map(Number); return `${todosLancMesFiltro}-${String(new Date(a,m,0).getDate()).padStart(2,'0')}`;})()}" style="padding:6px 8px;font-size:12px;"></div>
-        <button class="btn ghost sm" id="btnBaixarPdfTodosLanc">📄 Baixar PDF</button>
+    <div style="font-size:12.5px;color:var(--text-soft);margin:-8px 0 14px;">${qtd} lançamento(s) encontrado(s)</div>
+
+    <div class="fluxo-resumo-4col">
+      <div class="fluxo-resumo-item"><div class="lbl">Lançamentos</div><div class="val">${qtd}</div></div>
+      <div class="fluxo-resumo-item"><div class="lbl">Entradas</div><div class="val" style="color:var(--success);">+ ${vm(brl(entradasTotal))}</div></div>
+      <div class="fluxo-resumo-item"><div class="lbl">Saídas</div><div class="val" style="color:var(--danger);">− ${vm(brl(saidasTotal))}</div></div>
+      <div class="fluxo-resumo-item"><div class="lbl">Resultado</div><div class="val" style="color:${resultado>=0?'var(--success)':'var(--danger)'};">${resultado>=0?'+':'−'} ${vm(brl(Math.abs(resultado)))}</div></div>
+    </div>
+    <div class="fluxo-saldo-final-bar">
+      <span>Movimentação líquida</span>
+      <span class="mono" style="font-weight:700;font-size:15px;color:${resultado>=0?'var(--success)':'var(--danger)'};">${resultado>=0?'+':'−'} ${vm(brl(Math.abs(resultado)))}</span>
+    </div>
+
+    <div class="panel" style="margin:14px 0;">
+      <div class="panel-body" style="padding:14px 16px;">
+        <input type="text" id="todosLancBusca" placeholder="🔍 Buscar lançamento..." value="${escapeHTML(__todosLancBusca)}" style="width:100%;padding:11px 14px;font-size:13.5px;border:1px solid var(--line);border-radius:10px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px;">
+          <div class="fluxo-filtro-pills">
+            <button type="button" class="fluxo-filtro-pill ${__todosLancTipo==='todos'?'ativo':''}" data-todos-lanc-tipo="todos">Todos</button>
+            <button type="button" class="fluxo-filtro-pill ${__todosLancTipo==='entradas'?'ativo':''}" data-todos-lanc-tipo="entradas">Entradas</button>
+            <button type="button" class="fluxo-filtro-pill ${__todosLancTipo==='saidas'?'ativo':''}" data-todos-lanc-tipo="saidas">Saídas</button>
+          </div>
+          <button type="button" class="btn ghost sm" id="btnToggleFiltrosTodosLanc">⚙ Filtros${temFiltroExtra?' •':''}</button>
+        </div>
+        <div id="todosLancFiltrosExtra" style="display:${__todosLancFiltrosAbertos?'flex':'none'};gap:10px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
+          <div class="field" style="margin:0;min-width:160px;flex:1;">
+            <label style="font-size:10.5px;">Status</label>
+            <select id="todosLancStatusFiltro">
+              <option value="">Todos os status</option>
+              <option value="confirmado" ${__todosLancStatus==='confirmado'?'selected':''}>Pago/Recebido</option>
+              <option value="pendente" ${__todosLancStatus==='pendente'?'selected':''}>Pendente</option>
+              <option value="atrasado" ${__todosLancStatus==='atrasado'?'selected':''}>Atrasado</option>
+              <option value="cancelado" ${__todosLancStatus==='cancelado'?'selected':''}>Cancelado</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0;min-width:160px;flex:1;">
+            <label style="font-size:10.5px;">Categoria</label>
+            <select id="todosLancCategoriaFiltro">
+              <option value="">Todas as categorias</option>
+              ${categoriasDisponiveis.map(c=>`<option value="${escapeHTML(c)}" ${__todosLancCategoria===c?'selected':''}>${escapeHTML(c)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field" style="margin:0;min-width:160px;flex:1;">
+            <label style="font-size:10.5px;">Conta</label>
+            <select id="todosLancContaFiltro">
+              <option value="">Todas as contas</option>
+              ${state.contas.map(c=>`<option value="${c.id}" ${__todosLancContaId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
       </div>
-      <div class="note" style="margin-top:8px;margin-bottom:0;">Por padrão baixa o mês inteiro que está sendo exibido — mude "De"/"Até" pra gerar um período diferente.</div>
     </div>
+
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="panel-body" style="padding:14px 16px;">
+        <div class="filter-bar">${mesNavFiltroHTML(todosLancMesFiltro, 'todosLancMes')}</div>
+        <details style="margin-top:10px;">
+          <summary style="cursor:pointer;font-size:12.5px;color:var(--blue-accent);font-weight:600;">Exportar um período diferente do mês exibido</summary>
+          <div class="filter-bar" style="align-items:flex-end;margin-top:10px;">
+            <div class="field" style="margin:0;max-width:130px;"><label style="font-size:10.5px;">De</label><input type="date" id="todosLancPdfDe" value="${todosLancMesFiltro}-01" style="padding:6px 8px;font-size:12px;"></div>
+            <div class="field" style="margin:0;max-width:130px;"><label style="font-size:10.5px;">Até</label><input type="date" id="todosLancPdfAte" value="${(()=>{const [a,m]=todosLancMesFiltro.split('-').map(Number); return `${todosLancMesFiltro}-${String(new Date(a,m,0).getDate()).padStart(2,'0')}`;})()}" style="padding:6px 8px;font-size:12px;"></div>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <div class="fluxo-filtro-pills" style="margin-bottom:12px;">
+      <button type="button" class="fluxo-filtro-pill ${__todosLancVisao==='cronologico'?'ativo':''}" data-todos-lanc-visao="cronologico">Cronológico</button>
+      <button type="button" class="fluxo-filtro-pill ${__todosLancVisao==='categoria'?'ativo':''}" data-todos-lanc-visao="categoria">Por categoria</button>
+      <button type="button" class="fluxo-filtro-pill ${__todosLancVisao==='fornecedor'?'ativo':''}" data-todos-lanc-visao="fornecedor">Por fornecedor/cliente</button>
+    </div>
+
     <div class="panel">
+      ${__todosLancVisao!=='cronologico' ? `
+      <div class="ledger-row head">
+        <span></span><span>Data</span><span>Descrição</span><span class="col-cat">Venc. orig.</span><span class="col-status">Status</span><span style="text-align:right;">Valor</span>
+      </div>` : ''}
       <div class="panel-body">
-        ${[...dias.entries()].map(([dia, itens])=>{
+        ${__todosLancVisao!=='cronologico'
+          ? (corpoListaLancamentosHTML(listaBase, __todosLancVisao) || `<div class="empty">🔎<br>Nenhum lançamento encontrado.<br><span style="font-size:12px;color:var(--text-soft);">Tente alterar os filtros ou o período.</span></div>`)
+          : (dias.size ? [...dias.entries()].map(([dia, itens])=>{
           const [ano,mes,d] = dia.split('-').map(Number);
           const dt = new Date(ano, mes-1, d, 12);
           const totalDia = itens.reduce((s,l)=>s+(l.tipo==='entrada'?l.valor:-l.valor),0);
@@ -5901,12 +6022,13 @@ function viewTodosLancamentos(){
             </div>
             ${itens.map(rowHTMLEstiloBluecoins).join('')}
           `;
-        }).join('') || `<div class="empty">Nenhum lançamento ainda.</div>`}
+        }).join('') : `<div class="empty">🔎<br>Nenhum lançamento encontrado.<br><span style="font-size:12px;color:var(--text-soft);">Tente alterar os filtros ou o período.</span></div>`)}
       </div>
     </div>
-    <div class="note" style="margin-top:0;">O valor abaixo da conta é o saldo dela no fim do dia daquele lançamento. Se houver mais de um lançamento na mesma conta no mesmo dia, todos mostram esse mesmo saldo de fim de dia — não é possível saber a ordem exata entre eles.</div>
+    <div class="note" style="margin-top:10px;">O valor abaixo da conta é o saldo dela no fim do dia daquele lançamento. Se houver mais de um lançamento na mesma conta no mesmo dia, todos mostram esse mesmo saldo de fim de dia — não é possível saber a ordem exata entre eles.</div>
   `;
 }
+
 
 function rowHTML(l){
   const hoje = todayISO();
@@ -24209,6 +24331,30 @@ function attachViewHandlers(){
     if(!dataDe || !dataAte){ showToast('Preencha as duas datas'); return; }
     if(dataDe > dataAte){ showToast('A data "De" não pode ser depois da data "Até"'); return; }
     gerarTodosLancamentosPDF(dataDe, dataAte);
+  });
+  const todosLancBusca = document.getElementById('todosLancBusca');
+  if(todosLancBusca){
+    todosLancBusca.addEventListener('input', ()=>{
+      __todosLancBusca = todosLancBusca.value;
+      render();
+      // Depois do re-render, devolve o foco e o cursor pro campo de busca (senão cada letra digitada
+      // perderia o foco, já que render() recria o HTML inteiro da tela)
+      const campo = document.getElementById('todosLancBusca');
+      if(campo){ campo.focus(); campo.setSelectionRange(campo.value.length, campo.value.length); }
+    });
+  }
+  document.querySelectorAll('[data-todos-lanc-tipo]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ __todosLancTipo = btn.dataset.todosLancTipo; render(); });
+  });
+  document.getElementById('btnToggleFiltrosTodosLanc')?.addEventListener('click', ()=>{
+    __todosLancFiltrosAbertos = !__todosLancFiltrosAbertos;
+    render();
+  });
+  document.getElementById('todosLancStatusFiltro')?.addEventListener('change', (e)=>{ __todosLancStatus = e.target.value; render(); });
+  document.getElementById('todosLancCategoriaFiltro')?.addEventListener('change', (e)=>{ __todosLancCategoria = e.target.value; render(); });
+  document.getElementById('todosLancContaFiltro')?.addEventListener('change', (e)=>{ __todosLancContaId = e.target.value; render(); });
+  document.querySelectorAll('[data-todos-lanc-visao]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ __todosLancVisao = btn.dataset.todosLancVisao; render(); });
   });
   document.getElementById('todosLancMesAnterior')?.addEventListener('click', ()=>{
     todosLancMesFiltro = mesFiltroSomado(todosLancMesFiltro, -1);
