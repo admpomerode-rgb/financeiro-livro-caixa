@@ -4384,6 +4384,18 @@ function limparTextoPDF(txt){
 // Cria uma instância de jsPDF já com o método .text() interceptado pra sanitizar automaticamente
 // qualquer string (ou array de strings) antes de desenhar — assim NENHUM gerador de PDF precisa
 // se preocupar em limpar emoji manualmente, incluindo os que já existiam antes dessa revisão.
+// A fonte padrão do jsPDF (Helvetica) não tem glifos de emoji — tentar desenhar um emoji vira
+// caractere corrompido no PDF (ex: "💰" virando "Ø=ßâ"). Latin-1 (até 0xFF) já cobre acentuação
+// em português normalmente, então filtrar pra esse intervalo remove só o que quebraria o PDF.
+function pdfSafe(txt){
+  return (txt||'')
+    .replace(/[\u2012-\u2015]/g, '-')   // travessões (—, –) -> hífen
+    .replace(/[\u2018\u2019]/g, "'")    // aspas simples curvas -> reta
+    .replace(/[\u201C\u201D]/g, '"')    // aspas duplas curvas -> reta
+    .replace(/\u2026/g, '...')          // reticências -> três pontos
+    .replace(/[^\x00-\xFF]/g, '')       // qualquer outro símbolo fora do Latin-1 (emoji etc.) some
+    .replace(/\s{2,}/g,' ').trim();
+}
 function criarPDF(opts){
   const { jsPDF } = window.jspdf;
   const docPdf = new jsPDF(Object.assign({ unit:'mm', format:'a4' }, opts||{}));
@@ -5832,7 +5844,7 @@ function gerarTodosLancamentosPDF(dataDe, dataAte){
     y = pdfChecarQuebra(docPdf, y);
     docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...INK);
     docPdf.text(fmtDate(l.dataPagamento||l.dataVencimento), M, y);
-    const desc = (l.descricao||'').length>42 ? l.descricao.slice(0,42)+'…' : (l.descricao||'');
+    const descLimpa = pdfSafe(l.descricao); const desc = descLimpa.length>42 ? descLimpa.slice(0,42)+'…' : descLimpa;
     docPdf.text(desc, M+22, y);
     docPdf.setTextColor(...SOFT);
     docPdf.text((nomeConta(l.contaId)||'—').slice(0,20), M+120, y);
@@ -6201,7 +6213,7 @@ function gerarLancamentosPDF(lista, tipo){
     const atrasado = l.status==='pendente' && l.dataVencimento && l.dataVencimento<hoje;
     docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...INK);
     docPdf.text(fmtDate(l.dataVencimento), M, y);
-    const desc = l.descricao.length>48 ? l.descricao.slice(0,48)+'…' : l.descricao;
+    const descLimpa = pdfSafe(l.descricao); const desc = descLimpa.length>48 ? descLimpa.slice(0,48)+'…' : descLimpa;
     docPdf.text(desc, M+22, y);
     docPdf.setTextColor(...(atrasado?DANGER:SOFT));
     docPdf.text(atrasado?'Atrasado':{pago:'Pago',recebido:'Recebido',pendente:'Pendente',cancelado:'Cancelado'}[l.status], M+130, y);
@@ -6556,7 +6568,7 @@ function gerarFluxoCaixaPDF(mesRef, categoriaFiltro){
     saldoCorrida += ev.tipo==='entrada' ? ev.valor : -ev.valor;
     docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...INK);
     docPdf.text(fmtDate(ev.data), M, y);
-    const desc = (ev.descricao||'').length>48 ? ev.descricao.slice(0,48)+'…' : (ev.descricao||'');
+    const descLimpa = pdfSafe(ev.descricao); const desc = descLimpa.length>48 ? descLimpa.slice(0,48)+'…' : descLimpa;
     docPdf.text(desc, M+22, y);
     docPdf.setTextColor(...(ev.tipo==='entrada'?SUCCESS:DANGER));
     docPdf.text(`${ev.tipo==='entrada'?'+':'-'} ${brl(ev.valor)}`, M+W, y, { align:'right' });
@@ -7411,7 +7423,7 @@ function gerarExtratoCategoriaPDF(tipo, categoria, dataDe, dataAte){
     docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...INK);
     const sufixoCategoria = categoria ? '' : `  (${l.categoria})`;
     const limiteTexto = categoria ? 45 : 34;
-    const desc = l.descricao.length>limiteTexto ? l.descricao.slice(0,limiteTexto)+'…' : l.descricao;
+    const descLimpa = pdfSafe(l.descricao); const desc = descLimpa.length>limiteTexto ? descLimpa.slice(0,limiteTexto)+'…' : descLimpa;
     docPdf.text(`${fmtDate(l.dataPagamento||l.dataVencimento)}  ${desc}${sufixoCategoria}`, M, y);
     docPdf.setTextColor(...(tipo==='entrada'?SUCCESS:DANGER));
     docPdf.text(brl(l.valor), M+W, y, { align:'right' });
@@ -7594,8 +7606,8 @@ function gerarExtratoGeralPDF(dataDe, dataAte){
   lista.forEach(l=>{
     y = pdfChecarQuebra(docPdf, y);
     docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...INK);
-    const desc = l.descricao.length>38 ? l.descricao.slice(0,38)+'…' : l.descricao;
-    docPdf.text(`${fmtDate(l.dataPagamento)}  ${desc}  (${l.categoria})`, M, y);
+    const descLimpa = pdfSafe(l.descricao); const desc = descLimpa.length>38 ? descLimpa.slice(0,38)+'…' : descLimpa;
+    docPdf.text(`${fmtDate(l.dataPagamento)}  ${desc}  (${pdfSafe(l.categoria)})`, M, y);
     docPdf.setTextColor(...(l.tipo==='entrada'?SUCCESS:DANGER));
     docPdf.text(`${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}`, M+W, y, { align:'right' });
     y += 6;
@@ -7651,7 +7663,7 @@ function gerarExtratoConsolidadoPDF(){
         y = pdfChecarQuebra(docPdf, y);
         docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...INK);
         docPdf.text(fmtDate(l.dataPagamento), M, y);
-        const desc = (l.descricao||'').length>45 ? l.descricao.slice(0,45)+'…' : (l.descricao||'');
+        const descLimpa = pdfSafe(l.descricao); const desc = descLimpa.length>45 ? descLimpa.slice(0,45)+'…' : descLimpa;
         docPdf.text(desc, M+22, y);
         docPdf.setTextColor(...(l.tipo==='entrada'?SUCCESS:DANGER));
         docPdf.text(`${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}`, M+W, y, { align:'right' });
@@ -7716,7 +7728,7 @@ function gerarExtratoPDF(contaId, dataDe, dataAte){
     g.itens.forEach(l=>{
       y = pdfChecarQuebra(docPdf, y);
       docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...INK);
-      const desc = l.descricao.length>55 ? l.descricao.slice(0,55)+'…' : l.descricao;
+      const descLimpa = pdfSafe(l.descricao); const desc = descLimpa.length>55 ? descLimpa.slice(0,55)+'…' : descLimpa;
       docPdf.text(desc, M+2, y);
       docPdf.setTextColor(...(l.tipo==='entrada'?SUCCESS:DANGER));
       docPdf.text(`${l.tipo==='entrada'?'+':'-'} ${brl(l.valor)}`, M+W-2, y, { align:'right' });
