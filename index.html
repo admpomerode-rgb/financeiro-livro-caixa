@@ -508,17 +508,17 @@
   }
 
   /* Dashboard — Acesso Rápido */
-  .acesso-rapido-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:20px;}
-  .acesso-rapido-card{background:var(--white);border:1px solid var(--line);border-radius:12px;padding:14px 14px;cursor:pointer;transition:border-color .15s,box-shadow .15s;aspect-ratio:1/1;display:flex;flex-direction:column;justify-content:center;overflow:hidden;}
+  .acesso-rapido-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:20px;justify-items:center;}
+  .acesso-rapido-card{background:var(--white);border:1px solid var(--line);border-radius:10px;padding:10px 11px;cursor:pointer;transition:border-color .15s,box-shadow .15s;aspect-ratio:1/1;width:100%;max-width:150px;display:flex;flex-direction:column;justify-content:center;overflow:hidden;}
   .acesso-rapido-card:hover{border-color:var(--blue-accent);box-shadow:0 2px 10px rgba(11,15,20,.06);}
-  .acesso-rapido-card .ar-topo{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
-  .acesso-rapido-card .ar-icone{font-size:19px;}
-  .acesso-rapido-card .ar-titulo{font-weight:700;font-size:12.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--text-soft);}
-  .acesso-rapido-card .ar-linha1{font-size:13px;font-weight:600;overflow-wrap:break-word;}
-  .acesso-rapido-card .ar-linha2{font-size:11.5px;color:var(--text-soft);margin-top:3px;overflow-wrap:break-word;}
+  .acesso-rapido-card .ar-topo{display:flex;align-items:center;gap:6px;margin-bottom:5px;}
+  .acesso-rapido-card .ar-icone{font-size:15px;}
+  .acesso-rapido-card .ar-titulo{font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--text-soft);}
+  .acesso-rapido-card .ar-linha1{font-size:11.5px;font-weight:600;overflow-wrap:break-word;}
+  .acesso-rapido-card .ar-linha2{font-size:10px;color:var(--text-soft);margin-top:2px;overflow-wrap:break-word;}
   @media (min-width:700px){
-    .acesso-rapido-grid{grid-template-columns:repeat(auto-fill,minmax(190px,1fr));}
-    .acesso-rapido-card{aspect-ratio:auto;}
+    .acesso-rapido-grid{grid-template-columns:repeat(auto-fill,minmax(170px,1fr));justify-items:stretch;}
+    .acesso-rapido-card{aspect-ratio:auto;max-width:none;}
   }
 
   /* Cartões de crédito */
@@ -5196,15 +5196,83 @@ function painelOQueMudouHTML(){
 
 // Ponte do Caixa — visual em cascata explicando por que o caixa do mês mudou (não é um relatório
 // novo, é uma leitura rápida pra tela inicial). Reaproveita svgCascata já existente.
+// Ponte do Caixa (Dashboard) — versão mais elaborada do gráfico em cascata, só pra esse bloco.
+// Não reaproveita svgCascata porque ela também é usada no relatório de DRE (visão em cascata) e eu
+// não quero arriscar mudar a aparência de uma tela que você não pediu pra mexer.
+function svgPonteCaixa(passos){
+  // passos: [{label, valor, total?}] — o primeiro item e qualquer item marcado com total:true são
+  // barras "cheias" (do zero até o valor acumulado até ali), os do meio são barras de delta (o que
+  // subiu ou desceu). Isso é o que faz o gráfico em cascata fazer sentido visualmente.
+  const W=680, H=240, padB=34, padT=34, gap=18;
+  const barW = Math.min(96, (W-40-gap*(passos.length-1))/passos.length);
+  let acumulado = 0;
+  const pontos = passos.map((p,i)=>{
+    if(i===0){ acumulado = p.valor; return {...p, ini:0, fim:acumulado, ehTotal:true}; }
+    if(p.total){ return {...p, ini:0, fim:acumulado, ehTotal:true}; }
+    const ini=acumulado; acumulado+=p.valor; return {...p, ini, fim:acumulado, ehTotal:false};
+  });
+  const maxAbs = Math.max(...pontos.map(p=>Math.max(p.ini,p.fim)), Math.abs(Math.min(...pontos.map(p=>Math.min(p.ini,p.fim)))), 1);
+  const minAbs = Math.min(0, ...pontos.map(p=>Math.min(p.ini,p.fim)));
+  const range = Math.max(1, maxAbs-minAbs);
+  const yAt = v => H-padB - ((v-minAbs)/range)*(H-padB-padT);
+  const xAt = i => 20 + i*(barW+gap);
+  const yZero = yAt(0);
+
+  const grades = [0.25,0.5,0.75].map(f=>{
+    const y = padT + f*(H-padB-padT);
+    return `<line x1="20" y1="${y.toFixed(1)}" x2="${W-20}" y2="${y.toFixed(1)}" stroke="var(--line)" stroke-width="1" stroke-dasharray="2,4" opacity=".6"/>`;
+  }).join('');
+
+  const linhas = pontos.slice(0,-1).map((p,i)=>{
+    const x1 = xAt(i)+barW, x2 = xAt(i+1);
+    const y = yAt(p.fim);
+    return `<line x1="${x1}" y1="${y.toFixed(1)}" x2="${x2}" y2="${y.toFixed(1)}" stroke="var(--text-soft)" stroke-width="1.3" stroke-dasharray="3,3" opacity=".55"/>`;
+  }).join('');
+
+  const barras = pontos.map((p,i)=>{
+    const x = xAt(i);
+    const y1 = yAt(Math.max(p.ini,p.fim)), y2 = yAt(Math.min(p.ini,p.fim));
+    const cor = p.ehTotal ? 'var(--blue-accent)' : (p.valor>=0 ? 'var(--success)' : 'var(--danger)');
+    const gradId = `pcGrad${i}`;
+    const rotulo = p.ehTotal ? brl(p.fim) : `${p.valor>=0?'+':'−'} ${brl(Math.abs(p.valor)).replace('R$ ','')}`;
+    return `
+      <defs>
+        <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${cor}" stop-opacity="1"/>
+          <stop offset="100%" stop-color="${cor}" stop-opacity=".72"/>
+        </linearGradient>
+      </defs>
+      <rect x="${x.toFixed(1)}" y="${y1.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(3,y2-y1).toFixed(1)}" fill="url(#${gradId})" rx="6"/>
+      <text x="${(x+barW/2).toFixed(1)}" y="${(y1-9).toFixed(1)}" font-size="11.5" fill="var(--ink)" text-anchor="middle" font-weight="700">${rotulo}</text>
+      <text x="${(x+barW/2).toFixed(1)}" y="${H-14}" font-size="9.5" fill="var(--text-soft)" text-anchor="middle" font-weight="600">${escapeHTML(p.label)}</text>
+    `;
+  }).join('');
+
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;">
+    ${grades}
+    <line x1="20" y1="${yZero.toFixed(1)}" x2="${W-20}" y2="${yZero.toFixed(1)}" stroke="var(--line)" stroke-width="1.4"/>
+    ${linhas}
+    ${barras}
+  </svg>`;
+}
+
 function ponteCaixaHTML(t){
   const passos = [
     { label:'Caixa Inicial', valor:t.saldoInicial },
     { label:'Entradas', valor:t.entradasMes },
     { label:'Saídas', valor:-t.saidasMes },
+    { label:'Caixa Atual', valor:0, total:true },
   ];
   return `
-    <div class="dash-section-label">Ponte do Caixa — ${competenciaLabel(mesGlobalRef)}</div>
-    <div class="panel"><div class="panel-body" style="padding:10px 6px;overflow-x:auto;">${svgCascata(passos)}</div></div>
+    <div class="dash-section-label">💧 Ponte do Caixa — ${competenciaLabel(mesGlobalRef)}</div>
+    <div class="panel" style="margin-bottom:20px;">
+      <div class="panel-body" style="padding:16px 10px 12px;overflow-x:auto;">${svgPonteCaixa(passos)}</div>
+      <div style="display:flex;gap:16px;justify-content:center;padding:0 16px 14px;font-size:10.5px;color:var(--text-soft);">
+        <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--blue-accent);margin-right:4px;"></span>Total acumulado</span>
+        <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--success);margin-right:4px;"></span>Entrou</span>
+        <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--danger);margin-right:4px;"></span>Saiu</span>
+      </div>
+    </div>
   `;
 }
 
@@ -5725,6 +5793,7 @@ function viewDashboard(){
       </div>
     </div>
 
+    ${ponteCaixaHTML(t)}
     ${saudeEmpresaHTML()}
     ${acessoRapidoHTML(t)}
     ${ondeEstaDinheiroHTML()}
@@ -5748,7 +5817,6 @@ function viewDashboard(){
     ${modoSimples ? '' : possoGastarHojeHTML()}
     ${modoSimples ? '' : preview7DiasHTML()}
     ${modoSimples ? '' : resumoDiaCopiarHTML()}
-    ${ponteCaixaHTML(t)}
     ${cardQualidadeDadosHTML()}
 
     ${modoSimples ? '' : (()=>{
