@@ -26855,15 +26855,20 @@ function viewProvMatrizAba(ativos){
       const vencido = previsto>0 && chave < todayISO().slice(0,7) && reservadoMes<previsto && !lancPago;
       const coberto = previsto>0 && reservadoMes>=previsto;
       const risco = previsto>0 && !coberto && !vencido && chave===todayISO().slice(0,7) && !lancPago;
+      // falta = quanto ainda precisa reservar naquele mês pra cobrir o previsto — some conforme
+      // reservadoMes cresce, e some totalmente assim que a despesa é paga (lancPago).
+      const falta = (lancPago || previsto<=0) ? 0 : Math.max(0, Math.round((previsto-reservadoMes)*100)/100);
       // temValor considera também um pagamento avulso vinculado sem valor previsto cadastrado
       // naquele mês — pra sempre mostrar que foi pago, mesmo fora do planejamento original.
-      return { previsto, valorExibir: previsto>0 ? previsto : (lancPago?.valor||0), reservadoMes, vencido, coberto, risco, pago: !!lancPago, lancPagoId: lancPago?.id, temValor: previsto>0 || !!lancPago, semPrevisto: previsto<=0 && !!lancPago };
+      return { previsto, valorExibir: previsto>0 ? previsto : (lancPago?.valor||0), reservadoMes, falta, vencido, coberto, risco, pago: !!lancPago, lancPagoId: lancPago?.id, temValor: previsto>0 || !!lancPago, semPrevisto: previsto<=0 && !!lancPago };
     });
-    return { p: x.p, porMes, totalLinha: porMes.reduce((s,c)=>s+c.previsto,0) };
+    return { p: x.p, porMes, totalLinha: porMes.reduce((s,c)=>s+c.previsto,0), reservadoLinha: porMes.reduce((s,c)=>s+c.reservadoMes,0), faltaLinha: porMes.reduce((s,c)=>s+c.falta,0) };
   });
   const totaisColuna = meses.map((_,i)=>linhas.reduce((s,l)=>s+l.porMes[i].previsto,0));
   const totalGeral = totaisColuna.reduce((a,b)=>a+b,0);
-  const legenda = `<div class="note" style="margin-top:8px;">🟢 coberto · 🟡 mês atual ainda em risco · 🔴 vencido sem cobrir · ✅ já paga (clique pra ver o lançamento). O valor de cada mês é a meta de reserva dividida pelo número de ocorrências daquele provisionamento no ano.</div>`;
+  const totalReservadoGeral = linhas.reduce((s,l)=>s+l.reservadoLinha,0);
+  const totalFaltaGeral = linhas.reduce((s,l)=>s+l.faltaLinha,0);
+  const legenda = `<div class="note" style="margin-top:8px;"><span style="color:var(--ink);font-weight:700;">Preto</span> = previsto original · <span style="color:var(--success);font-weight:700;">verde</span> = já provisionado/reservado · <span style="color:var(--danger);font-weight:700;">vermelho</span> = falta reservar · ✅ já paga (clique pra ver o lançamento).</div>`;
   const navAno = `
     <div class="panel" style="margin-bottom:14px;">
       <div class="filter-bar" style="align-items:center;">
@@ -26885,17 +26890,28 @@ function viewProvMatrizAba(ativos){
             <div class="panel-head"><h2 style="font-size:14px;">${escapeHTML(l.p.nome)}</h2><span class="mono" style="font-size:12.5px;font-weight:700;">${brl(l.totalLinha)}</span></div>
             <div class="panel-body">
               ${mesesComValor.length ? mesesComValor.map(c=>{
-                const cor = c.pago ? 'var(--success)' : c.coberto ? 'var(--success)' : c.vencido ? 'var(--danger)' : c.risco ? 'var(--warn)' : 'var(--ink)';
-                return `<div class="${c.pago?'prov-matriz-pago-cell':''}" style="display:flex;justify-content:space-between;padding:7px 4px;border-bottom:1px solid var(--line);font-size:12.5px;${c.pago?'cursor:pointer;':''}" ${c.pago?`data-action="abrir-lancamento-prov" data-id="${c.lancPagoId}"`:''}>
-                  <span>${c.nome}/${ano}${c.pago?' ✅':''}${c.semPrevisto?' <span style="color:var(--text-soft);font-size:10.5px;">(sem previsão)</span>':''}</span>
-                  <span class="mono" style="color:${cor};font-weight:600;">${brl(c.valorExibir)}${c.reservadoMes>0?` <span style="font-size:10.5px;color:var(--text-soft);">(${brl(c.reservadoMes)} reservado)</span>`:''}</span>
+                return `<div class="${c.pago?'prov-matriz-pago-cell':''}" style="padding:7px 4px;border-bottom:1px solid var(--line);font-size:12.5px;${c.pago?'cursor:pointer;':''}" ${c.pago?`data-action="abrir-lancamento-prov" data-id="${c.lancPagoId}"`:''}>
+                  <div style="display:flex;justify-content:space-between;">
+                    <span>${c.nome}/${ano}${c.pago?' ✅':''}${c.semPrevisto?' <span style="color:var(--text-soft);font-size:10.5px;">(sem previsão)</span>':''}</span>
+                    <span class="mono" style="color:var(--ink);font-weight:600;">${brl(c.valorExibir)}</span>
+                  </div>
+                  ${!c.pago && c.previsto>0 ? `<div style="display:flex;justify-content:flex-end;gap:10px;font-size:10.5px;margin-top:2px;">
+                    ${c.reservadoMes>0?`<span class="mono" style="color:var(--success);">${brl(c.reservadoMes)} reservado</span>`:''}
+                    ${c.falta>0?`<span class="mono" style="color:var(--danger);">${brl(c.falta)} falta</span>`:''}
+                  </div>` : ''}
                 </div>`;
               }).join('') : `<div class="empty">Sem ocorrência nesse ano.</div>`}
             </div>
           </div>
         `;
       }).join('')}
-      <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="display:flex;justify-content:space-between;font-weight:700;padding:10px 4px;"><span>Total do ano</span><span class="mono">${brl(totalGeral)}</span></div></div>
+      <div class="panel" style="margin-bottom:14px;">
+        <div class="panel-body">
+          <div style="display:flex;justify-content:space-between;padding:5px 4px;"><span>Previsto no ano</span><span class="mono" style="color:var(--ink);font-weight:700;">${brl(totalGeral)}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:5px 4px;"><span>Já provisionado</span><span class="mono" style="color:var(--success);font-weight:700;">${brl(totalReservadoGeral)}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:5px 4px;"><span>Falta provisionar</span><span class="mono" style="color:var(--danger);font-weight:700;">${brl(totalFaltaGeral)}</span></div>
+        </div>
+      </div>
       ${legenda}
     `;
   }
@@ -26915,21 +26931,29 @@ function viewProvMatrizAba(ativos){
               <td style="padding:8px;font-weight:600;position:sticky;left:0;background:var(--card-bg,#fff);">${escapeHTML(l.p.nome)}</td>
               ${l.porMes.map(c=>{
                 if(!c.temValor) return `<td style="padding:8px;text-align:right;color:var(--line);">—</td>`;
-                const cor = c.pago ? 'var(--success)' : c.coberto ? 'var(--success)' : c.vencido ? 'var(--danger)' : c.risco ? 'var(--warn)' : 'var(--ink)';
-                return `<td class="${c.pago?'prov-matriz-pago-cell':''}" style="padding:8px;text-align:right;color:${cor};${c.pago?'cursor:pointer;':''}" ${c.pago?`data-action="abrir-lancamento-prov" data-id="${c.lancPagoId}"`:''}>
-                  <div>${brl(c.valorExibir)}${c.pago?' ✅':''}</div>
+                return `<td class="${c.pago?'prov-matriz-pago-cell':''}" style="padding:8px;text-align:right;${c.pago?'cursor:pointer;':''}" ${c.pago?`data-action="abrir-lancamento-prov" data-id="${c.lancPagoId}"`:''}>
+                  <div style="color:${c.pago?'var(--success)':'var(--ink)'};">${brl(c.valorExibir)}${c.pago?' ✅':''}</div>
                   ${c.semPrevisto ? `<div style="font-size:9px;color:var(--text-soft);">sem previsão</div>` : ''}
-                  ${c.reservadoMes>0 ? `<div style="font-size:9.5px;color:var(--text-soft);font-weight:400;">${c.coberto?'✓ ':''}${brl(c.reservadoMes)} reservado</div>` : ''}
+                  ${!c.pago && c.reservadoMes>0 ? `<div style="font-size:9.5px;color:var(--success);font-weight:600;">${brl(c.reservadoMes)}</div>` : ''}
+                  ${!c.pago && c.falta>0 ? `<div style="font-size:9.5px;color:var(--danger);font-weight:600;">falta ${brl(c.falta)}</div>` : ''}
                 </td>`;
               }).join('')}
-              <td style="padding:8px;text-align:right;font-weight:700;">${brl(l.totalLinha)}</td>
+              <td style="padding:8px;text-align:right;font-weight:700;">
+                <div style="color:var(--ink);">${brl(l.totalLinha)}</div>
+                ${l.reservadoLinha>0?`<div style="font-size:9.5px;color:var(--success);">${brl(l.reservadoLinha)}</div>`:''}
+                ${l.faltaLinha>0?`<div style="font-size:9.5px;color:var(--danger);">falta ${brl(l.faltaLinha)}</div>`:''}
+              </td>
             </tr>
           `).join('') : `<tr><td colspan="14" style="padding:20px;text-align:center;color:var(--text-soft);">Nenhum provisionamento ativo.</td></tr>`}
         </tbody>
         ${linhas.length ? `<tfoot><tr style="border-top:2px solid var(--line);font-weight:700;">
           <td style="padding:8px;position:sticky;left:0;background:var(--bone);">Total</td>
-          ${totaisColuna.map(t=>`<td style="padding:8px;text-align:right;">${brl(t)}</td>`).join('')}
-          <td style="padding:8px;text-align:right;">${brl(totalGeral)}</td>
+          ${totaisColuna.map(t=>`<td style="padding:8px;text-align:right;color:var(--ink);">${brl(t)}</td>`).join('')}
+          <td style="padding:8px;text-align:right;">
+            <div style="color:var(--ink);">${brl(totalGeral)}</div>
+            <div style="font-size:9.5px;color:var(--success);">${brl(totalReservadoGeral)}</div>
+            <div style="font-size:9.5px;color:var(--danger);">falta ${brl(totalFaltaGeral)}</div>
+          </td>
         </tr></tfoot>` : ''}
       </table>
     </div>
@@ -27142,13 +27166,6 @@ function openRegistrarReservaModal(provisionamentoId){
   modal.innerHTML = `
     <h3>Registrar reserva — ${escapeHTML(p.nome)}</h3>
     <div class="note" style="margin-top:0;">Já reservado (realizado): ${brl(realizado)} de ${brl(meta)} · falta ${brl(Math.max(0,meta-realizado))}</div>
-    <div class="field">
-      <label>Tipo de reserva</label>
-      <div class="toggle-row" id="rsvTipoToggle">
-        <button type="button" data-tipo="planejada" class="active">Planejada (só anotação)</button>
-        <button type="button" data-tipo="realizada">Realizada (dinheiro já separado)</button>
-      </div>
-    </div>
     <div class="field-row">
       <div class="field"><label>Valor (R$)</label><input type="text" inputmode="decimal" id="rsvValor" placeholder="0,00"></div>
       <div class="field"><label>Data (quando você está fazendo isso)</label><input type="date" id="rsvData" value="${todayISO()}"></div>
@@ -27158,7 +27175,7 @@ function openRegistrarReservaModal(provisionamentoId){
       <select id="rsvMesReferencia">${opcoesMes.map(m=>`<option value="${m}" ${m===mesReferenciaPadrao?'selected':''}>${competenciaLabel(m)}</option>`).join('')}</select>
       <div class="note" style="margin-top:6px;">Você pode reservar hoje pra um vencimento de vários meses à frente — ex: já separar dinheiro pra fatura que só vence daqui 8 meses. Isso aparece certinho na Matriz Mensal, no mês escolhido aqui, não no mês em que você registrou.</div>
     </div>
-    <div id="rsvGrupoRealizada" style="display:none;">
+    <div id="rsvGrupoRealizada">
       <div class="field-row">
         <div class="field"><label>Conta de origem</label>
           <select id="rsvContaOrigem"><option value="">— nenhuma —</option>${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}" ${p.contaOrigemId===c.id?'selected':''}>${escapeHTML(c.nome)} (${brl(saldoConta(c.id))})</option>`).join('')}</select>
@@ -27177,14 +27194,7 @@ function openRegistrarReservaModal(provisionamentoId){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  let tipoAtual = 'planejada';
-  document.getElementById('rsvTipoToggle').addEventListener('click', (e)=>{
-    const btn = e.target.closest('button[data-tipo]');
-    if(!btn) return;
-    tipoAtual = btn.dataset.tipo;
-    document.querySelectorAll('#rsvTipoToggle button').forEach(b=>b.classList.toggle('active', b===btn));
-    document.getElementById('rsvGrupoRealizada').style.display = tipoAtual==='realizada' ? 'block' : 'none';
-  });
+  const tipoAtual = 'realizada';
   document.getElementById('btnSalvarReservaProv').addEventListener('click', async ()=>{
     const btnClick = document.getElementById('btnSalvarReservaProv');
     if(btnClick.disabled) return;
