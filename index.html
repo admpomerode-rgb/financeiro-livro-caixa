@@ -1968,6 +1968,65 @@ function ultimaMovimentacaoConta(contaId){
   const eventos = movimentosRealizados().filter(ev=>ev.contaId===contaId).sort((a,b)=>(b.data||'').localeCompare(a.data||''));
   return eventos[0] || null;
 }
+// Rendimento de conta/caixinha (ex: 100% do CDI, igual PicPay/Nubank) — busca a taxa real do CDI
+// direto do Banco Central (API pública oficial, série 12 — "Taxa de juros CDI", % ao dia — não
+// precisa de chave/cadastro) e aplica juros compostos dia a dia desde a última atualização.
+function formatarDataBCB(iso){ const [a,m,d] = iso.split('-'); return `${d}/${m}/${a}`; }
+async function buscarCDIDiario(dataDe, dataAte){
+  const url = `https://api.bcb.gov.br/dados/serie/bcdata.sgs.12/dados?formato=json&dataInicial=${formatarDataBCB(dataDe)}&dataFinal=${formatarDataBCB(dataAte)}`;
+  const resp = await fetch(url);
+  if(!resp.ok) throw new Error('Falha ao consultar a API do Banco Central');
+  return await resp.json(); // [{data:'dd/mm/yyyy', valor:'0.05'}, ...] — só dias úteis
+}
+// Calcula o valor de rendimento acumulado (em R$) desde ultimoCalculoEm até hoje, pro saldo atual
+// da conta. Não lança nada sozinho — só calcula; quem chama decide o que fazer com o resultado.
+async function calcularRendimentoConta(conta){
+  const r = conta.rendimento;
+  if(!r || !r.ativo) return { valor: 0, dias: 0 };
+  const dataDe = r.ultimoCalculoEm || todayISO();
+  const dataAte = todayISO();
+  if(dataDe>=dataAte) return { valor: 0, dias: 0 };
+  const saldoBase = saldoConta(conta.id);
+  if(saldoBase<=0) return { valor: 0, dias: 0 };
+
+  if(r.tipo==='cdi_pct'){
+    const serie = await buscarCDIDiario(dataDe, dataAte);
+    if(!serie.length) return { valor: 0, dias: 0 };
+    let fator = 1;
+    serie.forEach(d=>{
+      const taxaDia = (parseFloat(d.valor.replace(',','.'))||0)/100; // ex: 0.05% -> 0.0005
+      fator *= (1 + taxaDia*(r.percentual/100));
+    });
+    return { valor: Math.round(saldoBase*(fator-1)*100)/100, dias: serie.length };
+  }
+
+  // taxa fixa (mensal ou diária) — composta dia a dia, contando só os dias corridos entre as datas
+  const dEntre = Math.round((new Date(dataAte+'T12:00:00') - new Date(dataDe+'T12:00:00'))/86400000);
+  if(dEntre<=0) return { valor: 0, dias: 0 };
+  const taxaDiaria = r.tipo==='fixo_mensal' ? Math.pow(1+(r.percentual/100), 1/30)-1 : (r.percentual/100);
+  const fator = Math.pow(1+taxaDiaria, dEntre);
+  return { valor: Math.round(saldoBase*(fator-1)*100)/100, dias: dEntre };
+}
+async function atualizarRendimentoConta(contaId){
+  const conta = state.contas.find(c=>c.id===contaId);
+  if(!conta || !conta.rendimento?.ativo) return;
+  try{
+    const { valor, dias } = await calcularRendimentoConta(conta);
+    if(valor<=0){ showToast(dias===0 ? 'Rendimento já está em dia' : 'Nada a atualizar ainda'); return; }
+    state.lancamentos.push({
+      id: uid(), tipo:'entrada', categoria:'Rendimentos', descricao:`Rendimento — ${conta.nome} (${dias} dia(s))`,
+      valor, contaId, status:'recebido', dataVencimento: todayISO(), dataPagamento: todayISO(),
+      origem:'rendimento-conta', criadoEm: new Date().toISOString()
+    });
+    conta.rendimento.ultimoCalculoEm = todayISO();
+    persist(); render();
+    showToast(`+${brl(valor)} de rendimento lançado`);
+  }catch(e){
+    console.error('Falha ao calcular rendimento:', e);
+    showToast('Não consegui buscar a taxa agora — confira a internet e tente de novo');
+  }
+}
+
 function nomeConta(contaId){
   if(!contaId) return 'Caixa';
   const conta = state.contas.find(c=>c.id===contaId);
@@ -7520,6 +7579,11 @@ function viewContas(){
             return totalProvisionado>0 ? `<div style="font-size:11px;color:var(--text-soft);margin-top:2px;">🗓️ ${vm(brl(totalProvisionado))} provisionado(s) (${provsDaConta.length})</div>` : '';
           })()}
           ${variacaoPct!==null ? `<div style="font-size:11px;color:${variacaoPct>=0?'var(--success)':'var(--danger)'};margin-top:2px;">${variacaoPct>=0?'▲':'▼'} ${Math.abs(variacaoPct).toFixed(1)}% vs mês passado</div>` : ''}
+          ${c.rendimento?.ativo ? `
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px dashed var(--line);">
+            <span style="font-size:10.5px;color:var(--text-soft);">💰 ${c.rendimento.tipo==='cdi_pct'?`${c.rendimento.percentual}% do CDI`:c.rendimento.tipo==='fixo_mensal'?`${c.rendimento.percentual}% a.m.`:`${c.rendimento.percentual}% a.d.`} · atualizado ${fmtDate(c.rendimento.ultimoCalculoEm)}</span>
+            <button type="button" class="icon-btn" data-action="atualizar-rendimento" data-id="${c.id}" title="Calcular e lançar rendimento desde a última atualização">🔄</button>
+          </div>` : ''}
           ${!modoCompactoContas ? `
           <div style="display:flex;align-items:flex-end;gap:1.5px;height:26px;margin-top:8px;" title="Saldo nos últimos 30 dias">
             ${sparkline.map(v=>`<div style="flex:1;background:${c.cor};opacity:.55;border-radius:1px;height:${Math.max(2,Math.round((v-sparkMin)/sparkRange*24))}px;"></div>`).join('')}
@@ -24481,6 +24545,17 @@ function attachViewHandlers(){
   });
   const btnIrOndeDinheiro = document.getElementById('btnIrOndeDinheiro');
   document.getElementById('btnGerenciarCategoriasConta')?.addEventListener('click', openCategoriasContaModal);
+  document.querySelectorAll('[data-action="atualizar-rendimento"]').forEach(btn=>{
+    btn.addEventListener('click', async (e)=>{
+      e.stopPropagation();
+      const original = btn.textContent;
+      btn.textContent = '⏳';
+      btn.disabled = true;
+      await atualizarRendimentoConta(btn.dataset.id);
+      btn.textContent = original;
+      btn.disabled = false;
+    });
+  });
   if(btnIrOndeDinheiro) btnIrOndeDinheiro.addEventListener('click', ()=>{
     relatorioAtivo = 'onde_dinheiro';
     currentView = 'relatorio-detalhe';
@@ -29199,6 +29274,27 @@ function openContaModal(existing){
       <input type="text" inputmode="decimal" id="cSaldoMinimoAlerta" value="${existing&&existing.saldoMinimoAlerta?existing.saldoMinimoAlerta:''}" placeholder="0,00">
     </div>
     <div class="field">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;">
+        <input type="checkbox" id="cRendeJuros" style="width:17px;height:17px;" ${existing?.rendimento?.ativo?'checked':''}>
+        💰 Essa conta rende juros? (caixinha remunerada)
+      </label>
+    </div>
+    <div id="cRendimentoGrupo" style="display:${existing?.rendimento?.ativo?'block':'none'};">
+      <div class="field-row">
+        <div class="field"><label>Tipo de rendimento</label>
+          <select id="cRendimentoTipo">
+            <option value="cdi_pct" ${existing?.rendimento?.tipo==='cdi_pct'?'selected':''}>% do CDI</option>
+            <option value="fixo_mensal" ${existing?.rendimento?.tipo==='fixo_mensal'?'selected':''}>Taxa fixa ao mês</option>
+            <option value="fixo_diario" ${existing?.rendimento?.tipo==='fixo_diario'?'selected':''}>Taxa fixa ao dia</option>
+          </select>
+        </div>
+        <div class="field"><label id="cRendimentoPctLabel">Percentual</label>
+          <input type="text" inputmode="decimal" id="cRendimentoPct" value="${existing?.rendimento?.percentual||''}" placeholder="Ex: 100">
+        </div>
+      </div>
+      <div class="note" style="margin-top:0;">Depois de salvar, use o botão "💰 Atualizar rendimento" no card dessa conta pra calcular e lançar o rendimento acumulado desde a última atualização.</div>
+    </div>
+    <div class="field">
       <label>🔗 Vinculada a um processo (opcional)</label>
       <input type="hidden" id="cProcessoVinculadoId" value="${existing?.processoVinculadoId||''}">
       <button type="button" class="btn ghost" id="cBtnVincularProcesso" style="width:100%;">${existing?.processoVinculadoTitulo ? '🔗 '+escapeHTML(existing.processoVinculadoTitulo) : '🔗 Vincular a um processo'}</button>
@@ -29219,6 +29315,9 @@ function openContaModal(existing){
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   let contaProcessoTituloAtual = existing?.processoVinculadoTitulo || '';
   let contaProcessoNumeroAtual = existing?.processoVinculadoNumero || '';
+  document.getElementById('cRendeJuros').addEventListener('change', (e)=>{
+    document.getElementById('cRendimentoGrupo').style.display = e.target.checked ? 'block' : 'none';
+  });
   document.getElementById('cBtnVincularProcesso').addEventListener('click', async ()=>{
     const btnVinc = document.getElementById('cBtnVincularProcesso');
     const textoOriginal = btnVinc.textContent;
@@ -29289,11 +29388,18 @@ function openContaModal(existing){
     const saldoMinimoAlerta = saldoMinimoAlertaRaw ? numBR(saldoMinimoAlertaRaw) : 0;
     const contaPaiId = document.getElementById('cContaPai').value || null;
     const categoriaContaId = document.getElementById('cCategoriaConta').value || null;
+    const rendeJuros = document.getElementById('cRendeJuros').checked;
+    const rendimento = rendeJuros ? {
+      ativo: true,
+      tipo: document.getElementById('cRendimentoTipo').value,
+      percentual: numBR(document.getElementById('cRendimentoPct').value)||0,
+      ultimoCalculoEm: existing?.rendimento?.ultimoCalculoEm || todayISO()
+    } : null;
     const processoVinculadoId = document.getElementById('cProcessoVinculadoId').value || null;
     const processoVinculadoTitulo = processoVinculadoId ? contaProcessoTituloAtual : null;
     const processoVinculadoNumero = processoVinculadoId ? (contaProcessoNumeroAtual||null) : null;
     const vinculoMudou = processoVinculadoId && processoVinculadoId !== (existing?.processoVinculadoId||null);
-    const payload = { nome, banco, bancoDominio, tipo: document.getElementById('cTipo').value, saldoInicial, cor: corAtual, limiteChequeEspecial, chavePix, saldoMinimoAlerta, contaPaiId, categoriaContaId, processoVinculadoId, processoVinculadoTitulo, processoVinculadoNumero };
+    const payload = { nome, banco, bancoDominio, tipo: document.getElementById('cTipo').value, saldoInicial, cor: corAtual, limiteChequeEspecial, chavePix, saldoMinimoAlerta, contaPaiId, categoriaContaId, rendimento, processoVinculadoId, processoVinculadoTitulo, processoVinculadoNumero };
     const idContaSalva = isEdit ? existing.id : uid();
     if(isEdit){ Object.assign(existing, payload); }
     else { state.contas.push({ id: idContaSalva, ...payload }); }
