@@ -508,14 +508,18 @@
   }
 
   /* Dashboard — Acesso Rápido */
-  .acesso-rapido-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px;margin-bottom:20px;}
-  .acesso-rapido-card{background:var(--white);border:1px solid var(--line);border-radius:12px;padding:14px 16px;cursor:pointer;transition:border-color .15s,box-shadow .15s;}
+  .acesso-rapido-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:20px;}
+  .acesso-rapido-card{background:var(--white);border:1px solid var(--line);border-radius:12px;padding:14px 14px;cursor:pointer;transition:border-color .15s,box-shadow .15s;aspect-ratio:1/1;display:flex;flex-direction:column;justify-content:center;overflow:hidden;}
   .acesso-rapido-card:hover{border-color:var(--blue-accent);box-shadow:0 2px 10px rgba(11,15,20,.06);}
   .acesso-rapido-card .ar-topo{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
   .acesso-rapido-card .ar-icone{font-size:19px;}
   .acesso-rapido-card .ar-titulo{font-weight:700;font-size:12.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--text-soft);}
-  .acesso-rapido-card .ar-linha1{font-size:13px;font-weight:600;}
-  .acesso-rapido-card .ar-linha2{font-size:11.5px;color:var(--text-soft);margin-top:3px;}
+  .acesso-rapido-card .ar-linha1{font-size:13px;font-weight:600;overflow-wrap:break-word;}
+  .acesso-rapido-card .ar-linha2{font-size:11.5px;color:var(--text-soft);margin-top:3px;overflow-wrap:break-word;}
+  @media (min-width:700px){
+    .acesso-rapido-grid{grid-template-columns:repeat(auto-fill,minmax(190px,1fr));}
+    .acesso-rapido-card{aspect-ratio:auto;}
+  }
 
   /* Cartões de crédito */
   .cartao-card{background:linear-gradient(145deg, #0B0F14, #1B2430);color:#FFFFFF;border-radius:14px;padding:48px 20px 18px;position:relative;overflow:hidden;border-top:8px solid var(--accent-c, var(--blue-accent));}
@@ -5743,9 +5747,7 @@ function viewDashboard(){
     ${semaforoAreasHTML()}
     ${modoSimples ? '' : possoGastarHojeHTML()}
     ${modoSimples ? '' : preview7DiasHTML()}
-    ${modoSimples ? '' : notaDiariaHTML()}
     ${modoSimples ? '' : resumoDiaCopiarHTML()}
-    ${modoSimples ? '' : checklistFimExpedienteHTML()}
     ${ponteCaixaHTML(t)}
     ${cardQualidadeDadosHTML()}
 
