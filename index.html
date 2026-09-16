@@ -805,6 +805,7 @@
         <div class="nav-item" data-view="contas" title="Contas Bancárias"><span class="nav-dot"></span><span class="nav-abbr">CB</span><span class="nav-label">Contas Bancárias</span></div>
         <div class="nav-item" data-view="cartoes" title="Cartões de Crédito"><span class="nav-dot"></span><span class="nav-abbr">CC</span><span class="nav-label">Cartões de Crédito</span></div>
         <div class="nav-item" data-view="ativos" title="Ativos Patrimoniais"><span class="nav-dot"></span><span class="nav-abbr">AP</span><span class="nav-label">Ativos Patrimoniais</span></div>
+        <div class="nav-item" data-view="usina-solar" title="Usina Solar"><span class="nav-dot"></span><span class="nav-abbr">US</span><span class="nav-label">Usina Solar</span></div>
         <div class="nav-item" data-view="investimentos" title="Investimentos"><span class="nav-dot"></span><span class="nav-abbr">IV</span><span class="nav-label">Investimentos</span></div>
         <div class="nav-item" data-view="orcamentos-processos" title="Orçamentos e Compras"><span class="nav-dot"></span><span class="nav-abbr">OC</span><span class="nav-label">Orçamentos e Compras</span></div>
         <div class="nav-item" data-view="comissoes" title="Comissões"><span class="nav-dot"></span><span class="nav-abbr">CM</span><span class="nav-label">Comissões</span></div>
@@ -1820,6 +1821,7 @@ function moreItensDef(){
     { view:'contas', icone:'🏦', nome:'Contas Bancárias', grupo:'Operacional' },
     { view:'cartoes', icone:'💳', nome:'Cartões de Crédito', grupo:'Operacional' },
     { view:'ativos', icone:'📦', nome:'Ativos Patrimoniais', grupo:'Operacional', badge:()=>(state.comprasProcessosPendentes||[]).length },
+    { view:'usina-solar', icone:'☀️', nome:'Usina Solar', grupo:'Operacional' },
     { view:'investimentos', icone:'📈', nome:'Investimentos', grupo:'Operacional', badge:()=>(state.notasPendentes||[]).length },
     { view:'orcamentos-processos', icone:'📋', nome:'Orçamentos e Compras', grupo:'Operacional', badge:()=>(state.orcamentosProcessos||[]).filter(o=>o.status==='pendente').length },
     { view:'comissoes', icone:'🤝', nome:'Comissões', grupo:'Operacional' },
@@ -1984,6 +1986,7 @@ function render(){
   else if(currentView==='vendas') main.innerHTML = viewVendas();
   else if(currentView==='centros-custo') main.innerHTML = viewCentrosCusto();
   else if(currentView==='ativos') main.innerHTML = viewAtivosPatrimoniais();
+  else if(currentView==='usina-solar') main.innerHTML = viewUsinaSolar();
   else if(currentView==='ativo-detalhe') main.innerHTML = viewAtivoPatrimonialDetalhe(ativoPatrimonialDetalheId);
   else if(currentView==='integracoes') main.innerHTML = viewIntegracoes();
   else if(currentView==='vk') main.innerHTML = viewVK();
@@ -4317,6 +4320,90 @@ function renderVeiculoLembretes(v){
         </div>`).join('')}
     </div></div>`}
   `;
+}
+
+// Leitura automática de print do app do inversor solar (ex: RENAC Power) — mesmo padrão de
+// extrairDadosNotaFiscalIA, só que pros campos de geração de energia. Sempre revisável antes de
+// salvar (a revisão na tela É a aprovação — nada entra como definitivo sem o usuário confirmar).
+async function extrairDadosGeracaoSolarIA(file){
+  const base64 = await new Promise((res, rej)=>{
+    const r = new FileReader();
+    r.onload = ()=>res(r.result.split(',')[1]);
+    r.onerror = ()=>rej(new Error('Não consegui ler o arquivo'));
+    r.readAsDataURL(file);
+  });
+  const conteudo = { type:'image', source:{ type:'base64', media_type: file.type || 'image/jpeg', data: base64 } };
+  const prompt = `Essa é uma captura de tela de um app de monitoramento de usina solar (ex: RENAC Power, Solarman ou similar), mostrando dados de geração de energia. Extraia os dados em JSON estrito, SEM nenhum texto antes ou depois, exatamente neste formato:
+{
+  "dataReferencia": string no formato AAAA-MM-DD ou null (a data mostrada na tela; se for uma tela de "Dia" com uma data específica, use ela; se for "Mês"/"Ano"/"Total", use null aqui),
+  "periodo": "dia" ou "mes" ou "ano" ou "total" ou null,
+  "geracaoKwh": number ou null (energia gerada no período mostrado — ex: "E-Dia", "Production" do dia, ou o total do período selecionado),
+  "geracaoTotalAcumuladaKwh": number ou null (só se aparecer um "E-Total" ou total acumulado desde a instalação),
+  "rendaReais": number ou null (receita/renda do período em R$ — ex: "Renda Hoje"),
+  "rendaTotalAcumuladaReais": number ou null (só se aparecer "Renda Total" acumulada),
+  "capacidadeKw": number ou null (só se aparecer a capacidade do sistema, ex: "5.50 kW Capacidade"),
+  "dataInstalacao": string no formato AAAA-MM-DD ou null (só se aparecer "Data da Instalação")
+}
+Se não conseguir ler algum campo com certeza, use null nesse campo (não invente valores). Responda só com o JSON.`;
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 800,
+      messages: [{ role:'user', content: [ conteudo, { type:'text', text: prompt } ] }]
+    })
+  });
+  if(!response.ok) throw new Error('Falha ao consultar o leitor automático (HTTP '+response.status+')');
+  const data = await response.json();
+  const textoResp = (data.content||[]).map(c=>c.text||'').join('').trim();
+  const limpo = textoResp.replace(/^```json\s*|^```\s*|```\s*$/gi, '').trim();
+  try{ return JSON.parse(limpo); }catch(e){ throw new Error('Não consegui interpretar a resposta do leitor automático — tente outra imagem ou preencha manualmente'); }
+}
+
+// Leitura automática da fatura de energia elétrica (PDF ou foto) — mesmo padrão de
+// extrairDadosNotaFiscalIA, focado nos campos que a fatura de energia solar (geração distribuída)
+// costuma trazer: consumo, energia injetada e o saldo de créditos (compensação).
+async function extrairDadosFaturaEnergiaIA(file){
+  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+  const base64 = await new Promise((res, rej)=>{
+    const r = new FileReader();
+    r.onload = ()=>res(r.result.split(',')[1]);
+    r.onerror = ()=>rej(new Error('Não consegui ler o arquivo'));
+    r.readAsDataURL(file);
+  });
+  const conteudo = isPdf
+    ? { type:'document', source:{ type:'base64', media_type:'application/pdf', data: base64 } }
+    : { type:'image', source:{ type:'base64', media_type: file.type || 'image/jpeg', data: base64 } };
+  const prompt = `Essa é uma fatura/conta de energia elétrica brasileira (de uma unidade consumidora com geração distribuída/energia solar — pode ter "energia injetada" e "saldo de créditos"). Extraia os dados em JSON estrito, SEM nenhum texto antes ou depois, exatamente neste formato:
+{
+  "referencia": string no formato AAAA-MM ou null (o mês/ano de referência da fatura, ex: 08/2026 vira "2026-08"),
+  "vencimento": string no formato AAAA-MM-DD ou null,
+  "valorTotal": number ou null (o "Total a Pagar"),
+  "consumoKwh": number ou null (o consumo de energia em kWh no período),
+  "energiaInjetadaKwh": number ou null (energia injetada/gerada pela usina solar, em kWh),
+  "saldoCreditosAnteriorKwh": number ou null (saldo de créditos de energia do mês anterior),
+  "creditosUtilizadosKwh": number ou null (créditos usados/abatidos nesta fatura),
+  "saldoCreditosAtualKwh": number ou null (saldo de créditos atualizado, que fica pro próximo mês),
+  "bandeira": string ou null (ex: "Verde", "Amarela", "Vermelha 1", "Vermelha 2")
+}
+Se não conseguir ler algum campo com certeza, use null nesse campo (não invente valores). Responda só com o JSON.`;
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 800,
+      messages: [{ role:'user', content: [ conteudo, { type:'text', text: prompt } ] }]
+    })
+  });
+  if(!response.ok) throw new Error('Falha ao consultar o leitor automático (HTTP '+response.status+')');
+  const data = await response.json();
+  const textoResp = (data.content||[]).map(c=>c.text||'').join('').trim();
+  const limpo = textoResp.replace(/^```json\s*|^```\s*|```\s*$/gi, '').trim();
+  try{ return JSON.parse(limpo); }catch(e){ throw new Error('Não consegui interpretar a resposta do leitor automático — tente outra imagem/PDF ou preencha manualmente'); }
 }
 
 function opcoesCategoriaHTML(tipo, selecionada){
@@ -18568,6 +18655,81 @@ function semaforo(valor, limiteVerde, limiteAmarelo, inverso){
   return valor>=limiteVerde ? '🟢' : valor>=limiteAmarelo ? '🟡' : '🔴';
 }
 
+function viewUsinaSolar(){
+  const usina = state.usinaSolar || {};
+  const leituras = [...(state.usinaLeituras||[])].sort((a,b)=>(b.data||'').localeCompare(a.data||''));
+  const faturas = [...(state.usinaFaturas||[])].sort((a,b)=>(b.referencia||'').localeCompare(a.referencia||''));
+
+  const geracaoTotalRegistrada = leituras.filter(l=>l.periodo==='dia').reduce((s,l)=>s+l.geracaoKwh,0);
+  const ultimaFatura = faturas[0];
+  const saldoCreditosAtual = ultimaFatura?.saldoCreditosAtualKwh;
+
+  if(!usina.capacidadeKw && !leituras.length && !faturas.length){
+    return `
+      <div class="topbar"><div><h1>☀️ Usina Solar</h1><p>Gerencie a geração e o cruzamento com a fatura de energia.</p></div></div>
+      <div class="panel"><div class="panel-body" style="padding:24px 20px;text-align:center;">
+        <div style="font-size:32px;margin-bottom:10px;">☀️</div>
+        <div style="font-size:13.5px;color:var(--text-soft);margin-bottom:16px;">Nenhum dado cadastrado ainda. Comece registrando um print do app do inversor ou uma fatura de energia — a leitura automática identifica os números pra você revisar.</div>
+        <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+          <button class="btn" id="btnRegistrarGeracaoSolar">📸 Registrar geração (print)</button>
+          <button class="btn ghost" id="btnRegistrarFaturaEnergia">🧾 Registrar fatura</button>
+        </div>
+      </div></div>
+    `;
+  }
+
+  return `
+    <div class="topbar">
+      <div><h1>☀️ Usina Solar</h1><p>Gerencie a geração e o cruzamento com a fatura de energia.</p></div>
+      <button class="btn ghost sm" id="btnEditarUsinaSolar">⚙️ Dados da usina</button>
+    </div>
+
+    <div class="contas-acoes-row">
+      <button class="btn" id="btnRegistrarGeracaoSolar">📸 Registrar geração (print)</button>
+      <button class="btn ghost sm" id="btnRegistrarFaturaEnergia">🧾 Registrar fatura</button>
+    </div>
+
+    ${usina.capacidadeKw || usina.dataInstalacao ? `
+    <div class="note" style="margin-top:0;">${usina.capacidadeKw?`Capacidade: <strong>${usina.capacidadeKw} kW</strong>`:''}${usina.capacidadeKw && usina.dataInstalacao?' · ':''}${usina.dataInstalacao?`Instalada em <strong>${fmtDate(usina.dataInstalacao)}</strong>`:''}</div>
+    ` : ''}
+
+    <div class="fluxo-resumo-4col" style="margin-top:14px;">
+      <div class="fluxo-resumo-item"><div class="lbl">Geração registrada</div><div class="val">${geracaoTotalRegistrada.toFixed(1)} kWh</div></div>
+      <div class="fluxo-resumo-item"><div class="lbl">Saldo de créditos atual</div><div class="val">${saldoCreditosAtual!=null?saldoCreditosAtual+' kWh':'—'}</div></div>
+      <div class="fluxo-resumo-item"><div class="lbl">Última fatura</div><div class="val">${ultimaFatura?brl(ultimaFatura.valorTotal):'—'}</div></div>
+      <div class="fluxo-resumo-item"><div class="lbl">Faturas registradas</div><div class="val">${faturas.length}</div></div>
+    </div>
+    <div class="note" style="margin-top:6px;">Não calculo "quanto você economizou" em R$ de forma automática — a fatura não traz esse valor pronto de forma confiável (depende de tarifas e bandeiras variáveis). Os números acima são os que aparecem direto na fatura e no app do inversor.</div>
+
+    <div class="contas-secao-titulo" style="margin-top:22px;">Histórico de geração</div>
+    <div class="panel">
+      <div class="panel-body" style="padding:0;">
+        ${leituras.length ? leituras.slice(0,20).map(l=>`
+          <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto auto;">
+            <span class="dot entrada"></span>
+            <span style="font-size:13px;">${fmtDate(l.data)} <span style="color:var(--text-soft);font-size:11px;">(${l.periodo})</span></span>
+            <span class="mono" style="font-weight:600;">${l.geracaoKwh} kWh</span>
+            <button class="icon-btn" data-action="excluir-leitura-solar" data-id="${l.id}" title="Excluir">✕</button>
+          </div>
+        `).join('') : `<div class="empty">Nenhuma geração registrada ainda.</div>`}
+      </div>
+    </div>
+
+    <div class="contas-secao-titulo" style="margin-top:22px;">Histórico de faturas</div>
+    <div class="panel">
+      <div class="panel-body" style="padding:0;">
+        ${faturas.length ? faturas.map(f=>`
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
+            <div class="desc-cell"><div>${competenciaLabel(f.referencia)}</div><div class="cat">${f.consumoKwh!=null?`Consumo ${f.consumoKwh} kWh`:''}${f.energiaInjetadaKwh!=null?` · Injetada ${f.energiaInjetadaKwh} kWh`:''}${f.saldoCreditosAtualKwh!=null?` · Saldo ${f.saldoCreditosAtualKwh} kWh`:''}</div></div>
+            <span class="mono" style="font-weight:600;">${brl(f.valorTotal)}</span>
+            <button class="icon-btn" data-action="excluir-fatura-solar" data-id="${f.id}" title="Excluir">✕</button>
+          </div>
+        `).join('') : `<div class="empty">Nenhuma fatura registrada ainda.</div>`}
+      </div>
+    </div>
+  `;
+}
+
 function viewAtivosPatrimoniais(){
   const hoje = todayISO();
   const em60ISO = (()=>{ const d=new Date(); d.setDate(d.getDate()+60); return d.toISOString().slice(0,10); })();
@@ -22478,6 +22640,46 @@ function attachViewHandlers(){
   atualizarSelecaoUI();
   document.querySelectorAll('[data-action="ir-demonstracoes-financeiras"]').forEach(el=>{
     el.addEventListener('click', ()=>{ currentView='demonstracoes-financeiras'; render(); });
+  });
+  document.getElementById('btnRegistrarGeracaoSolar')?.addEventListener('click', openRegistrarGeracaoSolarModal);
+  document.getElementById('btnRegistrarFaturaEnergia')?.addEventListener('click', openRegistrarFaturaEnergiaModal);
+  document.getElementById('btnEditarUsinaSolar')?.addEventListener('click', ()=>{
+    const modal = document.getElementById('modalContent');
+    const usina = state.usinaSolar || {};
+    modal.innerHTML = `
+      <h3>⚙️ Dados da usina</h3>
+      <div class="field-row">
+        <div class="field"><label>Capacidade (kW)</label><input type="text" inputmode="decimal" id="usCapacidade" value="${usina.capacidadeKw||''}"></div>
+        <div class="field"><label>Data da instalação</label><input type="date" id="usDataInstalacao" value="${usina.dataInstalacao||''}"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+        <button class="btn" id="btnSalvarUsinaSolar">Salvar</button>
+      </div>`;
+    document.getElementById('modalOverlay').classList.add('open');
+    document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+    document.getElementById('btnSalvarUsinaSolar').addEventListener('click', ()=>{
+      const capacidadeKw = numBR(document.getElementById('usCapacidade').value) || null;
+      const dataInstalacao = document.getElementById('usDataInstalacao').value || null;
+      state.usinaSolar = { capacidadeKw, dataInstalacao };
+      persist(); closeModal(); render();
+      showToast('Dados da usina salvos');
+    });
+  });
+  document.querySelectorAll('[data-action="excluir-leitura-solar"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!confirm('Excluir essa leitura de geração?')) return;
+      state.usinaLeituras = (state.usinaLeituras||[]).filter(l=>l.id!==btn.dataset.id);
+      persist(); render();
+    });
+  });
+  document.querySelectorAll('[data-action="excluir-fatura-solar"]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      if(!confirm('Excluir essa fatura registrada?')) return;
+      state.usinaFaturas = (state.usinaFaturas||[]).filter(f=>f.id!==btn.dataset.id);
+      persist(); render();
+    });
   });
   document.querySelectorAll('[data-action="abrir-demonstracao"]').forEach(el=>{
     el.addEventListener('click', ()=>{
@@ -32035,6 +32237,193 @@ function openImportarNotaFiscalModal(){
     registrarLog('Nota fiscal importada (PDF/foto)', `${nomeForn||'—'} — ${brl(valor)}`);
     persist(); closeModal(); render();
     showToast('Despesa lançada a partir da nota fiscal');
+  });
+}
+
+function openRegistrarGeracaoSolarModal(){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>☀️ Registrar geração — print do app</h3>
+    <div class="note" style="margin-top:0;">Envie um print da tela do app do inversor (Overview, ou a aba Statistics em Dia/Mês) — a leitura automática tenta identificar a geração e a renda. Sempre revise antes de salvar.</div>
+    <div class="field"><label>Print (imagem)</label><input type="file" id="gsArquivoInput" accept="image/*"></div>
+    <div id="gsStatus" class="note" style="display:none;"></div>
+    <div id="gsRevisaoWrap" style="display:none;">
+      <div class="field-row">
+        <div class="field"><label>Data de referência</label><input type="date" id="gsData" value="${todayISO()}"></div>
+        <div class="field"><label>Período do print</label>
+          <select id="gsPeriodo">
+            <option value="dia">Dia</option>
+            <option value="mes">Mês</option>
+            <option value="ano">Ano</option>
+            <option value="total">Total acumulado</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Geração no período (kWh)</label><input type="text" inputmode="decimal" id="gsGeracao"></div>
+        <div class="field"><label>Renda no período (R$, opcional)</label><input type="text" inputmode="decimal" id="gsRenda"></div>
+      </div>
+      <div class="note" style="margin-top:0;" id="gsAcumuladoInfo"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarGeracaoSolar" style="display:none;">Salvar geração</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+
+  document.getElementById('gsArquivoInput').addEventListener('change', async ()=>{
+    const file = document.getElementById('gsArquivoInput').files[0];
+    if(!file) return;
+    const status = document.getElementById('gsStatus');
+    status.style.display = 'block';
+    status.style.borderColor = 'var(--line)';
+    status.textContent = 'Lendo o print com o leitor automático... pode levar alguns segundos.';
+    document.getElementById('gsRevisaoWrap').style.display = 'none';
+    document.getElementById('btnSalvarGeracaoSolar').style.display = 'none';
+    try{
+      const dados = await extrairDadosGeracaoSolarIA(file);
+      document.getElementById('gsData').value = dados.dataReferencia || todayISO();
+      document.getElementById('gsPeriodo').value = dados.periodo || 'dia';
+      document.getElementById('gsGeracao').value = dados.geracaoKwh != null ? dados.geracaoKwh : '';
+      document.getElementById('gsRenda').value = dados.rendaReais != null ? dados.rendaReais : '';
+      const infoAcum = [];
+      if(dados.geracaoTotalAcumuladaKwh!=null) infoAcum.push(`Geração total acumulada no print: ${dados.geracaoTotalAcumuladaKwh} kWh`);
+      if(dados.rendaTotalAcumuladaReais!=null) infoAcum.push(`Renda total acumulada no print: ${brl(dados.rendaTotalAcumuladaReais)}`);
+      if(dados.capacidadeKw!=null || dados.dataInstalacao){
+        if(!state.usinaSolar || !state.usinaSolar.capacidadeKw){
+          state.usinaSolar = { capacidadeKw: dados.capacidadeKw||null, dataInstalacao: dados.dataInstalacao||null };
+          infoAcum.push('Identifiquei também a capacidade/data de instalação da usina — preenchi o cadastro automaticamente.');
+        }
+      }
+      document.getElementById('gsAcumuladoInfo').textContent = infoAcum.join(' · ');
+
+      const faltando = [];
+      if(dados.geracaoKwh==null) faltando.push('geração');
+      status.style.display = faltando.length ? 'block' : 'none';
+      if(faltando.length){
+        status.style.borderColor = 'var(--warn)';
+        status.textContent = `Não consegui identificar: ${faltando.join(', ')}. Preencha manualmente antes de salvar.`;
+      }
+      document.getElementById('gsRevisaoWrap').style.display = 'block';
+      document.getElementById('btnSalvarGeracaoSolar').style.display = 'inline-flex';
+    }catch(e){
+      console.error('Erro ao ler print de geração solar com IA:', e);
+      status.style.borderColor = 'var(--danger)';
+      status.textContent = e.message || 'Não consegui ler esse print automaticamente. Preencha manualmente.';
+      document.getElementById('gsRevisaoWrap').style.display = 'block';
+      document.getElementById('btnSalvarGeracaoSolar').style.display = 'inline-flex';
+    }
+  });
+
+  document.getElementById('btnSalvarGeracaoSolar').addEventListener('click', ()=>{
+    const data = document.getElementById('gsData').value || todayISO();
+    const periodo = document.getElementById('gsPeriodo').value;
+    const geracaoKwh = numBR(document.getElementById('gsGeracao').value);
+    const rendaReais = numBR(document.getElementById('gsRenda').value) || 0;
+    if(isNaN(geracaoKwh) || geracaoKwh<=0){ showToast('Preencha a geração em kWh'); return; }
+    if(!state.usinaLeituras) state.usinaLeituras = [];
+    state.usinaLeituras.push({ id: uid(), data, periodo, geracaoKwh, rendaReais, criadoEm: new Date().toISOString() });
+    registrarLog('Geração solar registrada', `${fmtDate(data)} — ${geracaoKwh} kWh`);
+    persist(); closeModal(); render();
+    showToast('Geração registrada');
+  });
+}
+
+function openRegistrarFaturaEnergiaModal(){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>🧾 Registrar fatura de energia</h3>
+    <div class="note" style="margin-top:0;">Envie o PDF ou uma foto da fatura — a leitura automática tenta identificar consumo, energia injetada e o saldo de créditos. Sempre revise antes de salvar.</div>
+    <div class="field"><label>Fatura (PDF ou imagem)</label><input type="file" id="feArquivoInput" accept="application/pdf,image/*"></div>
+    <div id="feStatus" class="note" style="display:none;"></div>
+    <div id="feRevisaoWrap" style="display:none;">
+      <div class="field-row">
+        <div class="field"><label>Referência (mês)</label><input type="month" id="feReferencia"></div>
+        <div class="field"><label>Vencimento</label><input type="date" id="feVencimento"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Total a pagar (R$)</label><input type="text" inputmode="decimal" id="feValor"></div>
+        <div class="field"><label>Bandeira tarifária</label><input type="text" id="feBandeira" placeholder="Verde, Amarela..."></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Consumo (kWh)</label><input type="text" inputmode="decimal" id="feConsumo"></div>
+        <div class="field"><label>Energia injetada (kWh)</label><input type="text" inputmode="decimal" id="feInjetada"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Saldo créditos anterior (kWh)</label><input type="text" inputmode="decimal" id="feSaldoAnterior"></div>
+        <div class="field"><label>Créditos utilizados (kWh)</label><input type="text" inputmode="decimal" id="feCreditosUsados"></div>
+      </div>
+      <div class="field"><label>Saldo de créditos atualizado (kWh)</label><input type="text" inputmode="decimal" id="feSaldoAtual"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarFaturaEnergia" style="display:none;">Salvar fatura</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+
+  document.getElementById('feArquivoInput').addEventListener('change', async ()=>{
+    const file = document.getElementById('feArquivoInput').files[0];
+    if(!file) return;
+    const status = document.getElementById('feStatus');
+    status.style.display = 'block';
+    status.style.borderColor = 'var(--line)';
+    status.textContent = 'Lendo a fatura com o leitor automático... pode levar alguns segundos.';
+    document.getElementById('feRevisaoWrap').style.display = 'none';
+    document.getElementById('btnSalvarFaturaEnergia').style.display = 'none';
+    try{
+      const dados = await extrairDadosFaturaEnergiaIA(file);
+      document.getElementById('feReferencia').value = dados.referencia || '';
+      document.getElementById('feVencimento').value = dados.vencimento || '';
+      document.getElementById('feValor').value = dados.valorTotal != null ? dados.valorTotal : '';
+      document.getElementById('feBandeira').value = dados.bandeira || '';
+      document.getElementById('feConsumo').value = dados.consumoKwh != null ? dados.consumoKwh : '';
+      document.getElementById('feInjetada').value = dados.energiaInjetadaKwh != null ? dados.energiaInjetadaKwh : '';
+      document.getElementById('feSaldoAnterior').value = dados.saldoCreditosAnteriorKwh != null ? dados.saldoCreditosAnteriorKwh : '';
+      document.getElementById('feCreditosUsados').value = dados.creditosUtilizadosKwh != null ? dados.creditosUtilizadosKwh : '';
+      document.getElementById('feSaldoAtual').value = dados.saldoCreditosAtualKwh != null ? dados.saldoCreditosAtualKwh : '';
+
+      const faltando = [];
+      if(!dados.referencia) faltando.push('referência');
+      if(dados.valorTotal==null) faltando.push('valor');
+      status.style.display = faltando.length ? 'block' : 'none';
+      if(faltando.length){
+        status.style.borderColor = 'var(--warn)';
+        status.textContent = `Não consegui identificar: ${faltando.join(', ')}. Preencha manualmente antes de salvar.`;
+      }
+      document.getElementById('feRevisaoWrap').style.display = 'block';
+      document.getElementById('btnSalvarFaturaEnergia').style.display = 'inline-flex';
+    }catch(e){
+      console.error('Erro ao ler fatura de energia com IA:', e);
+      status.style.borderColor = 'var(--danger)';
+      status.textContent = e.message || 'Não consegui ler essa fatura automaticamente. Preencha manualmente.';
+      document.getElementById('feRevisaoWrap').style.display = 'block';
+      document.getElementById('btnSalvarFaturaEnergia').style.display = 'inline-flex';
+    }
+  });
+
+  document.getElementById('btnSalvarFaturaEnergia').addEventListener('click', ()=>{
+    const referencia = document.getElementById('feReferencia').value;
+    const vencimento = document.getElementById('feVencimento').value || null;
+    const valorTotal = numBR(document.getElementById('feValor').value);
+    const bandeira = document.getElementById('feBandeira').value.trim() || null;
+    const consumoKwh = numBR(document.getElementById('feConsumo').value) || null;
+    const energiaInjetadaKwh = numBR(document.getElementById('feInjetada').value) || null;
+    const saldoCreditosAnteriorKwh = numBR(document.getElementById('feSaldoAnterior').value) || null;
+    const creditosUtilizadosKwh = numBR(document.getElementById('feCreditosUsados').value) || null;
+    const saldoCreditosAtualKwh = numBR(document.getElementById('feSaldoAtual').value) || null;
+    if(!referencia){ showToast('Preencha a referência (mês)'); return; }
+    if(isNaN(valorTotal) || valorTotal<=0){ showToast('Preencha o valor total'); return; }
+    if(!state.usinaFaturas) state.usinaFaturas = [];
+    const existente = state.usinaFaturas.find(f=>f.referencia===referencia);
+    const registro = { id: existente?.id||uid(), referencia, vencimento, valorTotal, bandeira, consumoKwh, energiaInjetadaKwh, saldoCreditosAnteriorKwh, creditosUtilizadosKwh, saldoCreditosAtualKwh, criadoEm: new Date().toISOString() };
+    if(existente) Object.assign(existente, registro); else state.usinaFaturas.push(registro);
+    registrarLog('Fatura de energia registrada', `${referencia} — ${brl(valorTotal)}`);
+    persist(); closeModal(); render();
+    showToast('Fatura registrada');
   });
 }
 
