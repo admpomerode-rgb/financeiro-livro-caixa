@@ -4340,6 +4340,36 @@ function renderVeiculoLembretes(v){
 // Leitura automática de print do app do inversor solar (ex: RENAC Power) — mesmo padrão de
 // extrairDadosNotaFiscalIA, só que pros campos de geração de energia. Sempre revisável antes de
 // salvar (a revisão na tela É a aprovação — nada entra como definitivo sem o usuário confirmar).
+// Chama o leitor automático (Claude via API da Anthropic) usando a chave que o usuário configurou
+// em Configurações > Leitor Automático (IA). Sem chave configurada, nem tenta — retorna direto um
+// erro claro, em vez de deixar o fetch falhar sem explicação nenhuma pro usuário.
+async function chamarLeitorIA(conteudo, prompt, maxTokens){
+  const chave = state.configApiKeyAnthropic;
+  if(!chave){
+    throw new Error('Leitor automático não está configurado. Vá em Configurações do Sistema → Leitor Automático (IA) e cole sua chave da Anthropic, ou preencha os campos manualmente.');
+  }
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': chave,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: maxTokens || 1000,
+      messages: [{ role:'user', content: [ conteudo, { type:'text', text: prompt } ] }]
+    })
+  });
+  if(response.status===401){ throw new Error('A chave de API configurada não foi aceita (verifique em Configurações do Sistema).'); }
+  if(!response.ok) throw new Error('Falha ao consultar o leitor automático (HTTP '+response.status+')');
+  const data = await response.json();
+  const textoResp = (data.content||[]).map(c=>c.text||'').join('').trim();
+  const limpo = textoResp.replace(/^```json\s*|^```\s*|```\s*$/gi, '').trim();
+  try{ return JSON.parse(limpo); }catch(e){ throw new Error('Não consegui interpretar a resposta do leitor automático — tente outra imagem/PDF ou preencha manualmente'); }
+}
+
 async function extrairDadosGeracaoSolarIA(file){
   const base64 = await new Promise((res, rej)=>{
     const r = new FileReader();
@@ -4361,20 +4391,7 @@ async function extrairDadosGeracaoSolarIA(file){
 }
 Se não conseguir ler algum campo com certeza, use null nesse campo (não invente valores). Responda só com o JSON.`;
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 800,
-      messages: [{ role:'user', content: [ conteudo, { type:'text', text: prompt } ] }]
-    })
-  });
-  if(!response.ok) throw new Error('Falha ao consultar o leitor automático (HTTP '+response.status+')');
-  const data = await response.json();
-  const textoResp = (data.content||[]).map(c=>c.text||'').join('').trim();
-  const limpo = textoResp.replace(/^```json\s*|^```\s*|```\s*$/gi, '').trim();
-  try{ return JSON.parse(limpo); }catch(e){ throw new Error('Não consegui interpretar a resposta do leitor automático — tente outra imagem ou preencha manualmente'); }
+  return chamarLeitorIA(conteudo, prompt, 800);
 }
 
 // Leitura automática da fatura de energia elétrica (PDF ou foto) — mesmo padrão de
@@ -4405,20 +4422,7 @@ async function extrairDadosFaturaEnergiaIA(file){
 }
 Se não conseguir ler algum campo com certeza, use null nesse campo (não invente valores). Responda só com o JSON.`;
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 800,
-      messages: [{ role:'user', content: [ conteudo, { type:'text', text: prompt } ] }]
-    })
-  });
-  if(!response.ok) throw new Error('Falha ao consultar o leitor automático (HTTP '+response.status+')');
-  const data = await response.json();
-  const textoResp = (data.content||[]).map(c=>c.text||'').join('').trim();
-  const limpo = textoResp.replace(/^```json\s*|^```\s*|```\s*$/gi, '').trim();
-  try{ return JSON.parse(limpo); }catch(e){ throw new Error('Não consegui interpretar a resposta do leitor automático — tente outra imagem/PDF ou preencha manualmente'); }
+  return chamarLeitorIA(conteudo, prompt, 800);
 }
 
 function opcoesCategoriaHTML(tipo, selecionada){
@@ -9413,6 +9417,37 @@ const NOME_PARA_TICKER = {
   'B3 SA': 'B3SA3', 'GERDAU': 'GGBR4', 'JBS': 'JBSS3',
   'SUZANO': 'SUZB3', 'LOCALIZA': 'RENT3', 'RAIA DROGASIL': 'RADL3'
 };
+
+// Fatura de energia (padrão Celesc, com geração distribuída/energia solar) — mesmo princípio da
+// nota de corretagem: extrai o texto do PDF localmente (extrairLinhasPDF, via pdf.js) e reconhece
+// os campos por padrão de texto. Não depende de IA nem de chave de API — funciona 100% offline,
+// direto no navegador. Só serve pra PDF (foto da fatura ainda precisa do leitor por IA, se configurado).
+function parseFaturaCelesc(linhas){
+  const texto = linhas.join('\n');
+  const ultimoNumero = str => { const m = str.match(/(\d{1,3}(?:\.\d{3})*(?:,\d+)?)(?!.*\d)/); return m ? parseFloat(m[1].replace(/\./g,'').replace(',','.')) : null; };
+  const primeiroNumeroAposRotulo = (rotulo) => { const m = texto.match(new RegExp(rotulo+'\\s*([\\d.,]+)','i')); return m ? parseFloat(m[1].replace(/\./g,'').replace(',','.')) : null; };
+
+  // Referência (MM/AAAA) + Vencimento (DD/MM/AAAA) + Total a pagar sempre aparecem juntos, nessa ordem
+  const refMatch = texto.match(/(\d{2}\/\d{4})\s+(\d{2}\/\d{2}\/\d{4})\s+R\$\s*([\d.,]+)/);
+  const referencia = refMatch ? refMatch[1].split('/').reverse().join('-') : null;
+  const vp = refMatch ? refMatch[2].split('/') : null;
+  const vencimento = vp ? `${vp[2]}-${vp[1]}-${vp[0]}` : null;
+  const valorTotal = refMatch ? parseFloat(refMatch[3].replace(/\./g,'').replace(',','.')) : null;
+
+  const linhaConsumo = linhas.find(l=>/Energia\s+Único/i.test(l) && !/injetada/i.test(l));
+  const linhaInjetada = linhas.find(l=>/Energia injetada/i.test(l));
+  const consumoKwh = linhaConsumo ? ultimoNumero(linhaConsumo) : null;
+  const energiaInjetadaKwh = linhaInjetada ? ultimoNumero(linhaInjetada) : null;
+
+  const saldoCreditosAnteriorKwh = primeiroNumeroAposRotulo('Saldo de créditos Anterior');
+  const creditosUtilizadosKwh = primeiroNumeroAposRotulo('Créditos utilizados');
+  const saldoCreditosAtualKwh = primeiroNumeroAposRotulo('Saldo de créditos atualizado');
+
+  const bandeiraMatch = texto.match(/\b(Verde|Amarela|Vermelha\s*1|Vermelha\s*2)\b/i);
+  const bandeira = bandeiraMatch ? bandeiraMatch[1] : null;
+
+  return { referencia, vencimento, valorTotal, consumoKwh, energiaInjetadaKwh, saldoCreditosAnteriorKwh, creditosUtilizadosKwh, saldoCreditosAtualKwh, bandeira };
+}
 
 function parseNotaCorretagem(linhas){
   const texto = linhas.join('\n');
@@ -22411,6 +22446,7 @@ function viewConfiguracoes(){
     { id:'firebase', icone:'🔥', nome:'Firebase', desc:'Projeto, usuário conectado, registros salvos e limites do plano' },
     { id:'conciliacao', icone:'🔄', nome:'Conciliação Bancária', desc:'Compare o extrato do banco (OFX) com os lançamentos já registrados' },
     { id:'dashboard_widget', icone:'🌤️', nome:'Widget do Dashboard', desc:'Cidade da previsão do tempo e ativos da bolsa mostrados no card do notebook' },
+    { id:'leitor_ia', icone:'🤖', nome:'Leitor Automático (IA)', desc:'Chave de API pra ler nota fiscal, print do inversor solar e fatura de energia automaticamente' },
   ];
   return `
     <div class="topbar">
@@ -22432,7 +22468,8 @@ function viewConfiguracoes(){
 
 const CONFIG_NOMES = {
   aparencia:'Aparência', armazenamento:'Armazenamento no Firestore', codigo:'Código do Sistema',
-  aprovacao:'Aprovação de Despesas', firebase:'Firebase', dashboard_widget:'Widget do Dashboard'
+  aprovacao:'Aprovação de Despesas', firebase:'Firebase', dashboard_widget:'Widget do Dashboard',
+  leitor_ia:'Leitor Automático (IA)'
 };
 
 function viewConfiguracaoDetalhe(){
@@ -22451,6 +22488,30 @@ function viewConfiguracaoDetalhe(){
     </div>
     <div class="panel" id="configPanel"></div>
   `;
+}
+
+function renderConfigLeitorIA(){
+  const temChave = !!(state.configApiKeyAnthropic && state.configApiKeyAnthropic.length>10);
+  return `
+    <div class="panel-body" style="padding:20px;">
+      <div style="font-weight:600;font-size:13.5px;margin-bottom:6px;">🤖 Leitor automático de documentos</div>
+      <div style="font-size:12.5px;color:var(--text-soft);line-height:1.6;margin-bottom:16px;">
+        Usado em 3 lugares: importar nota fiscal por foto/PDF, registrar geração da usina solar por print do app do inversor, e registrar fatura de energia por foto/PDF. Sem uma chave configurada aqui, esses botões funcionam só pro preenchimento manual (o upload do arquivo continua guardando a imagem, mas ninguém lê ela por você).
+      </div>
+      <div class="note" style="border-color:var(--warn);margin:0 0 16px;">
+        ⚠️ <strong>Leia antes de configurar:</strong> essa chave fica guardada no mesmo banco de dados do sistema e é usada direto do seu navegador — como este é um site estático (sem servidor por trás), qualquer pessoa que abrir as ferramentas de desenvolvedor do navegador enquanto você estiver logado consegue ver essa chave. Cada leitura automática também consome créditos da sua conta na Anthropic (custo pequeno por uso, mas é cobrado). Só configure se você entender e aceitar isso — e nunca use aqui uma chave que também dá acesso a outros sistemas sensíveis.
+      </div>
+      <div class="field">
+        <label>Chave de API da Anthropic</label>
+        <input type="password" id="cfgApiKeyAnthropic" placeholder="${temChave?'•••••••••••••••••••••• (já configurada)':'sk-ant-...'}" autocomplete="off">
+      </div>
+      <div style="font-size:11.5px;color:var(--text-soft);margin:-4px 0 14px;">Você gera essa chave em <span style="color:var(--blue-accent);">console.anthropic.com</span> → API Keys. ${temChave?'Deixe o campo em branco e clique em Salvar se não quiser trocar a chave atual.':''}</div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn" id="btnSalvarApiKeyAnthropic">Salvar</button>
+        ${temChave?`<button class="btn ghost" id="btnRemoverApiKeyAnthropic" style="color:var(--danger);">Remover chave</button>`:''}
+      </div>
+      <div style="margin-top:10px;font-size:12px;color:${temChave?'var(--success)':'var(--text-soft)'};font-weight:600;">${temChave?'✓ Leitor automático ativo':'○ Leitor automático desativado (preenchimento manual)'}</div>
+    </div>`;
 }
 
 function renderConfigAparencia(){
@@ -23196,6 +23257,24 @@ function attachViewHandlers(){
         });
       });
       if(configAtivo==='codigo') preencherEstatisticasCodigo();
+      document.getElementById('btnSalvarApiKeyAnthropic')?.addEventListener('click', ()=>{
+        const valor = document.getElementById('cfgApiKeyAnthropic').value.trim();
+        if(!valor){
+          if(state.configApiKeyAnthropic){ showToast('Chave mantida sem alteração'); return; }
+          showToast('Cole a chave antes de salvar'); return;
+        }
+        state.configApiKeyAnthropic = valor;
+        persist();
+        showToast('Chave salva — leitor automático ativado');
+        paintConfig();
+      });
+      document.getElementById('btnRemoverApiKeyAnthropic')?.addEventListener('click', ()=>{
+        if(!confirm('Remover a chave de API? O leitor automático volta a ficar desativado.')) return;
+        delete state.configApiKeyAnthropic;
+        persist();
+        showToast('Chave removida');
+        paintConfig();
+      });
     };
     const paintConfig = ()=>{
       const tituloEl = document.getElementById('configTitulo');
@@ -23205,6 +23284,7 @@ function attachViewHandlers(){
         configAtivo==='aprovacao' ? renderConfigAprovacao() :
         configAtivo==='firebase' ? renderConfigFirebase() :
         configAtivo==='dashboard_widget' ? renderConfigDashboardWidget() :
+        configAtivo==='leitor_ia' ? renderConfigLeitorIA() :
         configAtivo==='aparencia' ? renderConfigAparencia() :
         renderConfigArmazenamento();
       bindConfigInner();
@@ -32128,22 +32208,7 @@ async function extrairDadosNotaFiscalIA(file){
 }
 Se não conseguir ler algum campo com certeza, use null nesse campo (não invente valores). "itens" pode ser uma lista vazia se não der pra identificar os itens individualmente. Responda só com o JSON.`;
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1500,
-      messages: [{ role:'user', content: [ conteudo, { type:'text', text: prompt } ] }]
-    })
-  });
-  if(!response.ok) throw new Error('Falha ao consultar o leitor automático (HTTP '+response.status+')');
-  const data = await response.json();
-  const textoResp = (data.content||[]).map(c=>c.text||'').join('').trim();
-  const limpo = textoResp.replace(/^```json\s*|^```\s*|```\s*$/gi, '').trim();
-  let json;
-  try{ json = JSON.parse(limpo); }catch(e){ throw new Error('Não consegui interpretar a resposta do leitor automático — tente outra imagem/PDF ou preencha manualmente'); }
-  return json;
+  return chamarLeitorIA(conteudo, prompt, 1500);
 }
 
 function openImportarNotaFiscalModal(){
@@ -32350,7 +32415,7 @@ function openRegistrarFaturaEnergiaModal(){
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
     <h3>🧾 Registrar fatura de energia</h3>
-    <div class="note" style="margin-top:0;">Envie o PDF ou uma foto da fatura — a leitura automática tenta identificar consumo, energia injetada e o saldo de créditos. Sempre revise antes de salvar.</div>
+    <div class="note" style="margin-top:0;">Envie o PDF da fatura — o consumo, energia injetada e saldo de créditos são lidos direto do texto do PDF, sem precisar de IA nem internet. Uma foto da fatura precisa do leitor automático (IA), configurado em Configurações do Sistema. Sempre revise antes de salvar.</div>
     <div class="field"><label>Fatura (PDF ou imagem)</label><input type="file" id="feArquivoInput" accept="application/pdf,image/*"></div>
     <div id="feStatus" class="note" style="display:none;"></div>
     <div id="feRevisaoWrap" style="display:none;">
@@ -32386,11 +32451,10 @@ function openRegistrarFaturaEnergiaModal(){
     const status = document.getElementById('feStatus');
     status.style.display = 'block';
     status.style.borderColor = 'var(--line)';
-    status.textContent = 'Lendo a fatura com o leitor automático... pode levar alguns segundos.';
     document.getElementById('feRevisaoWrap').style.display = 'none';
     document.getElementById('btnSalvarFaturaEnergia').style.display = 'none';
-    try{
-      const dados = await extrairDadosFaturaEnergiaIA(file);
+
+    const preencherCampos = (dados) => {
       document.getElementById('feReferencia').value = dados.referencia || '';
       document.getElementById('feVencimento').value = dados.vencimento || '';
       document.getElementById('feValor').value = dados.valorTotal != null ? dados.valorTotal : '';
@@ -32400,24 +32464,61 @@ function openRegistrarFaturaEnergiaModal(){
       document.getElementById('feSaldoAnterior').value = dados.saldoCreditosAnteriorKwh != null ? dados.saldoCreditosAnteriorKwh : '';
       document.getElementById('feCreditosUsados').value = dados.creditosUtilizadosKwh != null ? dados.creditosUtilizadosKwh : '';
       document.getElementById('feSaldoAtual').value = dados.saldoCreditosAtualKwh != null ? dados.saldoCreditosAtualKwh : '';
+    };
+    const faltandoDe = (dados) => { const f=[]; if(!dados.referencia) f.push('referência'); if(dados.valorTotal==null) f.push('valor'); return f; };
 
-      const faltando = [];
-      if(!dados.referencia) faltando.push('referência');
-      if(dados.valorTotal==null) faltando.push('valor');
-      status.style.display = faltando.length ? 'block' : 'none';
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    let dados = null, viaIA = false;
+
+    if(isPdf){
+      // PDF: fatura da Celesc tem um formato de texto bem padronizado — lê local, sem IA nem
+      // internet, igual à nota de corretagem. É o caminho preferido: mais rápido, sem custo,
+      // funciona mesmo sem chave de API configurada.
+      status.textContent = 'Lendo o texto do PDF...';
+      try{
+        const linhas = await extrairLinhasPDF(file);
+        dados = parseFaturaCelesc(linhas);
+      }catch(e){
+        console.error('Erro ao ler PDF localmente:', e);
+      }
+    }
+
+    if(!dados || faltandoDe(dados).length){
+      // Não achou o suficiente lendo o texto (ou é foto, que não tem texto pra extrair) — tenta
+      // o leitor por IA como reforço, só se houver chave configurada.
+      if(state.configApiKeyAnthropic){
+        status.textContent = 'Lendo com o leitor automático (IA)... pode levar alguns segundos.';
+        try{
+          const dadosIA = await extrairDadosFaturaEnergiaIA(file);
+          dados = dados ? { ...dadosIA, ...Object.fromEntries(Object.entries(dados).filter(([,v])=>v!=null)) } : dadosIA;
+          viaIA = true;
+        }catch(e){
+          console.error('Erro ao ler fatura de energia com IA:', e);
+          if(!dados){ status.style.borderColor='var(--danger)'; status.textContent = e.message || 'Não consegui ler essa fatura automaticamente. Preencha manualmente.'; }
+        }
+      }
+    }
+
+    if(dados){
+      preencherCampos(dados);
+      const faltando = faltandoDe(dados);
       if(faltando.length){
+        status.style.display = 'block';
         status.style.borderColor = 'var(--warn)';
         status.textContent = `Não consegui identificar: ${faltando.join(', ')}. Preencha manualmente antes de salvar.`;
+      } else if(!viaIA){
+        status.style.display = 'block';
+        status.style.borderColor = 'var(--success)';
+        status.textContent = '✓ Lido direto do PDF, sem precisar de IA.';
+      } else {
+        status.style.display = 'none';
       }
-      document.getElementById('feRevisaoWrap').style.display = 'block';
-      document.getElementById('btnSalvarFaturaEnergia').style.display = 'inline-flex';
-    }catch(e){
-      console.error('Erro ao ler fatura de energia com IA:', e);
-      status.style.borderColor = 'var(--danger)';
-      status.textContent = e.message || 'Não consegui ler essa fatura automaticamente. Preencha manualmente.';
-      document.getElementById('feRevisaoWrap').style.display = 'block';
-      document.getElementById('btnSalvarFaturaEnergia').style.display = 'inline-flex';
+    } else if(!isPdf && !state.configApiKeyAnthropic){
+      status.style.borderColor = 'var(--warn)';
+      status.textContent = 'Foto de fatura precisa do leitor automático (IA), que não está configurado. Vá em Configurações do Sistema → Leitor Automático (IA), ou preencha manualmente.';
     }
+    document.getElementById('feRevisaoWrap').style.display = 'block';
+    document.getElementById('btnSalvarFaturaEnergia').style.display = 'inline-flex';
   });
 
   document.getElementById('btnSalvarFaturaEnergia').addEventListener('click', ()=>{
