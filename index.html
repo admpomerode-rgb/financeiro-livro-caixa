@@ -95,6 +95,19 @@
   }
   .sidebar.collapsed .sidebar-footer button{padding:9px 0;}
   .sidebar.collapsed .footer-label{display:none;}
+
+  /* Busca global — ícone e texto separados pra poder esconder o texto quando colapsar */
+  .sidebar.collapsed #btnAbrirBuscaGlobal{width:44px;height:44px;margin:10px auto 6px;padding:0;justify-content:center;border-radius:8px;}
+  .sidebar.collapsed #btnAbrirBuscaGlobal .busca-label{display:none;}
+  .sidebar.collapsed #btnAbrirBuscaGlobal .busca-icon{font-size:16px;}
+
+  /* Itens de destaque (Carros, Usina Solar) — acima de "Operacional", com ícone e letra maiores */
+  .nav-destaque{padding:2px 4px 12px;margin-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.1);}
+  .nav-destaque .nav-item{font-size:15.5px;font-weight:700;color:#E7EAF0;padding:11px 12px;}
+  .nav-destaque .nav-item .nav-abbr{font-size:16px;background:transparent;width:auto;height:auto;}
+  .sidebar.collapsed .nav-destaque{padding:2px 0 12px;}
+  .sidebar.collapsed .nav-destaque .nav-item{padding:10px 0;}
+  .sidebar.collapsed .nav-destaque .nav-item .nav-abbr{display:flex;font-size:19px;}
   .sidebar-footer button:hover{border-color:var(--blue-accent);color:var(--white);}
 
   .main{flex:1;padding:32px 40px;max-width:1200px;}
@@ -792,9 +805,13 @@
       <div class="sub">Administração Financeira</div>
     </div>
     <button id="btnAbrirBuscaGlobal" style="display:flex;align-items:center;gap:8px;width:calc(100% - 24px);margin:10px 12px 6px;padding:9px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bone);color:var(--text-soft);font-size:13px;cursor:pointer;text-align:left;">
-      🔍 Buscar...
+      <span class="busca-icon">🔍</span><span class="busca-label">Buscar...</span>
     </button>
     <nav class="nav" id="nav">
+      <div class="nav-destaque">
+        <div class="nav-item nav-destaque-item" data-view="veiculos" title="Carros"><span class="nav-abbr">🚗</span><span class="nav-label">🚗 Carros</span></div>
+        <div class="nav-item nav-destaque-item" data-view="usina-solar" title="Usina Solar"><span class="nav-abbr">☀️</span><span class="nav-label">☀️ Usina Solar</span></div>
+      </div>
       <div class="nav-group" style="--group-accent:var(--blue-accent);">
         <div class="nav-section-label">Operacional</div>
         <div class="nav-item active" data-view="dashboard" title="Dashboard"><span class="nav-dot"></span><span class="nav-abbr">DB</span><span class="nav-label">Dashboard</span></div>
@@ -805,7 +822,6 @@
         <div class="nav-item" data-view="contas" title="Contas Bancárias"><span class="nav-dot"></span><span class="nav-abbr">CB</span><span class="nav-label">Contas Bancárias</span></div>
         <div class="nav-item" data-view="cartoes" title="Cartões de Crédito"><span class="nav-dot"></span><span class="nav-abbr">CC</span><span class="nav-label">Cartões de Crédito</span></div>
         <div class="nav-item" data-view="ativos" title="Ativos Patrimoniais"><span class="nav-dot"></span><span class="nav-abbr">AP</span><span class="nav-label">Ativos Patrimoniais</span></div>
-        <div class="nav-item" data-view="usina-solar" title="Usina Solar"><span class="nav-dot"></span><span class="nav-abbr">US</span><span class="nav-label">Usina Solar</span></div>
         <div class="nav-item" data-view="investimentos" title="Investimentos"><span class="nav-dot"></span><span class="nav-abbr">IV</span><span class="nav-label">Investimentos</span></div>
         <div class="nav-item" data-view="orcamentos-processos" title="Orçamentos e Compras"><span class="nav-dot"></span><span class="nav-abbr">OC</span><span class="nav-label">Orçamentos e Compras</span></div>
         <div class="nav-item" data-view="comissoes" title="Comissões"><span class="nav-dot"></span><span class="nav-abbr">CM</span><span class="nav-label">Comissões</span></div>
@@ -814,7 +830,6 @@
         <div class="nav-item" data-view="provisionamentos" title="Provisionamentos"><span class="nav-dot"></span><span class="nav-abbr">PV</span><span class="nav-label">Provisionamentos</span></div>
         <div class="nav-item" data-view="recorrencias" title="Lançamentos Recorrentes"><span class="nav-dot"></span><span class="nav-abbr">RC</span><span class="nav-label">Recorrentes</span></div>
         <div class="nav-item" data-view="metas" title="Metas de Reserva"><span class="nav-dot"></span><span class="nav-abbr">MT</span><span class="nav-label">Metas de Reserva</span></div>
-        <div class="nav-item" data-view="veiculos" title="Meus Carros"><span class="nav-dot"></span><span class="nav-abbr">MC</span><span class="nav-label">Meus Carros</span></div>
         <div class="nav-item" data-view="orcamento" title="Orçamento e Planejamento"><span class="nav-dot"></span><span class="nav-abbr">OR</span><span class="nav-label">Orçamento e Planejamento</span></div>
         <div class="nav-item" data-view="retiradas" title="Central de Retiradas"><span class="nav-dot"></span><span class="nav-abbr">RT</span><span class="nav-label">Central de Retiradas</span></div>
       </div>
@@ -1831,7 +1846,7 @@ function moreItensDef(){
     { view:'relatorios', icone:'📊', nome:'Relatórios', grupo:'Análise' },
     { view:'busca-global', icone:'🔍', nome:'Busca Global', grupo:'Análise' },
     { view:'central-decisao', icone:'🧭', nome:'Central de Decisão', grupo:'Análise' },
-    { view:'veiculos', icone:'🚗', nome:'Meus Carros', grupo:'Operacional' },
+    { view:'veiculos', icone:'🚗', nome:'Carros', grupo:'Operacional' },
     { view:'capex', icone:'🏗️', nome:'Central de CAPEX', grupo:'Operacional' },
     { view:'retiradas', icone:'💸', nome:'Central de Retiradas', grupo:'Operacional' },
     { view:'pendencias', icone:'🔔', nome:'Central de Pendências', grupo:'Análise', badge:()=>state.lancamentos.filter(l=>l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento<todayISO()).length },
@@ -3750,7 +3765,7 @@ function calcularConsumoVeiculo(veiculoId){
 function viewVeiculos(){
   if(!state.veiculos.length){
     return `
-      <div class="topbar"><div><h1>Meus Carros</h1><p>Controle de veículos — abastecimento, despesas, receitas e serviços, integrado ao seu financeiro</p></div></div>
+      <div class="topbar"><div><h1>Carros</h1><p>Controle de veículos — abastecimento, despesas, receitas e serviços, integrado ao seu financeiro</p></div></div>
       <div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum veículo cadastrado ainda.</div></div>
       <button class="btn" id="btnNovoVeiculo" style="margin-top:12px;">+ Cadastrar veículo</button>
     `;
@@ -3825,7 +3840,7 @@ function viewVeiculosVisaoGeral(){
 
   return `
     <div class="topbar">
-      <div><h1>Meus Carros — Visão Geral</h1><p>Comparativo, ranking de custo e alertas de toda a frota</p></div>
+      <div><h1>Carros — Visão Geral</h1><p>Comparativo, ranking de custo e alertas de toda a frota</p></div>
     </div>
     <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:14px;">
       <div class="card saldo"><div class="label">Total de veículos</div><div class="value mono">${veiculos.length}</div></div>
