@@ -464,6 +464,49 @@
     .contas-hero-valor{font-size:28px;}
   }
 
+  /* Fluxo de Caixa (redesenho) */
+  .fluxo-saldo-atual-card{
+    background:linear-gradient(135deg, var(--blue-deep) 0%, var(--ink) 100%);
+    border-radius:16px;padding:20px 24px;color:#fff;
+  }
+  .fluxo-saldo-atual-card .lbl{font-size:11.5px;font-weight:600;color:rgba(255,255,255,.65);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;}
+  .fluxo-saldo-atual-card .val{font-family:'IBM Plex Mono',monospace;font-size:32px;font-weight:600;line-height:1.1;color:#fff;}
+  .fluxo-saldo-atual-card .val.neg{color:#FF9385;}
+  .fluxo-saldo-atual-card .sub{font-size:12px;color:rgba(255,255,255,.65);margin-top:6px;}
+  .fluxo-resumo-4col{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+  .fluxo-resumo-item{background:var(--white);border:1px solid var(--line);border-radius:10px;padding:12px 14px;}
+  .fluxo-resumo-item .lbl{font-size:10.5px;color:var(--text-soft);text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px;}
+  .fluxo-resumo-item .val{font-size:15px;font-weight:700;overflow-wrap:break-word;}
+  .fluxo-saldo-final-bar{display:flex;justify-content:space-between;align-items:center;background:var(--bone);border-radius:10px;padding:10px 16px;margin-top:10px;font-size:13px;font-weight:600;}
+  .fluxo-resumo-3col-mini{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center;margin-bottom:14px;}
+  .fluxo-resumo-3col-mini .lbl{font-size:10.5px;color:var(--text-soft);text-transform:uppercase;letter-spacing:.03em;}
+  .fluxo-resumo-3col-mini .val{font-size:14px;font-weight:700;margin-top:2px;}
+  .fluxo-semanas-bars{display:flex;align-items:flex-end;gap:14px;height:90px;overflow-x:auto;padding-top:6px;}
+  .fluxo-semana-col{display:flex;flex-direction:column;align-items:center;flex-shrink:0;}
+  .fluxo-semana-barras{display:flex;align-items:flex-end;gap:3px;height:70px;}
+  .fluxo-semana-barra{width:12px;border-radius:2px 2px 0 0;}
+  .fluxo-semana-label{font-size:10px;color:var(--text-soft);margin-top:4px;}
+  .fluxo-filtro-pills{display:flex;gap:6px;}
+  .fluxo-filtro-pill{border:1px solid var(--line);background:var(--white);border-radius:20px;padding:6px 14px;font-size:12.5px;font-weight:600;color:var(--text-soft);cursor:pointer;}
+  .fluxo-filtro-pill.ativo{background:var(--blue-accent);border-color:var(--blue-accent);color:#fff;}
+  .fluxo-dia-grupo{border-bottom:1px solid var(--line);}
+  .fluxo-dia-grupo:last-child{border-bottom:none;}
+  .fluxo-dia-grupo summary{display:flex;align-items:center;gap:10px;padding:12px 18px;cursor:pointer;list-style:none;}
+  .fluxo-dia-grupo summary::-webkit-details-marker{display:none;}
+  .fluxo-dia-grupo summary::before{content:'▶';font-size:9px;color:var(--text-soft);transition:transform .15s;flex-shrink:0;}
+  .fluxo-dia-grupo[open] summary::before{transform:rotate(90deg);}
+  .fluxo-dia-data{font-weight:700;font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;}
+  .fluxo-dia-qtd{font-size:11px;color:var(--text-soft);flex:1;}
+  .fluxo-dia-total{font-weight:700;font-size:13px;}
+  .fluxo-lanc-row{display:flex;align-items:center;gap:10px;padding:9px 18px 9px 34px;border-top:1px solid var(--line);}
+  .fluxo-lanc-desc{flex:1;min-width:0;font-size:13px;}
+  .fluxo-lanc-desc .cat{font-size:11px;color:var(--text-soft);}
+  .fluxo-lanc-valor{font-weight:600;font-size:13px;flex-shrink:0;}
+  @media (max-width:900px){
+    .fluxo-resumo-4col{grid-template-columns:repeat(2,1fr);}
+    .fluxo-saldo-atual-card .val{font-size:26px;}
+  }
+
   /* Cartões de crédito */
   .cartao-card{background:linear-gradient(145deg, #0B0F14, #1B2430);color:#FFFFFF;border-radius:14px;padding:48px 20px 18px;position:relative;overflow:hidden;border-top:8px solid var(--accent-c, var(--blue-accent));}
   .cartao-card .card-menu-wrap{position:absolute;top:14px;right:14px;z-index:2;}
@@ -1455,6 +1498,7 @@ let conciliacaoContaId = null;
 let pararCameraQRAtiva = null;
 let relatorioAtivo = 'dre';
 let __fluxoCategoriaAtiva = '';
+let __fluxoTipoFiltro = 'todos';
 let configAtivo = 'armazenamento';
 let dreAnaliseAtiva = 'horizontal';
 let custosProdutoPeriodo = 'mes';
@@ -6222,33 +6266,47 @@ function viewFluxo(categoriaFiltro){
   eventosMes.sort((a,b)=> (a.data||'').localeCompare(b.data||''));
   eventosMes.forEach(ev=>{ saldo += ev.tipo==='entrada' ? ev.valor : -ev.valor; });
   const saldoFimMes = saldo;
+  const entradasMes = eventosMes.filter(ev=>ev.tipo==='entrada').reduce((s,ev)=>s+ev.valor,0);
+  const saidasMes = eventosMes.filter(ev=>ev.tipo==='saida').reduce((s,ev)=>s+ev.valor,0);
+  const resultadoMes = entradasMes - saidasMes;
+  const saldoAtualReal = totaisRealizados().saldo;
 
-  const rowsHTML = eventosMes.map(ev=>`
-    <div class="ledger-row" data-id="${ev.lancamentoId}" data-action="abrir-lancamento" style="cursor:pointer;">
-      <span class="dot ${ev.tipo}"></span>
-      <span class="mono" style="font-size:12.5px;color:var(--text-soft)">${fmtDate(ev.data)}</span>
-      <div class="desc-cell"><div>${escapeHTML(ev.descricao)}</div><div class="cat">${escapeHTML(ev.categoria)}</div></div>
-      <span class="col-cat"></span><span class="col-status"></span>
-      <span class="mono" style="font-weight:600;text-align:right;color:${ev.tipo==='entrada'?'var(--success)':'var(--danger)'};">${ev.tipo==='entrada'?'+':'-'} ${brl(ev.valor)}</span>
-    </div>
-  `).join('');
+  // Aplica o filtro Todos/Entradas/Saídas só na listagem de Lançamentos (não nos indicadores/gráficos,
+  // que sempre mostram o quadro completo do mês)
+  const eventosListagem = __fluxoTipoFiltro==='entradas' ? eventosMes.filter(ev=>ev.tipo==='entrada')
+    : __fluxoTipoFiltro==='saidas' ? eventosMes.filter(ev=>ev.tipo==='saida')
+    : eventosMes;
 
-  // Gráfico do saldo acumulado dia a dia dentro do mês
+  // Gráfico do saldo acumulado dia a dia dentro do mês — mesmo cálculo de sempre, só que agora
+  // também guarda entradas/saídas de cada dia (pro detalhe ao tocar num ponto do gráfico)
   const ultimoDia = new Date(anoM, mesM, 0).getDate();
   const diasDoMes = Array.from({length:ultimoDia},(_,i)=>`${mesGlobalRef}-${String(i+1).padStart(2,'0')}`);
   let saldoCorrida = saldoInicioMes;
   const saldoPorDia = diasDoMes.map(dia=>{
-    todosEventos.filter(ev=>ev.data===dia && (!categoriaFiltro || ev.categoria===categoriaFiltro || (ev.categoria||'').startsWith(categoriaFiltro+' / '))).forEach(ev=>{ saldoCorrida += ev.tipo==='entrada' ? ev.valor : -ev.valor; });
-    return { dia, saldo: saldoCorrida };
+    const evsDoDia = todosEventos.filter(ev=>ev.data===dia && (!categoriaFiltro || ev.categoria===categoriaFiltro || (ev.categoria||'').startsWith(categoriaFiltro+' / ')));
+    const entradasDia = evsDoDia.filter(ev=>ev.tipo==='entrada').reduce((s,ev)=>s+ev.valor,0);
+    const saidasDia = evsDoDia.filter(ev=>ev.tipo==='saida').reduce((s,ev)=>s+ev.valor,0);
+    saldoCorrida += entradasDia - saidasDia;
+    return { dia, saldo: saldoCorrida, entradas: entradasDia, saidas: saidasDia };
   });
-  const maxSaldoAbs = Math.max(1, ...saldoPorDia.map(d=>Math.abs(d.saldo)));
+
+  // Entradas x saídas por semana (mesma regra de "início de semana" já usada na projeção de 60 dias)
+  const inicioSemana = d => { const dt = new Date(d+'T12:00:00'); const dia = dt.getDay(); const diff = dia===0?-6:1-dia; dt.setDate(dt.getDate()+diff); return dt.toISOString().slice(0,10); };
+  const semanasMapRealizado = {}; const ordemSemanasRealizado = [];
+  eventosMes.forEach(ev=>{
+    const chave = inicioSemana(ev.data);
+    if(!semanasMapRealizado[chave]){ semanasMapRealizado[chave] = { entradas:0, saidas:0 }; ordemSemanasRealizado.push(chave); }
+    if(ev.tipo==='entrada') semanasMapRealizado[chave].entradas += ev.valor; else semanasMapRealizado[chave].saidas += ev.valor;
+  });
+  ordemSemanasRealizado.sort();
+  const semanasRealizado = ordemSemanasRealizado.map((chave,i)=>({ n:i+1, ...semanasMapRealizado[chave] }));
+  const maxSemanaVal = Math.max(1, ...semanasRealizado.flatMap(s=>[s.entradas,s.saidas]));
 
   // Fôlego de caixa (Runway): saldo atual ÷ gasto médio diário dos últimos 90 dias
   const de90 = new Date(todayISO()+'T12:00:00'); de90.setDate(de90.getDate()-90);
   const de90ISO = de90.toISOString().slice(0,10);
   const gastos90dias = todosEventos.filter(ev=>ev.tipo==='saida' && ev.data>=de90ISO && ev.data<=hoje).reduce((s,ev)=>s+ev.valor,0);
   const gastoMedioDiario = gastos90dias / 90;
-  const saldoAtualReal = totaisRealizados().saldo;
   const foldegoDias = gastoMedioDiario>0 ? Math.round(saldoAtualReal/gastoMedioDiario) : null;
 
   // Categorias disponíveis pro filtro (só as que têm movimento no mês)
@@ -6262,7 +6320,6 @@ function viewFluxo(categoriaFiltro){
   pendentes.forEach(l=>{ saldoProjetado += l.tipo==='entrada' ? valorEmAberto(l) : -valorEmAberto(l); });
 
   // Agrupa a projeção de 60 dias por semana (segunda a domingo), pra ficar rápido de ler
-  const inicioSemana = d => { const dt = new Date(d+'T12:00:00'); const dia = dt.getDay(); const diff = dia===0?-6:1-dia; dt.setDate(dt.getDate()+diff); return dt.toISOString().slice(0,10); };
   const semanas = {};
   const ordemSemanas = [];
   let saldoAcumSemana = saldo;
@@ -6278,56 +6335,163 @@ function viewFluxo(categoriaFiltro){
     return { ...semanas[chave], saldoAcumulado: saldoAcumSemana };
   });
   const fmtSemana = iso => { const d = new Date(iso+'T12:00:00'); const fim = new Date(d); fim.setDate(fim.getDate()+6); return `${d.getDate()}/${d.getMonth()+1} a ${fim.getDate()}/${fim.getMonth()+1}`; };
+  const mesesExtenso = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+  const fmtDiaExtenso = iso => { const [,m,d] = iso.split('-'); return `${parseInt(d,10)} DE ${mesesExtenso[parseInt(m,10)-1].toUpperCase()}`; };
+
+  // Agrupa os lançamentos do mês (já filtrados por Todos/Entradas/Saídas) por dia, mais recente primeiro
+  const diasMap = {}; const ordemDiasListagem = [];
+  eventosListagem.forEach(ev=>{
+    if(!diasMap[ev.data]){ diasMap[ev.data] = []; ordemDiasListagem.push(ev.data); }
+    diasMap[ev.data].push(ev);
+  });
+  ordemDiasListagem.sort((a,b)=>b.localeCompare(a));
+  const diaMaisRecente = ordemDiasListagem[0];
+
+  // ---- SVG da Evolução do saldo (linha), responsivo via viewBox — mesmo padrão de SVG inline já
+  // usado no resto do sistema (svgCalendarioCalor), sem depender de biblioteca externa de gráficos.
+  const svgW = 700, svgH = 150, svgPad = 14;
+  const valoresSaldoDia = saldoPorDia.map(d=>d.saldo);
+  const minS = Math.min(0, ...valoresSaldoDia), maxS = Math.max(0, ...valoresSaldoDia);
+  const rangeS = Math.max(1, maxS-minS);
+  const stepX = saldoPorDia.length>1 ? (svgW-2*svgPad)/(saldoPorDia.length-1) : 0;
+  const yDe = v => svgH-svgPad - ((v-minS)/rangeS)*(svgH-2*svgPad);
+  const pontosSvg = saldoPorDia.map((d,i)=>({ ...d, x: svgPad+i*stepX, y: yDe(d.saldo) }));
+  const linhaPoints = pontosSvg.map(p=>`${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  const yZero = yDe(0);
 
   return `
     <div class="topbar">
-      <div><h1>Fluxo de Caixa</h1><p>Lançamentos realizados, em ordem cronológica, com saldo acumulado (transferências entre contas próprias e aplicações financeiras não entram aqui — veja o extrato da conta)</p></div>
+      <div><h1>Fluxo de Caixa</h1><p>Lançamentos e movimentações financeiras</p></div>
       <button class="btn ghost sm" id="btnBaixarFluxoPDF">📄 Baixar PDF</button>
     </div>
     ${mesNavHTML()}
 
-    <div class="cards cards-compact">
-      <div class="card"><div class="label">Saldo início do mês</div><div class="value mono">${vm(brl(saldoInicioMes))}</div></div>
-      <div class="card"><div class="label">Saldo fim do mês</div><div class="value mono ${saldoFimMes>=0?'':'neg'}">${vm(brl(saldoFimMes))}</div></div>
-      <div class="card"><div class="label">🔋 Fôlego de caixa</div><div class="value mono">${foldegoDias===null?'—':foldegoDias+' dia(s)'}</div></div>
+    <div class="fluxo-saldo-atual-card">
+      <div class="lbl">Saldo atual</div>
+      <div class="val mono ${saldoAtualReal<0?'neg':''}">${vm(brl(saldoAtualReal))}</div>
+      <div class="sub">em ${fmtDate(hoje)}</div>
     </div>
-    ${foldegoDias!==null ? `<div class="note" style="margin-top:0;">Fôlego de caixa: se você parasse de receber agora, no ritmo médio de gastos dos últimos 90 dias (${brl(gastoMedioDiario)}/dia), o saldo atual (${brl(saldoAtualReal)}) aguentaria mais ${foldegoDias} dia(s).</div>` : ''}
 
-    <div class="dash-section-label">Saldo dia a dia — ${competenciaLabel(mesGlobalRef)}</div>
+    <div class="contas-secao-titulo" style="margin-top:20px;">Resumo financeiro — ${competenciaLabel(mesGlobalRef)}</div>
+    <div class="fluxo-resumo-4col">
+      <div class="fluxo-resumo-item"><div class="lbl">Saldo inicial</div><div class="val mono">${vm(brl(saldoInicioMes))}</div></div>
+      <div class="fluxo-resumo-item"><div class="lbl">Entradas</div><div class="val mono" style="color:var(--success);">+ ${vm(brl(entradasMes))}</div></div>
+      <div class="fluxo-resumo-item"><div class="lbl">Saídas</div><div class="val mono" style="color:var(--danger);">− ${vm(brl(saidasMes))}</div></div>
+      <div class="fluxo-resumo-item"><div class="lbl">Resultado do mês</div><div class="val mono" style="color:${resultadoMes>=0?'var(--success)':'var(--danger)'};">${resultadoMes>=0?'+':'−'} ${vm(brl(Math.abs(resultadoMes)))}</div></div>
+    </div>
+    <div class="fluxo-saldo-final-bar">
+      <span>Saldo final do mês</span>
+      <span class="mono ${saldoFimMes<0?'neg':''}" style="font-weight:700;font-size:15px;">${vm(brl(saldoFimMes))}</span>
+    </div>
+    <div class="note" style="margin-top:6px;">Saldo inicial + resultado do mês = saldo final (${brl(saldoInicioMes)} ${resultadoMes>=0?'+':'−'} ${brl(Math.abs(resultadoMes))} = ${brl(saldoFimMes)}).</div>
+
+    <div class="contas-secao-titulo">Evolução do saldo</div>
     <div class="panel"><div class="panel-body" style="padding:16px 18px;">
-      <div style="display:flex;align-items:center;gap:2px;height:90px;overflow-x:auto;">
-        ${saldoPorDia.map(d=>`
-          <div style="flex:1;min-width:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;" title="${fmtDate(d.dia)}: ${brl(d.saldo)}">
-            <div style="width:4px;background:${d.saldo>=0?'var(--blue-accent)':'var(--danger)'};border-radius:2px;height:${Math.max(1,Math.round(Math.abs(d.saldo)/maxSaldoAbs*40))}px;margin-top:${d.saldo>=0?0:40}px;"></div>
+      <svg viewBox="0 0 ${svgW} ${svgH}" preserveAspectRatio="none" style="width:100%;height:150px;display:block;">
+        ${minS<0 && maxS>0 ? `<line x1="0" y1="${yZero.toFixed(1)}" x2="${svgW}" y2="${yZero.toFixed(1)}" stroke="var(--line)" stroke-dasharray="4 3" stroke-width="1"/>` : ''}
+        <polyline points="${linhaPoints}" fill="none" stroke="var(--blue-accent)" stroke-width="2.5" vector-effect="non-scaling-stroke"/>
+        ${pontosSvg.map(p=>`
+          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="9" fill="transparent" style="cursor:pointer;" data-action="ver-dia-fluxo-svg" data-dia="${p.dia}" data-saldo="${p.saldo}" data-entradas="${p.entradas}" data-saidas="${p.saidas}"></circle>
+          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2.5" fill="var(--blue-accent)" style="pointer-events:none;"></circle>
+        `).join('')}
+      </svg>
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-soft);margin-top:2px;">
+        <span>dia 1</span><span>dia ${ultimoDia}</span>
+      </div>
+      <div id="fluxoDiaDetalhe" class="note" style="margin-top:10px;">Toque num ponto do gráfico pra ver o detalhe daquele dia.</div>
+    </div></div>
+
+    <div class="contas-secao-titulo">Movimentação do mês</div>
+    <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+      <div class="fluxo-resumo-3col-mini">
+        <div><div class="lbl">Entradas</div><div class="val" style="color:var(--success);">${vm(brl(entradasMes))}</div></div>
+        <div><div class="lbl">Saídas</div><div class="val" style="color:var(--danger);">${vm(brl(saidasMes))}</div></div>
+        <div><div class="lbl">Resultado</div><div class="val" style="color:${resultadoMes>=0?'var(--success)':'var(--danger)'};">${vm(brl(resultadoMes))}</div></div>
+      </div>
+      ${semanasRealizado.length ? `
+      <div class="fluxo-semanas-bars">
+        ${semanasRealizado.map(s=>`
+          <div class="fluxo-semana-col">
+            <div class="fluxo-semana-barras">
+              <div class="fluxo-semana-barra" style="height:${Math.max(2,Math.round(s.entradas/maxSemanaVal*70))}px;background:var(--success);" title="Entradas: ${brl(s.entradas)}"></div>
+              <div class="fluxo-semana-barra" style="height:${Math.max(2,Math.round(s.saidas/maxSemanaVal*70))}px;background:var(--danger);" title="Saídas: ${brl(s.saidas)}"></div>
+            </div>
+            <div class="fluxo-semana-label">SEM ${s.n}</div>
           </div>
         `).join('')}
       </div>
-      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-soft);margin-top:6px;">
-        <span>dia 1</span><span>dia ${ultimoDia}</span>
-      </div>
+      <div style="display:flex;gap:16px;font-size:11px;color:var(--text-soft);margin-top:8px;">
+        <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--success);margin-right:4px;"></span>Entradas</span>
+        <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--danger);margin-right:4px;"></span>Saídas</span>
+      </div>` : `<div class="empty">Nenhuma movimentação neste mês.</div>`}
     </div></div>
 
-    <div class="dash-section-label">Calendário de movimentação (quanto se moveu por dia)</div>
+    <div class="contas-secao-titulo">Resumo do mês</div>
+    <div class="panel"><div class="panel-body" style="padding:16px 18px;font-size:13.5px;line-height:1.7;">
+      <div>Neste mês entraram <strong class="mono" style="color:var(--success);">${brl(entradasMes)}</strong> e saíram <strong class="mono" style="color:var(--danger);">${brl(saidasMes)}</strong>.</div>
+      <div>O resultado do mês é de <strong class="mono" style="color:${resultadoMes>=0?'var(--success)':'var(--danger)'};">${brl(resultadoMes)}</strong>.</div>
+      <div>Seu saldo atual é de <strong class="mono">${brl(saldoAtualReal)}</strong>.</div>
+      ${saidasMes>entradasMes ? `<div>Neste mês as saídas estão acima das entradas.</div>` : entradasMes>saidasMes ? `<div>Neste mês as entradas estão acima das saídas.</div>` : ''}
+    </div></div>
+
+    <div class="contas-secao-titulo">Fôlego de caixa</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 18px;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;">
+        <span style="font-size:12.5px;color:var(--text-soft);">🔋 Fôlego de caixa</span>
+        <span class="mono" style="font-size:19px;font-weight:700;">${foldegoDias===null?'—':foldegoDias+' dia(s)'}</span>
+      </div>
+      ${foldegoDias!==null ? `
+      <div style="display:flex;gap:18px;margin-top:8px;font-size:12px;color:var(--text-soft);flex-wrap:wrap;">
+        <span>Saldo considerado: <strong class="mono" style="color:var(--ink);">${brl(saldoAtualReal)}</strong></span>
+        <span>Média diária: <strong class="mono" style="color:var(--ink);">${brl(gastoMedioDiario)}</strong></span>
+      </div>
+      <div class="note" style="margin-top:8px;">Esta é uma estimativa baseada no histórico de gastos dos últimos 90 dias — não é uma previsão garantida.</div>
+      ` : `<div class="note" style="margin-top:8px;">Sem gastos suficientes nos últimos 90 dias pra estimar.</div>`}
+    </div></div>
+
+    <div class="contas-secao-titulo">Lançamentos</div>
+    <div class="panel">
+      <div class="panel-body" style="padding:14px 18px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <div class="fluxo-filtro-pills">
+          <button type="button" class="fluxo-filtro-pill ${__fluxoTipoFiltro==='todos'?'ativo':''}" data-fluxo-tipo="todos">Todos</button>
+          <button type="button" class="fluxo-filtro-pill ${__fluxoTipoFiltro==='entradas'?'ativo':''}" data-fluxo-tipo="entradas">Entradas</button>
+          <button type="button" class="fluxo-filtro-pill ${__fluxoTipoFiltro==='saidas'?'ativo':''}" data-fluxo-tipo="saidas">Saídas</button>
+        </div>
+        ${categoriasNoMes.length ? `
+        <select id="fluxoCategoriaFiltro" style="max-width:220px;">
+          <option value="">Todas as categorias</option>
+          ${categoriasNoMes.map(c=>`<option value="${escapeHTML(c)}" ${categoriaFiltro===c?'selected':''}>${escapeHTML(c)}</option>`).join('')}
+        </select>` : ''}
+      </div>
+      <div class="panel-body">
+        ${ordemDiasListagem.length ? ordemDiasListagem.map(dia=>{
+          const itensDia = diasMap[dia];
+          const totalDia = itensDia.reduce((s,ev)=>s+(ev.tipo==='entrada'?ev.valor:-ev.valor),0);
+          return `
+          <details class="fluxo-dia-grupo" ${dia===diaMaisRecente?'open':''}>
+            <summary>
+              <span class="fluxo-dia-data">${fmtDiaExtenso(dia)}</span>
+              <span class="fluxo-dia-qtd">${itensDia.length} lançamento(s)</span>
+              <span class="mono fluxo-dia-total ${totalDia>=0?'pos':'neg'}">${totalDia>=0?'+':'−'} ${brl(Math.abs(totalDia))}</span>
+            </summary>
+            <div>
+              ${itensDia.map(ev=>`
+                <div class="fluxo-lanc-row" data-id="${ev.lancamentoId}" data-action="abrir-lancamento" style="cursor:pointer;">
+                  <span class="dot ${ev.tipo}"></span>
+                  <div class="fluxo-lanc-desc"><div>${escapeHTML(ev.descricao)}</div><div class="cat">${escapeHTML(ev.categoria)}</div></div>
+                  <span class="mono fluxo-lanc-valor" style="color:${ev.tipo==='entrada'?'var(--success)':'var(--danger)'};">${ev.tipo==='entrada'?'+':'−'} ${brl(ev.valor)}</span>
+                </div>
+              `).join('')}
+            </div>
+          </details>`;
+        }).join('') : `<div class="empty">${categoriaFiltro?'Nenhum lançamento dessa categoria neste mês.':'Nenhum lançamento realizado (pago/recebido) neste mês.'}</div>`}
+      </div>
+    </div>
+
+    <div class="contas-secao-titulo">Calendário de movimentação</div>
     <div class="panel"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">
       ${svgCalendarioCalor(eventosMes.map(ev=>({ data:ev.data, valor: Math.abs(ev.valor) })), deMes, ateMes)}
     </div></div>
-
-    <div class="panel">
-      <div class="panel-head"><h2>Realizado no mês</h2><span style="font-size:12px;color:var(--text-soft);">Início: <span class="mono">${vm(brl(saldoInicioMes))}</span> · Fim: <span class="mono">${vm(brl(saldoFimMes))}</span></span></div>
-      ${categoriasNoMes.length ? `
-      <div style="padding:12px 20px 0;">
-        <select id="fluxoCategoriaFiltro" style="max-width:280px;">
-          <option value="">Todas as categorias</option>
-          ${categoriasNoMes.map(c=>`<option value="${escapeHTML(c)}" ${categoriaFiltro===c?'selected':''}>${escapeHTML(c)}</option>`).join('')}
-        </select>
-      </div>` : ''}
-      <div class="ledger-row head">
-        <span></span><span>Data</span><span>Descrição</span><span class="col-cat">Venc. orig.</span><span class="col-status">Status</span><span style="text-align:right;">Valor</span>
-      </div>
-      <div class="panel-body">
-        ${eventosMes.length? rowsHTML : `<div class="empty">${categoriaFiltro?'Nenhum lançamento dessa categoria neste mês.':'Nenhum lançamento realizado (pago/recebido) neste mês.'} Saldo início do mês: ${brl(saldoInicioMes)}</div>`}
-      </div>
-    </div>
 
     <details class="panel-details" ${semanasArr.length?'open':''}>
       <summary>Fluxo de caixa projetado — próximos 60 dias, por semana (${pendentes.length} conta(s) pendente(s)) · Saldo previsto: ${brl(saldoProjetado)}</summary>
@@ -22573,6 +22737,21 @@ function attachViewHandlers(){
   if(fluxoCategoriaFiltro) fluxoCategoriaFiltro.addEventListener('change', ()=>{
     __fluxoCategoriaAtiva = fluxoCategoriaFiltro.value;
     render();
+  });
+  document.querySelectorAll('[data-fluxo-tipo]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      __fluxoTipoFiltro = btn.dataset.fluxoTipo;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-action="ver-dia-fluxo-svg"]').forEach(circ=>{
+    circ.addEventListener('click', ()=>{
+      const painel = document.getElementById('fluxoDiaDetalhe');
+      if(!painel) return;
+      const dia = circ.dataset.dia, saldo = parseFloat(circ.dataset.saldo), entradas = parseFloat(circ.dataset.entradas), saidas = parseFloat(circ.dataset.saidas);
+      const liquido = entradas-saidas;
+      painel.innerHTML = `<strong>${fmtDate(dia)}</strong><br>Saldo: <span class="mono" style="font-weight:600;">${brl(saldo)}</span> · Entradas: <span class="mono" style="color:var(--success);">+${brl(entradas)}</span> · Saídas: <span class="mono" style="color:var(--danger);">−${brl(saidas)}</span> · Movimentação líquida: <span class="mono" style="color:${liquido>=0?'var(--success)':'var(--danger)'};font-weight:600;">${liquido>=0?'+':'−'}${brl(Math.abs(liquido))}</span>`;
+    });
   });
   const btnBaixarFluxoPDF = document.getElementById('btnBaixarFluxoPDF');
   if(btnBaixarFluxoPDF) btnBaixarFluxoPDF.addEventListener('click', ()=> gerarFluxoCaixaPDF(mesGlobalRef, __fluxoCategoriaAtiva));
