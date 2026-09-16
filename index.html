@@ -23725,6 +23725,12 @@ function attachViewHandlers(){
   });
 
   // Provisionamentos
+  document.querySelectorAll('[data-action="abrir-lancamento-prov"]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const l = state.lancamentos.find(x=>x.id===el.dataset.id);
+      if(l) openLancamentoModal(l.tipo, l);
+    });
+  });
   document.getElementById('btnNovoProvisionamento')?.addEventListener('click', ()=>openProvisionamentoModal());
   document.querySelectorAll('[data-prov-aba]').forEach(btn=>{
     btn.addEventListener('click', ()=>{ provAbaAtiva = btn.dataset.provAba; render(); });
@@ -25305,6 +25311,14 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       <div class="note" style="margin-top:6px;">Se preencher, o valor acima continua sendo o líquido (o que realmente entra) — o desconto aparece separado no DRE, em "Receita Bruta de Vendas" e "(-) Descontos Concedidos".</div>
     </div>
     ` : ''}
+    ${tipo==='saida' ? `
+    <div class="field">
+      <label>🗓️ Vinculada a um provisionamento (opcional)</label>
+      <input type="hidden" id="fProvisionamentoId" value="${existing?.provisionamentoVinculadoId||''}">
+      <button type="button" class="btn ghost" id="fBtnVincularProv" style="width:100%;">${existing?.provisionamentoVinculadoId ? '🗓️ '+escapeHTML((state.provisionamentos||[]).find(p=>p.id===existing.provisionamentoVinculadoId)?.nome||'') : '🗓️ Vincular a um provisionamento'}</button>
+    </div>
+    <div id="fProvisionamentoAviso"></div>
+    ` : ''}
     ${tipo==='saida' && !isEdit ? `
     <div class="field" id="fMulticategoriaWrap">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;">
@@ -25478,6 +25492,75 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  if(tipo==='saida'){
+    const atualizarAvisoProvisionamento = ()=>{
+      const wrap = document.getElementById('fProvisionamentoAviso');
+      const provId = document.getElementById('fProvisionamentoId')?.value;
+      if(!wrap) return;
+      if(!provId){ wrap.innerHTML = ''; return; }
+      const p = (state.provisionamentos||[]).find(x=>x.id===provId);
+      if(!p){ wrap.innerHTML = ''; return; }
+      const vencimento = document.getElementById('fVencimento')?.value || todayISO();
+      const mesRef = vencimento.slice(0,7);
+      const disponivel = reservadoDisponivelParaMes(p.id, mesRef);
+      if(disponivel<=0){
+        wrap.innerHTML = `<div class="note" style="margin-top:0;">Nenhum valor reservado pra ${competenciaLabel(mesRef)} nesse provisionamento ainda.</div>`;
+        return;
+      }
+      const valorDespesa = numBR(document.getElementById('fValor')?.value)||0;
+      const usar = Math.min(disponivel, valorDespesa||disponivel);
+      wrap.innerHTML = `
+        <div class="note" style="margin-top:0;border-color:var(--success);">
+          💰 Há <strong>${brl(disponivel)}</strong> já reservado(s) em "${escapeHTML(nomeConta(p.contaDestinoId))}" pra ${competenciaLabel(mesRef)}.
+          <button type="button" class="btn ghost sm" id="btnUsarReservaProv" style="margin-top:8px;width:100%;">Transferir ${brl(usar)} da caixinha pra essa conta agora</button>
+        </div>
+      `;
+      document.getElementById('btnUsarReservaProv').addEventListener('click', async ()=>{
+        const contaPagamentoId = document.getElementById('fConta')?.value || contaPreSelecionadaId;
+        if(!contaPagamentoId){ showToast('Escolha a conta de pagamento primeiro'); return; }
+        if(contaPagamentoId===p.contaDestinoId){ showToast('A conta de pagamento já é a própria caixinha — não precisa transferir'); return; }
+        const confirmar = await avisoModal({
+          titulo: 'Transferir da caixinha?',
+          mensagem: `Isso transfere ${brl(usar)} de "${nomeConta(p.contaDestinoId)}" para "${nomeConta(contaPagamentoId)}", usando o que já estava reservado pra essa despesa.`,
+          tipo:'aviso', textoConfirmar:'Transferir', textoCancelar:'Cancelar'
+        });
+        if(!confirmar) return;
+        const tid = uid();
+        const dataHoje = todayISO();
+        state.lancamentos.push({ id: uid(), tipo:'saida', categoria:'Transferência', descricao:`Saldos Provisionados — ${p.nome} (para ${nomeConta(contaPagamentoId)})`, valor: usar, contaId: p.contaDestinoId, status:'pago', dataVencimento: dataHoje, dataPagamento: dataHoje, origem:'transferencia', transferenciaId: tid, criadoEm: new Date().toISOString() });
+        state.lancamentos.push({ id: uid(), tipo:'entrada', categoria:'Transferência', descricao:`Saldos Provisionados — ${p.nome} (de ${nomeConta(p.contaDestinoId)})`, valor: usar, contaId: contaPagamentoId, status:'recebido', dataVencimento: dataHoje, dataPagamento: dataHoje, origem:'transferencia', transferenciaId: tid, criadoEm: new Date().toISOString() });
+        // marca as reservas usadas (da mais antiga pra mais nova) até completar o valor transferido
+        let restante = usar;
+        (state.reservasProvisionamento||[]).filter(r=>r.provisionamentoId===p.id && r.tipo==='realizada' && !r.usadaEmLancamentoId && (r.mesReferencia||(r.data||'').slice(0,7))===mesRef).sort((a,b)=>(a.data||'').localeCompare(b.data||'')).forEach(r=>{
+          if(restante<=0.004) return;
+          r.usadaEmLancamentoId = tid;
+          restante -= r.valor;
+        });
+        persist(); render();
+        showToast(`${brl(usar)} transferido(s) da caixinha`);
+        setTimeout(()=>openLancamentoModal(tipo, existing, contaPreSelecionadaId), 60);
+      });
+    };
+    document.getElementById('fBtnVincularProv')?.addEventListener('click', async ()=>{
+      const btnVinc = document.getElementById('fBtnVincularProv');
+      const provsAtivos = (state.provisionamentos||[]).filter(p=>p.status!=='arquivado');
+      abrirSeletorBusca({
+        titulo: 'Vincular a um provisionamento',
+        itens: provsAtivos.map(p=>({ value:p.id, label:p.nome })),
+        valorAtual: document.getElementById('fProvisionamentoId').value,
+        permitirNenhum: true,
+        onSelecionar: (id)=>{
+          document.getElementById('fProvisionamentoId').value = id;
+          const p = provsAtivos.find(x=>x.id===id);
+          btnVinc.textContent = p ? '🗓️ '+p.nome : '🗓️ Vincular a um provisionamento';
+          atualizarAvisoProvisionamento();
+        }
+      });
+    });
+    document.getElementById('fVencimento')?.addEventListener('change', atualizarAvisoProvisionamento);
+    document.getElementById('fValor')?.addEventListener('input', atualizarAvisoProvisionamento);
+    atualizarAvisoProvisionamento();
+  }
   if(!isEdit){
     const fDescricaoEl = document.getElementById('fDescricao');
     let debounceSugestao = null;
@@ -25868,6 +25951,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       dataVencimento: vencimentoInformado || dataEfetivacao || todayISO(),
       status,
       dataPagamento: efetivado ? dataEfetivacao : null,
+      provisionamentoVinculadoId: (tipo==='saida' && document.getElementById('fProvisionamentoId')) ? (document.getElementById('fProvisionamentoId').value||null) : (existing?.provisionamentoVinculadoId||null),
     };
     // Regra financeira VK: pendente = sem conta, inclusive se um recebido for revertido para pendente.
     if(existing?.origem==='vk' && status==='pendente') payload.contaId = null;
@@ -26598,6 +26682,15 @@ function reservasDoProvisionamento(provisionamentoId, tipo){
 function totalReservadoProvisionamento(provisionamentoId, tipo){
   return reservasDoProvisionamento(provisionamentoId, tipo).reduce((s,r)=>s+(r.valor||0),0);
 }
+// Quanto dessa reserva "realizada" (dinheiro de verdade separado numa caixinha) ainda está
+// disponível pra um mês específico — ou seja, ainda não foi usado num pagamento. Cada reserva tem
+// no máximo um "uso" (usadaEmLancamentoId): assim que ela financia um pagamento, para de contar
+// aqui, pra nunca ser oferecida de novo pro mesmo dinheiro.
+function reservadoDisponivelParaMes(provisionamentoId, mesReferencia){
+  return (state.reservasProvisionamento||[])
+    .filter(r=>r.provisionamentoId===provisionamentoId && r.tipo==='realizada' && !r.usadaEmLancamentoId && (r.mesReferencia||(r.data||'').slice(0,7))===mesReferencia)
+    .reduce((s,r)=>s+(r.valor||0),0);
+}
 // Meses inteiros entre hoje e o vencimento (mínimo 1, pra nunca dividir por zero) — datas locais,
 // sem passar por toISOString, pra não sofrer o problema de virada de dia perto da meia-noite.
 function mesesAteVencimento(proximoVencimento){
@@ -26661,13 +26754,14 @@ function mesesOcorrenciaProvisionamento(p, ano){
     // Eventual, Parcelado, Sazonal, Personalizado — sem recorrência automática, só o mês do vencimento cadastrado
     return (av===ano) ? [mv] : [];
   }
+  const antesDoInicio = (a,m)=> a<av || (a===av && m<mv);
   const meses = [];
   // anda pra frente e pra trás a partir do mês-base, marcando as ocorrências que caem no ano pedido
   for(let k=-60; k<=60; k++){
     const totalMeses = (mv-1) + k*passo;
     const a = av + Math.floor(totalMeses/12);
     const m = ((totalMeses%12)+12)%12 + 1;
-    if(a===ano && a>=av && dentroDoLimite(a,m)) meses.push(m);
+    if(a===ano && !antesDoInicio(a,m) && dentroDoLimite(a,m)) meses.push(m);
   }
   return [...new Set(meses)].sort((a,b)=>a-b);
 }
@@ -26755,18 +26849,21 @@ function viewProvMatrizAba(ativos){
     const porMes = meses.map((_,i)=>{
       const m = i+1;
       const previsto = ocorrencias.includes(m) ? metaReservaProvisionamento(x.p) : 0;
-      const reservadoMes = reservasDoProvisionamento(x.p.id,'realizada').filter(r=>(r.mesReferencia||(r.data||'').slice(0,7))===`${ano}-${String(m).padStart(2,'0')}`).reduce((s,r)=>s+r.valor,0);
       const chave = `${ano}-${String(m).padStart(2,'0')}`;
-      const vencido = previsto>0 && chave < todayISO().slice(0,7) && reservadoMes<previsto;
+      const reservadoMes = reservasDoProvisionamento(x.p.id,'realizada').filter(r=>(r.mesReferencia||(r.data||'').slice(0,7))===chave).reduce((s,r)=>s+r.valor,0);
+      const lancPago = state.lancamentos.find(l=>l.provisionamentoVinculadoId===x.p.id && l.status==='pago' && (l.dataVencimento||'').slice(0,7)===chave);
+      const vencido = previsto>0 && chave < todayISO().slice(0,7) && reservadoMes<previsto && !lancPago;
       const coberto = previsto>0 && reservadoMes>=previsto;
-      const risco = previsto>0 && !coberto && !vencido && chave===todayISO().slice(0,7);
-      return { previsto, reservadoMes, vencido, coberto, risco, temValor: previsto>0 };
+      const risco = previsto>0 && !coberto && !vencido && chave===todayISO().slice(0,7) && !lancPago;
+      // temValor considera também um pagamento avulso vinculado sem valor previsto cadastrado
+      // naquele mês — pra sempre mostrar que foi pago, mesmo fora do planejamento original.
+      return { previsto, valorExibir: previsto>0 ? previsto : (lancPago?.valor||0), reservadoMes, vencido, coberto, risco, pago: !!lancPago, lancPagoId: lancPago?.id, temValor: previsto>0 || !!lancPago, semPrevisto: previsto<=0 && !!lancPago };
     });
     return { p: x.p, porMes, totalLinha: porMes.reduce((s,c)=>s+c.previsto,0) };
   });
   const totaisColuna = meses.map((_,i)=>linhas.reduce((s,l)=>s+l.porMes[i].previsto,0));
   const totalGeral = totaisColuna.reduce((a,b)=>a+b,0);
-  const legenda = `<div class="note" style="margin-top:8px;">🟢 coberto · 🟡 mês atual ainda em risco · 🔴 vencido sem cobrir. O valor de cada mês é a meta de reserva dividida pelo número de ocorrências daquele provisionamento no ano.</div>`;
+  const legenda = `<div class="note" style="margin-top:8px;">🟢 coberto · 🟡 mês atual ainda em risco · 🔴 vencido sem cobrir · ✅ já paga (clique pra ver o lançamento). O valor de cada mês é a meta de reserva dividida pelo número de ocorrências daquele provisionamento no ano.</div>`;
   const navAno = `
     <div class="panel" style="margin-bottom:14px;">
       <div class="filter-bar" style="align-items:center;">
@@ -26788,10 +26885,10 @@ function viewProvMatrizAba(ativos){
             <div class="panel-head"><h2 style="font-size:14px;">${escapeHTML(l.p.nome)}</h2><span class="mono" style="font-size:12.5px;font-weight:700;">${brl(l.totalLinha)}</span></div>
             <div class="panel-body">
               ${mesesComValor.length ? mesesComValor.map(c=>{
-                const cor = c.coberto ? 'var(--success)' : c.vencido ? 'var(--danger)' : c.risco ? 'var(--warn)' : 'var(--ink)';
-                return `<div style="display:flex;justify-content:space-between;padding:7px 4px;border-bottom:1px solid var(--line);font-size:12.5px;">
-                  <span>${c.nome}/${ano}</span>
-                  <span class="mono" style="color:${cor};font-weight:600;">${brl(c.previsto)}${c.reservadoMes>0?` <span style="font-size:10.5px;color:var(--text-soft);">(${brl(c.reservadoMes)} reservado)</span>`:''}</span>
+                const cor = c.pago ? 'var(--success)' : c.coberto ? 'var(--success)' : c.vencido ? 'var(--danger)' : c.risco ? 'var(--warn)' : 'var(--ink)';
+                return `<div class="${c.pago?'prov-matriz-pago-cell':''}" style="display:flex;justify-content:space-between;padding:7px 4px;border-bottom:1px solid var(--line);font-size:12.5px;${c.pago?'cursor:pointer;':''}" ${c.pago?`data-action="abrir-lancamento-prov" data-id="${c.lancPagoId}"`:''}>
+                  <span>${c.nome}/${ano}${c.pago?' ✅':''}${c.semPrevisto?' <span style="color:var(--text-soft);font-size:10.5px;">(sem previsão)</span>':''}</span>
+                  <span class="mono" style="color:${cor};font-weight:600;">${brl(c.valorExibir)}${c.reservadoMes>0?` <span style="font-size:10.5px;color:var(--text-soft);">(${brl(c.reservadoMes)} reservado)</span>`:''}</span>
                 </div>`;
               }).join('') : `<div class="empty">Sem ocorrência nesse ano.</div>`}
             </div>
@@ -26818,9 +26915,10 @@ function viewProvMatrizAba(ativos){
               <td style="padding:8px;font-weight:600;position:sticky;left:0;background:var(--card-bg,#fff);">${escapeHTML(l.p.nome)}</td>
               ${l.porMes.map(c=>{
                 if(!c.temValor) return `<td style="padding:8px;text-align:right;color:var(--line);">—</td>`;
-                const cor = c.coberto ? 'var(--success)' : c.vencido ? 'var(--danger)' : c.risco ? 'var(--warn)' : 'var(--ink)';
-                return `<td style="padding:8px;text-align:right;color:${cor};">
-                  <div>${brl(c.previsto)}</div>
+                const cor = c.pago ? 'var(--success)' : c.coberto ? 'var(--success)' : c.vencido ? 'var(--danger)' : c.risco ? 'var(--warn)' : 'var(--ink)';
+                return `<td class="${c.pago?'prov-matriz-pago-cell':''}" style="padding:8px;text-align:right;color:${cor};${c.pago?'cursor:pointer;':''}" ${c.pago?`data-action="abrir-lancamento-prov" data-id="${c.lancPagoId}"`:''}>
+                  <div>${brl(c.valorExibir)}${c.pago?' ✅':''}</div>
+                  ${c.semPrevisto ? `<div style="font-size:9px;color:var(--text-soft);">sem previsão</div>` : ''}
                   ${c.reservadoMes>0 ? `<div style="font-size:9.5px;color:var(--text-soft);font-weight:400;">${c.coberto?'✓ ':''}${brl(c.reservadoMes)} reservado</div>` : ''}
                 </td>`;
               }).join('')}
