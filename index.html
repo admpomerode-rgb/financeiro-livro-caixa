@@ -4418,7 +4418,10 @@ async function extrairDadosFaturaEnergiaIA(file){
   "saldoCreditosAnteriorKwh": number ou null (saldo de créditos de energia do mês anterior),
   "creditosUtilizadosKwh": number ou null (créditos usados/abatidos nesta fatura),
   "saldoCreditosAtualKwh": number ou null (saldo de créditos atualizado, que fica pro próximo mês),
-  "bandeira": string ou null (ex: "Verde", "Amarela", "Vermelha 1", "Vermelha 2")
+  "bandeira": string ou null (ex: "Verde", "Amarela", "Vermelha 1", "Vermelha 2"),
+  "pisValor": number ou null (valor do PIS cobrado na fatura, em R$),
+  "cofinsValor": number ou null (valor do COFINS cobrado na fatura, em R$),
+  "icmsValor": number ou null (valor total do ICMS cobrado na fatura, em R$ — some todas as linhas de ICMS se houver mais de uma)
 }
 Se não conseguir ler algum campo com certeza, use null nesse campo (não invente valores). Responda só com o JSON.`;
 
@@ -9446,7 +9449,17 @@ function parseFaturaCelesc(linhas){
   const bandeiraMatch = texto.match(/\b(Verde|Amarela|Vermelha\s*1|Vermelha\s*2)\b/i);
   const bandeira = bandeiraMatch ? bandeiraMatch[1] : null;
 
-  return { referencia, vencimento, valorTotal, consumoKwh, energiaInjetadaKwh, saldoCreditosAnteriorKwh, creditosUtilizadosKwh, saldoCreditosAtualKwh, bandeira };
+  // Impostos — cada um pode aparecer em mais de uma linha (ex: ICMS normal + ICMS isento), soma tudo
+  const somaLinhasComRotulo = (rotulo) => {
+    const achadas = linhas.filter(l=>new RegExp('^'+rotulo+'\\b','i').test(l.trim()));
+    if(!achadas.length) return null;
+    return achadas.reduce((s,l)=>s+(ultimoNumero(l)||0),0);
+  };
+  const pisValor = somaLinhasComRotulo('PIS');
+  const cofinsValor = somaLinhasComRotulo('COFINS');
+  const icmsValor = somaLinhasComRotulo('ICMS');
+
+  return { referencia, vencimento, valorTotal, consumoKwh, energiaInjetadaKwh, saldoCreditosAnteriorKwh, creditosUtilizadosKwh, saldoCreditosAtualKwh, bandeira, pisValor, cofinsValor, icmsValor };
 }
 
 function parseNotaCorretagem(linhas){
@@ -18708,9 +18721,11 @@ function semaforo(valor, limiteVerde, limiteAmarelo, inverso){
 function viewUsinaSolar(){
   const usina = state.usinaSolar || {};
   const leituras = [...(state.usinaLeituras||[])].sort((a,b)=>(b.data||'').localeCompare(a.data||''));
-  const faturas = [...(state.usinaFaturas||[])].sort((a,b)=>(b.referencia||'').localeCompare(a.referencia||''));
+  const faturasAsc = [...(state.usinaFaturas||[])].sort((a,b)=>(a.referencia||'').localeCompare(b.referencia||''));
+  const faturas = [...faturasAsc].reverse();
+  const manutencoes = [...(state.usinaManutencoes||[])].sort((a,b)=>(b.data||'').localeCompare(a.data||''));
 
-  const geracaoTotalRegistrada = leituras.filter(l=>l.periodo==='dia').reduce((s,l)=>s+l.geracaoKwh,0);
+  const ultimaLeitura = leituras[0];
   const ultimaFatura = faturas[0];
   const saldoCreditosAtual = ultimaFatura?.saldoCreditosAtualKwh;
 
@@ -18719,14 +18734,63 @@ function viewUsinaSolar(){
       <div class="topbar"><div><h1>☀️ Usina Solar</h1><p>Gerencie a geração e o cruzamento com a fatura de energia.</p></div></div>
       <div class="panel"><div class="panel-body" style="padding:24px 20px;text-align:center;">
         <div style="font-size:32px;margin-bottom:10px;">☀️</div>
-        <div style="font-size:13.5px;color:var(--text-soft);margin-bottom:16px;">Nenhum dado cadastrado ainda. Comece registrando um print do app do inversor ou uma fatura de energia — a leitura automática identifica os números pra você revisar.</div>
+        <div style="font-size:13.5px;color:var(--text-soft);margin-bottom:16px;">Nenhum dado cadastrado ainda. Comece registrando a geração do mês (é só olhar no app do inversor e digitar) ou uma fatura de energia.</div>
         <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
-          <button class="btn" id="btnRegistrarGeracaoSolar">📸 Registrar geração (print)</button>
+          <button class="btn" id="btnRegistrarGeracaoSolar">☀️ Registrar geração</button>
           <button class="btn ghost" id="btnRegistrarFaturaEnergia">🧾 Registrar fatura</button>
         </div>
       </div></div>
     `;
   }
+
+  // ---- Alerta de crédito prestes a vencer (créditos de energia solar valem 60 meses — Lei
+  // 14.300/2022). Aproximação honesta: olha a fatura mais antiga registrada com saldo de créditos
+  // e avisa a partir de 55 meses (5 meses de antecedência) — não é uma reconstrução exata mês a mês
+  // de qual "lote" de crédito vence quando, só um alerta de que vale a pena conferir na fatura.
+  const faturaMaisAntigaComCredito = faturasAsc.find(f=>f.saldoCreditosAtualKwh!=null);
+  let alertaCredito = null;
+  if(faturaMaisAntigaComCredito){
+    const [a1,m1] = faturaMaisAntigaComCredito.referencia.split('-').map(Number);
+    const [a2,m2] = todayISO().slice(0,7).split('-').map(Number);
+    const meses = (a2-a1)*12 + (m2-m1);
+    if(meses>=55) alertaCredito = { meses, referencia: faturaMaisAntigaComCredito.referencia };
+  }
+
+  // ---- Payback (só se valor investido estiver cadastrado) — economia mensal estimada por fatura:
+  // energia injetada × (valor da fatura ÷ consumo) daquele mesmo mês, ou seja, valorizando cada kWh
+  // injetado pela tarifa média que você pagou naquele mês. É uma estimativa, não um valor oficial.
+  const faturasComDados = faturasAsc.filter(f=>f.consumoKwh>0 && f.energiaInjetadaKwh!=null && f.valorTotal!=null);
+  const economiaPorFatura = faturasComDados.map(f=>({ referencia: f.referencia, economia: f.energiaInjetadaKwh*(f.valorTotal/f.consumoKwh) }));
+  const economiaMediaMensal = economiaPorFatura.length ? economiaPorFatura.reduce((s,e)=>s+e.economia,0)/economiaPorFatura.length : null;
+  const economiaAcumulada = economiaPorFatura.reduce((s,e)=>s+e.economia,0);
+  let paybackTexto = null;
+  if(usina.valorInvestido>0 && economiaMediaMensal>0){
+    const restante = Math.max(0, usina.valorInvestido-economiaAcumulada);
+    const mesesFaltando = Math.ceil(restante/economiaMediaMensal);
+    paybackTexto = restante<=0 ? 'Já pago (pela estimativa)' : `~${mesesFaltando} mês(es) (${(mesesFaltando/12).toFixed(1)} ano(s))`;
+  }
+
+  // ---- Impostos totais (só soma o que foi preenchido)
+  const totalImpostos = faturas.reduce((s,f)=>s+(f.pisValor||0)+(f.cofinsValor||0)+(f.icmsValor||0), 0);
+
+  // ---- Geração x consumo por mês (últimos 12 meses com dado) — geração vem das leituras tipo
+  // "mes" quando existir pra aquele mês, senão usa a energia injetada da fatura como aproximação
+  const mesesComDado = [...new Set([...leituras.filter(l=>l.periodo==='mes').map(l=>l.data.slice(0,7)), ...faturas.map(f=>f.referencia)])].sort().slice(-12);
+  const dadosGeracaoConsumo = mesesComDado.map(m=>{
+    const leituraMes = leituras.find(l=>l.periodo==='mes' && l.data.slice(0,7)===m);
+    const fatura = faturas.find(f=>f.referencia===m);
+    return { mes:m, geracao: leituraMes?leituraMes.geracaoKwh:(fatura?.energiaInjetadaKwh||0), consumo: fatura?.consumoKwh||0 };
+  });
+  const maxGeracaoConsumo = Math.max(1, ...dadosGeracaoConsumo.flatMap(d=>[d.geracao,d.consumo]));
+
+  // ---- Evolução do saldo de créditos (últimas faturas com saldo registrado)
+  const evolucaoCreditos = faturasAsc.filter(f=>f.saldoCreditosAtualKwh!=null).slice(-12);
+  const maxCredito = Math.max(1, ...evolucaoCreditos.map(f=>f.saldoCreditosAtualKwh));
+
+  // ---- Ranking de meses por geração (todas as leituras tipo "mes" que existirem)
+  const rankingGeracao = [...leituras.filter(l=>l.periodo==='mes')].sort((a,b)=>b.geracaoKwh-a.geracaoKwh).slice(0,6);
+
+  const custoManutencaoTotal = manutencoes.reduce((s,m)=>s+(m.valor||0),0);
 
   return `
     <div class="topbar">
@@ -18735,21 +18799,99 @@ function viewUsinaSolar(){
     </div>
 
     <div class="contas-acoes-row">
-      <button class="btn" id="btnRegistrarGeracaoSolar">📸 Registrar geração (print)</button>
+      <button class="btn" id="btnRegistrarGeracaoSolar">☀️ Registrar geração</button>
       <button class="btn ghost sm" id="btnRegistrarFaturaEnergia">🧾 Registrar fatura</button>
+      <button class="btn ghost sm" id="btnRegistrarManutencaoSolar">🔧 Registrar manutenção</button>
     </div>
 
     ${usina.capacidadeKw || usina.dataInstalacao ? `
     <div class="note" style="margin-top:0;">${usina.capacidadeKw?`Capacidade: <strong>${usina.capacidadeKw} kW</strong>`:''}${usina.capacidadeKw && usina.dataInstalacao?' · ':''}${usina.dataInstalacao?`Instalada em <strong>${fmtDate(usina.dataInstalacao)}</strong>`:''}</div>
     ` : ''}
 
+    ${alertaCredito ? `
+    <div class="note" style="border-color:var(--warn);margin-top:10px;">⚠️ Os créditos de energia valem 60 meses (Lei 14.300/2022). A fatura mais antiga com saldo registrado (${competenciaLabel(alertaCredito.referencia)}) já tem ${alertaCredito.meses} mês(es) — vale conferir na sua próxima fatura se ainda sobra saldo daquele período, antes que expire.</div>
+    ` : ''}
+
     <div class="fluxo-resumo-4col" style="margin-top:14px;">
-      <div class="fluxo-resumo-item"><div class="lbl">Geração registrada</div><div class="val">${geracaoTotalRegistrada.toFixed(1)} kWh</div></div>
+      <div class="fluxo-resumo-item"><div class="lbl">Última leitura</div><div class="val">${ultimaLeitura?`${ultimaLeitura.geracaoKwh} kWh (${ultimaLeitura.periodo})`:'—'}</div></div>
       <div class="fluxo-resumo-item"><div class="lbl">Saldo de créditos atual</div><div class="val">${saldoCreditosAtual!=null?saldoCreditosAtual+' kWh':'—'}</div></div>
       <div class="fluxo-resumo-item"><div class="lbl">Última fatura</div><div class="val">${ultimaFatura?brl(ultimaFatura.valorTotal):'—'}</div></div>
-      <div class="fluxo-resumo-item"><div class="lbl">Faturas registradas</div><div class="val">${faturas.length}</div></div>
+      <div class="fluxo-resumo-item"><div class="lbl">Impostos pagos (total)</div><div class="val">${totalImpostos>0?brl(totalImpostos):'—'}</div></div>
     </div>
-    <div class="note" style="margin-top:6px;">Não calculo "quanto você economizou" em R$ de forma automática — a fatura não traz esse valor pronto de forma confiável (depende de tarifas e bandeiras variáveis). Os números acima são os que aparecem direto na fatura e no app do inversor.</div>
+
+    ${usina.valorInvestido>0 ? `
+    <div class="contas-secao-titulo" style="margin-top:22px;">Investimento</div>
+    <div class="fluxo-resumo-4col">
+      <div class="fluxo-resumo-item"><div class="lbl">Valor investido</div><div class="val">${brl(usina.valorInvestido)}</div></div>
+      <div class="fluxo-resumo-item"><div class="lbl">Economia estimada (total)</div><div class="val">${brl(economiaAcumulada)}</div></div>
+      <div class="fluxo-resumo-item"><div class="lbl">Economia média/mês (estimada)</div><div class="val">${economiaMediaMensal?brl(economiaMediaMensal):'—'}</div></div>
+      <div class="fluxo-resumo-item"><div class="lbl">Payback estimado</div><div class="val" style="font-size:12.5px;">${paybackTexto||'—'}</div></div>
+    </div>
+    <div class="note" style="margin-top:6px;">A economia é uma <strong>estimativa</strong>: valorizo cada kWh injetado pela tarifa média que você pagou naquele mês (valor da fatura ÷ consumo). Não é o valor oficial de compensação da distribuidora, que segue regras próprias (Fio B, bandeiras, etc.).</div>
+    ` : `<div class="note" style="margin-top:10px;">Cadastre o "valor investido" em ⚙️ Dados da usina pra ver a estimativa de payback aqui.</div>`}
+
+    ${dadosGeracaoConsumo.length ? `
+    <div class="contas-secao-titulo" style="margin-top:22px;">Geração x consumo por mês</div>
+    <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+      <div class="fluxo-semanas-bars" style="height:110px;">
+        ${dadosGeracaoConsumo.map(d=>`
+          <div class="fluxo-semana-col">
+            <div class="fluxo-semana-barras" style="height:90px;">
+              <div class="fluxo-semana-barra" style="height:${Math.max(2,Math.round(d.geracao/maxGeracaoConsumo*90))}px;background:var(--warn);" title="Geração: ${d.geracao} kWh"></div>
+              <div class="fluxo-semana-barra" style="height:${Math.max(2,Math.round(d.consumo/maxGeracaoConsumo*90))}px;background:var(--blue-accent);" title="Consumo: ${d.consumo} kWh"></div>
+            </div>
+            <div class="fluxo-semana-label">${d.mes.slice(5)}/${d.mes.slice(2,4)}</div>
+          </div>
+        `).join('')}
+      </div>
+      <div style="display:flex;gap:16px;font-size:11px;color:var(--text-soft);margin-top:8px;">
+        <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--warn);margin-right:4px;"></span>Geração</span>
+        <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--blue-accent);margin-right:4px;"></span>Consumo</span>
+      </div>
+    </div></div>` : ''}
+
+    ${evolucaoCreditos.length>1 ? `
+    <div class="contas-secao-titulo">Evolução do saldo de créditos</div>
+    <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+      <div style="display:flex;align-items:flex-end;gap:4px;height:70px;">
+        ${evolucaoCreditos.map(f=>`
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;" title="${competenciaLabel(f.referencia)}: ${f.saldoCreditosAtualKwh} kWh">
+            <div style="width:100%;max-width:26px;background:var(--success);opacity:.75;border-radius:2px 2px 0 0;height:${Math.max(2,Math.round(f.saldoCreditosAtualKwh/maxCredito*60))}px;"></div>
+          </div>
+        `).join('')}
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:9.5px;color:var(--text-soft);margin-top:4px;">
+        <span>${competenciaLabel(evolucaoCreditos[0].referencia)}</span><span>${competenciaLabel(evolucaoCreditos[evolucaoCreditos.length-1].referencia)}</span>
+      </div>
+    </div></div>` : ''}
+
+    ${rankingGeracao.length ? `
+    <div class="contas-secao-titulo">Ranking de meses por geração</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${rankingGeracao.map((l,i)=>`
+        <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto;">
+          <span style="font-size:12px;color:var(--text-soft);width:16px;">${i+1}º</span>
+          <span style="font-size:13px;">${competenciaLabel(l.data.slice(0,7))}</span>
+          <span class="mono" style="font-weight:600;">${l.geracaoKwh} kWh</span>
+        </div>
+      `).join('')}
+    </div></div>` : ''}
+
+    ${faturas.length ? `
+    <div class="contas-secao-titulo">Autossuficiência e custo por kWh, por fatura</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${faturas.filter(f=>f.consumoKwh>0).map(f=>{
+        const autossuf = f.energiaInjetadaKwh!=null ? (f.energiaInjetadaKwh/f.consumoKwh*100) : null;
+        const custoKwh = f.valorTotal/f.consumoKwh;
+        const impostosFatura = (f.pisValor||0)+(f.cofinsValor||0)+(f.icmsValor||0);
+        return `
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
+          <div class="desc-cell"><div>${competenciaLabel(f.referencia)}</div><div class="cat">${autossuf!=null?`Autossuficiência ${autossuf.toFixed(0)}%`:''}${impostosFatura>0?` · Impostos ${brl(impostosFatura)}`:''}</div></div>
+          <span class="mono" style="font-size:12px;color:var(--text-soft);">${brl(custoKwh)}/kWh</span>
+          <span class="mono" style="font-weight:600;">${brl(f.valorTotal)}</span>
+        </div>`;
+      }).join('')}
+    </div></div>` : ''}
 
     <div class="contas-secao-titulo" style="margin-top:22px;">Histórico de geração</div>
     <div class="panel">
@@ -18775,6 +18917,23 @@ function viewUsinaSolar(){
             <button class="icon-btn" data-action="excluir-fatura-solar" data-id="${f.id}" title="Excluir">✕</button>
           </div>
         `).join('') : `<div class="empty">Nenhuma fatura registrada ainda.</div>`}
+      </div>
+    </div>
+
+    <div class="contas-secao-titulo" style="margin-top:22px;display:flex;justify-content:space-between;align-items:center;">
+      <span>Histórico de manutenções</span>
+      ${custoManutencaoTotal>0?`<span style="font-size:11px;color:var(--text-soft);font-weight:400;text-transform:none;letter-spacing:0;">Total: ${brl(custoManutencaoTotal)}</span>`:''}
+    </div>
+    <div class="panel">
+      <div class="panel-body" style="padding:0;">
+        ${manutencoes.length ? manutencoes.map(m=>`
+          <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto auto;">
+            <span class="dot saida"></span>
+            <span style="font-size:13px;">${fmtDate(m.data)} — ${escapeHTML(m.descricao)}</span>
+            <span class="mono" style="font-weight:600;">${m.valor>0?brl(m.valor):'—'}</span>
+            <button class="icon-btn" data-action="excluir-manutencao-solar" data-id="${m.id}" title="Excluir">✕</button>
+          </div>
+        `).join('') : `<div class="empty">Nenhuma manutenção registrada ainda.</div>`}
       </div>
     </div>
   `;
@@ -22719,6 +22878,7 @@ function attachViewHandlers(){
   });
   document.getElementById('btnRegistrarGeracaoSolar')?.addEventListener('click', openRegistrarGeracaoSolarModal);
   document.getElementById('btnRegistrarFaturaEnergia')?.addEventListener('click', openRegistrarFaturaEnergiaModal);
+  document.getElementById('btnRegistrarManutencaoSolar')?.addEventListener('click', openRegistrarManutencaoSolarModal);
   document.getElementById('btnEditarUsinaSolar')?.addEventListener('click', ()=>{
     const modal = document.getElementById('modalContent');
     const usina = state.usinaSolar || {};
@@ -22727,6 +22887,15 @@ function attachViewHandlers(){
       <div class="field-row">
         <div class="field"><label>Capacidade (kW)</label><input type="text" inputmode="decimal" id="usCapacidade" value="${usina.capacidadeKw||''}"></div>
         <div class="field"><label>Data da instalação</label><input type="date" id="usDataInstalacao" value="${usina.dataInstalacao||''}"></div>
+      </div>
+      <div class="field">
+        <label>Valor investido na usina (R$, opcional)</label>
+        <input type="text" inputmode="decimal" id="usValorInvestido" value="${usina.valorInvestido||''}">
+      </div>
+      <div class="note" style="margin-top:0;">Usado só pra estimar o payback (quanto tempo falta pra usina se pagar) nos relatórios — não afeta nenhum cálculo do financeiro geral.</div>
+      <div class="field">
+        <label>Garantia do inversor vence em (opcional)</label>
+        <input type="date" id="usGarantiaInversor" value="${usina.garantiaInversorAte||''}">
       </div>
       <div class="modal-actions">
         <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
@@ -22737,7 +22906,9 @@ function attachViewHandlers(){
     document.getElementById('btnSalvarUsinaSolar').addEventListener('click', ()=>{
       const capacidadeKw = numBR(document.getElementById('usCapacidade').value) || null;
       const dataInstalacao = document.getElementById('usDataInstalacao').value || null;
-      state.usinaSolar = { capacidadeKw, dataInstalacao };
+      const valorInvestido = numBR(document.getElementById('usValorInvestido').value) || null;
+      const garantiaInversorAte = document.getElementById('usGarantiaInversor').value || null;
+      state.usinaSolar = { capacidadeKw, dataInstalacao, valorInvestido, garantiaInversorAte };
       persist(); closeModal(); render();
       showToast('Dados da usina salvos');
     });
@@ -22754,6 +22925,13 @@ function attachViewHandlers(){
       e.stopPropagation();
       if(!confirm('Excluir essa fatura registrada?')) return;
       state.usinaFaturas = (state.usinaFaturas||[]).filter(f=>f.id!==btn.dataset.id);
+      persist(); render();
+    });
+  });
+  document.querySelectorAll('[data-action="excluir-manutencao-solar"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!confirm('Excluir essa manutenção?')) return;
+      state.usinaManutencoes = (state.usinaManutencoes||[]).filter(m=>m.id!==btn.dataset.id);
       persist(); render();
     });
   });
@@ -32323,31 +32501,34 @@ function openImportarNotaFiscalModal(){
 function openRegistrarGeracaoSolarModal(){
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
-    <h3>☀️ Registrar geração — print do app</h3>
-    <div class="note" style="margin-top:0;">Envie um print da tela do app do inversor (Overview, ou a aba Statistics em Dia/Mês) — a leitura automática tenta identificar a geração e a renda. Sempre revise antes de salvar.</div>
-    <div class="field"><label>Print (imagem)</label><input type="file" id="gsArquivoInput" accept="image/*"></div>
-    <div id="gsStatus" class="note" style="display:none;"></div>
-    <div id="gsRevisaoWrap" style="display:none;">
-      <div class="field-row">
-        <div class="field"><label>Data de referência</label><input type="date" id="gsData" value="${todayISO()}"></div>
-        <div class="field"><label>Período do print</label>
-          <select id="gsPeriodo">
-            <option value="dia">Dia</option>
-            <option value="mes">Mês</option>
-            <option value="ano">Ano</option>
-            <option value="total">Total acumulado</option>
-          </select>
-        </div>
+    <h3>☀️ Registrar geração</h3>
+    <div class="note" style="margin-top:0;">Jeito mais simples: uma vez por mês, abra o app do inversor na aba "Mês", veja o total de kWh gerados e digite abaixo.</div>
+    <div class="field-row">
+      <div class="field"><label>Data de referência</label><input type="date" id="gsData" value="${todayISO()}"></div>
+      <div class="field"><label>Período</label>
+        <select id="gsPeriodo">
+          <option value="dia">Dia</option>
+          <option value="mes" selected>Mês</option>
+          <option value="ano">Ano</option>
+          <option value="total">Total acumulado</option>
+        </select>
       </div>
-      <div class="field-row">
-        <div class="field"><label>Geração no período (kWh)</label><input type="text" inputmode="decimal" id="gsGeracao"></div>
-        <div class="field"><label>Renda no período (R$, opcional)</label><input type="text" inputmode="decimal" id="gsRenda"></div>
-      </div>
-      <div class="note" style="margin-top:0;" id="gsAcumuladoInfo"></div>
     </div>
+    <div class="field-row">
+      <div class="field"><label>Geração no período (kWh)</label><input type="text" inputmode="decimal" id="gsGeracao" autofocus></div>
+      <div class="field"><label>Renda no período (R$, opcional)</label><input type="text" inputmode="decimal" id="gsRenda"></div>
+    </div>
+    <div class="note" style="margin-top:0;" id="gsAcumuladoInfo"></div>
+    <details style="margin-top:4px;">
+      <summary style="cursor:pointer;font-size:12.5px;color:var(--blue-accent);font-weight:600;">Prefere enviar um print e deixar o sistema tentar preencher sozinho?</summary>
+      <div style="margin-top:10px;">
+        <div class="field"><label>Print (imagem)</label><input type="file" id="gsArquivoInput" accept="image/*"></div>
+        <div id="gsStatus" class="note" style="display:none;"></div>
+      </div>
+    </details>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
-      <button class="btn" id="btnSalvarGeracaoSolar" style="display:none;">Salvar geração</button>
+      <button class="btn" id="btnSalvarGeracaoSolar">Salvar geração</button>
     </div>
   `;
   document.getElementById('modalOverlay').classList.add('open');
@@ -32360,12 +32541,15 @@ function openRegistrarGeracaoSolarModal(){
     status.style.display = 'block';
     status.style.borderColor = 'var(--line)';
     status.textContent = 'Lendo o print com o leitor automático... pode levar alguns segundos.';
-    document.getElementById('gsRevisaoWrap').style.display = 'none';
-    document.getElementById('btnSalvarGeracaoSolar').style.display = 'none';
+    if(!state.configApiKeyAnthropic){
+      status.style.borderColor = 'var(--warn)';
+      status.textContent = 'Leitor automático não configurado (Configurações do Sistema → Leitor Automático). Preencha os campos acima manualmente.';
+      return;
+    }
     try{
       const dados = await extrairDadosGeracaoSolarIA(file);
       document.getElementById('gsData').value = dados.dataReferencia || todayISO();
-      document.getElementById('gsPeriodo').value = dados.periodo || 'dia';
+      document.getElementById('gsPeriodo').value = dados.periodo || 'mes';
       document.getElementById('gsGeracao').value = dados.geracaoKwh != null ? dados.geracaoKwh : '';
       document.getElementById('gsRenda').value = dados.rendaReais != null ? dados.rendaReais : '';
       const infoAcum = [];
@@ -32386,14 +32570,10 @@ function openRegistrarGeracaoSolarModal(){
         status.style.borderColor = 'var(--warn)';
         status.textContent = `Não consegui identificar: ${faltando.join(', ')}. Preencha manualmente antes de salvar.`;
       }
-      document.getElementById('gsRevisaoWrap').style.display = 'block';
-      document.getElementById('btnSalvarGeracaoSolar').style.display = 'inline-flex';
     }catch(e){
       console.error('Erro ao ler print de geração solar com IA:', e);
       status.style.borderColor = 'var(--danger)';
       status.textContent = e.message || 'Não consegui ler esse print automaticamente. Preencha manualmente.';
-      document.getElementById('gsRevisaoWrap').style.display = 'block';
-      document.getElementById('btnSalvarGeracaoSolar').style.display = 'inline-flex';
     }
   });
 
@@ -32411,39 +32591,86 @@ function openRegistrarGeracaoSolarModal(){
   });
 }
 
-function openRegistrarFaturaEnergiaModal(){
+function openRegistrarManutencaoSolarModal(){
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
-    <h3>🧾 Registrar fatura de energia</h3>
-    <div class="note" style="margin-top:0;">Envie o PDF da fatura — o consumo, energia injetada e saldo de créditos são lidos direto do texto do PDF, sem precisar de IA nem internet. Uma foto da fatura precisa do leitor automático (IA), configurado em Configurações do Sistema. Sempre revise antes de salvar.</div>
-    <div class="field"><label>Fatura (PDF ou imagem)</label><input type="file" id="feArquivoInput" accept="application/pdf,image/*"></div>
-    <div id="feStatus" class="note" style="display:none;"></div>
-    <div id="feRevisaoWrap" style="display:none;">
-      <div class="field-row">
-        <div class="field"><label>Referência (mês)</label><input type="month" id="feReferencia"></div>
-        <div class="field"><label>Vencimento</label><input type="date" id="feVencimento"></div>
-      </div>
-      <div class="field-row">
-        <div class="field"><label>Total a pagar (R$)</label><input type="text" inputmode="decimal" id="feValor"></div>
-        <div class="field"><label>Bandeira tarifária</label><input type="text" id="feBandeira" placeholder="Verde, Amarela..."></div>
-      </div>
-      <div class="field-row">
-        <div class="field"><label>Consumo (kWh)</label><input type="text" inputmode="decimal" id="feConsumo"></div>
-        <div class="field"><label>Energia injetada (kWh)</label><input type="text" inputmode="decimal" id="feInjetada"></div>
-      </div>
-      <div class="field-row">
-        <div class="field"><label>Saldo créditos anterior (kWh)</label><input type="text" inputmode="decimal" id="feSaldoAnterior"></div>
-        <div class="field"><label>Créditos utilizados (kWh)</label><input type="text" inputmode="decimal" id="feCreditosUsados"></div>
-      </div>
-      <div class="field"><label>Saldo de créditos atualizado (kWh)</label><input type="text" inputmode="decimal" id="feSaldoAtual"></div>
+    <h3>🔧 Registrar manutenção</h3>
+    <div class="field-row">
+      <div class="field"><label>Data</label><input type="date" id="msData" value="${todayISO()}"></div>
+      <div class="field"><label>Valor (R$, opcional)</label><input type="text" inputmode="decimal" id="msValor"></div>
     </div>
+    <div class="field"><label>Descrição</label><input type="text" id="msDescricao" placeholder="Ex: Limpeza dos painéis, troca do inversor..."></div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
-      <button class="btn" id="btnSalvarFaturaEnergia" style="display:none;">Salvar fatura</button>
+      <button class="btn" id="btnSalvarManutencaoSolar">Salvar</button>
     </div>
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarManutencaoSolar').addEventListener('click', ()=>{
+    const data = document.getElementById('msData').value || todayISO();
+    const valor = numBR(document.getElementById('msValor').value) || 0;
+    const descricao = document.getElementById('msDescricao').value.trim();
+    if(!descricao){ showToast('Descreva a manutenção'); return; }
+    if(!state.usinaManutencoes) state.usinaManutencoes = [];
+    state.usinaManutencoes.push({ id: uid(), data, valor, descricao, criadoEm: new Date().toISOString() });
+    persist(); closeModal(); render();
+    showToast('Manutenção registrada');
+  });
+}
+
+function openRegistrarFaturaEnergiaModal(){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>🧾 Registrar fatura de energia</h3>
+    <div class="note" style="margin-top:0;">Envie o PDF da fatura — o consumo, energia injetada e saldo de créditos são lidos direto do texto do PDF, sem precisar de IA nem internet. Ou preencha direto olhando o papel/PDF da fatura.</div>
+    <div class="field"><label>Fatura (PDF, opcional)</label><input type="file" id="feArquivoInput" accept="application/pdf,image/*"></div>
+    <div id="feStatus" class="note" style="display:none;"></div>
+    <div class="field-row">
+      <div class="field"><label>Referência (mês)</label><input type="month" id="feReferencia" value="${todayISO().slice(0,7)}"></div>
+      <div class="field"><label>Vencimento</label><input type="date" id="feVencimento"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Total a pagar (R$)</label><input type="text" inputmode="decimal" id="feValor"></div>
+      <div class="field"><label>Bandeira tarifária</label><input type="text" id="feBandeira" placeholder="Verde, Amarela..."></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Consumo (kWh)</label><input type="text" inputmode="decimal" id="feConsumo"></div>
+      <div class="field"><label>Energia injetada (kWh)</label><input type="text" inputmode="decimal" id="feInjetada"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Saldo créditos anterior (kWh)</label><input type="text" inputmode="decimal" id="feSaldoAnterior"></div>
+      <div class="field"><label>Créditos utilizados (kWh)</label><input type="text" inputmode="decimal" id="feCreditosUsados"></div>
+    </div>
+    <div class="field"><label>Saldo de créditos atualizado (kWh)</label><input type="text" inputmode="decimal" id="feSaldoAtual"></div>
+    <details style="margin-top:4px;">
+      <summary style="cursor:pointer;font-size:12.5px;color:var(--blue-accent);font-weight:600;">Impostos (opcional, pro relatório de impostos)</summary>
+      <div class="field-row" style="margin-top:10px;">
+        <div class="field"><label>PIS (R$)</label><input type="text" inputmode="decimal" id="fePis"></div>
+        <div class="field"><label>COFINS (R$)</label><input type="text" inputmode="decimal" id="feCofins"></div>
+        <div class="field"><label>ICMS (R$)</label><input type="text" inputmode="decimal" id="feIcms"></div>
+      </div>
+    </details>
+    <div class="field" style="margin-top:10px;">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;">
+        <input type="checkbox" id="feCriarLancamento" style="width:17px;height:17px;" checked>
+        💰 Já lançar essa fatura como despesa no financeiro
+      </label>
+    </div>
+    <div id="feGrupoLancamento" class="field-row">
+      <div class="field"><label>Conta de pagamento</label><select id="feConta">${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+      <div class="field"><label>Categoria</label><select id="feCategoria">${opcoesCategoriaHTML('saida')}</select></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarFaturaEnergia">Salvar fatura</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('feCriarLancamento').addEventListener('change', (e)=>{
+    document.getElementById('feGrupoLancamento').style.display = e.target.checked ? 'flex' : 'none';
+  });
 
   document.getElementById('feArquivoInput').addEventListener('change', async ()=>{
     const file = document.getElementById('feArquivoInput').files[0];
@@ -32451,8 +32678,6 @@ function openRegistrarFaturaEnergiaModal(){
     const status = document.getElementById('feStatus');
     status.style.display = 'block';
     status.style.borderColor = 'var(--line)';
-    document.getElementById('feRevisaoWrap').style.display = 'none';
-    document.getElementById('btnSalvarFaturaEnergia').style.display = 'none';
 
     const preencherCampos = (dados) => {
       document.getElementById('feReferencia').value = dados.referencia || '';
@@ -32464,6 +32689,9 @@ function openRegistrarFaturaEnergiaModal(){
       document.getElementById('feSaldoAnterior').value = dados.saldoCreditosAnteriorKwh != null ? dados.saldoCreditosAnteriorKwh : '';
       document.getElementById('feCreditosUsados').value = dados.creditosUtilizadosKwh != null ? dados.creditosUtilizadosKwh : '';
       document.getElementById('feSaldoAtual').value = dados.saldoCreditosAtualKwh != null ? dados.saldoCreditosAtualKwh : '';
+      if(dados.pisValor!=null) document.getElementById('fePis').value = dados.pisValor;
+      if(dados.cofinsValor!=null) document.getElementById('feCofins').value = dados.cofinsValor;
+      if(dados.icmsValor!=null) document.getElementById('feIcms').value = dados.icmsValor;
     };
     const faltandoDe = (dados) => { const f=[]; if(!dados.referencia) f.push('referência'); if(dados.valorTotal==null) f.push('valor'); return f; };
 
@@ -32517,8 +32745,6 @@ function openRegistrarFaturaEnergiaModal(){
       status.style.borderColor = 'var(--warn)';
       status.textContent = 'Foto de fatura precisa do leitor automático (IA), que não está configurado. Vá em Configurações do Sistema → Leitor Automático (IA), ou preencha manualmente.';
     }
-    document.getElementById('feRevisaoWrap').style.display = 'block';
-    document.getElementById('btnSalvarFaturaEnergia').style.display = 'inline-flex';
   });
 
   document.getElementById('btnSalvarFaturaEnergia').addEventListener('click', ()=>{
@@ -32531,12 +32757,27 @@ function openRegistrarFaturaEnergiaModal(){
     const saldoCreditosAnteriorKwh = numBR(document.getElementById('feSaldoAnterior').value) || null;
     const creditosUtilizadosKwh = numBR(document.getElementById('feCreditosUsados').value) || null;
     const saldoCreditosAtualKwh = numBR(document.getElementById('feSaldoAtual').value) || null;
+    const pisValor = numBR(document.getElementById('fePis').value) || null;
+    const cofinsValor = numBR(document.getElementById('feCofins').value) || null;
+    const icmsValor = numBR(document.getElementById('feIcms').value) || null;
     if(!referencia){ showToast('Preencha a referência (mês)'); return; }
     if(isNaN(valorTotal) || valorTotal<=0){ showToast('Preencha o valor total'); return; }
     if(!state.usinaFaturas) state.usinaFaturas = [];
     const existente = state.usinaFaturas.find(f=>f.referencia===referencia);
-    const registro = { id: existente?.id||uid(), referencia, vencimento, valorTotal, bandeira, consumoKwh, energiaInjetadaKwh, saldoCreditosAnteriorKwh, creditosUtilizadosKwh, saldoCreditosAtualKwh, criadoEm: new Date().toISOString() };
+    const registro = { id: existente?.id||uid(), referencia, vencimento, valorTotal, bandeira, consumoKwh, energiaInjetadaKwh, saldoCreditosAnteriorKwh, creditosUtilizadosKwh, saldoCreditosAtualKwh, pisValor, cofinsValor, icmsValor, criadoEm: new Date().toISOString() };
     if(existente) Object.assign(existente, registro); else state.usinaFaturas.push(registro);
+    if(document.getElementById('feCriarLancamento').checked && !existente){
+      const contaId = document.getElementById('feConta').value;
+      const categoria = document.getElementById('feCategoria').value;
+      if(contaId){
+        state.lancamentos.push({
+          id: uid(), tipo:'saida', categoria, descricao: `Fatura de energia — ${competenciaLabel(referencia)}`,
+          valor: valorTotal, contaId, dataVencimento: vencimento || todayISO(), status:'pendente', dataPagamento: null,
+          origem: 'usina-solar', criadoEm: new Date().toISOString()
+        });
+        registro.lancamentoId = state.lancamentos[state.lancamentos.length-1].id;
+      }
+    }
     registrarLog('Fatura de energia registrada', `${referencia} — ${brl(valorTotal)}`);
     persist(); closeModal(); render();
     showToast('Fatura registrada');
