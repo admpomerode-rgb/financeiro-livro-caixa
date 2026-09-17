@@ -409,11 +409,12 @@
 
   /* Contas bancárias */
   .conta-cards{display:grid;grid-template-columns:repeat(auto-fill, minmax(220px,1fr));gap:14px;margin-bottom:22px;}
-  .conta-card{background:var(--white);border:1px solid var(--line);border-radius:10px;padding:48px 18px 16px;border-top:3px solid var(--accent-c, var(--blue-accent));position:relative;}
+  .conta-card{background:var(--white);border:1px solid var(--line);border-radius:10px;padding:48px 18px 16px;border-top:3px solid var(--accent-c, var(--blue-accent));position:relative;display:flex;flex-direction:column;}
+  .conta-card .conta-card-footer{margin-top:auto;padding-top:14px;}
   .conta-card.conta-principal{box-shadow:0 0 0 2px var(--warn);}
   .conta-card.conta-negativa{background:var(--bg-sutil-vermelho);}
   .conta-cards-compacto{grid-template-columns:1fr !important;}
-  .conta-cards-compacto .conta-card{display:flex;align-items:center;gap:14px;padding:10px 16px;}
+  .conta-cards-compacto .conta-card{display:flex;flex-direction:row;align-items:center;gap:14px;padding:10px 16px;}
   .conta-cards-compacto .card-top{flex:1;margin:0;}
   .conta-cards-compacto .saldo{margin:0;}
   .conta-cards-compacto .conta-card-footer{margin:0 !important;}
@@ -428,7 +429,7 @@
   .conta-card.drag-over{outline:2px dashed var(--blue-accent);outline-offset:2px;}
   .conta-tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-soft);}
   .conta-swatch{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
-  .color-pick{display:flex;gap:8px;margin-top:4px;}
+  .color-pick{display:flex;gap:8px;margin-top:4px;flex-wrap:wrap;}
   .color-pick span{width:22px;height:22px;border-radius:50%;cursor:pointer;border:2px solid transparent;display:inline-block;}
   .color-pick span.sel{border-color:var(--ink);}
   .add-conta-card{
@@ -1017,7 +1018,7 @@ function ehMovimentoDeCapital(l){
   return false;
 }
 
-const CONTA_CORES = ['#3B6FE0','#1E9E6B','#D98F2B','#8A5CF6','#D5473F','#0F9BB0'];
+const CONTA_CORES = ['#3B6FE0','#1E9E6B','#D98F2B','#8A5CF6','#D5473F','#0F9BB0','#E0527A','#4C6B3C','#B8860B','#5B7FFF','#2FA8A0','#9B5DE5','#F15BB5','#00A896','#C9622D','#4A4E9E'];
 const CATEGORIA_CORES = ['#3B6FE0','#1E9E6B','#D98F2B','#8A5CF6','#D5473F','#0F9BB0','#E0507A','#6B7280'];
 const BANCOS_BR = [
   { nome: 'Banco Inter', dominio: 'bancointer.com.br' },
@@ -1076,6 +1077,12 @@ const LIVRO_CAIXA_FIREBASE_CONFIG = {
 firebase.initializeApp(LIVRO_CAIXA_FIREBASE_CONFIG);
 const auth = firebase.auth();
 const db = firebase.firestore();
+// Mitiga os erros "ERR_QUIC_PROTOCOL_ERROR" / "ERR_HTTP2_PING_FAILED" / "Could not reach Cloud
+// Firestore backend" que aparecem em redes que bloqueiam ou limitam o protocolo QUIC (comum em
+// Wi-Fi corporativo, VPN, ou provedor de internet mais restritivo). Com essa configuração, o
+// Firestore detecta sozinho quando a conexão normal (WebChannel/QUIC) está falhando e troca pra
+// long-polling automaticamente — sem isso, ele insiste no QUIC e cai pra "modo offline".
+db.settings({ experimentalAutoDetectLongPolling: true });
 const DOC_REF = db.collection('livro-caixa').doc('dados');
 
 function aplicarMigracoes(s){
@@ -8323,7 +8330,7 @@ function viewContas(){
           ${parada && ultimaMov ? `<div class="note" style="margin:8px 0 0;padding:6px 10px;font-size:11px;">💤 Sem movimentação há mais de 90 dias</div>` : ''}
           ${!ultimaMov ? `<div class="note" style="margin:8px 0 0;padding:6px 10px;font-size:11px;">💤 Nenhuma movimentação registrada ainda</div>` : ''}
           ` : ''}
-          <div class="conta-card-footer" style="display:flex;gap:8px;margin-top:14px;">
+          <div class="conta-card-footer" style="display:flex;gap:8px;">
             <button class="btn ghost sm" data-action="ver-extrato" data-id="${c.id}" style="flex:1;">Ver extrato</button>
           </div>
         </div>`;
@@ -8359,14 +8366,39 @@ function viewContas(){
       ${[...ativas].sort((a,b)=>Math.abs(saldoConta(b.id))-Math.abs(saldoConta(a.id))).slice(0,8).map(c=>{
         const s = saldoConta(c.id);
         const pct = Math.max(2, Math.round(Math.abs(s)/maxSaldoAbs*100));
+        const corBarra = s<0
+          ? `repeating-linear-gradient(135deg, var(--danger), var(--danger) 6px, #b91c1c 6px, #b91c1c 10px)`
+          : c.cor;
         return `
         <div class="contas-onde-linha">
-          <div class="contas-onde-topo"><span class="contas-onde-nome">${escapeHTML(c.nome)}</span><span class="mono ${s<0?'neg':''}" style="font-weight:600;">${vm(brl(s))}</span></div>
-          <div class="contas-onde-barra-fundo"><div class="contas-onde-barra-fill" style="width:${pct}%;background:${s<0?'var(--danger)':c.cor};"></div></div>
+          <div class="contas-onde-topo"><span class="contas-onde-nome">${escapeHTML(c.nome)}${s<0?' <span style="font-size:10px;color:var(--danger);font-weight:700;">NEGATIVO</span>':''}</span><span class="mono ${s<0?'neg':''}" style="font-weight:600;">${vm(brl(s))}</span></div>
+          <div class="contas-onde-barra-fundo"><div class="contas-onde-barra-fill" style="width:${pct}%;background:${corBarra};"></div></div>
         </div>`;
       }).join('')}
+      ${(()=>{
+        // Soma por categoria de conta (ex: "Vinculadas a Investimentos") — só mostra se existir
+        // pelo menos uma categoria com conta ativa dentro dela.
+        const categorias = state.categoriasContas || [];
+        const somas = categorias.map(cat=>({
+          nome: cat.nome,
+          total: ativas.filter(c=>c.categoriaContaId===cat.id).reduce((s,c)=>s+saldoConta(c.id),0),
+          qtd: ativas.filter(c=>c.categoriaContaId===cat.id).length
+        })).filter(s=>s.qtd>0);
+        if(!somas.length) return '';
+        return `
+        <div style="border-top:1px solid var(--line);margin-top:14px;padding-top:12px;">
+          <div style="font-size:10.5px;font-weight:700;color:var(--text-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;">Soma por categoria</div>
+          ${somas.map(s=>`
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;">
+              <span>${escapeHTML(s.nome)} <span style="color:var(--text-soft);font-size:11px;">(${s.qtd})</span></span>
+              <span class="mono" style="font-weight:600;${s.total<0?'color:var(--danger);':''}">${vm(brl(s.total))}</span>
+            </div>`).join('')}
+        </div>`;
+      })()}
     </div>
+` : ''}
 
+    ${ativas.length ? `
     <div class="contas-secao-titulo">Saúde das contas</div>
     <div class="contas-saude-row">
       <div class="contas-saude-chip">🟢 ${qtdPositivas} conta${qtdPositivas===1?'':'s'} positiva${qtdPositivas===1?'':'s'}</div>
