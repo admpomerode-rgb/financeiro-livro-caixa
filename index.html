@@ -828,6 +828,7 @@
         <div class="nav-item" data-view="orcamentos-processos" title="Orçamentos e Compras"><span class="nav-dot"></span><span class="nav-abbr">OC</span><span class="nav-label">Orçamentos e Compras</span></div>
         <div class="nav-item" data-view="comissoes" title="Comissões"><span class="nav-dot"></span><span class="nav-abbr">CM</span><span class="nav-label">Comissões</span></div>
         <div class="nav-item" data-view="vendas" title="Vendas"><span class="nav-dot"></span><span class="nav-abbr">VD</span><span class="nav-label">Vendas</span></div>
+        <div class="nav-item" data-view="creditos-clientes" title="Créditos de Clientes"><span class="nav-dot"></span><span class="nav-abbr">CC</span><span class="nav-label">Créditos de Clientes</span></div>
         <div class="nav-item" data-view="centros-custo" title="Centro de Custos"><span class="nav-dot"></span><span class="nav-abbr">CC</span><span class="nav-label">Centro de Custos</span></div>
         <div class="nav-item" data-view="provisionamentos" title="Provisionamentos"><span class="nav-dot"></span><span class="nav-abbr">PV</span><span class="nav-label">Provisionamentos</span></div>
         <div class="nav-item" data-view="recorrencias" title="Lançamentos Recorrentes"><span class="nav-dot"></span><span class="nav-abbr">RC</span><span class="nav-label">Recorrentes</span></div>
@@ -1849,6 +1850,7 @@ function moreItensDef(){
     { view:'orcamentos-processos', icone:'📋', nome:'Orçamentos e Compras', grupo:'Operacional', badge:()=>(state.orcamentosProcessos||[]).filter(o=>o.status==='pendente').length },
     { view:'comissoes', icone:'🤝', nome:'Comissões', grupo:'Operacional' },
     { view:'vendas', icone:'📈', nome:'Vendas', grupo:'Operacional' },
+    { view:'creditos-clientes', icone:'💳', nome:'Créditos de Clientes', grupo:'Operacional' },
     { view:'centros-custo', icone:'🏗️', nome:'Centro de Custos', grupo:'Análise' },
     { view:'a-receber-representante', icone:'💵', nome:'A Receber do Representante', grupo:'Operacional', badge:()=>todasFilasRecebimentoRep().filter(r=>!r.conferido).length },
     { view:'relatorios', icone:'📊', nome:'Relatórios', grupo:'Análise' },
@@ -2010,6 +2012,7 @@ function render(){
   else if(currentView==='centros-custo') main.innerHTML = viewCentrosCusto();
   else if(currentView==='ativos') main.innerHTML = viewAtivosPatrimoniais();
   else if(currentView==='usina-solar') main.innerHTML = viewUsinaSolar();
+  else if(currentView==='creditos-clientes') main.innerHTML = viewCreditosClientes();
   else if(currentView==='ativo-detalhe') main.innerHTML = viewAtivoPatrimonialDetalhe(ativoPatrimonialDetalheId);
   else if(currentView==='integracoes') main.innerHTML = viewIntegracoes();
   else if(currentView==='vk') main.innerHTML = viewVK();
@@ -19254,6 +19257,75 @@ function viewUsinaSolar(){
   `;
 }
 
+// Créditos de Clientes (Lote 17) — quando um cliente paga a mais num pedido e o valor deve ficar
+// guardado pra abater num pedido futuro. Reaproveita a lista de nomes de clientes já usada no
+// filtro de Comissões (dadosComissaoAnalise + vendasBonificadas), sem criar um cadastro de cliente
+// novo do zero.
+function listaClientesConhecidos(){
+  const nomes = new Set();
+  (state.vendasBonificadas||[]).forEach(b=>{ if(b.clienteNome) nomes.add(b.clienteNome); });
+  try{
+    dadosComissaoAnalise(addDiasISO(todayISO(),-730), todayISO()).forEach(it=>{ if(it.cliente) nomes.add(it.cliente); });
+  }catch(e){ /* comissões podem não estar configuradas ainda — segue sem essa fonte */ }
+  (state.creditosClientes||[]).forEach(c=>{ if(c.clienteNome) nomes.add(c.clienteNome); });
+  return [...nomes].sort();
+}
+
+function viewCreditosClientes(){
+  const creditos = [...(state.creditosClientes||[])].sort((a,b)=>(b.data||'').localeCompare(a.data||''));
+  const porCliente = {};
+  creditos.forEach(c=>{
+    if(!porCliente[c.clienteNome]) porCliente[c.clienteNome] = { nome:c.clienteNome, saldo:0, itens:[] };
+    porCliente[c.clienteNome].saldo += (c.valor - (c.valorUsado||0));
+    porCliente[c.clienteNome].itens.push(c);
+  });
+  const clientesComSaldo = Object.values(porCliente).filter(c=>c.saldo>0.004).sort((a,b)=>b.saldo-a.saldo);
+  const totalDisponivel = clientesComSaldo.reduce((s,c)=>s+c.saldo,0);
+
+  return `
+    <div class="topbar">
+      <div><h1>💳 Créditos de Clientes</h1><p>Valores que um cliente pagou a mais e ficaram guardados pra abater num pedido futuro.</p></div>
+      <button class="btn" id="btnRegistrarCreditoCliente">+ Registrar crédito</button>
+    </div>
+
+    <div class="fluxo-resumo-4col">
+      <div class="fluxo-resumo-item"><div class="lbl">Clientes com saldo</div><div class="val">${clientesComSaldo.length}</div></div>
+      <div class="fluxo-resumo-item"><div class="lbl">Total disponível</div><div class="val">${brl(totalDisponivel)}</div></div>
+      <div class="fluxo-resumo-item"><div class="lbl">Créditos registrados (total)</div><div class="val">${creditos.length}</div></div>
+      <div class="fluxo-resumo-item"><div class="lbl">Já utilizados</div><div class="val">${creditos.filter(c=>(c.valorUsado||0)>=c.valor-0.004).length}</div></div>
+    </div>
+
+    <div class="contas-secao-titulo" style="margin-top:22px;">Clientes com saldo disponível</div>
+    <div class="panel">
+      <div class="panel-body" style="padding:0;">
+        ${clientesComSaldo.length ? clientesComSaldo.map(c=>`
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
+            <div class="desc-cell"><div>${escapeHTML(c.nome)}</div><div class="cat">${c.itens.length} registro(s)</div></div>
+            <span class="mono" style="font-weight:700;color:var(--success);">${brl(c.saldo)}</span>
+            <button class="btn ghost sm" data-action="usar-credito-cliente" data-cliente="${escapeHTML(c.nome)}">Usar crédito</button>
+          </div>
+        `).join('') : `<div class="empty">Nenhum cliente com saldo de crédito no momento.</div>`}
+      </div>
+    </div>
+
+    <div class="contas-secao-titulo" style="margin-top:22px;">Histórico completo</div>
+    <div class="panel">
+      <div class="panel-body" style="padding:0;">
+        ${creditos.length ? creditos.map(c=>{
+          const saldoItem = c.valor - (c.valorUsado||0);
+          const status = saldoItem<=0.004 ? '✅ Usado' : (c.valorUsado>0 ? '🔸 Parcial' : '⏳ Disponível');
+          return `
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
+            <div class="desc-cell"><div>${escapeHTML(c.clienteNome)}</div><div class="cat">${fmtDate(c.data)}${c.motivo?' · '+escapeHTML(c.motivo):''} · ${status}</div></div>
+            <span class="mono" style="font-size:12px;color:var(--text-soft);">${c.valorUsado>0?`usado ${brl(c.valorUsado)}`:''}</span>
+            <span class="mono" style="font-weight:600;">${brl(c.valor)}</span>
+          </div>`;
+        }).join('') : `<div class="empty">Nenhum crédito registrado ainda.</div>`}
+      </div>
+    </div>
+  `;
+}
+
 function viewAtivosPatrimoniais(){
   const hoje = todayISO();
   const em60ISO = (()=>{ const d=new Date(); d.setDate(d.getDate()+60); return d.toISOString().slice(0,10); })();
@@ -23195,6 +23267,10 @@ function attachViewHandlers(){
   document.getElementById('btnRegistrarFaturaEnergia')?.addEventListener('click', openRegistrarFaturaEnergiaModal);
   document.getElementById('btnRegistrarManutencaoSolar')?.addEventListener('click', openRegistrarManutencaoSolarModal);
   document.getElementById('btnExportarPdfUsina')?.addEventListener('click', gerarUsinaSolarPDF);
+  document.getElementById('btnRegistrarCreditoCliente')?.addEventListener('click', openRegistrarCreditoClienteModal);
+  document.querySelectorAll('[data-action="usar-credito-cliente"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openUsarCreditoClienteModal(btn.dataset.cliente));
+  });
   document.getElementById('btnEditarUsinaSolar')?.addEventListener('click', ()=>{
     const modal = document.getElementById('modalContent');
     const usina = state.usinaSolar || {};
@@ -32926,6 +33002,81 @@ function openRegistrarGeracaoSolarModal(){
     registrarLog('Geração solar registrada', `${fmtDate(data)} — ${geracaoKwh} kWh`);
     persist(); closeModal(); render();
     showToast('Geração registrada');
+  });
+}
+
+function openRegistrarCreditoClienteModal(){
+  const modal = document.getElementById('modalContent');
+  const clientes = listaClientesConhecidos();
+  modal.innerHTML = `
+    <h3>💳 Registrar crédito de cliente</h3>
+    <div class="note" style="margin-top:0;">Use quando um cliente pagar a mais num pedido e esse valor deve ficar guardado pra abater num pedido futuro.</div>
+    <div class="field">
+      <label>Cliente</label>
+      <input type="text" id="ccCliente" list="ccClientesLista" placeholder="Nome do cliente">
+      <datalist id="ccClientesLista">${clientes.map(c=>`<option value="${escapeHTML(c)}">`).join('')}</datalist>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Valor do crédito (R$)</label><input type="text" inputmode="decimal" id="ccValor"></div>
+      <div class="field"><label>Data</label><input type="date" id="ccData" value="${todayISO()}"></div>
+    </div>
+    <div class="field"><label>Motivo (opcional)</label><input type="text" id="ccMotivo" placeholder="Ex: Pedido Nº 2574 — pagou R$100, pedido era R$90"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarCreditoCliente">Registrar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarCreditoCliente').addEventListener('click', ()=>{
+    const clienteNome = document.getElementById('ccCliente').value.trim();
+    const valor = numBR(document.getElementById('ccValor').value);
+    const data = document.getElementById('ccData').value || todayISO();
+    const motivo = document.getElementById('ccMotivo').value.trim() || null;
+    if(!clienteNome){ showToast('Informe o nome do cliente'); return; }
+    if(isNaN(valor) || valor<=0){ showToast('Informe o valor do crédito'); return; }
+    if(!state.creditosClientes) state.creditosClientes = [];
+    state.creditosClientes.push({ id: uid(), clienteNome, valor, valorUsado: 0, data, motivo, criadoEm: new Date().toISOString() });
+    persist(); closeModal(); render();
+    showToast(`Crédito de ${brl(valor)} registrado pra ${clienteNome}`);
+  });
+}
+
+function openUsarCreditoClienteModal(clienteNome){
+  const creditosDisponiveis = (state.creditosClientes||[])
+    .filter(c=>c.clienteNome===clienteNome && (c.valor-(c.valorUsado||0))>0.004)
+    .sort((a,b)=>(a.data||'').localeCompare(b.data||''));
+  const saldoTotal = creditosDisponiveis.reduce((s,c)=>s+(c.valor-(c.valorUsado||0)),0);
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>💳 Usar crédito — ${escapeHTML(clienteNome)}</h3>
+    <div class="note" style="margin-top:0;">Saldo disponível: <strong>${brl(saldoTotal)}</strong>. Informe quanto vai abater agora (ex: no próximo pedido desse cliente) — o sistema desconta primeiro dos créditos mais antigos.</div>
+    <div class="field"><label>Valor a usar agora (R$)</label><input type="text" inputmode="decimal" id="ucValor" value="${saldoTotal.toFixed(2).replace('.',',')}"></div>
+    <div class="field"><label>Referência (opcional)</label><input type="text" id="ucReferencia" placeholder="Ex: Pedido Nº 2601"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarUsoCredito">Usar crédito</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnConfirmarUsoCredito').addEventListener('click', ()=>{
+    let valorUsar = numBR(document.getElementById('ucValor').value);
+    const referencia = document.getElementById('ucReferencia').value.trim() || null;
+    if(isNaN(valorUsar) || valorUsar<=0){ showToast('Informe quanto vai usar'); return; }
+    if(valorUsar>saldoTotal+0.004){ showToast(`Esse cliente só tem ${brl(saldoTotal)} de saldo`); return; }
+    let restante = valorUsar;
+    creditosDisponiveis.forEach(c=>{
+      if(restante<=0.004) return;
+      const disponivelNesse = c.valor-(c.valorUsado||0);
+      const abate = Math.min(disponivelNesse, restante);
+      c.valorUsado = Math.round(((c.valorUsado||0)+abate)*100)/100;
+      c.usoHistorico = c.usoHistorico || [];
+      c.usoHistorico.push({ valor:abate, data:todayISO(), referencia });
+      restante = Math.round((restante-abate)*100)/100;
+    });
+    persist(); closeModal(); render();
+    showToast(`${brl(valorUsar)} de crédito usado${referencia?' em '+referencia:''}`);
   });
 }
 
