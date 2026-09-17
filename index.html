@@ -24280,13 +24280,18 @@ function attachViewHandlers(){
     });
   });
   document.querySelectorAll('#centroCustoPeriodoToggle [data-periodo]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{ centroCustoFiltro.periodo = btn.dataset.periodo; render(); });
+    btn.addEventListener('click', ()=>{ centroCustoFiltro.periodo = btn.dataset.periodo; centroCustoLancQtd = 20; render(); });
   });
   document.getElementById('btnAplicarFiltroCentroCusto')?.addEventListener('click', ()=>{
     centroCustoFiltro.centro = document.getElementById('ccfCentro').value;
     centroCustoFiltro.categoria = document.getElementById('ccfCategoria').value;
     centroCustoFiltro.fornecedor = document.getElementById('ccfFornecedor').value;
     centroCustoFiltro.tipoCusto = document.getElementById('ccfTipoCusto').value;
+    centroCustoLancQtd = 20;
+    render();
+  });
+  document.getElementById('btnMostrarMaisCentroCusto')?.addEventListener('click', ()=>{
+    centroCustoLancQtd += 20;
     render();
   });
   document.querySelectorAll('[data-action="abrir-centro-custo"]').forEach(el=>{
@@ -30717,6 +30722,7 @@ function openRetiradaModal(existing){
 
 let centroCustoFiltro = { periodo:'mes', centro:'', categoria:'', fornecedor:'', tipoCusto:'' };
 let centroCustoSelecionado = null;
+let centroCustoLancQtd = 20;
 
 function viewCentroCustoDetalhe(nomeCentro){
   const hoje = todayISO();
@@ -30788,9 +30794,17 @@ function viewCentrosCusto(){
   const periodo = resolverPeriodoAtalho(centroCustoFiltro.periodo);
   const lancs = dadosCentroCusto(periodo.de, periodo.ate, centroCustoFiltro);
   const resumo = resumoCentroCusto(lancs);
+  // ---- Centros sem movimento (§19) — continuam aparecendo com R$0,00, não somem da lista. Só
+  // entram quando não há filtro de centro específico ativo.
+  if(!centroCustoFiltro.centro){
+    const presentes = new Set(resumo.rankingCentros.map(c=>c.nome));
+    const faltantes = (state.centrosCusto||[]).filter(nome=>!presentes.has(nome)).map(nome=>({nome, valor:0}));
+    resumo.rankingCentros = [...resumo.rankingCentros, ...faltantes].sort((a,b)=>b.valor-a.valor);
+  }
   const orc = state.orcamentoCentrosCusto||{};
   const orcamentoTotal = Object.values(orc).reduce((s,v)=>s+(v>0?v:0),0);
   const diferenca = orcamentoTotal - resumo.total;
+  const pctOrcamentoUtilizado = orcamentoTotal>0 ? (resumo.total/orcamentoTotal*100) : null;
 
   const categoriasUnicas = [...new Set(lancs.map(l=>l.categoria))].sort();
   const fornecedoresUnicos = [...new Set(lancs.map(l=>l.fornecedor).filter(Boolean))].sort();
@@ -30857,6 +30871,7 @@ function viewCentrosCusto(){
       ${metricCardHTML('Orçamento', orcamentoTotal>0?brl(orcamentoTotal):'—')}
       ${metricCardHTML('Realizado', brl(resumo.total))}
       ${orcamentoTotal>0 ? metricCardHTML('Orçamento × Realizado', brl(diferenca), diferenca<0?'var(--danger)':'var(--success)') : ''}
+      ${metricCardHTML('% do orçamento utilizado', pctOrcamentoUtilizado!=null?pctOrcamentoUtilizado.toFixed(0)+'%':'Sem orçamento', pctOrcamentoUtilizado!=null&&pctOrcamentoUtilizado>=100?'var(--danger)':undefined)}
     </div>
 
     ${alertas.length ? `
@@ -30865,18 +30880,34 @@ function viewCentrosCusto(){
       ${alertas.map(a=>`<div class="ledger-row compact" style="grid-template-columns:auto 1fr;"><span>${a.critico?'🔴':'🟡'}</span><span style="font-size:12.5px;">${a.texto}</span></div>`).join('')}
     </div></div>` : ''}
 
+    ${!lancs.length && !resumo.rankingCentros.some(c=>c.valor>0) ? `
+    <div class="panel" style="margin-bottom:16px;"><div class="empty" style="padding:40px 20px;text-align:center;">
+      Nenhum custo encontrado neste período.<br><span style="font-size:12px;color:var(--text-soft);">Altere o período ou os filtros para consultar outros dados.</span>
+    </div></div>
+    ` : `
     ${chartCardHTML('📈 Evolução dos custos', 'Últimos 6 meses', svgLinhasMultiplas([{ nome:'Custo total', valores:evolucaoPorMes, cor:'#C74A3D' }], labelsMeses))}
     ${resumo.rankingCentros.length ? chartCardHTML('🏗️ Custos por centro', 'Clique num centro pra ver o detalhamento', svgBarrasHorizontais(resumo.rankingCentros, '#1E49E2', null, 'abrir-centro-custo')) : ''}
     ${resumo.fixo>0 || resumo.variavel>0 ? chartCardHTML('⚖️ Fixo × Variável', '', svgBarrasComparativas([{ nome:'Fixo', valores:[resumo.fixo], cor:'#1E49E2' },{ nome:'Variável', valores:[resumo.variavel], cor:'#E0A62B' }], [''])) : ''}
 
-    ${Object.keys(orc).length ? `
-    <div class="dash-section-label">🎯 Orçado × Realizado por centro</div>
-    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
-      ${resumo.rankingCentros.filter(c=>orc[c.nome]>0).map(c=>{
-        const orcC = orc[c.nome];
-        const pct = Math.round(c.valor/orcC*100);
-        return `<div class="ledger-row compact" style="grid-template-columns:1fr auto auto;"><span style="font-size:12.5px;">${escapeHTML(c.nome)}</span><span class="mono" style="font-size:11.5px;">${brl(c.valor)} de ${brl(orcC)}</span><span style="font-size:11px;font-weight:600;color:${pct>=100?'var(--danger)':pct>=90?'var(--warn)':'var(--success)'};">${pct}%</span></div>`;
-      }).join('') || `<div class="empty">Nenhum centro com orçamento definido tem gasto no período.</div>`}
+    ${resumo.rankingCentros.length ? `
+    <div class="dash-section-label">🎯 Orçamento × Realizado por centro</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;overflow-x:auto;">
+      <div class="ledger-row head" style="grid-template-columns:1fr 110px 110px 110px 80px;min-width:520px;"><span>Centro</span><span>Orçado</span><span>Realizado</span><span>Diferença</span><span>%</span></div>
+      <div style="min-width:520px;">
+        ${resumo.rankingCentros.map(c=>{
+          const orcC = orc[c.nome];
+          const temOrcamento = orcC>0;
+          const diferencaC = temOrcamento ? c.valor-orcC : null;
+          const pctC = temOrcamento ? Math.round(c.valor/orcC*100) : null;
+          return `<div class="ledger-row compact" style="grid-template-columns:1fr 110px 110px 110px 80px;">
+            <span style="font-size:12.5px;">${escapeHTML(c.nome)}</span>
+            <span class="mono" style="font-size:11.5px;color:${temOrcamento?'inherit':'var(--text-soft)'};">${temOrcamento?brl(orcC):'Não informado'}</span>
+            <span class="mono" style="font-size:11.5px;">${brl(c.valor)}</span>
+            <span class="mono" style="font-size:11.5px;color:${!temOrcamento?'var(--text-soft)':diferencaC>0?'var(--danger)':'var(--success)'};">${temOrcamento?(diferencaC>=0?'+':'')+brl(diferencaC):'—'}</span>
+            <span style="font-size:11px;font-weight:600;color:${!temOrcamento?'var(--text-soft)':pctC>=100?'var(--danger)':pctC>=90?'var(--warn)':'var(--success)'};">${temOrcamento?pctC+'%':'—'}</span>
+          </div>`;
+        }).join('')}
+      </div>
     </div></div>` : ''}
 
     <div class="dash-section-label">💸 Onde estamos gastando mais?</div>
@@ -30893,7 +30924,7 @@ function viewCentrosCusto(){
     <div class="panel"><div class="panel-body" style="padding:0;overflow-x:auto;">
       <div class="ledger-row head" style="grid-template-columns:80px 1fr 120px 120px 120px 90px;min-width:640px;"><span>Data</span><span>Descrição</span><span>Centro</span><span>Categoria</span><span>Fornecedor</span><span>Valor</span></div>
       <div style="min-width:640px;">
-        ${[...lancs].sort((a,b)=>b.dataPagamento.localeCompare(a.dataPagamento)).slice(0,60).map(l=>`
+        ${[...lancs].sort((a,b)=>b.dataPagamento.localeCompare(a.dataPagamento)).slice(0,centroCustoLancQtd).map(l=>`
           <div class="ledger-row compact" data-action="ver-lancamento-centro-custo" data-id="${l.id}" style="cursor:pointer;grid-template-columns:80px 1fr 120px 120px 120px 90px;">
             <span class="mono" style="font-size:11px;color:var(--text-soft);">${fmtDate(l.dataPagamento)}</span>
             <span style="font-size:11.5px;">${escapeHTML(l.descricao)}</span>
@@ -30905,7 +30936,8 @@ function viewCentrosCusto(){
         `).join('') || `<div class="empty">Nenhum lançamento no período/filtro atual.</div>`}
       </div>
     </div></div>
-    ${lancs.length>60 ? `<div class="note" style="margin-top:0;">Mostrando os 60 mais recentes de ${lancs.length} lançamentos — use os filtros pra refinar.</div>` : ''}
+    ${lancs.length>centroCustoLancQtd ? `<button class="btn ghost sm" id="btnMostrarMaisCentroCusto" style="margin-top:10px;">Mostrar mais (${lancs.length-centroCustoLancQtd} restantes)</button>` : ''}
+    `}
   `;
 }
 
