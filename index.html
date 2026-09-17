@@ -9012,6 +9012,27 @@ function viewCartoes(){
     recomendacoes.push(`Os parcelamentos futuros (${brl(comprometimentoFuturo)}) já superam o limite disponível hoje (${brl(limiteDisponivelTotal)}) — vale cautela antes de novos parcelamentos.`);
   }
 
+  // ---- Gastos por Categoria (§13 do manual de cartões) — período selecionável, sem inventar
+  // categoria: usa exatamente o que já está gravado em cada compra (ou "Sem categoria")
+  const cartoesPeriodoSel = window._cartoesGastoPeriodo || 'mes';
+  const cartoesPeriodoHoje = todayISO();
+  const cartoesPeriodoDe = cartoesPeriodoSel==='mes' ? cartoesPeriodoHoje.slice(0,8)+'01'
+    : cartoesPeriodoSel==='3m' ? addDiasISO(cartoesPeriodoHoje,-90)
+    : cartoesPeriodoSel==='6m' ? addDiasISO(cartoesPeriodoHoje,-180)
+    : cartoesPeriodoSel==='12m' ? addDiasISO(cartoesPeriodoHoje,-365)
+    : (window._cartoesGastoPersonalDe || cartoesPeriodoHoje.slice(0,8)+'01');
+  const cartoesPeriodoAte = cartoesPeriodoSel==='personalizado' ? (window._cartoesGastoPersonalAte || cartoesPeriodoHoje) : cartoesPeriodoHoje;
+  const gastosPorCategoria = (()=>{
+    const porCategoria = {};
+    state.comprasCartao.filter(c=>c.dataCompra>=cartoesPeriodoDe && c.dataCompra<=cartoesPeriodoAte).forEach(c=>{
+      const cat = c.categoria || 'Sem categoria';
+      porCategoria[cat] = (porCategoria[cat]||0) + c.valor;
+    });
+    return Object.entries(porCategoria).map(([categoria,valor])=>({categoria,valor})).sort((a,b)=>b.valor-a.valor);
+  })();
+  const totalGastosPorCategoria = gastosPorCategoria.reduce((s,g)=>s+g.valor,0);
+  const maxGastoCategoria = Math.max(1, ...gastosPorCategoria.map(g=>g.valor));
+
   return `
     <div class="topbar">
       <div><h1>Cartões de Crédito</h1><p>Controle de limites, faturas, parcelamentos e compromissos futuros</p></div>
@@ -9175,7 +9196,61 @@ function viewCartoes(){
           </div>
         `).join('')}
       </div>
+    </div>
+    <div class="dash-section-label">Comparação entre cartões</div>
+    <div class="panel" style="margin-bottom:16px;"><div class="panel-body" style="padding:0;overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap;">
+        <thead><tr style="border-bottom:1px solid var(--line);">
+          <th style="text-align:left;padding:8px 12px;color:var(--text-soft);">Cartão</th>
+          <th style="text-align:right;padding:8px 12px;color:var(--text-soft);">Limite</th>
+          <th style="text-align:right;padding:8px 12px;color:var(--text-soft);">Utilizado</th>
+          <th style="text-align:right;padding:8px 12px;color:var(--text-soft);">Disponível</th>
+          <th style="text-align:right;padding:8px 12px;color:var(--text-soft);">% utilizado</th>
+          <th style="text-align:right;padding:8px 12px;color:var(--text-soft);">Fatura atual</th>
+          <th style="text-align:right;padding:8px 12px;color:var(--text-soft);">Parcelamentos futuros</th>
+        </tr></thead>
+        <tbody>
+          ${dadosPorCartao.map(d=>`
+            <tr style="border-bottom:1px solid var(--line);">
+              <td style="padding:6px 12px;">${escapeHTML(d.cartao.nome)}</td>
+              <td style="text-align:right;padding:6px 12px;" class="mono">${d.cartao.limite?brl(d.cartao.limite):'Limite não informado'}</td>
+              <td style="text-align:right;padding:6px 12px;" class="mono">${brl(d.cartao.limite-d.disponivel)}</td>
+              <td style="text-align:right;padding:6px 12px;" class="mono">${brl(d.disponivel)}</td>
+              <td style="text-align:right;padding:6px 12px;" class="mono">${d.cartao.limite?d.usoPct+'%':'—'}</td>
+              <td style="text-align:right;padding:6px 12px;" class="mono">${brl(d.faturaAtual)}</td>
+              <td style="text-align:right;padding:6px 12px;" class="mono">${brl(parcelasFuturas.filter(p=>p.cartaoNome===d.cartao.nome).reduce((s,p)=>s+p.totalFuturo,0))}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div></div>
+    <div class="note" style="margin-top:0;">Comparação informativa — não é um ranking de "melhor cartão".</div>` : ''}
+
+    <div class="dash-section-label" style="display:flex;justify-content:space-between;align-items:center;">
+      <span>Gastos por categoria</span>
+      <select id="cartoesGastoPeriodoSelect" style="width:auto;font-size:12px;">
+        <option value="mes" ${cartoesPeriodoSel==='mes'?'selected':''}>Mês atual</option>
+        <option value="3m" ${cartoesPeriodoSel==='3m'?'selected':''}>Últimos 3 meses</option>
+        <option value="6m" ${cartoesPeriodoSel==='6m'?'selected':''}>Últimos 6 meses</option>
+        <option value="12m" ${cartoesPeriodoSel==='12m'?'selected':''}>Últimos 12 meses</option>
+        <option value="personalizado" ${cartoesPeriodoSel==='personalizado'?'selected':''}>Período personalizado</option>
+      </select>
+    </div>
+    ${cartoesPeriodoSel==='personalizado' ? `
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+      <input type="date" id="cartoesGastoPersonalDe" value="${cartoesPeriodoDe}" style="width:auto;">
+      <span style="color:var(--text-soft);">até</span>
+      <input type="date" id="cartoesGastoPersonalAte" value="${cartoesPeriodoAte}" style="width:auto;">
     </div>` : ''}
+    ${gastosPorCategoria.length ? `
+    <div class="panel" style="margin-bottom:16px;"><div class="panel-body" style="padding:14px 18px;">
+      ${gastosPorCategoria.map(g=>`
+        <div style="margin-bottom:12px;">
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px;"><span>${escapeHTML(g.categoria)}</span><span class="mono">${brl(g.valor)} (${totalGastosPorCategoria>0?(g.valor/totalGastosPorCategoria*100).toFixed(0):0}%)</span></div>
+          <div class="limit-bar" style="height:8px;"><div class="limit-bar-fill" style="width:${(g.valor/maxGastoCategoria*100).toFixed(0)}%;background:var(--blue-accent);"></div></div>
+        </div>
+      `).join('')}
+    </div></div>` : `<div class="panel" style="margin-bottom:16px;"><div class="empty" style="padding:24px 20px;">Nenhuma compra registrada nesse período.</div></div>`}
 
     <div class="dash-section-label">Saúde dos cartões</div>
     <div class="panel" style="margin-bottom:16px;">
@@ -27161,6 +27236,12 @@ function attachViewHandlers(){
     cartoesFiltroAtivo = e.target.value;
     render();
   });
+  document.getElementById('cartoesGastoPeriodoSelect')?.addEventListener('change', (e)=>{
+    window._cartoesGastoPeriodo = e.target.value;
+    render();
+  });
+  document.getElementById('cartoesGastoPersonalDe')?.addEventListener('change', (e)=>{ window._cartoesGastoPersonalDe = e.target.value; render(); });
+  document.getElementById('cartoesGastoPersonalAte')?.addEventListener('change', (e)=>{ window._cartoesGastoPersonalAte = e.target.value; render(); });
   document.querySelector('[data-action="ver-faturas-pendentes"]')?.addEventListener('click', ()=>{
     document.querySelector('[data-action="revisar-fatura"]')?.scrollIntoView({ behavior:'smooth', block:'center' });
   });
