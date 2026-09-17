@@ -22326,6 +22326,17 @@ function viewVKAprovacoes(){
             <div class="mono" style="font-weight:700;font-size:16px;color:${ehPedido?'var(--success)':'var(--danger)'};">${ehPedido?'+':'-'} ${brl(item.valor)}</div>
           </div>
           ${item.observacao ? `<div class="note" style="margin:12px 0 0;white-space:pre-wrap;">${escapeHTML(item.observacao)}</div>` : ''}
+          ${(()=>{
+            if(!ehPedido || !item.contraparte) return '';
+            const creditosCliente = (state.creditosClientes||[]).filter(c=>c.clienteNome===item.contraparte && (c.valor-(c.valorUsado||0))>0.004);
+            const saldoCliente = creditosCliente.reduce((s,c)=>s+(c.valor-(c.valorUsado||0)),0);
+            if(saldoCliente<=0.004) return '';
+            const aCobrar = Math.max(0, item.valor - saldoCliente);
+            return `<div class="note" style="border-color:var(--success);margin-top:12px;">
+              💳 <strong>${escapeHTML(item.contraparte)} tem ${brl(saldoCliente)} de crédito</strong> (pagou a mais em outro pedido). Se ele já usou esse crédito pra abater esse pedido, cobre só ${brl(aCobrar)} dele — não os ${brl(item.valor)} cheios.
+              <button type="button" class="btn ghost sm" style="margin-top:8px;" data-action="usar-credito-na-aprovacao" data-cliente="${escapeHTML(item.contraparte)}">Usar crédito agora</button>
+            </div>`;
+          })()}
           ${ehPedido && item.pagamentoJaRealizado ? `
           <div class="field" style="margin-top:14px;max-width:340px;">
             <label>💰 Pagamento já realizado — em qual conta entrou?</label>
@@ -22746,6 +22757,19 @@ function abrirQuitarModal(id){
       <div style="display:flex;justify-content:space-between;padding:2px 0;font-weight:700;border-top:1px solid var(--line);margin-top:4px;"><span>Falta ${l.tipo==='entrada'?'receber':'pagar'}</span><span class="mono">${brl(falta)}</span></div>
     </div>
     ` : `<div class="note" style="margin-top:0;">Valor em aberto: <strong class="mono">${brl(falta)}</strong></div>`}
+    ${(()=>{
+      if(l.tipo!=='entrada') return '';
+      const clienteNome = l.fornecedor || l.clienteNome;
+      if(!clienteNome) return '';
+      const creditosCliente = (state.creditosClientes||[]).filter(c=>c.clienteNome===clienteNome && (c.valor-(c.valorUsado||0))>0.004);
+      const saldoCliente = creditosCliente.reduce((s,c)=>s+(c.valor-(c.valorUsado||0)),0);
+      if(saldoCliente<=0.004) return '';
+      const aCobrar = Math.max(0, falta - saldoCliente);
+      return `<div class="note" style="border-color:var(--success);">
+        💳 <strong>Este cliente possui ${brl(saldoCliente)} de crédito</strong> (de um pagamento a mais em outro pedido). Se ele já usou isso pra abater esse pedido, cobre só ${brl(aCobrar)} dele — não os ${brl(falta)} cheios.
+        <button type="button" class="btn ghost sm" style="margin-top:8px;" id="btnUsarCreditoDoQuitar" data-cliente="${escapeHTML(clienteNome)}">Usar crédito agora</button>
+      </div>`;
+    })()}
     <div class="field"><label>Valor ${l.tipo==='entrada'?'recebido':'pago'} agora (R$)</label><input type="text" inputmode="decimal" id="qtValor" value="${falta}"></div>
     <div class="field-row">
       <div class="field"><label>Data</label><input type="date" id="qtData" value="${todayISO()}"></div>
@@ -22773,6 +22797,9 @@ function abrirQuitarModal(id){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnUsarCreditoDoQuitar')?.addEventListener('click', (e)=>{
+    openUsarCreditoClienteModal(e.target.dataset.cliente);
+  });
   document.getElementById('btnConfirmarQuitar').addEventListener('click', ()=>{
     const btnQuitarClick = document.getElementById('btnConfirmarQuitar');
     if(btnQuitarClick.disabled) return;
@@ -23278,6 +23305,9 @@ function attachViewHandlers(){
   document.getElementById('btnExportarPdfUsina')?.addEventListener('click', gerarUsinaSolarPDF);
   document.getElementById('btnRegistrarCreditoCliente')?.addEventListener('click', openRegistrarCreditoClienteModal);
   document.querySelectorAll('[data-action="usar-credito-cliente"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openUsarCreditoClienteModal(btn.dataset.cliente));
+  });
+  document.querySelectorAll('[data-action="usar-credito-na-aprovacao"]').forEach(btn=>{
     btn.addEventListener('click', ()=>openUsarCreditoClienteModal(btn.dataset.cliente));
   });
   document.querySelectorAll('[data-action="excluir-credito-cliente"]').forEach(btn=>{
@@ -27127,6 +27157,19 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       <label>Etiquetas (opcional)</label>
       <input type="text" id="fEtiquetas" placeholder="Separe por vírgula — ex: Universidade, Melhoria Home" value="${existing?.tags ? escapeHTML(existing.tags.join(', ')) : ''}">
     </div>
+    ${(()=>{
+      if(!isEdit || tipo!=='entrada' || existing.status!=='pendente') return '';
+      const clienteNome = existing.fornecedor || existing.clienteNome;
+      if(!clienteNome) return '';
+      const creditosCliente = (state.creditosClientes||[]).filter(c=>c.clienteNome===clienteNome && (c.valor-(c.valorUsado||0))>0.004);
+      const saldoCliente = creditosCliente.reduce((s,c)=>s+(c.valor-(c.valorUsado||0)),0);
+      if(saldoCliente<=0.004) return '';
+      const aCobrar = Math.max(0, existing.valor - saldoCliente);
+      return `<div class="note" style="border-color:var(--success);margin-top:4px;">
+        💳 <strong>Este cliente (${escapeHTML(clienteNome)}) possui ${brl(saldoCliente)} de crédito</strong> (de um pagamento a mais em outro pedido). Se ele já usou isso pra abater esse pedido de ${brl(existing.valor)}, você só cobrou ${brl(aCobrar)} dele de verdade.
+        <button type="button" class="btn ghost sm" style="margin-top:8px;" id="btnUsarCreditoDoEditar" data-cliente="${escapeHTML(clienteNome)}">Usar crédito agora</button>
+      </div>`;
+    })()}
     ${isEdit ? `
     <div class="modal-actions" style="justify-content:space-between;border-top:1px solid var(--line);padding-top:14px;margin-top:4px;">
       <button class="btn ghost" id="btnExcluirDoEditar" style="color:var(--danger);border-color:#F3C6C2;">Excluir</button>
@@ -27273,6 +27316,9 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
   document.getElementById('btnExcluirDoEditar')?.addEventListener('click', ()=>{
     closeModal();
     excluirLancamento(existing.id);
+  });
+  document.getElementById('btnUsarCreditoDoEditar')?.addEventListener('click', (e)=>{
+    openUsarCreditoClienteModal(e.target.dataset.cliente);
   });
   document.getElementById('btnEfetivarDoEditar')?.addEventListener('click', ()=>{
     closeModal();
