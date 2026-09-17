@@ -19111,6 +19111,20 @@ function viewUsinaSolar(){
   });
   const maxGeracaoConsumo = Math.max(1, ...dadosGeracaoConsumo.flatMap(d=>[d.geracao,d.consumo]));
 
+  // ---- Tabela consumo×geração×injetada×compensada (§2 do complemento) — nunca estima
+  // silenciosamente: se não tiver o dado, mostra "—" em vez de inventar.
+  const tabelaConsumoGeracao = mesesComDado.map(m=>{
+    const leituraMes = leituras.find(l=>l.periodo==='mes' && l.data.slice(0,7)===m);
+    const fatura = faturas.find(f=>f.referencia===m);
+    return {
+      mes: m,
+      geracao: leituraMes?.geracaoKwh ?? null,
+      consumo: fatura?.consumoKwh ?? null,
+      injetada: fatura?.energiaInjetadaKwh ?? null,
+      compensada: fatura?.energiaInjetadaUtilizadaKwh ?? null,
+    };
+  }).reverse();
+
   // ---- Evolução do saldo de créditos (últimas faturas com saldo registrado)
   const evolucaoCreditos = faturasAsc.filter(f=>f.saldoCreditosAtualKwh!=null).slice(-12);
   // ---- Totais de créditos (§19) — gerado (energia injetada) e utilizado, somados direto das
@@ -19288,14 +19302,18 @@ function viewUsinaSolar(){
     piorMesProdutividade: produtividadePorMes.length ? [...produtividadePorMes].sort((a,b)=>a.produtividade-b.produtividade)[0] : null,
   } : null;
 
-  // ---- Comparação "com solar x sem solar" (§11) — só estimativa, sempre identificada como tal.
-  // Valor "sem solar" = o que você pagaria se comprasse da distribuidora toda a energia que
-  // consumiu (consumo × tarifa), sem o abatimento da energia injetada.
+  // ---- Comparação "com solar x sem solar" (§11 / §7 do complemento) — só estimativa, sempre
+  // identificada como tal. Valor "sem solar" = o que você pagaria se comprasse da distribuidora
+  // toda a energia que consumiu (consumo × tarifa), sem o abatimento da energia injetada.
   let comparacaoSemSolar = null;
   if(ultimaFatura?.consumoKwh>0 && ultimaFatura?.tarifaEnergiaKwh){
     const semSolar = ultimaFatura.consumoKwh * ultimaFatura.tarifaEnergiaKwh;
     const comSolar = ultimaFatura.valorTotal;
-    comparacaoSemSolar = { semSolar, comSolar, economia: semSolar-comSolar, pct: semSolar>0 ? ((semSolar-comSolar)/semSolar*100) : 0 };
+    comparacaoSemSolar = {
+      semSolar, comSolar, economia: semSolar-comSolar, pct: semSolar>0 ? ((semSolar-comSolar)/semSolar*100) : 0,
+      tarifaUsada: ultimaFatura.tarifaEnergiaKwh, tarifaEhDaFaturaMesma: true,
+      creditosUtilizados: ultimaFatura.creditosUtilizadosKwh ?? null,
+    };
   }
 
   // ---- Calendário mensal (§24) — mostra geração por dia (só onde existir leitura tipo "dia")
@@ -19308,10 +19326,20 @@ function viewUsinaSolar(){
   const diaSelecionado = window._usinaCalendarioDiaSelecionado;
   const leituraDiaSelecionado = diaSelecionado ? leiturasDiaPorData[diaSelecionado] : null;
 
+  // ---- Outros eventos no calendário (§11 do complemento) — vencimento de fatura, manutenção,
+  // vencimento de garantia. Mapeados por data exata; nada inventado, só o que já está registrado.
+  const eventosCalPorData = {};
+  const addEventoCal = (data, tipo, emoji) => { if(!data) return; if(!eventosCalPorData[data]) eventosCalPorData[data]=[]; eventosCalPorData[data].push({tipo,emoji}); };
+  faturas.forEach(f=>addEventoCal(f.vencimento, `Vencimento da fatura ${competenciaLabel(f.referencia)}`, '📄'));
+  manutencoes.forEach(m=>addEventoCal(m.data, `Manutenção: ${m.descricao}`, '🔧'));
+  addEventoCal(equip.inversor?.garantiaAte, 'Vencimento da garantia do inversor', '🛡️');
+  addEventoCal(equip.paineis?.garantiaAte, 'Vencimento da garantia dos painéis', '🛡️');
+  const eventosDiaSelecionado = diaSelecionado ? (eventosCalPorData[diaSelecionado]||[]) : [];
+
   const abas = [
     ['visao-geral','Visão Geral'], ['geracao','Geração'], ['economia','Economia'],
     ['faturas','Faturas'], ['creditos','Créditos'], ['desempenho','Desempenho'], ['equipamentos','Equipamentos'],
-    ['manutencao','Manutenção'], ['historico','Histórico'], ['relatorios','Relatórios'], ['config','Configuração']
+    ['manutencao','Manutenção'], ['documentos','Documentos'], ['historico','Histórico'], ['relatorios','Relatórios'], ['config','Configuração']
   ];
 
   return `
@@ -19451,10 +19479,12 @@ function viewUsinaSolar(){
           ${gradeCalMes.map(dia=>{
             if(!dia) return `<div></div>`;
             const l = leiturasDiaPorData[dia];
+            const outrosEventos = eventosCalPorData[dia];
             const numDia = Number(dia.slice(8,10));
             const intensidade = l ? Math.max(0.15, l.geracaoKwh/maxGeracaoDiaCal) : 0;
             const selecionado = dia===diaSelecionado;
-            return `<div data-action="selecionar-dia-cal-solar" data-dia="${dia}" style="cursor:pointer;aspect-ratio:1;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10.5px;border:${selecionado?'2px solid var(--blue-accent)':'1px solid var(--line)'};background:${l?`rgba(217,143,43,${intensidade})`:'transparent'};color:${l&&intensidade>0.5?'#fff':'var(--ink)'};" title="${l?l.geracaoKwh+' kWh':'Sem registro'}">${numDia}</div>`;
+            const titulo = [l?l.geracaoKwh+' kWh':null, ...(outrosEventos||[]).map(e=>e.tipo)].filter(Boolean).join(' · ') || 'Sem registro';
+            return `<div data-action="selecionar-dia-cal-solar" data-dia="${dia}" style="cursor:pointer;aspect-ratio:1;border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:10.5px;position:relative;border:${selecionado?'2px solid var(--blue-accent)':'1px solid var(--line)'};background:${l?`rgba(217,143,43,${intensidade})`:'transparent'};color:${l&&intensidade>0.5?'#fff':'var(--ink)'};" title="${titulo}">${numDia}${outrosEventos?.length?`<span style="position:absolute;top:1px;right:1px;font-size:7px;">${outrosEventos[0].emoji}</span>`:''}</div>`;
           }).join('')}
         </div>
       </div></div>
@@ -19468,6 +19498,10 @@ function viewUsinaSolar(){
           <div class="fluxo-resumo-item"><div class="lbl">Diferença</div><div class="val">${metaDiaria?((leituraDiaSelecionado.geracaoKwh-metaDiaria)>=0?'+':'')+(leituraDiaSelecionado.geracaoKwh-metaDiaria).toFixed(1)+' kWh':'—'}</div></div>
           <div class="fluxo-resumo-item"><div class="lbl">Economia estimada</div><div class="val">${tarifaParaEconomia?brl(leituraDiaSelecionado.geracaoKwh*tarifaParaEconomia):'—'}</div></div>
         </div>` : `<div class="empty">Sem registro de geração nesse dia.</div>`}
+        ${eventosDiaSelecionado.length ? `
+        <div style="margin-top:10px;">
+          ${eventosDiaSelecionado.map(e=>`<div style="font-size:13px;padding:4px 0;">${e.emoji} ${e.tipo}</div>`).join('')}
+        </div>` : ''}
       </div></div>` : ''}
 
       ${dadosGeracaoConsumo.length ? `
@@ -19489,6 +19523,31 @@ function viewUsinaSolar(){
           <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--blue-accent);margin-right:4px;"></span>Consumo</span>
         </div>
       </div></div>` : `<div class="empty">Sem dados de geração registrados para este período.</div>`}
+
+      ${tabelaConsumoGeracao.length ? `
+      <div class="contas-secao-titulo">Tabela: Geração, Consumo, Injetada, Compensada</div>
+      <div class="panel"><div class="panel-body" style="padding:0;overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          <thead><tr style="border-bottom:1px solid var(--line);">
+            <th style="text-align:left;padding:8px 12px;color:var(--text-soft);">Mês</th>
+            <th style="text-align:right;padding:8px 12px;color:var(--text-soft);">Geração</th>
+            <th style="text-align:right;padding:8px 12px;color:var(--text-soft);">Consumo</th>
+            <th style="text-align:right;padding:8px 12px;color:var(--text-soft);">Injetada</th>
+            <th style="text-align:right;padding:8px 12px;color:var(--text-soft);">Compensada</th>
+          </tr></thead>
+          <tbody>
+            ${tabelaConsumoGeracao.map(r=>`
+              <tr style="border-bottom:1px solid var(--line);">
+                <td style="padding:6px 12px;">${competenciaLabel(r.mes)}</td>
+                <td style="text-align:right;padding:6px 12px;" class="mono">${r.geracao!=null?r.geracao+' kWh':'—'}</td>
+                <td style="text-align:right;padding:6px 12px;" class="mono">${r.consumo!=null?r.consumo+' kWh':'—'}</td>
+                <td style="text-align:right;padding:6px 12px;" class="mono">${r.injetada!=null?r.injetada+' kWh':'—'}</td>
+                <td style="text-align:right;padding:6px 12px;" class="mono">${r.compensada!=null?r.compensada+' kWh':'—'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div></div>` : ''}
 
       ${saldoLiquidoMensal.length ? `
       <div class="contas-secao-titulo">Saldo líquido mensal (injetada − consumo)</div>
@@ -19512,7 +19571,7 @@ function viewUsinaSolar(){
         ${leituras.length ? leituras.slice(0,20).map(l=>`
           <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto auto;">
             <span class="dot entrada"></span>
-            <div class="desc-cell"><div style="font-size:13px;">${fmtDate(l.data)} <span style="color:var(--text-soft);font-size:11px;">(${l.periodo})</span></div>${l.deltaUltimoRegistro!=null?`<div class="cat">${l.deltaUltimoRegistro>=0?'+':''}${l.deltaUltimoRegistro.toFixed(1)} kWh desde ${fmtDate(l.dataRegistroAnterior)}</div>`:''}</div>
+            <div class="desc-cell"><div style="font-size:13px;">${fmtDate(l.data)} <span style="color:var(--text-soft);font-size:11px;">(${l.periodo})${l.origem?' · '+({manual:'manual','ia':'IA','ia-corrigida':'IA, corrigida'}[l.origem]||l.origem):''}</span></div>${l.deltaUltimoRegistro!=null?`<div class="cat">${l.deltaUltimoRegistro>=0?'+':''}${l.deltaUltimoRegistro.toFixed(1)} kWh desde ${fmtDate(l.dataRegistroAnterior)}</div>`:''}</div>
             <span class="mono" style="font-weight:600;">${l.geracaoKwh} kWh</span>
             <button class="icon-btn" data-action="excluir-leitura-solar" data-id="${l.id}" title="Excluir">✕</button>
           </div>
@@ -19538,15 +19597,29 @@ function viewUsinaSolar(){
       ` : `<div class="note" style="margin-top:0;">Cadastre o "valor investido" em ⚙️ Dados da usina pra ver a estimativa de payback aqui.</div>`}
 
       ${comparacaoSemSolar ? `
-      <div class="contas-secao-titulo" style="margin-top:22px;">💡 Impacto da usina na conta de energia (${competenciaLabel(ultimaFatura.referencia)})</div>
+      <div class="contas-secao-titulo" style="margin-top:22px;">💡 Simulador — Com Solar × Sem Solar (${competenciaLabel(ultimaFatura.referencia)})</div>
       <div class="panel"><div class="panel-body" style="padding:14px 18px;">
-        <div class="fluxo-resumo-4col">
-          <div class="fluxo-resumo-item"><div class="lbl">Sem solar (estimado)</div><div class="val">${brl(comparacaoSemSolar.semSolar)}</div></div>
-          <div class="fluxo-resumo-item"><div class="lbl">Com solar (pago de verdade)</div><div class="val">${brl(comparacaoSemSolar.comSolar)}</div></div>
-          <div class="fluxo-resumo-item"><div class="lbl">Economia</div><div class="val" style="color:var(--success);">${brl(comparacaoSemSolar.economia)}</div></div>
-          <div class="fluxo-resumo-item"><div class="lbl">Percentual de economia</div><div class="val">${comparacaoSemSolar.pct.toFixed(0)}%</div></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div>
+            <div style="font-weight:700;font-size:12px;color:var(--success);margin-bottom:8px;">☀️ COM SOLAR</div>
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);"><span>Consumo</span><span class="mono">${ultimaFatura.consumoKwh} kWh</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);"><span>Energia compensada</span><span class="mono">${ultimaFatura.energiaInjetadaUtilizadaKwh!=null?ultimaFatura.energiaInjetadaUtilizadaKwh+' kWh':'—'}</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);"><span>Créditos utilizados</span><span class="mono">${comparacaoSemSolar.creditosUtilizados!=null?comparacaoSemSolar.creditosUtilizados+' kWh':'—'}</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;font-weight:700;"><span>Valor da fatura</span><span class="mono">${brl(comparacaoSemSolar.comSolar)}</span></div>
+          </div>
+          <div>
+            <div style="font-weight:700;font-size:12px;color:var(--text-soft);margin-bottom:8px;">⚡ SEM SOLAR (estimado)</div>
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);"><span>Consumo</span><span class="mono">${ultimaFatura.consumoKwh} kWh</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);"><span>Tarifa aplicável</span><span class="mono">R$ ${comparacaoSemSolar.tarifaUsada.toFixed(6).replace('.',',')}/kWh</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);"><span>&nbsp;</span><span class="mono">&nbsp;</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;font-weight:700;"><span>Valor estimado</span><span class="mono">${brl(comparacaoSemSolar.semSolar)}</span></div>
+          </div>
         </div>
-        <div class="note" style="margin-top:10px;">"Sem solar" é uma <strong>estimativa</strong> (todo o consumo pago pela tarifa cheia, sem o abatimento da energia injetada) — não é um valor real de uma fatura sem usina.</div>
+        <div style="text-align:center;margin-top:14px;padding:10px;background:var(--surface-alt,rgba(30,158,107,.08));border-radius:8px;">
+          <div style="font-size:11px;color:var(--text-soft);text-transform:uppercase;letter-spacing:.04em;">Economia proporcionada pela usina</div>
+          <div style="font-size:20px;font-weight:700;color:var(--success);">${brl(comparacaoSemSolar.economia)} <span style="font-size:13px;font-weight:400;">(${comparacaoSemSolar.pct.toFixed(0)}%)</span></div>
+        </div>
+        <div class="note" style="margin-top:10px;">"Sem solar" é uma <strong>estimativa</strong> — usei a tarifa desta mesma fatura (dado real do período, não a tarifa de hoje aplicada retroativamente). Não é o valor real de uma fatura sem usina.</div>
       </div></div>` : ''}
     </div>
 
@@ -19758,6 +19831,20 @@ function viewUsinaSolar(){
             <button class="icon-btn" data-action="excluir-manutencao-solar" data-id="${m.id}" title="Excluir">✕</button>
           </div>
         `).join('') : `<div class="empty">Nenhuma manutenção registrada ainda.</div>`}
+      </div></div>
+    </div>
+
+    <div data-aba-painel="documentos" style="display:${abaAtiva==='documentos'?'block':'none'};margin-top:14px;">
+      <div class="topbar" style="margin-top:0;"><div></div><button class="btn ghost sm" id="btnRegistrarDocumentoSolar">+ Registrar documento</button></div>
+      <div class="note" style="margin-top:0;">Este sistema ainda não tem um jeito de guardar o arquivo em si (isso exigiria configurar armazenamento em nuvem, que não está pronto aqui) — mas você pode registrar nome, tipo, data e observação de cada documento importante, pra ter tudo listado num lugar só.</div>
+      <div class="panel"><div class="panel-body" style="padding:0;">
+        ${(state.usinaDocumentos||[]).length ? [...state.usinaDocumentos].sort((a,b)=>(b.data||'').localeCompare(a.data||'')).map(d=>`
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
+            <div class="desc-cell"><div>${escapeHTML(d.nome)}</div><div class="cat">${escapeHTML(d.tipo)}${d.periodo?' · '+competenciaLabel(d.periodo):''}${d.observacao?' · '+escapeHTML(d.observacao):''}</div></div>
+            <span class="mono" style="font-size:12px;color:var(--text-soft);">${d.data?fmtDate(d.data):'—'}</span>
+            <button class="icon-btn" data-action="excluir-documento-solar" data-id="${d.id}" title="Excluir">✕</button>
+          </div>
+        `).join('') : `<div class="empty">Nenhum documento registrado ainda.</div>`}
       </div></div>
     </div>
 
@@ -22884,7 +22971,11 @@ function viewVK(){
 function escapeHTML(s){ const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
 
 function viewVKAprovacoes(){
-  const itens = state.vkAprovacoes||[];
+  const todosItens = state.vkAprovacoes||[];
+  const qtdPedidos = todosItens.filter(i=>i.tipo==='pedido').length;
+  const qtdDespesas = todosItens.filter(i=>i.tipo==='despesa').length;
+  const filtroAtivo = window._vkAprovacoesFiltro || 'pedidos';
+  const itens = todosItens.filter(i=>filtroAtivo==='pedidos' ? i.tipo==='pedido' : i.tipo==='despesa');
   return `
     <div class="topbar">
       <div>
@@ -22893,7 +22984,11 @@ function viewVKAprovacoes(){
         <p>Pedidos e entradas de estoque importados esperam aqui até você conferir a categoria (e marcar se é despesa de cartão) e aprovar</p>
       </div>
     </div>
-    ${!itens.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum item aguardando aprovação no momento.</div></div>` : itens.map(item=>{
+    <div class="toggle-row" style="margin-bottom:14px;">
+      <button type="button" data-vk-aprov-filtro="pedidos" class="${filtroAtivo==='pedidos'?'active':''}">Pedidos (${qtdPedidos})</button>
+      <button type="button" data-vk-aprov-filtro="despesas" class="${filtroAtivo==='despesas'?'active':''}">Contas a Pagar (${qtdDespesas})</button>
+    </div>
+    ${!itens.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum${filtroAtivo==='pedidos'?' pedido':'a conta a pagar'} aguardando aprovação no momento.</div></div>` : itens.map(item=>{
       const ehPedido = item.tipo==='pedido';
       return `
       <div class="panel" style="margin-bottom:14px;" data-aprov-card="${item.id}">
@@ -23904,6 +23999,20 @@ function attachViewHandlers(){
   document.getElementById('btnAtualizarDadosSolar')?.addEventListener('click', ()=>{ render(); showToast('Dados atualizados'); });
   document.getElementById('btnVerRelatorioSolar')?.addEventListener('click', ()=>{ window._usinaSolarAbaAtiva = 'relatorios'; render(); });
   document.getElementById('btnRegistrarTarifaSolar')?.addEventListener('click', openRegistrarTarifaSolarModal);
+  document.getElementById('btnRegistrarDocumentoSolar')?.addEventListener('click', openRegistrarDocumentoSolarModal);
+  document.querySelectorAll('[data-vk-aprov-filtro]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      window._vkAprovacoesFiltro = btn.dataset.vkAprovFiltro;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-action="excluir-documento-solar"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!confirm('Excluir esse documento registrado?')) return;
+      state.usinaDocumentos = (state.usinaDocumentos||[]).filter(d=>d.id!==btn.dataset.id);
+      persist(); render();
+    });
+  });
   document.getElementById('usinaHistoricoDe')?.addEventListener('change', (e)=>{ window._usinaHistoricoDe = e.target.value; render(); });
   document.getElementById('usinaHistoricoAte')?.addEventListener('change', (e)=>{ window._usinaHistoricoAte = e.target.value; render(); });
   document.getElementById('usinaHistoricoTipo')?.addEventListener('change', (e)=>{ window._usinaHistoricoTipo = e.target.value; render(); });
@@ -33613,6 +33722,7 @@ function openImportarNotaFiscalModal(){
 }
 
 function openRegistrarGeracaoSolarModal(){
+  let viaIA = false;
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
     <h3>☀️ Registrar geração</h3>
@@ -33647,6 +33757,8 @@ function openRegistrarGeracaoSolarModal(){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  let corrigidoManualmente = false;
+  document.getElementById('gsGeracao').addEventListener('input', ()=>{ if(viaIA) corrigidoManualmente = true; });
 
   document.getElementById('gsArquivoInput').addEventListener('change', async ()=>{
     const file = document.getElementById('gsArquivoInput').files[0];
@@ -33662,6 +33774,7 @@ function openRegistrarGeracaoSolarModal(){
     }
     try{
       const dados = await extrairDadosGeracaoSolarIA(file);
+      viaIA = true;
       document.getElementById('gsData').value = dados.dataReferencia || todayISO();
       document.getElementById('gsPeriodo').value = dados.periodo || 'mes';
       document.getElementById('gsGeracao').value = dados.geracaoKwh != null ? dados.geracaoKwh : '';
@@ -33671,7 +33784,7 @@ function openRegistrarGeracaoSolarModal(){
       if(dados.rendaTotalAcumuladaReais!=null) infoAcum.push(`Renda total acumulada no print: ${brl(dados.rendaTotalAcumuladaReais)}`);
       if(dados.capacidadeKw!=null || dados.dataInstalacao){
         if(!state.usinaSolar || !state.usinaSolar.capacidadeKw){
-          state.usinaSolar = { capacidadeKw: dados.capacidadeKw||null, dataInstalacao: dados.dataInstalacao||null };
+          state.usinaSolar = Object.assign({}, state.usinaSolar, { capacidadeKw: dados.capacidadeKw||state.usinaSolar?.capacidadeKw||null, dataInstalacao: dados.dataInstalacao||state.usinaSolar?.dataInstalacao||null });
           infoAcum.push('Identifiquei também a capacidade/data de instalação da usina — preenchi o cadastro automaticamente.');
         }
       }
@@ -33704,15 +33817,20 @@ function openRegistrarGeracaoSolarModal(){
     // um segundo registro (que somaria errado nos relatórios), atualiza o mesmo registro com o
     // valor novo e guarda a diferença — assim o histórico mostra quanto foi gerado entre as duas
     // conferências, sem duplicar o total do mês.
+    const origemLeitura = viaIA ? (corrigidoManualmente ? 'ia-corrigida' : 'ia') : 'manual';
     const existente = periodo==='mes' ? state.usinaLeituras.find(l=>l.periodo==='mes' && l.data.slice(0,7)===data.slice(0,7)) : null;
     if(existente){
       const delta = geracaoKwh - existente.geracaoKwh;
       const dataAnterior = existente.data, valorAnterior = existente.geracaoKwh;
+      const origemAnterior = existente.origem;
       existente.data = data;
       existente.geracaoKwh = geracaoKwh;
       existente.rendaReais = rendaReais || existente.rendaReais;
       existente.deltaUltimoRegistro = delta;
       existente.dataRegistroAnterior = dataAnterior;
+      existente.origem = origemLeitura;
+      existente.historicoAlteracoes = existente.historicoAlteracoes || [];
+      existente.historicoAlteracoes.push({ data: new Date().toISOString(), evento: origemAnterior==='ia' && origemLeitura!=='ia' ? 'Geração corrigida manualmente' : `Atualizado (${origemLeitura})` });
       persist(); closeModal(); render();
       showToast(delta>=0
         ? `Atualizado: +${delta.toFixed(1)} kWh gerados desde ${fmtDate(dataAnterior)} (${valorAnterior} → ${geracaoKwh})`
@@ -33720,7 +33838,7 @@ function openRegistrarGeracaoSolarModal(){
       return;
     }
 
-    state.usinaLeituras.push({ id: uid(), data, periodo, geracaoKwh, rendaReais, criadoEm: new Date().toISOString() });
+    state.usinaLeituras.push({ id: uid(), data, periodo, geracaoKwh, rendaReais, origem: origemLeitura, historicoAlteracoes: [{ data: new Date().toISOString(), evento: `Leitura adicionada (${origemLeitura==='manual'?'manual':'por IA'})` }], criadoEm: new Date().toISOString() });
     registrarLog('Geração solar registrada', `${fmtDate(data)} — ${geracaoKwh} kWh`);
     persist(); closeModal(); render();
     showToast('Geração registrada');
@@ -33824,6 +33942,51 @@ function openUsarCreditoClienteModal(clienteNome){
     });
     persist(); closeModal(); render();
     showToast(`${brl(valorUsar)} de Passivo baixado${referencia?' em '+referencia:''} — lance o pedido pelo valor cheio normalmente, o caixa já fica certo`);
+  });
+}
+
+function openRegistrarDocumentoSolarModal(){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>📁 Registrar documento</h3>
+    <div class="field"><label>Nome</label><input type="text" id="dsNome" placeholder="Ex: Contrato de instalação"></div>
+    <div class="field-row">
+      <div class="field"><label>Tipo</label>
+        <select id="dsTipo">
+          <option>Fatura de energia</option>
+          <option>Nota fiscal da instalação</option>
+          <option>Contrato</option>
+          <option>Orçamento</option>
+          <option>Garantia</option>
+          <option>Manual</option>
+          <option>Documento de equipamento</option>
+          <option>Laudo</option>
+          <option>Comprovante de manutenção</option>
+          <option>Outro</option>
+        </select>
+      </div>
+      <div class="field"><label>Data</label><input type="date" id="dsData" value="${todayISO()}"></div>
+    </div>
+    <div class="field"><label>Período relacionado (opcional, mês/ano)</label><input type="month" id="dsPeriodo"></div>
+    <div class="field"><label>Observação (opcional)</label><input type="text" id="dsObservacao"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarDocumentoSolar">Registrar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarDocumentoSolar').addEventListener('click', ()=>{
+    const nome = document.getElementById('dsNome').value.trim();
+    const tipo = document.getElementById('dsTipo').value;
+    const data = document.getElementById('dsData').value || null;
+    const periodo = document.getElementById('dsPeriodo').value || null;
+    const observacao = document.getElementById('dsObservacao').value.trim() || null;
+    if(!nome){ showToast('Informe o nome do documento'); return; }
+    if(!state.usinaDocumentos) state.usinaDocumentos = [];
+    state.usinaDocumentos.push({ id: uid(), nome, tipo, data, periodo, observacao, criadoEm: new Date().toISOString() });
+    persist(); closeModal(); render();
+    showToast('Documento registrado');
   });
 }
 
