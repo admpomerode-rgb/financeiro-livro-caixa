@@ -1006,6 +1006,7 @@ const CATEGORIAS_ENTRADA = ['Vendas', 'Serviços', 'Recebimento de cliente', 'Re
 function ehMovimentoDeCapital(l){
   if(!l) return false;
   if(l.categoria==='Investimentos' && l.origem==='investimento') return true;
+  if(l.origem==='credito-cliente' || l.origem==='credito-cliente-uso') return true; // Passivo (Adiantamento de Cliente) — não é receita nem despesa
   if(!l.categoria) return false;
   const lista = l.tipo==='saida' ? (state.categorias?.saida||[]) : (state.categorias?.entrada||[]);
   const cat = lista.find(c=>c.nome===l.categoria || l.categoria.startsWith(c.nome+' / '));
@@ -33010,7 +33011,7 @@ function openRegistrarCreditoClienteModal(){
   const clientes = listaClientesConhecidos();
   modal.innerHTML = `
     <h3>💳 Registrar crédito de cliente</h3>
-    <div class="note" style="margin-top:0;">Use quando um cliente pagar a mais num pedido e esse valor deve ficar guardado pra abater num pedido futuro.</div>
+    <div class="note" style="margin-top:0;">Use quando um cliente pagar a mais num pedido (ex: pagou R$100 em espécie por um pedido de R$90). Os R$10 entram de verdade no caixa da conta escolhida agora, mas viram um <strong>Passivo</strong> — um Adiantamento de Cliente (uma dívida sua com ele) — em vez de receita. Só vira receita quando for usado num pedido futuro.</div>
     <div class="field">
       <label>Cliente</label>
       <input type="text" id="ccCliente" list="ccClientesLista" placeholder="Nome do cliente">
@@ -33020,6 +33021,7 @@ function openRegistrarCreditoClienteModal(){
       <div class="field"><label>Valor do crédito (R$)</label><input type="text" inputmode="decimal" id="ccValor"></div>
       <div class="field"><label>Data</label><input type="date" id="ccData" value="${todayISO()}"></div>
     </div>
+    <div class="field"><label>Em qual conta esse valor entrou?</label><select id="ccConta">${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select></div>
     <div class="field"><label>Motivo (opcional)</label><input type="text" id="ccMotivo" placeholder="Ex: Pedido Nº 2574 — pagou R$100, pedido era R$90"></div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
@@ -33032,13 +33034,25 @@ function openRegistrarCreditoClienteModal(){
     const clienteNome = document.getElementById('ccCliente').value.trim();
     const valor = numBR(document.getElementById('ccValor').value);
     const data = document.getElementById('ccData').value || todayISO();
+    const contaId = document.getElementById('ccConta').value;
     const motivo = document.getElementById('ccMotivo').value.trim() || null;
     if(!clienteNome){ showToast('Informe o nome do cliente'); return; }
     if(isNaN(valor) || valor<=0){ showToast('Informe o valor do crédito'); return; }
+    if(!contaId){ showToast('Escolha em qual conta esse valor entrou'); return; }
     if(!state.creditosClientes) state.creditosClientes = [];
-    state.creditosClientes.push({ id: uid(), clienteNome, valor, valorUsado: 0, data, motivo, criadoEm: new Date().toISOString() });
+    const creditoId = uid();
+    // Lançamento de verdade — entra no caixa da conta agora, mas fica fora da DRE (é Passivo:
+    // Adiantamento de Cliente, uma dívida sua com ele — não é receita até ser usado num pedido).
+    const lancId = uid();
+    state.lancamentos.push({
+      id: lancId, tipo:'entrada', categoria:'Crédito de Cliente',
+      descricao: `Adiantamento de cliente (Passivo) — ${clienteNome}${motivo?' ('+motivo+')':''}`,
+      valor, contaId, status:'recebido', dataVencimento:data, dataPagamento:data,
+      origem:'credito-cliente', creditoClienteId: creditoId, criadoEm: new Date().toISOString()
+    });
+    state.creditosClientes.push({ id: creditoId, clienteNome, valor, valorUsado: 0, data, contaId, motivo, lancamentoId: lancId, criadoEm: new Date().toISOString() });
     persist(); closeModal(); render();
-    showToast(`Crédito de ${brl(valor)} registrado pra ${clienteNome}`);
+    showToast(`R$${valor.toFixed(2).replace('.',',')} registrado no caixa e guardado como crédito de ${clienteNome}`);
   });
 }
 
@@ -33047,11 +33061,13 @@ function openUsarCreditoClienteModal(clienteNome){
     .filter(c=>c.clienteNome===clienteNome && (c.valor-(c.valorUsado||0))>0.004)
     .sort((a,b)=>(a.data||'').localeCompare(b.data||''));
   const saldoTotal = creditosDisponiveis.reduce((s,c)=>s+(c.valor-(c.valorUsado||0)),0);
+  const contaSugerida = creditosDisponiveis[0]?.contaId || (state.contas.find(c=>!c.arquivada)?.id);
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
     <h3>💳 Usar crédito — ${escapeHTML(clienteNome)}</h3>
-    <div class="note" style="margin-top:0;">Saldo disponível: <strong>${brl(saldoTotal)}</strong>. Informe quanto vai abater agora (ex: no próximo pedido desse cliente) — o sistema desconta primeiro dos créditos mais antigos.</div>
-    <div class="field"><label>Valor a usar agora (R$)</label><input type="text" inputmode="decimal" id="ucValor" value="${saldoTotal.toFixed(2).replace('.',',')}"></div>
+    <div class="note" style="margin-top:0;">Saldo disponível: <strong>${brl(saldoTotal)}</strong>. Lance o pedido novo pelo valor <strong>cheio</strong> (ex: R$90) como receita normal, batendo certinho com o VK. Aqui você só baixa o Passivo (Adiantamento de Cliente) — o sistema lança uma saída que "fecha" essa dívida, sem contar como despesa.</div>
+    <div class="field"><label>Valor a baixar agora (R$)</label><input type="text" inputmode="decimal" id="ucValor" value="${saldoTotal.toFixed(2).replace('.',',')}"></div>
+    <div class="field"><label>Descontar de qual conta?</label><select id="ucConta">${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}" ${c.id===contaSugerida?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select></div>
     <div class="field"><label>Referência (opcional)</label><input type="text" id="ucReferencia" placeholder="Ex: Pedido Nº 2601"></div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
@@ -33062,9 +33078,19 @@ function openUsarCreditoClienteModal(clienteNome){
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnConfirmarUsoCredito').addEventListener('click', ()=>{
     let valorUsar = numBR(document.getElementById('ucValor').value);
+    const contaId = document.getElementById('ucConta').value;
     const referencia = document.getElementById('ucReferencia').value.trim() || null;
     if(isNaN(valorUsar) || valorUsar<=0){ showToast('Informe quanto vai usar'); return; }
     if(valorUsar>saldoTotal+0.004){ showToast(`Esse cliente só tem ${brl(saldoTotal)} de saldo`); return; }
+    if(!contaId){ showToast('Escolha de qual conta vai descontar'); return; }
+    // Lançamento de saída de verdade — baixa o Passivo (Adiantamento de Cliente). Fora da DRE (não
+    // é despesa nova, é a quitação de uma dívida que já existia).
+    state.lancamentos.push({
+      id: uid(), tipo:'saida', categoria:'Crédito de Cliente',
+      descricao: `Baixa de adiantamento (Passivo) — ${clienteNome}${referencia?' ('+referencia+')':''}`,
+      valor: valorUsar, contaId, status:'pago', dataVencimento:todayISO(), dataPagamento:todayISO(),
+      origem:'credito-cliente-uso', criadoEm: new Date().toISOString()
+    });
     let restante = valorUsar;
     creditosDisponiveis.forEach(c=>{
       if(restante<=0.004) return;
@@ -33076,7 +33102,7 @@ function openUsarCreditoClienteModal(clienteNome){
       restante = Math.round((restante-abate)*100)/100;
     });
     persist(); closeModal(); render();
-    showToast(`${brl(valorUsar)} de crédito usado${referencia?' em '+referencia:''}`);
+    showToast(`${brl(valorUsar)} de Passivo baixado${referencia?' em '+referencia:''} — lance o pedido pelo valor cheio normalmente, o caixa já fica certo`);
   });
 }
 
