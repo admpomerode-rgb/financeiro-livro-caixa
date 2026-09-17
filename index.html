@@ -9537,6 +9537,7 @@ function parseFaturaCelesc(linhas){
   const cosipValor = somaValorLinhasComRotulo('GY\\) COSIP');
   const multaValor = somaValorLinhasComRotulo('EG\\) Multa');
   const jurosValor = somaValorLinhasComRotulo('EB\\) Juros');
+  const correcaoValor = somaValorLinhasComRotulo('95\\) Correção');
 
   // Alerta de suspensão de fornecimento — a Celesc avisa isso na própria fatura quando há atraso
   const alertaSuspensaoMatch = texto.match(/SUJEITA A SUSPENSÃO DE FORNECIMENTO A PARTIR DE (\d{2}\/\d{2}\/\d{4})[^\n]*?R\$\s*([\d.,]+)/i);
@@ -9567,16 +9568,26 @@ function parseFaturaCelesc(linhas){
     };
     const consumoT = pegaLinhaNumeros('Consumo');
     const injetadaT = pegaLinhaNumeros('Energia Injetada(?! utilizada)');
+    const injetadaUtilizadaT = pegaLinhaNumeros('Energia Injetada utilizada');
+    const excedenteDistribuidoT = pegaLinhaNumeros('Excedente de energia distribuído');
+    const excedenteRecebidoT = pegaLinhaNumeros('Excedente de energia recebido');
     const saldoAntT = pegaLinhaNumeros('Saldo de créditos Anterior');
     const usadosT = pegaLinhaNumeros('Créditos utilizados');
     const saldoAtuT = pegaLinhaNumeros('Saldo de créditos atualizado');
     historicoCreditos = mesesTabela.map((m,i)=>({
-      mes: m, consumo: consumoT?.[i], injetada: injetadaT?.[i],
+      mes: m, consumo: consumoT?.[i], injetada: injetadaT?.[i], injetadaUtilizada: injetadaUtilizadaT?.[i],
+      excedenteDistribuido: excedenteDistribuidoT?.[i], excedenteRecebido: excedenteRecebidoT?.[i],
       saldoAnterior: saldoAntT?.[i], creditosUtilizados: usadosT?.[i], saldoAtualizado: saldoAtuT?.[i]
     })).filter(x=>x.mes);
   }
+  // Os 3 campos também ficam disponíveis direto na fatura (não só dentro da tabela), pegando o
+  // mês que bate com a referência dessa fatura — mais fácil de usar nas telas.
+  const mesReferenciaNaTabela = (historicoCreditos||[]).find(h=>h.mes===referencia);
+  const energiaInjetadaUtilizadaKwh = mesReferenciaNaTabela?.injetadaUtilizada ?? null;
+  const excedenteDistribuidoKwh = mesReferenciaNaTabela?.excedenteDistribuido ?? null;
+  const excedenteRecebidoKwh = mesReferenciaNaTabela?.excedenteRecebido ?? null;
 
-  return { referencia, vencimento, valorTotal, consumoKwh, energiaInjetadaKwh, saldoCreditosAnteriorKwh, creditosUtilizadosKwh, saldoCreditosAtualKwh, bandeira, pisValor, cofinsValor, icmsValor, tarifaEnergiaKwh, tarifaTEKwh, tarifaTUSDKwh, cosipValor, multaValor, jurosValor, alertaSuspensao, proximaLeitura, historicoCreditos };
+  return { referencia, vencimento, valorTotal, consumoKwh, energiaInjetadaKwh, energiaInjetadaUtilizadaKwh, excedenteDistribuidoKwh, excedenteRecebidoKwh, saldoCreditosAnteriorKwh, creditosUtilizadosKwh, saldoCreditosAtualKwh, bandeira, pisValor, cofinsValor, icmsValor, tarifaEnergiaKwh, tarifaTEKwh, tarifaTUSDKwh, cosipValor, multaValor, jurosValor, correcaoValor, alertaSuspensao, proximaLeitura, historicoCreditos };
 }
 
 function parseNotaCorretagem(linhas){
@@ -18938,6 +18949,43 @@ function gerarUsinaSolarPDF(tema){
 // como já funcionavam antes.
 // Grade do calendário mensal (§24) — array de 35/42 células (múltiplo de 7), null nas posições
 // vazias antes do dia 1 e depois do último dia do mês, testado isoladamente antes de usar aqui.
+// Tarifa vigente numa data, olhando o histórico registrado manualmente (§12) — testada isoladamente
+// antes de usar aqui. Se não houver histórico cobrindo a data, retorna null (quem chama decide o
+// que fazer, normalmente cair pra tarifa da fatura mais próxima, como já fazia antes).
+// Análise automática comparando uma fatura com a anterior (§63) — só sinaliza mudanças
+// significativas (10-15% pra evitar alarme falso por flutuação pequena), sempre descritiva,
+// nunca afirmando causa (não diz "painel sujo", só descreve o que mudou).
+function analiseAutomaticaFaturaUsinaSolar(atual, anterior){
+  const msgs = [];
+  if(!anterior) return msgs;
+  if(atual.consumoKwh!=null && anterior.consumoKwh>0){
+    const diff = atual.consumoKwh - anterior.consumoKwh;
+    if(Math.abs(diff) >= anterior.consumoKwh*0.1) msgs.push(`Consumo ${diff>0?'aumentou':'diminuiu'} em relação ao mês anterior (${anterior.consumoKwh} → ${atual.consumoKwh} kWh)`);
+  }
+  if(atual.energiaInjetadaKwh!=null && anterior.energiaInjetadaKwh>0){
+    const diff = atual.energiaInjetadaKwh - anterior.energiaInjetadaKwh;
+    if(Math.abs(diff) >= anterior.energiaInjetadaKwh*0.1) msgs.push(`Energia injetada ${diff>0?'aumentou':'caiu'} em relação ao mês anterior (${anterior.energiaInjetadaKwh} → ${atual.energiaInjetadaKwh} kWh)`);
+  }
+  if(atual.saldoCreditosAtualKwh!=null && anterior.saldoCreditosAtualKwh!=null){
+    if(atual.saldoCreditosAtualKwh > anterior.saldoCreditosAtualKwh) msgs.push('Saldo de créditos aumentou em relação ao mês anterior');
+    else if(atual.saldoCreditosAtualKwh < anterior.saldoCreditosAtualKwh) msgs.push('Saldo de créditos diminuiu em relação ao mês anterior');
+  }
+  if(atual.valorTotal!=null && anterior.valorTotal>0){
+    const diff = atual.valorTotal - anterior.valorTotal;
+    if(Math.abs(diff) >= anterior.valorTotal*0.15) msgs.push(`Valor da fatura ${diff>0?'aumentou':'diminuiu'} em relação ao mês anterior (${brl(anterior.valorTotal)} → ${brl(atual.valorTotal)})`);
+  }
+  if(atual.tarifaEnergiaKwh!=null && anterior.tarifaEnergiaKwh!=null && atual.tarifaEnergiaKwh!==anterior.tarifaEnergiaKwh){
+    msgs.push('Tarifa sofreu alteração em relação ao mês anterior');
+  }
+  return msgs;
+}
+
+function tarifaVigenteEmUsinaSolar(tarifas, data){
+  const validas = (tarifas||[]).filter(t => t.dataInicio<=data && (!t.dataFim || t.dataFim>=data));
+  if(!validas.length) return null;
+  return validas.sort((a,b)=>b.dataInicio.localeCompare(a.dataInicio))[0];
+}
+
 function gerarGradeMesUsinaSolar(anoMes){
   const [ano, mes] = anoMes.split('-').map(Number);
   const primeiroDia = new Date(ano, mes-1, 1);
@@ -19042,7 +19090,23 @@ function viewUsinaSolar(){
 
   // ---- Evolução do saldo de créditos (últimas faturas com saldo registrado)
   const evolucaoCreditos = faturasAsc.filter(f=>f.saldoCreditosAtualKwh!=null).slice(-12);
+  // ---- Totais de créditos (§19) — gerado (energia injetada) e utilizado, somados direto das
+  // faturas registradas. "Expirados" eu não calculo (exigiria reconstruir o FIFO exato de qual lote
+  // venceu quando, e a própria fatura não me dá essa granularidade) — mostro "Não informado".
+  const creditosGeradosTotal = faturasAsc.reduce((s,f)=>s+(f.energiaInjetadaKwh||0),0);
+  const creditosUtilizadosTotal = faturasAsc.reduce((s,f)=>s+(f.creditosUtilizadosKwh||0),0);
   const maxCredito = Math.max(1, ...evolucaoCreditos.map(f=>f.saldoCreditosAtualKwh));
+
+  // ---- Tendência de créditos (§64) — baseada nas últimas 2 faturas com saldo registrado
+  let tendenciaCreditos = null;
+  if(evolucaoCreditos.length>=2){
+    const ultimo = evolucaoCreditos[evolucaoCreditos.length-1].saldoCreditosAtualKwh;
+    const penultimo = evolucaoCreditos[evolucaoCreditos.length-2].saldoCreditosAtualKwh;
+    tendenciaCreditos = ultimo>penultimo ? { seta:'↑', texto:'aumentando' } : ultimo<penultimo ? { seta:'↓', texto:'diminuindo' } : { seta:'→', texto:'estável' };
+  }
+
+  // ---- Análise automática (§63) — compara a última fatura com a anterior
+  const analiseAutomatica = faturasAsc.length>=2 ? analiseAutomaticaFaturaUsinaSolar(faturasAsc[faturasAsc.length-1], faturasAsc[faturasAsc.length-2]) : [];
 
   // ---- Ranking de meses por geração (todas as leituras tipo "mes" que existirem)
   const rankingGeracao = [...leituras.filter(l=>l.periodo==='mes')].sort((a,b)=>b.geracaoKwh-a.geracaoKwh).slice(0,6);
@@ -19140,7 +19204,8 @@ function viewUsinaSolar(){
   const geracaoNoPeriodo = leiturasDiaNoPeriodo.length
     ? leiturasDiaNoPeriodo.reduce((s,l)=>s+l.geracaoKwh,0)
     : (leiturasMesNoPeriodo[0]?.geracaoKwh || 0);
-  const tarifaParaEconomia = ultimaFatura?.tarifaEnergiaKwh || (economiaMediaMensal && faturasComDados.length ? faturasComDados[faturasComDados.length-1].valorTotal/faturasComDados[faturasComDados.length-1].consumoKwh : null);
+  const tarifaHistoricoHoje = tarifaVigenteEmUsinaSolar(state.usinaTarifas, todayISO());
+  const tarifaParaEconomia = tarifaHistoricoHoje?.tarifaKwh || ultimaFatura?.tarifaEnergiaKwh || (economiaMediaMensal && faturasComDados.length ? faturasComDados[faturasComDados.length-1].valorTotal/faturasComDados[faturasComDados.length-1].consumoKwh : null);
   const economiaNoPeriodo = tarifaParaEconomia!=null ? geracaoNoPeriodo*tarifaParaEconomia : null;
   const geracaoTotalAcumulada = leituras.filter(l=>l.periodo==='mes').reduce((s,l)=>s+l.geracaoKwh,0);
 
@@ -19195,7 +19260,7 @@ function viewUsinaSolar(){
 
   const abas = [
     ['visao-geral','Visão Geral'], ['geracao','Geração'], ['economia','Economia'],
-    ['faturas','Faturas e Créditos'], ['desempenho','Desempenho'], ['equipamentos','Equipamentos'],
+    ['faturas','Faturas'], ['creditos','Créditos'], ['desempenho','Desempenho'], ['equipamentos','Equipamentos'],
     ['manutencao','Manutenção'], ['historico','Histórico'], ['relatorios','Relatórios'], ['config','Configuração']
   ];
 
@@ -19408,29 +19473,54 @@ function viewUsinaSolar(){
     </div>
 
     <div data-aba-painel="faturas" style="display:${abaAtiva==='faturas'?'block':'none'};margin-top:14px;">
+      ${ultimaFatura ? `
+      <div class="contas-secao-titulo" style="margin-top:0;">🧾 Última fatura (${competenciaLabel(ultimaFatura.referencia)})</div>
+      <div class="fluxo-resumo-4col">
+        <div class="fluxo-resumo-item"><div class="lbl">Valor</div><div class="val">${brl(ultimaFatura.valorTotal)}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Consumo</div><div class="val">${ultimaFatura.consumoKwh!=null?ultimaFatura.consumoKwh+' kWh':'—'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Energia injetada</div><div class="val">${ultimaFatura.energiaInjetadaKwh!=null?ultimaFatura.energiaInjetadaKwh+' kWh':'—'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Energia compensada</div><div class="val">${ultimaFatura.energiaInjetadaUtilizadaKwh!=null?ultimaFatura.energiaInjetadaUtilizadaKwh+' kWh':'—'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Saldo de créditos</div><div class="val">${ultimaFatura.saldoCreditosAtualKwh!=null?ultimaFatura.saldoCreditosAtualKwh+' kWh':'—'}</div></div>
+        ${ultimaFatura.vencimento ? `<div class="fluxo-resumo-item"><div class="lbl">Vencimento</div><div class="val" style="font-size:13px;">${fmtDate(ultimaFatura.vencimento)}</div></div>` : ''}
+      </div>
+
+      ${analiseAutomatica.length ? `
+      <div class="panel" style="margin-top:10px;"><div class="panel-body" style="padding:0;">
+        ${analiseAutomatica.map(m=>`
+          <div class="ledger-row compact" style="grid-template-columns:auto 1fr;">
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--blue-accent);display:inline-block;"></span>
+            <span style="font-size:13px;">${m}</span>
+          </div>
+        `).join('')}
+      </div></div>` : ''}
+
+      <details class="panel-details" style="margin-top:10px;">
+        <summary>Ver composição da fatura</summary>
+        <div style="padding:14px 18px;">
+          ${[
+            ['TE (energia)', ultimaFatura.tarifaTEKwh?`R$ ${ultimaFatura.tarifaTEKwh.toFixed(6).replace('.',',')}/kWh`:null],
+            ['TUSD (distribuição)', ultimaFatura.tarifaTUSDKwh?`R$ ${ultimaFatura.tarifaTUSDKwh.toFixed(6).replace('.',',')}/kWh`:null],
+            ['Bandeira', ultimaFatura.bandeira],
+            ['PIS', ultimaFatura.pisValor>0?brl(ultimaFatura.pisValor):null],
+            ['COFINS', ultimaFatura.cofinsValor>0?brl(ultimaFatura.cofinsValor):null],
+            ['ICMS', ultimaFatura.icmsValor>0?brl(ultimaFatura.icmsValor):null],
+            ['COSIP (iluminação pública)', ultimaFatura.cosipValor>0?brl(ultimaFatura.cosipValor):null],
+            ['Multa', ultimaFatura.multaValor>0?brl(ultimaFatura.multaValor):null],
+            ['Juros', ultimaFatura.jurosValor>0?brl(ultimaFatura.jurosValor):null],
+            ['Correção monetária', ultimaFatura.correcaoValor>0?brl(ultimaFatura.correcaoValor):null],
+          ].filter(([,v])=>v).map(([k,v])=>`<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;border-bottom:1px solid var(--line);"><span style="color:var(--text-soft);">${k}</span><span class="mono">${v}</span></div>`).join('') || `<div class="empty">Sem detalhamento suficiente extraído dessa fatura.</div>`}
+        </div>
+      </details>
+      ` : ''}
+
       ${distribuicaoFatura ? `
-      <div class="contas-secao-titulo" style="margin-top:0;">Pra onde vai o dinheiro da fatura (${competenciaLabel(ultimaFatura.referencia)})</div>
+      <div class="contas-secao-titulo" style="margin-top:22px;">Pra onde vai o dinheiro da fatura (${competenciaLabel(ultimaFatura.referencia)})</div>
       <div class="panel"><div class="panel-body" style="padding:14px 18px;">
         <div style="display:flex;height:22px;border-radius:6px;overflow:hidden;margin-bottom:10px;">
           ${distribuicaoFatura.map(d=>`<div style="width:${(d.valor/ultimaFatura.valorTotal*100).toFixed(1)}%;background:${d.cor};" title="${d.nome}: ${brl(d.valor)}"></div>`).join('')}
         </div>
         ${distribuicaoFatura.map(d=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;"><span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${d.cor};margin-right:6px;"></span>${d.nome}</span><span class="mono">${brl(d.valor)} (${(d.valor/ultimaFatura.valorTotal*100).toFixed(0)}%)</span></div>`).join('')}
       </div></div>` : ''}
-
-      ${evolucaoCreditos.length>1 ? `
-      <div class="contas-secao-titulo">Evolução do saldo de créditos</div>
-      <div class="panel"><div class="panel-body" style="padding:16px 18px;">
-        <div style="display:flex;align-items:flex-end;gap:4px;height:70px;">
-          ${evolucaoCreditos.map(f=>`
-            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;" title="${competenciaLabel(f.referencia)}: ${f.saldoCreditosAtualKwh} kWh">
-              <div style="width:100%;max-width:26px;background:var(--success);opacity:.75;border-radius:2px 2px 0 0;height:${Math.max(2,Math.round(f.saldoCreditosAtualKwh/maxCredito*60))}px;"></div>
-            </div>
-          `).join('')}
-        </div>
-        <div style="display:flex;justify-content:space-between;font-size:9.5px;color:var(--text-soft);margin-top:4px;">
-          <span>${competenciaLabel(evolucaoCreditos[0].referencia)}</span><span>${competenciaLabel(evolucaoCreditos[evolucaoCreditos.length-1].referencia)}</span>
-        </div>
-      </div></div>` : `<div class="note">Não informado — sem saldo de créditos suficiente registrado ainda.</div>`}
 
       ${bandeirasHistorico.length ? `
       <div class="contas-secao-titulo">Bandeira tarifária ao longo do tempo</div>
@@ -19469,6 +19559,36 @@ function viewUsinaSolar(){
           </div>
         `).join('') : `<div class="empty">Nenhuma fatura registrada ainda.</div>`}
       </div></div>
+    </div>
+
+    <div data-aba-painel="creditos" style="display:${abaAtiva==='creditos'?'block':'none'};margin-top:14px;">
+      <div class="fluxo-resumo-4col">
+        <div class="fluxo-resumo-item"><div class="lbl">Saldo atual</div><div class="val">${saldoCreditosAtual!=null?saldoCreditosAtual+' kWh':'—'}${tendenciaCreditos?` <span style="font-size:14px;" title="${tendenciaCreditos.texto}">${tendenciaCreditos.seta}</span>`:''}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Créditos gerados (total)</div><div class="val">${creditosGeradosTotal>0?creditosGeradosTotal.toFixed(0)+' kWh':'Não informado'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Créditos utilizados (total)</div><div class="val">${creditosUtilizadosTotal>0?creditosUtilizadosTotal.toFixed(0)+' kWh':'Não informado'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Créditos expirados</div><div class="val" style="font-size:12.5px;">Não informado</div></div>
+      </div>
+      ${tendenciaCreditos ? `<div class="note" style="margin-top:6px;">🔋 Saldo de créditos ${tendenciaCreditos.texto} (${tendenciaCreditos.seta}), com base nas duas últimas faturas com saldo registrado.</div>` : ''}
+      <div class="note" style="margin-top:6px;">"Créditos expirados" eu não calculo — exigiria saber exatamente qual mês gerou cada kWh de crédito ainda não usado, e a fatura não me dá essa granularidade por lote.</div>
+
+      ${alertaCreditoV2 ? `
+      <div class="note" style="border-color:var(--warn);margin-top:14px;">⚠️ Créditos próximos de expirar: o mês mais antigo com saldo no histórico (${competenciaLabel(alertaCreditoV2.referencia)}) já tem ${alertaCreditoV2.meses} mês(es) — os créditos valem 60 meses (Lei 14.300/2022).</div>
+      ` : `<div class="note" style="margin-top:14px;">Nenhum crédito próximo de expirar (55+ meses) identificado no histórico registrado.</div>`}
+
+      ${evolucaoCreditos.length>1 ? `
+      <div class="contas-secao-titulo" style="margin-top:22px;">Evolução do saldo de créditos</div>
+      <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+        <div style="display:flex;align-items:flex-end;gap:4px;height:70px;">
+          ${evolucaoCreditos.map(f=>`
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;" title="${competenciaLabel(f.referencia)}: ${f.saldoCreditosAtualKwh} kWh">
+              <div style="width:100%;max-width:26px;background:var(--success);opacity:.75;border-radius:2px 2px 0 0;height:${Math.max(2,Math.round(f.saldoCreditosAtualKwh/maxCredito*60))}px;"></div>
+            </div>
+          `).join('')}
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:9.5px;color:var(--text-soft);margin-top:4px;">
+          <span>${competenciaLabel(evolucaoCreditos[0].referencia)}</span><span>${competenciaLabel(evolucaoCreditos[evolucaoCreditos.length-1].referencia)}</span>
+        </div>
+      </div></div>` : `<div class="note" style="margin-top:22px;">Não informado — sem saldo de créditos suficiente registrado ainda pra montar o gráfico.</div>`}
     </div>
 
     <div data-aba-painel="desempenho" style="display:${abaAtiva==='desempenho'?'block':'none'};margin-top:14px;">
@@ -19638,7 +19758,8 @@ function viewUsinaSolar(){
           </div>
         `).join('') : `<div class="empty">Nenhuma tarifa registrada manualmente ainda — os cálculos de economia usam a tarifa de cada fatura registrada, que já reflete o valor real de cada período.</div>`}
       </div></div>
-      <div class="note" style="margin-top:0;">Isso é um registro de referência — os cálculos de economia por fatura já usam automaticamente a tarifa de cada fatura no seu próprio período (não aplicam a tarifa de hoje pro passado).</div>
+      <div class="note" style="margin-top:0;">A tarifa vigente hoje (registrada aqui) é usada no card "Economia no período" e no detalhe do calendário de geração. Já os cálculos de economia <strong>por fatura</strong> continuam usando a tarifa de cada fatura no seu próprio período (não aplicam a tarifa de hoje pro passado).</div>
+      <div class="note" style="margin-top:8px;">Nenhuma tarifa registrada aqui? Sem problema — os cálculos caem automaticamente pra tarifa da fatura mais recente.</div>
     </div>
   `;
 }
@@ -33777,6 +33898,7 @@ function openRegistrarFaturaEnergiaModal(){
         <div class="field"><label>Multa por atraso (R$)</label><input type="text" inputmode="decimal" id="feMulta"></div>
         <div class="field"><label>Juros por atraso (R$)</label><input type="text" inputmode="decimal" id="feJuros"></div>
       </div>
+      <div class="field"><label>Correção monetária (R$)</label><input type="text" inputmode="decimal" id="feCorrecao"></div>
     </details>
     <div class="field" style="margin-top:10px;">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;">
@@ -33824,7 +33946,8 @@ function openRegistrarFaturaEnergiaModal(){
       if(dados.cosipValor!=null) document.getElementById('feCosip').value = dados.cosipValor;
       if(dados.multaValor!=null) document.getElementById('feMulta').value = dados.multaValor;
       if(dados.jurosValor!=null) document.getElementById('feJuros').value = dados.jurosValor;
-      dadosExtrasNaoEditaveis = { alertaSuspensao: dados.alertaSuspensao||null, proximaLeitura: dados.proximaLeitura||null, historicoCreditos: dados.historicoCreditos||null };
+      if(dados.correcaoValor!=null) document.getElementById('feCorrecao').value = dados.correcaoValor;
+      dadosExtrasNaoEditaveis = { alertaSuspensao: dados.alertaSuspensao||null, proximaLeitura: dados.proximaLeitura||null, historicoCreditos: dados.historicoCreditos||null, energiaInjetadaUtilizadaKwh: dados.energiaInjetadaUtilizadaKwh??null, excedenteDistribuidoKwh: dados.excedenteDistribuidoKwh??null, excedenteRecebidoKwh: dados.excedenteRecebidoKwh??null };
       if(dados.alertaSuspensao){
         status.style.display = 'block';
         status.style.borderColor = 'var(--danger)';
@@ -33904,6 +34027,7 @@ function openRegistrarFaturaEnergiaModal(){
     const cosipValor = numBR(document.getElementById('feCosip').value) || null;
     const multaValor = numBR(document.getElementById('feMulta').value) || null;
     const jurosValor = numBR(document.getElementById('feJuros').value) || null;
+    const correcaoValor = numBR(document.getElementById('feCorrecao').value) || null;
     if(!referencia){ showToast('Preencha a referência (mês)'); return; }
     if(isNaN(valorTotal) || valorTotal<=0){ showToast('Preencha o valor total'); return; }
     if(!state.usinaFaturas) state.usinaFaturas = [];
@@ -33911,10 +34035,13 @@ function openRegistrarFaturaEnergiaModal(){
     const registro = {
       id: existente?.id||uid(), referencia, vencimento, valorTotal, bandeira, consumoKwh, energiaInjetadaKwh,
       saldoCreditosAnteriorKwh, creditosUtilizadosKwh, saldoCreditosAtualKwh, pisValor, cofinsValor, icmsValor,
-      tarifaEnergiaKwh, cosipValor, multaValor, jurosValor,
+      tarifaEnergiaKwh, cosipValor, multaValor, jurosValor, correcaoValor,
       alertaSuspensao: dadosExtrasNaoEditaveis?.alertaSuspensao || null,
       proximaLeitura: dadosExtrasNaoEditaveis?.proximaLeitura || null,
       historicoCreditos: dadosExtrasNaoEditaveis?.historicoCreditos || null,
+      energiaInjetadaUtilizadaKwh: dadosExtrasNaoEditaveis?.energiaInjetadaUtilizadaKwh ?? null,
+      excedenteDistribuidoKwh: dadosExtrasNaoEditaveis?.excedenteDistribuidoKwh ?? null,
+      excedenteRecebidoKwh: dadosExtrasNaoEditaveis?.excedenteRecebidoKwh ?? null,
       criadoEm: new Date().toISOString()
     };
     if(existente) Object.assign(existente, registro); else state.usinaFaturas.push(registro);
