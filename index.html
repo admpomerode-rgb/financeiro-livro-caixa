@@ -5776,6 +5776,18 @@ function acessoRapidoHTML(t){
       ${item('🏦','Contas', `Saldo total: <strong class="mono ${caixaAtual>=0?'':'neg'}">${vm(brl(caixaAtual))}</strong>`, `${state.contas.filter(c=>!c.arquivada).length} conta(s)`, 'contas')}
       ${item('📜','Lançamentos', `${qtdLancMes} no mês`, 'Ver todos', 'todos-lancamentos')}
       ${item('📑','Relatórios', 'Análises completas', 'DRE, indicadores e mais', 'relatorios')}
+      ${(()=>{
+        const leiturasMesUsina = (state.usinaLeituras||[]).filter(l=>l.periodo==='mes' && l.data.slice(0,7)===mesRef);
+        const geracaoMesUsina = leiturasMesUsina[0]?.geracaoKwh || 0;
+        const faturaUsinaRecente = [...(state.usinaFaturas||[])].sort((a,b)=>b.referencia.localeCompare(a.referencia))[0];
+        const economiaMesUsina = faturaUsinaRecente?.tarifaEnergiaKwh ? geracaoMesUsina*faturaUsinaRecente.tarifaEnergiaKwh : null;
+        const creditoUsina = faturaUsinaRecente?.saldoCreditosAtualKwh;
+        if(!state.usinaSolar?.capacidadeKw && !(state.usinaLeituras||[]).length && !(state.usinaFaturas||[]).length) return '';
+        return item('☀️','Usina Solar',
+          geracaoMesUsina>0 ? `Geração: <strong class="mono">${geracaoMesUsina} kWh</strong>` : 'Sem geração no mês',
+          `${economiaMesUsina!=null?'Economia ~'+vm(brl(economiaMesUsina)):''}${creditoUsina!=null?' · Créd. '+creditoUsina+' kWh':''}`,
+          'usina-solar');
+      })()}
     </div>
   `;
 }
@@ -18828,15 +18840,17 @@ function semaforo(valor, limiteVerde, limiteAmarelo, inverso){
   return valor>=limiteVerde ? '🟢' : valor>=limiteAmarelo ? '🟡' : '🔴';
 }
 
-function gerarUsinaSolarPDF(){
+function gerarUsinaSolarPDF(tema){
   if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
   const docPdf = criarPDF();
   const M = 18, PW = 210, W = PW - M*2;
   const INK=[11,15,20], SOFT=[91,100,114];
-  let y = pdfCabecalho(docPdf, { relatorio:'Usina Solar', subtitulo:'Geração, faturas e cruzamento com a fatura de energia' });
+  const titulos = { geracao:'Relatório de Geração', financeiro:'Relatório Financeiro', desempenho:'Relatório de Desempenho', faturas:'Relatório de Faturas', creditos:'Relatório de Créditos', manutencao:'Relatório de Manutenção' };
+  let y = pdfCabecalho(docPdf, { relatorio: titulos[tema] || 'Usina Solar — Relatório Completo', subtitulo:'Geração, faturas e cruzamento com a fatura de energia' });
 
   const leituras = [...(state.usinaLeituras||[])].sort((a,b)=>(b.data||'').localeCompare(a.data||''));
   const faturas = [...(state.usinaFaturas||[])].sort((a,b)=>(b.referencia||'').localeCompare(a.referencia||''));
+  const manutencoes = [...(state.usinaManutencoes||[])].sort((a,b)=>(b.data||'').localeCompare(a.data||''));
   const usina = state.usinaSolar || {};
 
   docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10.5); docPdf.setTextColor(...INK);
@@ -18844,41 +18858,117 @@ function gerarUsinaSolarPDF(){
   docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
   docPdf.text(`Capacidade: ${usina.capacidadeKw?usina.capacidadeKw+' kW':'—'}   ·   Instalada em: ${usina.dataInstalacao?fmtDate(usina.dataInstalacao):'—'}`, M, y); y += 10;
 
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10.5); docPdf.setTextColor(...INK);
-  docPdf.text('Histórico de faturas', M, y); y += 7;
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(8); docPdf.setTextColor(...SOFT);
-  docPdf.text('Referência', M, y); docPdf.text('Consumo', M+35, y); docPdf.text('Injetada', M+65, y); docPdf.text('Saldo créd.', M+95, y); docPdf.text('Tarifa/kWh', M+130, y); docPdf.text('Total', M+W, y, { align:'right' });
-  y += 2; docPdf.setDrawColor(227,231,238); docPdf.line(M, y, M+W, y); y += 5;
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...INK);
-  faturas.forEach(f=>{
-    y = pdfChecarQuebra(docPdf, y, 6);
-    docPdf.text(competenciaLabel(f.referencia), M, y);
-    docPdf.text(f.consumoKwh!=null?f.consumoKwh+' kWh':'—', M+35, y);
-    docPdf.text(f.energiaInjetadaKwh!=null?f.energiaInjetadaKwh+' kWh':'—', M+65, y);
-    docPdf.text(f.saldoCreditosAtualKwh!=null?f.saldoCreditosAtualKwh+' kWh':'—', M+95, y);
-    docPdf.text(f.tarifaEnergiaKwh?brl(f.tarifaEnergiaKwh):'—', M+130, y);
-    docPdf.text(brl(f.valorTotal), M+W, y, { align:'right' });
-    y += 6;
-  });
-  y += 8;
+  if(!tema || tema==='financeiro'){
+    const faturasComDadosPdf = faturas.filter(f=>f.consumoKwh>0 && f.energiaInjetadaKwh!=null && f.valorTotal!=null);
+    const economiaAcumuladaPdf = faturasComDadosPdf.reduce((s,f)=>s+f.energiaInjetadaKwh*(f.valorTotal/f.consumoKwh),0);
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10.5); docPdf.setTextColor(...INK);
+    docPdf.text('Investimento e economia', M, y); y += 6;
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
+    const manutTotalPdf = manutencoes.reduce((s,m)=>s+(m.valor||0),0);
+    const investimentoTotalPdf = (usina.valorInvestido||0) + (usina.custosAdicionais||0) + manutTotalPdf + (usina.outrosCustos||0);
+    docPdf.text(`Investimento total: ${investimentoTotalPdf>0?brl(investimentoTotalPdf):'—'}   ·   Economia estimada acumulada: ${brl(economiaAcumuladaPdf)}`, M, y); y += 10;
+  }
 
-  y = pdfChecarQuebra(docPdf, y, 20);
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10.5); docPdf.setTextColor(...INK);
-  docPdf.text('Histórico de geração', M, y); y += 7;
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(8); docPdf.setTextColor(...SOFT);
-  docPdf.text('Data', M, y); docPdf.text('Período', M+40, y); docPdf.text('Geração', M+W, y, { align:'right' });
-  y += 2; docPdf.line(M, y, M+W, y); y += 5;
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...INK);
-  leituras.forEach(l=>{
-    y = pdfChecarQuebra(docPdf, y, 6);
-    docPdf.text(fmtDate(l.data), M, y);
-    docPdf.text(l.periodo, M+40, y);
-    docPdf.text(l.geracaoKwh+' kWh', M+W, y, { align:'right' });
-    y += 6;
-  });
+  if(!tema || tema==='faturas' || tema==='creditos'){
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10.5); docPdf.setTextColor(...INK);
+    docPdf.text('Histórico de faturas', M, y); y += 7;
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(8); docPdf.setTextColor(...SOFT);
+    docPdf.text('Referência', M, y); docPdf.text('Consumo', M+35, y); docPdf.text('Injetada', M+65, y); docPdf.text('Saldo créd.', M+95, y); docPdf.text('Tarifa/kWh', M+130, y); docPdf.text('Total', M+W, y, { align:'right' });
+    y += 2; docPdf.setDrawColor(227,231,238); docPdf.line(M, y, M+W, y); y += 5;
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...INK);
+    faturas.forEach(f=>{
+      y = pdfChecarQuebra(docPdf, y, 6);
+      docPdf.text(competenciaLabel(f.referencia), M, y);
+      docPdf.text(f.consumoKwh!=null?f.consumoKwh+' kWh':'—', M+35, y);
+      docPdf.text(f.energiaInjetadaKwh!=null?f.energiaInjetadaKwh+' kWh':'—', M+65, y);
+      docPdf.text(f.saldoCreditosAtualKwh!=null?f.saldoCreditosAtualKwh+' kWh':'—', M+95, y);
+      docPdf.text(f.tarifaEnergiaKwh?brl(f.tarifaEnergiaKwh):'—', M+130, y);
+      docPdf.text(brl(f.valorTotal), M+W, y, { align:'right' });
+      y += 6;
+    });
+    y += 8;
+  }
+
+  if(!tema || tema==='geracao' || tema==='desempenho'){
+    y = pdfChecarQuebra(docPdf, y, 20);
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10.5); docPdf.setTextColor(...INK);
+    docPdf.text('Histórico de geração', M, y); y += 7;
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(8); docPdf.setTextColor(...SOFT);
+    docPdf.text('Data', M, y); docPdf.text('Período', M+40, y); docPdf.text('Geração', M+W, y, { align:'right' });
+    y += 2; docPdf.line(M, y, M+W, y); y += 5;
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...INK);
+    leituras.forEach(l=>{
+      y = pdfChecarQuebra(docPdf, y, 6);
+      docPdf.text(fmtDate(l.data), M, y);
+      docPdf.text(l.periodo, M+40, y);
+      docPdf.text(l.geracaoKwh+' kWh', M+W, y, { align:'right' });
+      y += 6;
+    });
+    y += 8;
+  }
+
+  if(!tema || tema==='manutencao'){
+    y = pdfChecarQuebra(docPdf, y, 20);
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10.5); docPdf.setTextColor(...INK);
+    docPdf.text('Histórico de manutenções', M, y); y += 7;
+    if(manutencoes.length){
+      docPdf.setFont('helvetica','bold'); docPdf.setFontSize(8); docPdf.setTextColor(...SOFT);
+      docPdf.text('Data', M, y); docPdf.text('Descrição', M+30, y); docPdf.text('Custo', M+W, y, { align:'right' });
+      y += 2; docPdf.line(M, y, M+W, y); y += 5;
+      docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...INK);
+      manutencoes.forEach(m=>{
+        y = pdfChecarQuebra(docPdf, y, 6);
+        docPdf.text(fmtDate(m.data), M, y);
+        docPdf.text(pdfSafe(m.descricao||''), M+30, y);
+        docPdf.text(m.valor>0?brl(m.valor):'—', M+W, y, { align:'right' });
+        y += 6;
+      });
+    } else {
+      docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
+      docPdf.text('Nenhuma manutenção registrada.', M, y); y += 6;
+    }
+  }
 
   pdfNumerarPaginas(docPdf);
-  docPdf.save(`usina-solar-${todayISO()}.pdf`);
+  docPdf.save(`usina-solar${tema?'-'+tema:''}-${todayISO()}.pdf`);
+}
+
+// Seletor de período da Usina Solar (usado só na Visão Geral, pra "geração/economia no período").
+// Não mexe em nenhum outro gráfico/cálculo da tela — esses continuam olhando o histórico inteiro,
+// como já funcionavam antes.
+// Grade do calendário mensal (§24) — array de 35/42 células (múltiplo de 7), null nas posições
+// vazias antes do dia 1 e depois do último dia do mês, testado isoladamente antes de usar aqui.
+function gerarGradeMesUsinaSolar(anoMes){
+  const [ano, mes] = anoMes.split('-').map(Number);
+  const primeiroDia = new Date(ano, mes-1, 1);
+  const diasNoMes = new Date(ano, mes, 0).getDate();
+  const diaSemanaInicio = primeiroDia.getDay();
+  const celulas = [];
+  for(let i=0;i<diaSemanaInicio;i++) celulas.push(null);
+  for(let d=1;d<=diasNoMes;d++) celulas.push(`${anoMes}-${String(d).padStart(2,'0')}`);
+  while(celulas.length % 7 !== 0) celulas.push(null);
+  return celulas;
+}
+
+function calcularPeriodoUsinaSolar(sel, dataInstalacao, personalDe, personalAte){
+  const hoje = todayISO();
+  const ano = hoje.slice(0,4), mesRef = hoje.slice(0,7);
+  switch(sel){
+    case 'hoje': return { de: hoje, ate: hoje, label: 'Hoje' };
+    case 'ontem': { const o = addDiasISO(hoje,-1); return { de:o, ate:o, label: 'Ontem' }; }
+    case 'semana': { const dow = new Date(hoje+'T00:00:00').getDay(); return { de: addDiasISO(hoje,-dow), ate: hoje, label: 'Esta semana' }; }
+    case 'mes-anterior': {
+      const [a,m] = mesRef.split('-').map(Number);
+      const am = m===1 ? `${a-1}-12` : `${a}-${String(m-1).padStart(2,'0')}`;
+      const ultimoDia = new Date(Number(am.split('-')[0]), Number(am.split('-')[1]), 0).getDate();
+      return { de: am+'-01', ate: am+'-'+String(ultimoDia).padStart(2,'0'), label: 'Mês anterior' };
+    }
+    case 'ano': return { de: ano+'-01-01', ate: hoje, label: 'Este ano' };
+    case 'ano-anterior': return { de: (Number(ano)-1)+'-01-01', ate: (Number(ano)-1)+'-12-31', label: 'Ano anterior' };
+    case 'instalacao': return { de: dataInstalacao || '2000-01-01', ate: hoje, label: 'Desde a instalação' };
+    case 'personalizado': return { de: personalDe||hoje, ate: personalAte||hoje, label: 'Período personalizado' };
+    case 'mes': default: return { de: mesRef+'-01', ate: hoje, label: 'Este mês' };
+  }
 }
 
 function viewUsinaSolar(){
@@ -18926,9 +19016,13 @@ function viewUsinaSolar(){
   const economiaPorFatura = faturasComDados.map(f=>({ referencia: f.referencia, economia: f.energiaInjetadaKwh*(f.valorTotal/f.consumoKwh) }));
   const economiaMediaMensal = economiaPorFatura.length ? economiaPorFatura.reduce((s,e)=>s+e.economia,0)/economiaPorFatura.length : null;
   const economiaAcumulada = economiaPorFatura.reduce((s,e)=>s+e.economia,0);
+  // Investimento total = inicial + custos adicionais + manutenções já registradas + outros custos
+  // (antes só olhava o valor inicial — a especificação pede contar manutenção como parte do custo real)
+  const custoManutencaoParaPayback = manutencoes.reduce((s,m)=>s+(m.valor||0),0);
+  const investimentoTotalReal = (usina.valorInvestido||0) + (usina.custosAdicionais||0) + custoManutencaoParaPayback + (usina.outrosCustos||0);
   let paybackTexto = null;
-  if(usina.valorInvestido>0 && economiaMediaMensal>0){
-    const restante = Math.max(0, usina.valorInvestido-economiaAcumulada);
+  if(investimentoTotalReal>0 && economiaMediaMensal>0){
+    const restante = Math.max(0, investimentoTotalReal-economiaAcumulada);
     const mesesFaltando = Math.ceil(restante/economiaMediaMensal);
     paybackTexto = restante<=0 ? 'Já pago (pela estimativa)' : `~${mesesFaltando} mês(es) (${(mesesFaltando/12).toFixed(1)} ano(s))`;
   }
@@ -19032,10 +19126,82 @@ function viewUsinaSolar(){
   const mediaRecente = ultimasLeiturasMes.length ? ultimasLeiturasMes.reduce((s,l)=>s+l.geracaoKwh,0)/ultimasLeiturasMes.length : null;
 
   const custoManutencaoTotal = manutencoes.reduce((s,m)=>s+(m.valor||0),0);
+  const equip = state.usinaEquipamentos || {};
+  const abaAtiva = window._usinaSolarAbaAtiva || 'visao-geral';
+
+  // ---- Seletor de período (só afeta os cards "no período" da Visão Geral)
+  const periodoSel = window._usinaSolarPeriodoSel || 'mes';
+  const periodo = calcularPeriodoUsinaSolar(periodoSel, usina.dataInstalacao, window._usinaSolarPeriodoDe, window._usinaSolarPeriodoAte);
+  const leiturasNoPeriodo = leituras.filter(l=>l.data>=periodo.de && l.data<=periodo.ate);
+  const leiturasDiaNoPeriodo = leiturasNoPeriodo.filter(l=>l.periodo==='dia');
+  const leiturasMesNoPeriodo = leiturasNoPeriodo.filter(l=>l.periodo==='mes');
+  // Geração no período: soma leituras "dia" se houver; senão usa a leitura "mês" mais recente do
+  // período (que já é cumulativa, não deve ser somada com outras do mesmo mês)
+  const geracaoNoPeriodo = leiturasDiaNoPeriodo.length
+    ? leiturasDiaNoPeriodo.reduce((s,l)=>s+l.geracaoKwh,0)
+    : (leiturasMesNoPeriodo[0]?.geracaoKwh || 0);
+  const tarifaParaEconomia = ultimaFatura?.tarifaEnergiaKwh || (economiaMediaMensal && faturasComDados.length ? faturasComDados[faturasComDados.length-1].valorTotal/faturasComDados[faturasComDados.length-1].consumoKwh : null);
+  const economiaNoPeriodo = tarifaParaEconomia!=null ? geracaoNoPeriodo*tarifaParaEconomia : null;
+  const geracaoTotalAcumulada = leituras.filter(l=>l.periodo==='mes').reduce((s,l)=>s+l.geracaoKwh,0);
+
+  // ---- Alertas de desempenho consolidados (§18) — baseados só em dado real disponível, sem
+  // diagnosticar defeito físico, só descrevendo o padrão observado.
+  const alertasDesempenho = [];
+  if(alertaSuspensaoAtivo) alertasDesempenho.push({ tipo:'suspensao', texto:`Suspensão de fornecimento avisada a partir de ${fmtDate(alertaSuspensaoAtivo.data)} (dívida de ${brl(alertaSuspensaoAtivo.valor)})`, cor:'var(--danger)' });
+  if(alertaCreditoV2) alertasDesempenho.push({ tipo:'credito', texto:`Crédito de energia com ${alertaCreditoV2.meses} meses — vale conferir validade`, cor:'var(--warn)' });
+  const leiturasMesOrdenadas = [...leituras].filter(l=>l.periodo==='mes').sort((a,b)=>a.data.localeCompare(b.data));
+  if(leiturasMesOrdenadas.length>=4){
+    const ultimos3 = leiturasMesOrdenadas.slice(-3).map(l=>l.geracaoKwh);
+    const consecutivaQueda = ultimos3[0]>ultimos3[1] && ultimos3[1]>ultimos3[2];
+    if(consecutivaQueda) alertasDesempenho.push({ tipo:'queda', texto:'Produção abaixo do padrão registrado nos últimos 3 meses (queda consecutiva)', cor:'var(--warn)' });
+  }
+  if(usina.metaMensalKwh>0 && ultimaLeitura?.periodo==='mes' && ultimaLeitura.geracaoKwh < usina.metaMensalKwh*0.85){
+    alertasDesempenho.push({ tipo:'meta', texto:`Produção do último mês (${ultimaLeitura.geracaoKwh} kWh) ficou abaixo da meta (${usina.metaMensalKwh} kWh)`, cor:'var(--warn)' });
+  }
+  if(ultimaLeitura && addDiasISO(todayISO(),-35) > ultimaLeitura.data){
+    alertasDesempenho.push({ tipo:'desatualizado', texto:`Sem registro de geração há mais de 35 dias (última: ${fmtDate(ultimaLeitura.data)})`, cor:'var(--text-soft)' });
+  }
+  const manutVencida = (equip.inversor?.garantiaAte && equip.inversor.garantiaAte < todayISO()) || (equip.paineis?.garantiaAte && equip.paineis.garantiaAte < todayISO());
+  if(manutVencida) alertasDesempenho.push({ tipo:'garantia', texto:'Garantia de algum equipamento (inversor ou painéis) já venceu', cor:'var(--text-soft)' });
+
+  // ---- Recordes (§25) — só mostra quando houver dado suficiente
+  const leiturasDiaTodas = leituras.filter(l=>l.periodo==='dia');
+  const recordes = leiturasMesOrdenadas.length || leiturasDiaTodas.length ? {
+    maiorGeracaoDiaria: leiturasDiaTodas.length ? [...leiturasDiaTodas].sort((a,b)=>b.geracaoKwh-a.geracaoKwh)[0] : null,
+    maiorGeracaoMensal: leiturasMesOrdenadas.length ? [...leiturasMesOrdenadas].sort((a,b)=>b.geracaoKwh-a.geracaoKwh)[0] : null,
+    melhorMesProdutividade: produtividadePorMes.length ? [...produtividadePorMes].sort((a,b)=>b.produtividade-a.produtividade)[0] : null,
+    piorMesProdutividade: produtividadePorMes.length ? [...produtividadePorMes].sort((a,b)=>a.produtividade-b.produtividade)[0] : null,
+  } : null;
+
+  // ---- Comparação "com solar x sem solar" (§11) — só estimativa, sempre identificada como tal.
+  // Valor "sem solar" = o que você pagaria se comprasse da distribuidora toda a energia que
+  // consumiu (consumo × tarifa), sem o abatimento da energia injetada.
+  let comparacaoSemSolar = null;
+  if(ultimaFatura?.consumoKwh>0 && ultimaFatura?.tarifaEnergiaKwh){
+    const semSolar = ultimaFatura.consumoKwh * ultimaFatura.tarifaEnergiaKwh;
+    const comSolar = ultimaFatura.valorTotal;
+    comparacaoSemSolar = { semSolar, comSolar, economia: semSolar-comSolar, pct: semSolar>0 ? ((semSolar-comSolar)/semSolar*100) : 0 };
+  }
+
+  // ---- Calendário mensal (§24) — mostra geração por dia (só onde existir leitura tipo "dia")
+  const calMes = window._usinaCalendarioMes || todayISO().slice(0,7);
+  const gradeCalMes = gerarGradeMesUsinaSolar(calMes);
+  const leiturasDiaPorData = {};
+  leituras.filter(l=>l.periodo==='dia').forEach(l=>{ leiturasDiaPorData[l.data] = l; });
+  const metaDiaria = usina.metaMensalKwh>0 ? usina.metaMensalKwh/new Date(Number(calMes.split('-')[0]),Number(calMes.split('-')[1]),0).getDate() : null;
+  const maxGeracaoDiaCal = Math.max(1, ...Object.values(leiturasDiaPorData).map(l=>l.geracaoKwh));
+  const diaSelecionado = window._usinaCalendarioDiaSelecionado;
+  const leituraDiaSelecionado = diaSelecionado ? leiturasDiaPorData[diaSelecionado] : null;
+
+  const abas = [
+    ['visao-geral','Visão Geral'], ['geracao','Geração'], ['economia','Economia'],
+    ['faturas','Faturas e Créditos'], ['desempenho','Desempenho'], ['equipamentos','Equipamentos'],
+    ['manutencao','Manutenção'], ['historico','Histórico'], ['relatorios','Relatórios'], ['config','Configuração']
+  ];
 
   return `
     <div class="topbar">
-      <div><h1>☀️ Usina Solar</h1><p>Gerencie a geração e o cruzamento com a fatura de energia.</p></div>
+      <div><h1>☀️ Usina Solar</h1><p>${usina.nome ? escapeHTML(usina.nome)+' — ' : ''}Central de gestão da usina fotovoltaica.</p></div>
       <div style="display:flex;gap:8px;">
         <button class="btn ghost sm" id="btnExportarPdfUsina">📄 Exportar PDF</button>
         <button class="btn ghost sm" id="btnEditarUsinaSolar">⚙️ Dados da usina</button>
@@ -19046,182 +19212,160 @@ function viewUsinaSolar(){
       <button class="btn" id="btnRegistrarGeracaoSolar">☀️ Registrar geração</button>
       <button class="btn ghost sm" id="btnRegistrarFaturaEnergia">🧾 Registrar fatura</button>
       <button class="btn ghost sm" id="btnRegistrarManutencaoSolar">🔧 Registrar manutenção</button>
+      <button class="btn ghost sm" id="btnAtualizarDadosSolar">🔄 Atualizar dados</button>
+      <button class="btn ghost sm" id="btnVerRelatorioSolar">📊 Ver relatório</button>
     </div>
 
     ${alertaSuspensaoAtivo ? `
     <div class="note" style="border-color:var(--danger);background:rgba(220,38,38,.06);margin-top:0;">🔴 <strong>Atenção:</strong> uma fatura registrada avisa suspensão de fornecimento a partir de ${fmtDate(alertaSuspensaoAtivo.data)} (dívida de ${brl(alertaSuspensaoAtivo.valor)}). Se já resolveu isso com a Celesc, pode ignorar.</div>
     ` : ''}
-
-    ${usina.capacidadeKw || usina.dataInstalacao ? `
-    <div class="note" style="margin-top:10px;">${usina.capacidadeKw?`Capacidade: <strong>${usina.capacidadeKw} kW</strong>`:''}${usina.capacidadeKw && usina.dataInstalacao?' · ':''}${usina.dataInstalacao?`Instalada em <strong>${fmtDate(usina.dataInstalacao)}</strong>`:''}</div>
-    ` : ''}
-
     ${alertaCreditoV2 ? `
     <div class="note" style="border-color:var(--warn);margin-top:10px;">⚠️ Os créditos de energia valem 60 meses (Lei 14.300/2022). O mês mais antigo com saldo no histórico (${competenciaLabel(alertaCreditoV2.referencia)}) já tem ${alertaCreditoV2.meses} mês(es) — vale conferir na sua próxima fatura se ainda sobra saldo daquele período, antes que expire.</div>
     ` : ''}
+    ${usina.capacidadeKw || usina.dataInstalacao ? `
+    <div class="note" style="margin-top:10px;">${usina.capacidadeKw?`Capacidade: <strong>${usina.capacidadeKw} kW</strong>`:''}${usina.capacidadeKw && usina.dataInstalacao?' · ':''}${usina.dataInstalacao?`Instalada em <strong>${fmtDate(usina.dataInstalacao)}</strong>`:''} · <span style="color:var(--text-soft);">${usina.atualizacaoModo==='automatica'?'Atualizado automaticamente':'Atualização manual'}</span></div>
+    ` : ''}
 
-    <div class="fluxo-resumo-4col" style="margin-top:14px;">
-      <div class="fluxo-resumo-item"><div class="lbl">Última leitura</div><div class="val">${ultimaLeitura?`${ultimaLeitura.geracaoKwh} kWh (${ultimaLeitura.periodo})`:'—'}</div></div>
-      <div class="fluxo-resumo-item"><div class="lbl">Saldo de créditos atual</div><div class="val">${saldoCreditosAtual!=null?saldoCreditosAtual+' kWh':'—'}</div></div>
-      <div class="fluxo-resumo-item"><div class="lbl">Última fatura</div><div class="val">${ultimaFatura?brl(ultimaFatura.valorTotal):'—'}</div></div>
-      <div class="fluxo-resumo-item"><div class="lbl">Impostos pagos (total)</div><div class="val">${totalImpostos>0?brl(totalImpostos):'—'}</div></div>
-      <div class="fluxo-resumo-item"><div class="lbl">Tarifa de energia (Celesc)</div><div class="val">${ultimaFatura?.tarifaEnergiaKwh?`R$ ${ultimaFatura.tarifaEnergiaKwh.toFixed(6).replace('.',',')}/kWh`:'—'}</div></div>
-      ${ultimaFatura?.proximaLeitura ? `<div class="fluxo-resumo-item"><div class="lbl">Próxima leitura</div><div class="val">${fmtDate(ultimaFatura.proximaLeitura)}</div></div>` : ''}
+    <div class="toggle-row" id="usinaSolarAbaToggle" style="flex-wrap:wrap;margin-top:14px;">
+      ${abas.map(([id,label])=>`<button type="button" data-aba="${id}" class="${abaAtiva===id?'active':''}">${label}</button>`).join('')}
     </div>
 
-    ${fechamentoAnual ? `
-    <div class="contas-secao-titulo" style="margin-top:22px;">Fechamento de ${anoAtual}</div>
-    <div class="fluxo-resumo-4col">
-      <div class="fluxo-resumo-item"><div class="lbl">Geração total</div><div class="val">${fechamentoAnual.geracaoTotal>0?fechamentoAnual.geracaoTotal.toFixed(0)+' kWh':'—'}</div></div>
-      <div class="fluxo-resumo-item"><div class="lbl">Consumo total</div><div class="val">${fechamentoAnual.consumoTotal>0?fechamentoAnual.consumoTotal.toFixed(0)+' kWh':'—'}</div></div>
-      <div class="fluxo-resumo-item"><div class="lbl">Total pago nas faturas</div><div class="val">${brl(fechamentoAnual.valorPagoTotal)}</div></div>
-      <div class="fluxo-resumo-item"><div class="lbl">Impostos no ano</div><div class="val">${brl(fechamentoAnual.impostosTotal)}</div></div>
-    </div>` : ''}
-
-    ${usina.valorInvestido>0 ? `
-    <div class="contas-secao-titulo" style="margin-top:22px;">Investimento</div>
-    <div class="fluxo-resumo-4col">
-      <div class="fluxo-resumo-item"><div class="lbl">Valor investido</div><div class="val">${brl(usina.valorInvestido)}</div></div>
-      <div class="fluxo-resumo-item"><div class="lbl">Economia estimada (total)</div><div class="val">${brl(economiaAcumulada)}</div></div>
-      <div class="fluxo-resumo-item"><div class="lbl">Economia média/mês (estimada)</div><div class="val">${economiaMediaMensal?brl(economiaMediaMensal):'—'}</div></div>
-      <div class="fluxo-resumo-item"><div class="lbl">Payback estimado</div><div class="val" style="font-size:12.5px;">${paybackTexto||'—'}</div></div>
-    </div>
-    ${usina.valorInvestido>0 && economiaAcumulada>=0 ? `
-    <div class="panel" style="margin-top:8px;"><div class="panel-body" style="padding:12px 16px;">
-      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-soft);margin-bottom:5px;"><span>Progresso do payback</span><span>${Math.min(100,Math.round(economiaAcumulada/usina.valorInvestido*100))}%</span></div>
-      <div style="background:var(--bone);border-radius:6px;height:10px;overflow:hidden;"><div style="width:${Math.min(100,economiaAcumulada/usina.valorInvestido*100)}%;height:100%;background:var(--success);"></div></div>
-    </div></div>` : ''}
-    <div class="note" style="margin-top:6px;">A economia é uma <strong>estimativa</strong>: valorizo cada kWh injetado pela tarifa média que você pagou naquele mês (valor da fatura ÷ consumo). Não é o valor oficial de compensação da distribuidora, que segue regras próprias (Fio B, bandeiras, etc.).</div>
-    ` : `<div class="note" style="margin-top:10px;">Cadastre o "valor investido" em ⚙️ Dados da usina pra ver a estimativa de payback aqui.</div>`}
-
-    ${distribuicaoFatura ? `
-    <div class="contas-secao-titulo" style="margin-top:22px;">Pra onde vai o dinheiro da fatura (${competenciaLabel(ultimaFatura.referencia)})</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 18px;">
-      <div style="display:flex;height:22px;border-radius:6px;overflow:hidden;margin-bottom:10px;">
-        ${distribuicaoFatura.map(d=>`<div style="width:${(d.valor/ultimaFatura.valorTotal*100).toFixed(1)}%;background:${d.cor};" title="${d.nome}: ${brl(d.valor)}"></div>`).join('')}
+    <div data-aba-painel="visao-geral" style="display:${abaAtiva==='visao-geral'?'block':'none'};margin-top:14px;">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+        <label style="font-size:11px;color:var(--text-soft);text-transform:uppercase;letter-spacing:.04em;font-weight:700;">Período</label>
+        <select id="usinaSolarPeriodoSelect">
+          <option value="hoje" ${periodoSel==='hoje'?'selected':''}>Hoje</option>
+          <option value="ontem" ${periodoSel==='ontem'?'selected':''}>Ontem</option>
+          <option value="semana" ${periodoSel==='semana'?'selected':''}>Esta semana</option>
+          <option value="mes" ${periodoSel==='mes'?'selected':''}>Este mês</option>
+          <option value="mes-anterior" ${periodoSel==='mes-anterior'?'selected':''}>Mês anterior</option>
+          <option value="ano" ${periodoSel==='ano'?'selected':''}>Este ano</option>
+          <option value="ano-anterior" ${periodoSel==='ano-anterior'?'selected':''}>Ano anterior</option>
+          <option value="instalacao" ${periodoSel==='instalacao'?'selected':''}>Desde a instalação</option>
+          <option value="personalizado" ${periodoSel==='personalizado'?'selected':''}>Período personalizado</option>
+        </select>
+        ${periodoSel==='personalizado' ? `
+          <input type="date" id="usinaSolarPeriodoDe" value="${window._usinaSolarPeriodoDe||''}" style="width:auto;">
+          <span style="color:var(--text-soft);">até</span>
+          <input type="date" id="usinaSolarPeriodoAte" value="${window._usinaSolarPeriodoAte||''}" style="width:auto;">
+        ` : ''}
       </div>
-      ${distribuicaoFatura.map(d=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;"><span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${d.cor};margin-right:6px;"></span>${d.nome}</span><span class="mono">${brl(d.valor)} (${(d.valor/ultimaFatura.valorTotal*100).toFixed(0)}%)</span></div>`).join('')}
-    </div></div>` : ''}
 
-    ${dadosGeracaoConsumo.length ? `
-    <div class="contas-secao-titulo" style="margin-top:22px;">Geração x consumo por mês</div>
-    <div class="panel"><div class="panel-body" style="padding:16px 18px;">
-      <div class="fluxo-semanas-bars" style="height:110px;">
-        ${dadosGeracaoConsumo.map(d=>`
-          <div class="fluxo-semana-col">
-            <div class="fluxo-semana-barras" style="height:90px;">
-              <div class="fluxo-semana-barra" style="height:${Math.max(2,Math.round(d.geracao/maxGeracaoConsumo*90))}px;background:var(--warn);" title="Geração: ${d.geracao} kWh"></div>
-              <div class="fluxo-semana-barra" style="height:${Math.max(2,Math.round(d.consumo/maxGeracaoConsumo*90))}px;background:var(--blue-accent);" title="Consumo: ${d.consumo} kWh"></div>
+      <div class="fluxo-resumo-4col">
+        <div class="fluxo-resumo-item"><div class="lbl">Geração no período (${periodo.label})</div><div class="val">${geracaoNoPeriodo>0?geracaoNoPeriodo.toFixed(1)+' kWh':'Sem dados registrados para este período'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Economia estimada no período</div><div class="val">${economiaNoPeriodo!=null?brl(economiaNoPeriodo):'—'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Geração acumulada (desde o início)</div><div class="val">${geracaoTotalAcumulada>0?geracaoTotalAcumulada.toFixed(0)+' kWh':'—'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Potência instalada</div><div class="val">${usina.capacidadeKw?usina.capacidadeKw+' kWp':'—'}</div></div>
+      </div>
+      ${leiturasDiaNoPeriodo.length===0 && leiturasMesNoPeriodo.length===0 ? `<div class="note" style="margin-top:6px;">A geração do período usa leitura tipo "dia" quando existir, ou a leitura "mês" mais recente dentro do período. Se você só registra por mês, escolha "Este mês" ou períodos maiores pra ver o número.</div>` : ''}
+
+      <div class="contas-secao-titulo" style="margin-top:22px;">Resumo geral</div>
+      <div class="fluxo-resumo-4col">
+        <div class="fluxo-resumo-item"><div class="lbl">Última leitura</div><div class="val">${ultimaLeitura?`${ultimaLeitura.geracaoKwh} kWh (${ultimaLeitura.periodo})`:'—'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Saldo de créditos atual</div><div class="val">${saldoCreditosAtual!=null?saldoCreditosAtual+' kWh':'—'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Última fatura</div><div class="val">${ultimaFatura?brl(ultimaFatura.valorTotal):'—'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Impostos pagos (total)</div><div class="val">${totalImpostos>0?brl(totalImpostos):'—'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Tarifa de energia (Celesc)</div><div class="val">${ultimaFatura?.tarifaEnergiaKwh?`R$ ${ultimaFatura.tarifaEnergiaKwh.toFixed(6).replace('.',',')}/kWh`:'—'}</div></div>
+        ${ultimaFatura?.proximaLeitura ? `<div class="fluxo-resumo-item"><div class="lbl">Próxima leitura</div><div class="val">${fmtDate(ultimaFatura.proximaLeitura)}</div></div>` : ''}
+      </div>
+
+      ${alertasDesempenho.length ? `
+      <div class="contas-secao-titulo" style="margin-top:22px;">🚨 Alertas de desempenho</div>
+      <div class="panel"><div class="panel-body" style="padding:0;">
+        ${alertasDesempenho.map(a=>`
+          <div class="ledger-row compact" style="grid-template-columns:auto 1fr;">
+            <span style="width:8px;height:8px;border-radius:50%;background:${a.cor};display:inline-block;"></span>
+            <span style="font-size:13px;">${a.texto}</span>
+          </div>
+        `).join('')}
+      </div></div>` : ''}
+
+      ${!usina.capacidadeKw && !leituras.length && !faturas.length ? `<div class="note" style="margin-top:14px;">Sem dados registrados para este período. <button class="btn ghost sm" id="btnEditarUsinaSolar2">Configurar usina</button></div>` : ''}
+      ${fechamentoAnual ? `
+      <div class="contas-secao-titulo" style="margin-top:22px;">Fechamento de ${anoAtual}</div>
+      <div class="fluxo-resumo-4col">
+        <div class="fluxo-resumo-item"><div class="lbl">Geração total</div><div class="val">${fechamentoAnual.geracaoTotal>0?fechamentoAnual.geracaoTotal.toFixed(0)+' kWh':'—'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Consumo total</div><div class="val">${fechamentoAnual.consumoTotal>0?fechamentoAnual.consumoTotal.toFixed(0)+' kWh':'—'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Total pago nas faturas</div><div class="val">${brl(fechamentoAnual.valorPagoTotal)}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Impostos no ano</div><div class="val">${brl(fechamentoAnual.impostosTotal)}</div></div>
+      </div>` : ''}
+    </div>
+
+    <div data-aba-painel="geracao" style="display:${abaAtiva==='geracao'?'block':'none'};margin-top:14px;">
+      <div class="contas-secao-titulo" style="margin-top:0;display:flex;justify-content:space-between;align-items:center;">
+        <span>Calendário de geração</span>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button class="icon-btn" id="btnCalMesAnterior" title="Mês anterior">‹</button>
+          <span style="font-size:12.5px;font-weight:600;min-width:110px;text-align:center;">${competenciaLabel(calMes)}</span>
+          <button class="icon-btn" id="btnCalMesProximo" title="Próximo mês">›</button>
+        </div>
+      </div>
+      <div class="panel"><div class="panel-body" style="padding:14px 18px;">
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;font-size:9.5px;color:var(--text-soft);text-align:center;margin-bottom:4px;">
+          <span>D</span><span>S</span><span>T</span><span>Q</span><span>Q</span><span>S</span><span>S</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;">
+          ${gradeCalMes.map(dia=>{
+            if(!dia) return `<div></div>`;
+            const l = leiturasDiaPorData[dia];
+            const numDia = Number(dia.slice(8,10));
+            const intensidade = l ? Math.max(0.15, l.geracaoKwh/maxGeracaoDiaCal) : 0;
+            const selecionado = dia===diaSelecionado;
+            return `<div data-action="selecionar-dia-cal-solar" data-dia="${dia}" style="cursor:pointer;aspect-ratio:1;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10.5px;border:${selecionado?'2px solid var(--blue-accent)':'1px solid var(--line)'};background:${l?`rgba(217,143,43,${intensidade})`:'transparent'};color:${l&&intensidade>0.5?'#fff':'var(--ink)'};" title="${l?l.geracaoKwh+' kWh':'Sem registro'}">${numDia}</div>`;
+          }).join('')}
+        </div>
+      </div></div>
+      ${diaSelecionado ? `
+      <div class="panel" style="margin-top:8px;"><div class="panel-body" style="padding:14px 18px;">
+        <div style="font-weight:600;font-size:13px;margin-bottom:8px;">${fmtDate(diaSelecionado)}</div>
+        ${leituraDiaSelecionado ? `
+        <div class="fluxo-resumo-4col">
+          <div class="fluxo-resumo-item"><div class="lbl">Geração</div><div class="val">${leituraDiaSelecionado.geracaoKwh} kWh</div></div>
+          <div class="fluxo-resumo-item"><div class="lbl">Meta do dia</div><div class="val">${metaDiaria?metaDiaria.toFixed(1)+' kWh':'—'}</div></div>
+          <div class="fluxo-resumo-item"><div class="lbl">Diferença</div><div class="val">${metaDiaria?((leituraDiaSelecionado.geracaoKwh-metaDiaria)>=0?'+':'')+(leituraDiaSelecionado.geracaoKwh-metaDiaria).toFixed(1)+' kWh':'—'}</div></div>
+          <div class="fluxo-resumo-item"><div class="lbl">Economia estimada</div><div class="val">${tarifaParaEconomia?brl(leituraDiaSelecionado.geracaoKwh*tarifaParaEconomia):'—'}</div></div>
+        </div>` : `<div class="empty">Sem registro de geração nesse dia.</div>`}
+      </div></div>` : ''}
+
+      ${dadosGeracaoConsumo.length ? `
+      <div class="contas-secao-titulo">Geração x consumo por mês</div>
+      <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+        <div class="fluxo-semanas-bars" style="height:110px;">
+          ${dadosGeracaoConsumo.map(d=>`
+            <div class="fluxo-semana-col">
+              <div class="fluxo-semana-barras" style="height:90px;">
+                <div class="fluxo-semana-barra" style="height:${Math.max(2,Math.round(d.geracao/maxGeracaoConsumo*90))}px;background:var(--warn);" title="Geração: ${d.geracao} kWh"></div>
+                <div class="fluxo-semana-barra" style="height:${Math.max(2,Math.round(d.consumo/maxGeracaoConsumo*90))}px;background:var(--blue-accent);" title="Consumo: ${d.consumo} kWh"></div>
+              </div>
+              <div class="fluxo-semana-label">${d.mes.slice(5)}/${d.mes.slice(2,4)}</div>
             </div>
-            <div class="fluxo-semana-label">${d.mes.slice(5)}/${d.mes.slice(2,4)}</div>
-          </div>
-        `).join('')}
-      </div>
-      <div style="display:flex;gap:16px;font-size:11px;color:var(--text-soft);margin-top:8px;">
-        <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--warn);margin-right:4px;"></span>Geração</span>
-        <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--blue-accent);margin-right:4px;"></span>Consumo</span>
-      </div>
-    </div></div>` : ''}
-
-    ${saldoLiquidoMensal.length ? `
-    <div class="contas-secao-titulo">Saldo líquido mensal (injetada − consumo)</div>
-    <div class="panel"><div class="panel-body" style="padding:16px 18px;">
-      <div style="display:flex;align-items:center;gap:3px;height:80px;">
-        ${saldoLiquidoMensal.map(d=>`
-          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;" title="${competenciaLabel(d.mes)}: ${d.liquido>=0?'+':''}${d.liquido} kWh">
-            <div style="width:100%;max-width:22px;background:${d.liquido>=0?'var(--success)':'var(--danger)'};opacity:.8;border-radius:2px;height:${Math.max(2,Math.round(Math.abs(d.liquido)/maxLiquidoAbs*36))}px;margin-${d.liquido>=0?'bottom':'top'}:36px;"></div>
-          </div>
-        `).join('')}
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:9.5px;color:var(--text-soft);margin-top:4px;">
-        <span>${competenciaLabel(saldoLiquidoMensal[0].mes)}</span><span>${competenciaLabel(saldoLiquidoMensal[saldoLiquidoMensal.length-1].mes)}</span>
-      </div>
-    </div></div>` : ''}
-
-    ${evolucaoCreditos.length>1 ? `
-    <div class="contas-secao-titulo">Evolução do saldo de créditos</div>
-    <div class="panel"><div class="panel-body" style="padding:16px 18px;">
-      <div style="display:flex;align-items:flex-end;gap:4px;height:70px;">
-        ${evolucaoCreditos.map(f=>`
-          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;" title="${competenciaLabel(f.referencia)}: ${f.saldoCreditosAtualKwh} kWh">
-            <div style="width:100%;max-width:26px;background:var(--success);opacity:.75;border-radius:2px 2px 0 0;height:${Math.max(2,Math.round(f.saldoCreditosAtualKwh/maxCredito*60))}px;"></div>
-          </div>
-        `).join('')}
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:9.5px;color:var(--text-soft);margin-top:4px;">
-        <span>${competenciaLabel(evolucaoCreditos[0].referencia)}</span><span>${competenciaLabel(evolucaoCreditos[evolucaoCreditos.length-1].referencia)}</span>
-      </div>
-    </div></div>` : ''}
-
-    ${bandeirasHistorico.length ? `
-    <div class="contas-secao-titulo">Bandeira tarifária ao longo do tempo</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 18px;">
-      <div style="display:flex;gap:3px;">
-        ${bandeirasHistorico.map(f=>`<div style="flex:1;height:24px;border-radius:3px;background:${corBandeira(f.bandeira)};" title="${competenciaLabel(f.referencia)}: ${escapeHTML(f.bandeira)}"></div>`).join('')}
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:9.5px;color:var(--text-soft);margin-top:4px;">
-        <span>${competenciaLabel(bandeirasHistorico[0].referencia)}</span><span>${competenciaLabel(bandeirasHistorico[bandeirasHistorico.length-1].referencia)}</span>
-      </div>
-    </div></div>` : ''}
-
-    ${produtividadePorMes.length ? `
-    <div class="contas-secao-titulo">Produtividade específica (kWh gerado por kW instalado)</div>
-    <div class="panel"><div class="panel-body" style="padding:0;">
-      ${produtividadePorMes.slice(-6).reverse().map(p=>`
-        <div class="ledger-row compact" style="grid-template-columns:1fr auto;">
-          <span style="font-size:13px;">${competenciaLabel(p.mes)}</span>
-          <span class="mono" style="font-weight:600;">${p.produtividade.toFixed(1)} kWh/kWp</span>
+          `).join('')}
         </div>
-      `).join('')}
-    </div></div>
-    <div class="note" style="margin-top:0;">Referência de mercado pra sistemas bem dimensionados costuma ficar entre 100-150 kWh/kWp por mês (varia com a região). Uma queda brusca pode indicar painel sujo ou sombreamento novo.</div>` : ''}
-
-    ${mesesComComparativo.length ? `
-    <div class="contas-secao-titulo">Comparativo do mesmo mês em anos diferentes</div>
-    <div class="panel"><div class="panel-body" style="padding:0;">
-      ${mesesComComparativo.map(mm=>{
-        const anos = Object.keys(comparativoAnual[mm]).sort();
-        return `<div class="ledger-row compact" style="grid-template-columns:1fr auto;">
-          <span style="font-size:13px;">Mês ${mm}</span>
-          <span class="mono" style="font-size:12px;">${anos.map(a=>`${a}: ${comparativoAnual[mm][a]} kWh`).join(' · ')}</span>
-        </div>`;
-      }).join('')}
-    </div></div>` : ''}
-
-    ${mediaRecente ? `
-    <div class="note" style="margin-top:10px;">📈 Pela média dos últimos ${ultimasLeiturasMes.length} mês(es) registrados, a projeção pros próximos meses é de aproximadamente <strong>${mediaRecente.toFixed(0)} kWh/mês</strong>. É só uma extensão da média recente, não uma previsão de tendência.</div>` : ''}
-
-    ${rankingGeracao.length ? `
-    <div class="contas-secao-titulo">Ranking de meses por geração</div>
-    <div class="panel"><div class="panel-body" style="padding:0;">
-      ${rankingGeracao.map((l,i)=>`
-        <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto;">
-          <span style="font-size:12px;color:var(--text-soft);width:16px;">${i+1}º</span>
-          <span style="font-size:13px;">${competenciaLabel(l.data.slice(0,7))}</span>
-          <span class="mono" style="font-weight:600;">${l.geracaoKwh} kWh</span>
+        <div style="display:flex;gap:16px;font-size:11px;color:var(--text-soft);margin-top:8px;">
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--warn);margin-right:4px;"></span>Geração</span>
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--blue-accent);margin-right:4px;"></span>Consumo</span>
         </div>
-      `).join('')}
-    </div></div>` : ''}
+      </div></div>` : `<div class="empty">Sem dados de geração registrados para este período.</div>`}
 
-    ${faturas.length ? `
-    <div class="contas-secao-titulo">Autossuficiência e custo por kWh, por fatura</div>
-    <div class="panel"><div class="panel-body" style="padding:0;">
-      ${faturas.filter(f=>f.consumoKwh>0).map(f=>{
-        const autossuf = f.energiaInjetadaKwh!=null ? (f.energiaInjetadaKwh/f.consumoKwh*100) : null;
-        const custoKwh = f.valorTotal/f.consumoKwh;
-        const impostosFatura = (f.pisValor||0)+(f.cofinsValor||0)+(f.icmsValor||0);
-        return `
-        <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
-          <div class="desc-cell"><div>${competenciaLabel(f.referencia)}</div><div class="cat">${autossuf!=null?`Autossuficiência ${autossuf.toFixed(0)}%`:''}${impostosFatura>0?` · Impostos ${brl(impostosFatura)}`:''}</div></div>
-          <span class="mono" style="font-size:12px;color:var(--text-soft);">${brl(custoKwh)}/kWh</span>
-          <span class="mono" style="font-weight:600;">${brl(f.valorTotal)}</span>
-        </div>`;
-      }).join('')}
-    </div></div>` : ''}
+      ${saldoLiquidoMensal.length ? `
+      <div class="contas-secao-titulo">Saldo líquido mensal (injetada − consumo)</div>
+      <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+        <div style="display:flex;align-items:center;gap:3px;height:80px;">
+          ${saldoLiquidoMensal.map(d=>`
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;" title="${competenciaLabel(d.mes)}: ${d.liquido>=0?'+':''}${d.liquido} kWh">
+              <div style="width:100%;max-width:22px;background:${d.liquido>=0?'var(--success)':'var(--danger)'};opacity:.8;border-radius:2px;height:${Math.max(2,Math.round(Math.abs(d.liquido)/maxLiquidoAbs*36))}px;margin-${d.liquido>=0?'bottom':'top'}:36px;"></div>
+            </div>
+          `).join('')}
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:9.5px;color:var(--text-soft);margin-top:4px;">
+          <span>${competenciaLabel(saldoLiquidoMensal[0].mes)}</span><span>${competenciaLabel(saldoLiquidoMensal[saldoLiquidoMensal.length-1].mes)}</span>
+        </div>
+      </div></div>` : ''}
 
-    <div class="contas-secao-titulo" style="margin-top:22px;">Histórico de geração</div>
-    <div class="panel">
-      <div class="panel-body" style="padding:0;">
+      ${mediaRecente ? `<div class="note" style="margin-top:10px;">📈 Pela média dos últimos ${ultimasLeiturasMes.length} mês(es) registrados, a projeção pros próximos meses é de aproximadamente <strong>${mediaRecente.toFixed(0)} kWh/mês</strong>. É só uma extensão da média recente, não uma previsão de tendência.</div>` : ''}
+
+      <div class="contas-secao-titulo" style="margin-top:22px;">Histórico de geração</div>
+      <div class="panel"><div class="panel-body" style="padding:0;">
         ${leituras.length ? leituras.slice(0,20).map(l=>`
           <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto auto;">
             <span class="dot entrada"></span>
@@ -19230,12 +19374,93 @@ function viewUsinaSolar(){
             <button class="icon-btn" data-action="excluir-leitura-solar" data-id="${l.id}" title="Excluir">✕</button>
           </div>
         `).join('') : `<div class="empty">Nenhuma geração registrada ainda.</div>`}
-      </div>
+      </div></div>
     </div>
 
-    <div class="contas-secao-titulo" style="margin-top:22px;">Histórico de faturas</div>
-    <div class="panel">
-      <div class="panel-body" style="padding:0;">
+    <div data-aba-painel="economia" style="display:${abaAtiva==='economia'?'block':'none'};margin-top:14px;">
+      ${investimentoTotalReal>0 ? `
+      <div class="fluxo-resumo-4col">
+        <div class="fluxo-resumo-item"><div class="lbl">Investimento total</div><div class="val">${brl(investimentoTotalReal)}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Economia estimada (total)</div><div class="val">${brl(economiaAcumulada)}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Economia média/mês (estimada)</div><div class="val">${economiaMediaMensal?brl(economiaMediaMensal):'—'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Payback estimado</div><div class="val" style="font-size:12.5px;">${paybackTexto||'Dados insuficientes para calcular'}</div></div>
+      </div>
+      <div class="note" style="margin-top:6px;">Investimento total = ${brl(usina.valorInvestido||0)} (inicial) + ${brl(usina.custosAdicionais||0)} (custos adicionais) + ${brl(custoManutencaoParaPayback)} (manutenções registradas) + ${brl(usina.outrosCustos||0)} (outros).</div>
+      ${economiaAcumulada>=0 ? `
+      <div class="panel" style="margin-top:8px;"><div class="panel-body" style="padding:12px 16px;">
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-soft);margin-bottom:5px;"><span>Progresso do payback</span><span>${Math.min(100,Math.round(economiaAcumulada/investimentoTotalReal*100))}%</span></div>
+        <div style="background:var(--bone);border-radius:6px;height:10px;overflow:hidden;"><div style="width:${Math.min(100,economiaAcumulada/investimentoTotalReal*100)}%;height:100%;background:var(--success);"></div></div>
+      </div></div>` : ''}
+      <div class="note" style="margin-top:6px;">A economia é uma <strong>estimativa</strong>: valorizo cada kWh injetado pela tarifa média que você pagou naquele mês (valor da fatura ÷ consumo). Não é o valor oficial de compensação da distribuidora, que segue regras próprias (Fio B, bandeiras, etc.).</div>
+      ` : `<div class="note" style="margin-top:0;">Cadastre o "valor investido" em ⚙️ Dados da usina pra ver a estimativa de payback aqui.</div>`}
+
+      ${comparacaoSemSolar ? `
+      <div class="contas-secao-titulo" style="margin-top:22px;">💡 Impacto da usina na conta de energia (${competenciaLabel(ultimaFatura.referencia)})</div>
+      <div class="panel"><div class="panel-body" style="padding:14px 18px;">
+        <div class="fluxo-resumo-4col">
+          <div class="fluxo-resumo-item"><div class="lbl">Sem solar (estimado)</div><div class="val">${brl(comparacaoSemSolar.semSolar)}</div></div>
+          <div class="fluxo-resumo-item"><div class="lbl">Com solar (pago de verdade)</div><div class="val">${brl(comparacaoSemSolar.comSolar)}</div></div>
+          <div class="fluxo-resumo-item"><div class="lbl">Economia</div><div class="val" style="color:var(--success);">${brl(comparacaoSemSolar.economia)}</div></div>
+          <div class="fluxo-resumo-item"><div class="lbl">Percentual de economia</div><div class="val">${comparacaoSemSolar.pct.toFixed(0)}%</div></div>
+        </div>
+        <div class="note" style="margin-top:10px;">"Sem solar" é uma <strong>estimativa</strong> (todo o consumo pago pela tarifa cheia, sem o abatimento da energia injetada) — não é um valor real de uma fatura sem usina.</div>
+      </div></div>` : ''}
+    </div>
+
+    <div data-aba-painel="faturas" style="display:${abaAtiva==='faturas'?'block':'none'};margin-top:14px;">
+      ${distribuicaoFatura ? `
+      <div class="contas-secao-titulo" style="margin-top:0;">Pra onde vai o dinheiro da fatura (${competenciaLabel(ultimaFatura.referencia)})</div>
+      <div class="panel"><div class="panel-body" style="padding:14px 18px;">
+        <div style="display:flex;height:22px;border-radius:6px;overflow:hidden;margin-bottom:10px;">
+          ${distribuicaoFatura.map(d=>`<div style="width:${(d.valor/ultimaFatura.valorTotal*100).toFixed(1)}%;background:${d.cor};" title="${d.nome}: ${brl(d.valor)}"></div>`).join('')}
+        </div>
+        ${distribuicaoFatura.map(d=>`<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;"><span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${d.cor};margin-right:6px;"></span>${d.nome}</span><span class="mono">${brl(d.valor)} (${(d.valor/ultimaFatura.valorTotal*100).toFixed(0)}%)</span></div>`).join('')}
+      </div></div>` : ''}
+
+      ${evolucaoCreditos.length>1 ? `
+      <div class="contas-secao-titulo">Evolução do saldo de créditos</div>
+      <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+        <div style="display:flex;align-items:flex-end;gap:4px;height:70px;">
+          ${evolucaoCreditos.map(f=>`
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;" title="${competenciaLabel(f.referencia)}: ${f.saldoCreditosAtualKwh} kWh">
+              <div style="width:100%;max-width:26px;background:var(--success);opacity:.75;border-radius:2px 2px 0 0;height:${Math.max(2,Math.round(f.saldoCreditosAtualKwh/maxCredito*60))}px;"></div>
+            </div>
+          `).join('')}
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:9.5px;color:var(--text-soft);margin-top:4px;">
+          <span>${competenciaLabel(evolucaoCreditos[0].referencia)}</span><span>${competenciaLabel(evolucaoCreditos[evolucaoCreditos.length-1].referencia)}</span>
+        </div>
+      </div></div>` : `<div class="note">Não informado — sem saldo de créditos suficiente registrado ainda.</div>`}
+
+      ${bandeirasHistorico.length ? `
+      <div class="contas-secao-titulo">Bandeira tarifária ao longo do tempo</div>
+      <div class="panel"><div class="panel-body" style="padding:14px 18px;">
+        <div style="display:flex;gap:3px;">
+          ${bandeirasHistorico.map(f=>`<div style="flex:1;height:24px;border-radius:3px;background:${corBandeira(f.bandeira)};" title="${competenciaLabel(f.referencia)}: ${escapeHTML(f.bandeira)}"></div>`).join('')}
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:9.5px;color:var(--text-soft);margin-top:4px;">
+          <span>${competenciaLabel(bandeirasHistorico[0].referencia)}</span><span>${competenciaLabel(bandeirasHistorico[bandeirasHistorico.length-1].referencia)}</span>
+        </div>
+      </div></div>` : ''}
+
+      ${faturas.length ? `
+      <div class="contas-secao-titulo">Autossuficiência e custo por kWh, por fatura</div>
+      <div class="panel"><div class="panel-body" style="padding:0;">
+        ${faturas.filter(f=>f.consumoKwh>0).map(f=>{
+          const autossuf = f.energiaInjetadaKwh!=null ? (f.energiaInjetadaKwh/f.consumoKwh*100) : null;
+          const custoKwh = f.valorTotal/f.consumoKwh;
+          const impostosFatura = (f.pisValor||0)+(f.cofinsValor||0)+(f.icmsValor||0);
+          return `
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
+            <div class="desc-cell"><div>${competenciaLabel(f.referencia)}</div><div class="cat">${autossuf!=null?`Autossuficiência ${autossuf.toFixed(0)}%`:''}${impostosFatura>0?` · Impostos ${brl(impostosFatura)}`:''}</div></div>
+            <span class="mono" style="font-size:12px;color:var(--text-soft);">${brl(custoKwh)}/kWh</span>
+            <span class="mono" style="font-weight:600;">${brl(f.valorTotal)}</span>
+          </div>`;
+        }).join('')}
+      </div></div>` : ''}
+
+      <div class="contas-secao-titulo" style="margin-top:22px;">Histórico de faturas</div>
+      <div class="panel"><div class="panel-body" style="padding:0;">
         ${faturas.length ? faturas.map(f=>`
           <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
             <div class="desc-cell"><div>${competenciaLabel(f.referencia)}</div><div class="cat">${f.consumoKwh!=null?`Consumo ${f.consumoKwh} kWh`:''}${f.energiaInjetadaKwh!=null?` · Injetada ${f.energiaInjetadaKwh} kWh`:''}${f.saldoCreditosAtualKwh!=null?` · Saldo ${f.saldoCreditosAtualKwh} kWh`:''}</div></div>
@@ -19243,15 +19468,86 @@ function viewUsinaSolar(){
             <button class="icon-btn" data-action="excluir-fatura-solar" data-id="${f.id}" title="Excluir">✕</button>
           </div>
         `).join('') : `<div class="empty">Nenhuma fatura registrada ainda.</div>`}
-      </div>
+      </div></div>
     </div>
 
-    <div class="contas-secao-titulo" style="margin-top:22px;display:flex;justify-content:space-between;align-items:center;">
-      <span>Histórico de manutenções</span>
-      ${custoManutencaoTotal>0?`<span style="font-size:11px;color:var(--text-soft);font-weight:400;text-transform:none;letter-spacing:0;">Total: ${brl(custoManutencaoTotal)}</span>`:''}
+    <div data-aba-painel="desempenho" style="display:${abaAtiva==='desempenho'?'block':'none'};margin-top:14px;">
+      ${recordes ? `
+      <div class="contas-secao-titulo" style="margin-top:0;">🏆 Recordes da usina</div>
+      <div class="fluxo-resumo-4col">
+        <div class="fluxo-resumo-item"><div class="lbl">Maior geração diária</div><div class="val" style="font-size:13px;">${recordes.maiorGeracaoDiaria?`${recordes.maiorGeracaoDiaria.geracaoKwh} kWh (${fmtDate(recordes.maiorGeracaoDiaria.data)})`:'Não informado'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Maior geração mensal</div><div class="val" style="font-size:13px;">${recordes.maiorGeracaoMensal?`${recordes.maiorGeracaoMensal.geracaoKwh} kWh (${competenciaLabel(recordes.maiorGeracaoMensal.data.slice(0,7))})`:'Não informado'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Melhor mês (produtividade)</div><div class="val" style="font-size:13px;">${recordes.melhorMesProdutividade?`${recordes.melhorMesProdutividade.produtividade.toFixed(1)} kWh/kWp (${competenciaLabel(recordes.melhorMesProdutividade.mes)})`:'Não informado'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Pior mês (produtividade)</div><div class="val" style="font-size:13px;">${recordes.piorMesProdutividade?`${recordes.piorMesProdutividade.produtividade.toFixed(1)} kWh/kWp (${competenciaLabel(recordes.piorMesProdutividade.mes)})`:'Não informado'}</div></div>
+      </div>` : ''}
+      ${produtividadePorMes.length ? `
+      <div class="contas-secao-titulo">Produtividade específica (kWh gerado por kW instalado)</div>
+      <div class="panel"><div class="panel-body" style="padding:0;">
+        ${produtividadePorMes.slice(-6).reverse().map(p=>`
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto;">
+            <span style="font-size:13px;">${competenciaLabel(p.mes)}</span>
+            <span class="mono" style="font-weight:600;">${p.produtividade.toFixed(1)} kWh/kWp</span>
+          </div>
+        `).join('')}
+      </div></div>
+      <div class="note" style="margin-top:0;">Referência de mercado pra sistemas bem dimensionados costuma ficar entre 100-150 kWh/kWp por mês (varia com a região). Uma queda brusca pode indicar produção abaixo do padrão registrado — vale conferir o painel.</div>` : `<div class="empty">Cadastre a capacidade (kWp) da usina pra ver a produtividade específica aqui.</div>`}
+
+      ${rankingGeracao.length ? `
+      <div class="contas-secao-titulo">Ranking de meses por geração</div>
+      <div class="panel"><div class="panel-body" style="padding:0;">
+        ${rankingGeracao.map((l,i)=>`
+          <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto;">
+            <span style="font-size:12px;color:var(--text-soft);width:16px;">${i+1}º</span>
+            <span style="font-size:13px;">${competenciaLabel(l.data.slice(0,7))}</span>
+            <span class="mono" style="font-weight:600;">${l.geracaoKwh} kWh</span>
+          </div>
+        `).join('')}
+      </div></div>` : ''}
+
+      ${mesesComComparativo.length ? `
+      <div class="contas-secao-titulo">Comparativo do mesmo mês em anos diferentes</div>
+      <div class="panel"><div class="panel-body" style="padding:0;">
+        ${mesesComComparativo.map(mm=>{
+          const anos = Object.keys(comparativoAnual[mm]).sort();
+          return `<div class="ledger-row compact" style="grid-template-columns:1fr auto;">
+            <span style="font-size:13px;">Mês ${mm}</span>
+            <span class="mono" style="font-size:12px;">${anos.map(a=>`${a}: ${comparativoAnual[mm][a]} kWh`).join(' · ')}</span>
+          </div>`;
+        }).join('')}
+      </div></div>` : `<div class="note">Ainda não há dois anos com o mesmo mês registrado pra comparar.</div>`}
     </div>
-    <div class="panel">
-      <div class="panel-body" style="padding:0;">
+
+    <div data-aba-painel="equipamentos" style="display:${abaAtiva==='equipamentos'?'block':'none'};margin-top:14px;">
+      <div class="topbar" style="margin-top:0;"><div></div><button class="btn ghost sm" id="btnEditarEquipamentosSolar">✎ Editar equipamentos</button></div>
+      <div class="contas-secao-titulo" style="margin-top:0;">Inversor</div>
+      <div class="panel"><div class="panel-body" style="padding:14px 18px;">
+        ${equip.inversor && (equip.inversor.fabricante||equip.inversor.modelo) ? `
+          <div class="fluxo-resumo-4col">
+            <div class="fluxo-resumo-item"><div class="lbl">Fabricante</div><div class="val" style="font-size:13px;">${escapeHTML(equip.inversor.fabricante||'—')}</div></div>
+            <div class="fluxo-resumo-item"><div class="lbl">Modelo</div><div class="val" style="font-size:13px;">${escapeHTML(equip.inversor.modelo||'—')}</div></div>
+            <div class="fluxo-resumo-item"><div class="lbl">Nº de série</div><div class="val" style="font-size:13px;">${escapeHTML(equip.inversor.numeroSerie||'—')}</div></div>
+            <div class="fluxo-resumo-item"><div class="lbl">Garantia até</div><div class="val" style="font-size:13px;">${equip.inversor.garantiaAte?fmtDate(equip.inversor.garantiaAte):'—'}</div></div>
+          </div>` : `<div class="empty">Nenhum dado do inversor cadastrado ainda.</div>`}
+      </div></div>
+      <div class="contas-secao-titulo">Painéis</div>
+      <div class="panel"><div class="panel-body" style="padding:14px 18px;">
+        ${equip.paineis && (equip.paineis.fabricante||equip.paineis.quantidade) ? `
+          <div class="fluxo-resumo-4col">
+            <div class="fluxo-resumo-item"><div class="lbl">Fabricante</div><div class="val" style="font-size:13px;">${escapeHTML(equip.paineis.fabricante||'—')}</div></div>
+            <div class="fluxo-resumo-item"><div class="lbl">Quantidade</div><div class="val">${equip.paineis.quantidade||'—'}</div></div>
+            <div class="fluxo-resumo-item"><div class="lbl">Potência unitária</div><div class="val" style="font-size:13px;">${equip.paineis.potenciaUnitariaW?equip.paineis.potenciaUnitariaW+' W':'—'}</div></div>
+            <div class="fluxo-resumo-item"><div class="lbl">Garantia até</div><div class="val" style="font-size:13px;">${equip.paineis.garantiaAte?fmtDate(equip.paineis.garantiaAte):'—'}</div></div>
+          </div>` : `<div class="empty">Nenhum dado dos painéis cadastrado ainda.</div>`}
+      </div></div>
+      ${equip.outros ? `<div class="contas-secao-titulo">Outros equipamentos</div><div class="note" style="margin-top:0;white-space:pre-wrap;">${escapeHTML(equip.outros)}</div>` : ''}
+    </div>
+
+    <div data-aba-painel="manutencao" style="display:${abaAtiva==='manutencao'?'block':'none'};margin-top:14px;">
+      <div class="contas-secao-titulo" style="margin-top:0;display:flex;justify-content:space-between;align-items:center;">
+        <span>Histórico de manutenções</span>
+        ${custoManutencaoTotal>0?`<span style="font-size:11px;color:var(--text-soft);font-weight:400;text-transform:none;letter-spacing:0;">Total: ${brl(custoManutencaoTotal)}</span>`:''}
+      </div>
+      <div class="panel"><div class="panel-body" style="padding:0;">
         ${manutencoes.length ? manutencoes.map(m=>`
           <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto auto;">
             <span class="dot saida"></span>
@@ -19260,7 +19556,89 @@ function viewUsinaSolar(){
             <button class="icon-btn" data-action="excluir-manutencao-solar" data-id="${m.id}" title="Excluir">✕</button>
           </div>
         `).join('') : `<div class="empty">Nenhuma manutenção registrada ainda.</div>`}
+      </div></div>
+    </div>
+
+    <div data-aba-painel="historico" style="display:${abaAtiva==='historico'?'block':'none'};margin-top:14px;">
+      <div class="contas-secao-titulo" style="margin-top:0;">Todos os eventos da usina</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+        <input type="date" id="usinaHistoricoDe" value="${window._usinaHistoricoDe||''}" style="width:auto;">
+        <span style="color:var(--text-soft);">até</span>
+        <input type="date" id="usinaHistoricoAte" value="${window._usinaHistoricoAte||''}" style="width:auto;">
+        <select id="usinaHistoricoTipo" style="width:auto;">
+          <option value="todos" ${!window._usinaHistoricoTipo || window._usinaHistoricoTipo==='todos'?'selected':''}>Todos os tipos</option>
+          <option value="Geração" ${window._usinaHistoricoTipo==='Geração'?'selected':''}>Geração</option>
+          <option value="Fatura" ${window._usinaHistoricoTipo==='Fatura'?'selected':''}>Fatura</option>
+          <option value="Manutenção" ${window._usinaHistoricoTipo==='Manutenção'?'selected':''}>Manutenção</option>
+        </select>
+        <button class="btn ghost sm" id="btnLimparFiltroHistoricoSolar">Limpar filtro</button>
       </div>
+      <div class="panel"><div class="panel-body" style="padding:0;">
+        ${(()=>{
+          let eventos = [
+            ...leituras.map(l=>({data:l.data, tipo:'Geração', desc:`${l.geracaoKwh} kWh (${l.periodo})`})),
+            ...faturas.map(f=>({data:f.referencia+'-01', tipo:'Fatura', desc:`${competenciaLabel(f.referencia)} — ${brl(f.valorTotal)}`})),
+            ...manutencoes.map(m=>({data:m.data, tipo:'Manutenção', desc:escapeHTML(m.descricao)})),
+          ];
+          if(window._usinaHistoricoDe) eventos = eventos.filter(e=>e.data>=window._usinaHistoricoDe);
+          if(window._usinaHistoricoAte) eventos = eventos.filter(e=>e.data<=window._usinaHistoricoAte);
+          if(window._usinaHistoricoTipo && window._usinaHistoricoTipo!=='todos') eventos = eventos.filter(e=>e.tipo===window._usinaHistoricoTipo);
+          eventos = eventos.sort((a,b)=>(b.data||'').localeCompare(a.data||'')).slice(0,60);
+          return eventos.length ? eventos.map(e=>`
+            <div class="ledger-row compact" style="grid-template-columns:auto 1fr auto;">
+              <span class="dot pendente"></span>
+              <div class="desc-cell"><div style="font-size:13px;">${e.desc}</div><div class="cat">${e.tipo}</div></div>
+              <span class="mono" style="font-size:12px;color:var(--text-soft);">${fmtDate(e.data)}</span>
+            </div>
+          `).join('') : `<div class="empty">Nenhum evento encontrado com esse filtro.</div>`;
+        })()}
+      </div></div>
+    </div>
+
+    <div data-aba-painel="relatorios" style="display:${abaAtiva==='relatorios'?'block':'none'};margin-top:14px;">
+      <div class="contas-secao-titulo" style="margin-top:0;">Relatório completo</div>
+      <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+        <div style="font-size:13px;color:var(--text-soft);margin-bottom:12px;">Inclui dados da usina, geração, faturas, manutenções e o resumo financeiro (investimento/payback) já calculados nesta tela.</div>
+        <button class="btn" id="btnExportarPdfUsina2">📄 Exportar relatório completo em PDF</button>
+      </div></div>
+      <div class="contas-secao-titulo">Relatórios por tema</div>
+      <div class="panel"><div class="panel-body" style="padding:16px 18px;display:flex;flex-wrap:wrap;gap:8px;">
+        <button class="btn ghost sm" data-action="exportar-pdf-tema-solar" data-tema="geracao">☀️ Geração</button>
+        <button class="btn ghost sm" data-action="exportar-pdf-tema-solar" data-tema="financeiro">💰 Financeiro</button>
+        <button class="btn ghost sm" data-action="exportar-pdf-tema-solar" data-tema="desempenho">🎯 Desempenho</button>
+        <button class="btn ghost sm" data-action="exportar-pdf-tema-solar" data-tema="faturas">🧾 Faturas</button>
+        <button class="btn ghost sm" data-action="exportar-pdf-tema-solar" data-tema="creditos">🔋 Créditos</button>
+        <button class="btn ghost sm" data-action="exportar-pdf-tema-solar" data-tema="manutencao">🔧 Manutenção</button>
+      </div></div>
+      <div class="note" style="margin-top:10px;">Excel/CSV ainda não existe — por enquanto todos os relatórios (completo e por tema) saem em PDF.</div>
+    </div>
+
+    <div data-aba-painel="config" style="display:${abaAtiva==='config'?'block':'none'};margin-top:14px;">
+      <div class="contas-secao-titulo" style="margin-top:0;">Dados da usina</div>
+      <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+        <div class="fluxo-resumo-4col">
+          <div class="fluxo-resumo-item"><div class="lbl">Nome</div><div class="val" style="font-size:13px;">${escapeHTML(usina.nome||'—')}</div></div>
+          <div class="fluxo-resumo-item"><div class="lbl">Capacidade</div><div class="val">${usina.capacidadeKw?usina.capacidadeKw+' kW':'—'}</div></div>
+          <div class="fluxo-resumo-item"><div class="lbl">Instalação</div><div class="val" style="font-size:13px;">${usina.dataInstalacao?fmtDate(usina.dataInstalacao):'—'}</div></div>
+          <div class="fluxo-resumo-item"><div class="lbl">Meta mensal</div><div class="val">${usina.metaMensalKwh?usina.metaMensalKwh+' kWh':'—'}</div></div>
+        </div>
+        <button class="btn ghost sm" style="margin-top:14px;" id="btnEditarUsinaSolar3">⚙️ Editar dados da usina</button>
+      </div></div>
+
+      <div class="contas-secao-titulo" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>Histórico de tarifa de energia</span>
+        <button class="btn ghost sm" id="btnRegistrarTarifaSolar">+ Registrar tarifa</button>
+      </div>
+      <div class="panel"><div class="panel-body" style="padding:0;">
+        ${(state.usinaTarifas||[]).length ? [...state.usinaTarifas].sort((a,b)=>(b.dataInicio||'').localeCompare(a.dataInicio||'')).map(t=>`
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
+            <div class="desc-cell"><div>${fmtDate(t.dataInicio)}${t.dataFim?' até '+fmtDate(t.dataFim):' (em vigor)'}</div>${t.observacao?`<div class="cat">${escapeHTML(t.observacao)}</div>`:''}</div>
+            <span class="mono" style="font-weight:600;">R$ ${t.tarifaKwh.toFixed(6).replace('.',',')}/kWh</span>
+            <button class="icon-btn" data-action="excluir-tarifa-solar" data-id="${t.id}" title="Excluir">✕</button>
+          </div>
+        `).join('') : `<div class="empty">Nenhuma tarifa registrada manualmente ainda — os cálculos de economia usam a tarifa de cada fatura registrada, que já reflete o valor real de cada período.</div>`}
+      </div></div>
+      <div class="note" style="margin-top:0;">Isso é um registro de referência — os cálculos de economia por fatura já usam automaticamente a tarifa de cada fatura no seu próprio período (não aplicam a tarifa de hoje pro passado).</div>
     </div>
   `;
 }
@@ -23303,6 +23681,63 @@ function attachViewHandlers(){
   document.getElementById('btnRegistrarFaturaEnergia')?.addEventListener('click', openRegistrarFaturaEnergiaModal);
   document.getElementById('btnRegistrarManutencaoSolar')?.addEventListener('click', openRegistrarManutencaoSolarModal);
   document.getElementById('btnExportarPdfUsina')?.addEventListener('click', gerarUsinaSolarPDF);
+  document.getElementById('btnExportarPdfUsina2')?.addEventListener('click', gerarUsinaSolarPDF);
+  document.getElementById('btnEditarUsinaSolar2')?.addEventListener('click', ()=>document.getElementById('btnEditarUsinaSolar')?.click());
+  document.getElementById('btnEditarUsinaSolar3')?.addEventListener('click', ()=>document.getElementById('btnEditarUsinaSolar')?.click());
+  document.getElementById('btnEditarEquipamentosSolar')?.addEventListener('click', openEditarEquipamentosSolarModal);
+  document.querySelectorAll('#usinaSolarAbaToggle [data-aba]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      window._usinaSolarAbaAtiva = btn.dataset.aba;
+      document.querySelectorAll('#usinaSolarAbaToggle [data-aba]').forEach(b=>b.classList.toggle('active', b===btn));
+      document.querySelectorAll('[data-aba-painel]').forEach(p=>{ p.style.display = (p.dataset.abaPainel===btn.dataset.aba) ? 'block' : 'none'; });
+    });
+  });
+  document.getElementById('usinaSolarPeriodoSelect')?.addEventListener('change', (e)=>{
+    window._usinaSolarPeriodoSel = e.target.value;
+    render();
+  });
+  document.getElementById('usinaSolarPeriodoDe')?.addEventListener('change', (e)=>{ window._usinaSolarPeriodoDe = e.target.value; render(); });
+  document.getElementById('usinaSolarPeriodoAte')?.addEventListener('change', (e)=>{ window._usinaSolarPeriodoAte = e.target.value; render(); });
+  document.getElementById('btnAtualizarDadosSolar')?.addEventListener('click', ()=>{ render(); showToast('Dados atualizados'); });
+  document.getElementById('btnVerRelatorioSolar')?.addEventListener('click', ()=>{ window._usinaSolarAbaAtiva = 'relatorios'; render(); });
+  document.getElementById('btnRegistrarTarifaSolar')?.addEventListener('click', openRegistrarTarifaSolarModal);
+  document.getElementById('usinaHistoricoDe')?.addEventListener('change', (e)=>{ window._usinaHistoricoDe = e.target.value; render(); });
+  document.getElementById('usinaHistoricoAte')?.addEventListener('change', (e)=>{ window._usinaHistoricoAte = e.target.value; render(); });
+  document.getElementById('usinaHistoricoTipo')?.addEventListener('change', (e)=>{ window._usinaHistoricoTipo = e.target.value; render(); });
+  document.getElementById('btnLimparFiltroHistoricoSolar')?.addEventListener('click', ()=>{
+    window._usinaHistoricoDe = null; window._usinaHistoricoAte = null; window._usinaHistoricoTipo = 'todos';
+    render();
+  });
+  document.getElementById('btnCalMesAnterior')?.addEventListener('click', ()=>{
+    const mesAtual = window._usinaCalendarioMes || todayISO().slice(0,7);
+    const [a,m] = mesAtual.split('-').map(Number);
+    window._usinaCalendarioMes = m===1 ? `${a-1}-12` : `${a}-${String(m-1).padStart(2,'0')}`;
+    window._usinaCalendarioDiaSelecionado = null;
+    render();
+  });
+  document.getElementById('btnCalMesProximo')?.addEventListener('click', ()=>{
+    const mesAtual = window._usinaCalendarioMes || todayISO().slice(0,7);
+    const [a,m] = mesAtual.split('-').map(Number);
+    window._usinaCalendarioMes = m===12 ? `${a+1}-01` : `${a}-${String(m+1).padStart(2,'0')}`;
+    window._usinaCalendarioDiaSelecionado = null;
+    render();
+  });
+  document.querySelectorAll('[data-action="selecionar-dia-cal-solar"]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      window._usinaCalendarioDiaSelecionado = window._usinaCalendarioDiaSelecionado===el.dataset.dia ? null : el.dataset.dia;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-action="exportar-pdf-tema-solar"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>gerarUsinaSolarPDF(btn.dataset.tema));
+  });
+  document.querySelectorAll('[data-action="excluir-tarifa-solar"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!confirm('Excluir essa tarifa registrada?')) return;
+      state.usinaTarifas = (state.usinaTarifas||[]).filter(t=>t.id!==btn.dataset.id);
+      persist(); render();
+    });
+  });
   document.getElementById('btnRegistrarCreditoCliente')?.addEventListener('click', openRegistrarCreditoClienteModal);
   document.querySelectorAll('[data-action="usar-credito-cliente"]').forEach(btn=>{
     btn.addEventListener('click', ()=>openUsarCreditoClienteModal(btn.dataset.cliente));
@@ -23325,18 +23760,32 @@ function attachViewHandlers(){
     const usina = state.usinaSolar || {};
     modal.innerHTML = `
       <h3>⚙️ Dados da usina</h3>
+      <div class="field"><label>Nome da usina (opcional)</label><input type="text" id="usNome" value="${escapeHTML(usina.nome||'')}" placeholder="Ex: Usina de Pomerode"></div>
       <div class="field-row">
         <div class="field"><label>Capacidade (kW)</label><input type="text" inputmode="decimal" id="usCapacidade" value="${usina.capacidadeKw||''}"></div>
         <div class="field"><label>Data da instalação</label><input type="date" id="usDataInstalacao" value="${usina.dataInstalacao||''}"></div>
       </div>
       <div class="field">
-        <label>Valor investido na usina (R$, opcional)</label>
+        <label>Valor investido inicial na usina (R$, opcional)</label>
         <input type="text" inputmode="decimal" id="usValorInvestido" value="${usina.valorInvestido||''}">
       </div>
-      <div class="note" style="margin-top:0;">Usado só pra estimar o payback (quanto tempo falta pra usina se pagar) nos relatórios — não afeta nenhum cálculo do financeiro geral.</div>
+      <div class="field-row">
+        <div class="field"><label>Custos adicionais (R$, opcional)</label><input type="text" inputmode="decimal" id="usCustosAdicionais" value="${usina.custosAdicionais||''}"></div>
+        <div class="field"><label>Outros custos (R$, opcional)</label><input type="text" inputmode="decimal" id="usOutrosCustos" value="${usina.outrosCustos||''}"></div>
+      </div>
+      <div class="note" style="margin-top:0;">Usado pra estimar o payback (investimento inicial + custos adicionais + manutenções já registradas + outros custos) — não afeta nenhum cálculo do financeiro geral.</div>
       <div class="field">
         <label>Garantia do inversor vence em (opcional)</label>
         <input type="date" id="usGarantiaInversor" value="${usina.garantiaInversorAte||''}">
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Meta mensal (kWh, opcional)</label><input type="text" inputmode="decimal" id="usMetaMensal" value="${usina.metaMensalKwh||''}"></div>
+        <div class="field"><label>Como os dados chegam</label>
+          <select id="usAtualizacaoModo">
+            <option value="manual" ${usina.atualizacaoModo!=='automatica'?'selected':''}>Manual (você digita)</option>
+            <option value="automatica" ${usina.atualizacaoModo==='automatica'?'selected':''}>Automática</option>
+          </select>
+        </div>
       </div>
       <div class="modal-actions">
         <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
@@ -23345,11 +23794,16 @@ function attachViewHandlers(){
     document.getElementById('modalOverlay').classList.add('open');
     document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
     document.getElementById('btnSalvarUsinaSolar').addEventListener('click', ()=>{
+      const nome = document.getElementById('usNome').value.trim() || null;
       const capacidadeKw = numBR(document.getElementById('usCapacidade').value) || null;
       const dataInstalacao = document.getElementById('usDataInstalacao').value || null;
       const valorInvestido = numBR(document.getElementById('usValorInvestido').value) || null;
+      const custosAdicionais = numBR(document.getElementById('usCustosAdicionais').value) || null;
+      const outrosCustos = numBR(document.getElementById('usOutrosCustos').value) || null;
       const garantiaInversorAte = document.getElementById('usGarantiaInversor').value || null;
-      state.usinaSolar = { capacidadeKw, dataInstalacao, valorInvestido, garantiaInversorAte };
+      const metaMensalKwh = numBR(document.getElementById('usMetaMensal').value) || null;
+      const atualizacaoModo = document.getElementById('usAtualizacaoModo').value;
+      state.usinaSolar = { nome, capacidadeKw, dataInstalacao, valorInvestido, custosAdicionais, outrosCustos, garantiaInversorAte, metaMensalKwh, atualizacaoModo };
       persist(); closeModal(); render();
       showToast('Dados da usina salvos');
     });
@@ -33167,6 +33621,92 @@ function openUsarCreditoClienteModal(clienteNome){
     });
     persist(); closeModal(); render();
     showToast(`${brl(valorUsar)} de Passivo baixado${referencia?' em '+referencia:''} — lance o pedido pelo valor cheio normalmente, o caixa já fica certo`);
+  });
+}
+
+function openRegistrarTarifaSolarModal(){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>💵 Registrar tarifa de energia</h3>
+    <div class="note" style="margin-top:0;">Registro de referência — os cálculos de economia por fatura já usam a tarifa de cada fatura automaticamente. Isso aqui é só pra você guardar o histórico de reajustes.</div>
+    <div class="field-row">
+      <div class="field"><label>Tarifa (R$/kWh)</label><input type="text" inputmode="decimal" id="tfValor" placeholder="ex: 0,701686"></div>
+      <div class="field"><label>Data de início</label><input type="date" id="tfDataInicio" value="${todayISO()}"></div>
+    </div>
+    <div class="field"><label>Data final (opcional — deixe vazio se ainda está em vigor)</label><input type="date" id="tfDataFim"></div>
+    <div class="field"><label>Observação (opcional)</label><input type="text" id="tfObservacao" placeholder="Ex: Reajuste anual Celesc"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarTarifaSolar">Registrar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarTarifaSolar').addEventListener('click', ()=>{
+    const tarifaKwh = numBR(document.getElementById('tfValor').value);
+    const dataInicio = document.getElementById('tfDataInicio').value || todayISO();
+    const dataFim = document.getElementById('tfDataFim').value || null;
+    const observacao = document.getElementById('tfObservacao').value.trim() || null;
+    if(isNaN(tarifaKwh) || tarifaKwh<=0){ showToast('Informe a tarifa em R$/kWh'); return; }
+    if(!state.usinaTarifas) state.usinaTarifas = [];
+    state.usinaTarifas.push({ id: uid(), tarifaKwh, dataInicio, dataFim, observacao, criadoEm: new Date().toISOString() });
+    persist(); closeModal(); render();
+    showToast('Tarifa registrada');
+  });
+}
+
+function openEditarEquipamentosSolarModal(){
+  const equip = state.usinaEquipamentos || {};
+  const inv = equip.inversor || {};
+  const pn = equip.paineis || {};
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>🔧 Equipamentos da usina</h3>
+    <div style="font-weight:600;font-size:12.5px;margin:10px 0 6px;">Inversor</div>
+    <div class="field-row">
+      <div class="field"><label>Fabricante</label><input type="text" id="eqInvFabricante" value="${escapeHTML(inv.fabricante||'')}"></div>
+      <div class="field"><label>Modelo</label><input type="text" id="eqInvModelo" value="${escapeHTML(inv.modelo||'')}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Nº de série</label><input type="text" id="eqInvSerie" value="${escapeHTML(inv.numeroSerie||'')}"></div>
+      <div class="field"><label>Garantia até</label><input type="date" id="eqInvGarantia" value="${inv.garantiaAte||''}"></div>
+    </div>
+    <div style="font-weight:600;font-size:12.5px;margin:16px 0 6px;">Painéis</div>
+    <div class="field-row">
+      <div class="field"><label>Fabricante</label><input type="text" id="eqPnFabricante" value="${escapeHTML(pn.fabricante||'')}"></div>
+      <div class="field"><label>Quantidade</label><input type="text" inputmode="numeric" id="eqPnQuantidade" value="${pn.quantidade||''}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Potência unitária (W)</label><input type="text" inputmode="numeric" id="eqPnPotencia" value="${pn.potenciaUnitariaW||''}"></div>
+      <div class="field"><label>Garantia até</label><input type="date" id="eqPnGarantia" value="${pn.garantiaAte||''}"></div>
+    </div>
+    <div style="font-weight:600;font-size:12.5px;margin:16px 0 6px;">Outros equipamentos (opcional)</div>
+    <div class="field"><label>Datalogger, monitoramento, estrutura, proteções...</label><textarea id="eqOutros" rows="3">${escapeHTML(equip.outros||'')}</textarea></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarEquipamentosSolar">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarEquipamentosSolar').addEventListener('click', ()=>{
+    state.usinaEquipamentos = {
+      inversor: {
+        fabricante: document.getElementById('eqInvFabricante').value.trim() || null,
+        modelo: document.getElementById('eqInvModelo').value.trim() || null,
+        numeroSerie: document.getElementById('eqInvSerie').value.trim() || null,
+        garantiaAte: document.getElementById('eqInvGarantia').value || null,
+      },
+      paineis: {
+        fabricante: document.getElementById('eqPnFabricante').value.trim() || null,
+        quantidade: numBR(document.getElementById('eqPnQuantidade').value) || null,
+        potenciaUnitariaW: numBR(document.getElementById('eqPnPotencia').value) || null,
+        garantiaAte: document.getElementById('eqPnGarantia').value || null,
+      },
+      outros: document.getElementById('eqOutros').value.trim() || null,
+    };
+    persist(); closeModal(); render();
+    showToast('Equipamentos salvos');
   });
 }
 
