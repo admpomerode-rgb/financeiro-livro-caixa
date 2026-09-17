@@ -18955,6 +18955,29 @@ function gerarUsinaSolarPDF(tema){
 // Análise automática comparando uma fatura com a anterior (§63) — só sinaliza mudanças
 // significativas (10-15% pra evitar alarme falso por flutuação pequena), sempre descritiva,
 // nunca afirmando causa (não diz "painel sujo", só descreve o que mudou).
+// Status de desempenho (§1 do complemento) — compara geração real com a esperada (a meta mensal
+// cadastrada). Limites: >=90% verde, 70-90% amarelo, <70% vermelho — testados isolados antes.
+// Sem meta cadastrada, nunca inventa um "esperado": retorna null e quem chama mostra a mensagem certa.
+// Status de garantia (§10 do complemento) — vigente/próxima (90 dias)/vencida, testado isolado antes.
+function statusGarantiaUsinaSolar(dataFim, hoje){
+  if(!dataFim) return null;
+  const dias = Math.round((new Date(dataFim+'T00:00:00') - new Date(hoje+'T00:00:00')) / 86400000);
+  if(dias < 0) return { status:'vencida', emoji:'🔴', texto:'Garantia vencida', dias };
+  if(dias <= 90) return { status:'proxima', emoji:'🟡', texto:'Garantia próxima do vencimento', dias };
+  return { status:'vigente', emoji:'🟢', texto:'Garantia vigente', dias };
+}
+
+function statusDesempenhoUsinaSolar(realKwh, esperadoKwh){
+  if(esperadoKwh==null || esperadoKwh<=0 || realKwh==null) return null;
+  const pct = (realKwh/esperadoKwh)*100;
+  const diffKwh = realKwh-esperadoKwh;
+  let status, emoji, texto;
+  if(pct>=90){ status='dentro'; emoji='🟢'; texto='Dentro do esperado'; }
+  else if(pct>=70){ status='abaixo'; emoji='🟡'; texto='Abaixo do esperado'; }
+  else { status='muito-abaixo'; emoji='🔴'; texto='Muito abaixo do esperado'; }
+  return { status, emoji, texto, pct, diffKwh };
+}
+
 function analiseAutomaticaFaturaUsinaSolar(atual, anterior){
   const msgs = [];
   if(!anterior) return msgs;
@@ -19102,7 +19125,7 @@ function viewUsinaSolar(){
   if(evolucaoCreditos.length>=2){
     const ultimo = evolucaoCreditos[evolucaoCreditos.length-1].saldoCreditosAtualKwh;
     const penultimo = evolucaoCreditos[evolucaoCreditos.length-2].saldoCreditosAtualKwh;
-    tendenciaCreditos = ultimo>penultimo ? { seta:'↑', texto:'aumentando' } : ultimo<penultimo ? { seta:'↓', texto:'diminuindo' } : { seta:'→', texto:'estável' };
+    tendenciaCreditos = ultimo>penultimo ? { seta:'↑', texto:'aumentando', status:'aumentando' } : ultimo<penultimo ? { seta:'↓', texto:'diminuindo', status:'diminuindo' } : { seta:'→', texto:'estável', status:'estavel' };
   }
 
   // ---- Análise automática (§63) — compara a última fatura com a anterior
@@ -19228,6 +19251,33 @@ function viewUsinaSolar(){
   }
   const manutVencida = (equip.inversor?.garantiaAte && equip.inversor.garantiaAte < todayISO()) || (equip.paineis?.garantiaAte && equip.paineis.garantiaAte < todayISO());
   if(manutVencida) alertasDesempenho.push({ tipo:'garantia', texto:'Garantia de algum equipamento (inversor ou painéis) já venceu', cor:'var(--text-soft)' });
+  if(tendenciaCreditos?.status==='diminuindo') alertasDesempenho.push({ tipo:'creditos-reducao', texto:'Saldo de créditos em redução nas últimas faturas registradas', cor:'var(--warn)' });
+  const faturaPendenteLancamento = (state.usinaFaturas||[]).find(f=>f.lancamentoId==null || !state.lancamentos.find(l=>l.id===f.lancamentoId));
+  if(faturaPendenteLancamento) alertasDesempenho.push({ tipo:'fatura-pendente', texto:`Fatura ${competenciaLabel(faturaPendenteLancamento.referencia)} sem lançamento vinculado no financeiro`, cor:'var(--text-soft)' });
+
+  // ---- Indicador de Desempenho da Usina (§1) — compara a última leitura mensal com a meta
+  const desempenhoUsina = usina.metaMensalKwh>0 && ultimaLeitura?.periodo==='mes'
+    ? statusDesempenhoUsinaSolar(ultimaLeitura.geracaoKwh, usina.metaMensalKwh)
+    : null;
+
+  // ---- Status de garantia dos equipamentos (§10)
+  const garantiaInversorStatus = statusGarantiaUsinaSolar(equip.inversor?.garantiaAte, todayISO());
+  const garantiaPaineisStatus = statusGarantiaUsinaSolar(equip.paineis?.garantiaAte, todayISO());
+
+  // ---- Saúde da Usina (§13) — agrega os indicadores objetivos já calculados acima num status só.
+  // Vermelho se tiver algo realmente sério (desempenho muito abaixo, garantia vencida, suspensão
+  // avisada); amarelo se tiver qualquer alerta ativo; verde só se não tiver nada pra avisar.
+  const saudeUsinaItens = [
+    { nome:'Produção', valor: desempenhoUsina ? desempenhoUsina.texto : 'Dados insuficientes para calcular', grave: desempenhoUsina?.status==='muito-abaixo', atencao: desempenhoUsina?.status==='abaixo' },
+    { nome:'Tendência', valor: tendenciaCreditos ? `${tendenciaCreditos.seta} ${tendenciaCreditos.texto}` : 'Sem dado suficiente', grave:false, atencao: tendenciaCreditos?.status==='diminuindo' },
+    { nome:'Créditos', valor: saldoCreditosAtual>0 ? `Disponíveis (${saldoCreditosAtual} kWh)` : 'Sem saldo', grave:false, atencao: saldoCreditosAtual===0 },
+    { nome:'Garantia', valor: [garantiaInversorStatus,garantiaPaineisStatus].filter(Boolean).length ? [garantiaInversorStatus,garantiaPaineisStatus].filter(Boolean).map(g=>g.texto).join(' · ') : 'Não cadastrada', grave: [garantiaInversorStatus,garantiaPaineisStatus].some(g=>g?.status==='vencida'), atencao: [garantiaInversorStatus,garantiaPaineisStatus].some(g=>g?.status==='proxima') },
+    { nome:'Dados', valor: ultimaLeitura && addDiasISO(todayISO(),-35)<=ultimaLeitura.data ? 'Atualizados' : 'Desatualizados (35+ dias)', grave:false, atencao: !(ultimaLeitura && addDiasISO(todayISO(),-35)<=ultimaLeitura.data) },
+    { nome:'Alertas ativos', valor: `${alertasDesempenho.length} alerta(s)`, grave: alertasDesempenho.length>=3, atencao: alertasDesempenho.length>0 && alertasDesempenho.length<3 },
+  ];
+  const saudeUsinaGrave = saudeUsinaItens.some(i=>i.grave) || !!alertaSuspensaoAtivo;
+  const saudeUsinaAtencao = saudeUsinaItens.some(i=>i.atencao);
+  const saudeUsina = saudeUsinaGrave ? { emoji:'🔴', texto:'NECESSITA VERIFICAÇÃO', cor:'var(--danger)' } : saudeUsinaAtencao ? { emoji:'🟡', texto:'ATENÇÃO', cor:'var(--warn)' } : { emoji:'🟢', texto:'NORMAL', cor:'var(--success)' };
 
   // ---- Recordes (§25) — só mostra quando houver dado suficiente
   const leiturasDiaTodas = leituras.filter(l=>l.periodo==='dia');
@@ -19323,6 +19373,34 @@ function viewUsinaSolar(){
         <div class="fluxo-resumo-item"><div class="lbl">Potência instalada</div><div class="val">${usina.capacidadeKw?usina.capacidadeKw+' kWp':'—'}</div></div>
       </div>
       ${leiturasDiaNoPeriodo.length===0 && leiturasMesNoPeriodo.length===0 ? `<div class="note" style="margin-top:6px;">A geração do período usa leitura tipo "dia" quando existir, ou a leitura "mês" mais recente dentro do período. Se você só registra por mês, escolha "Este mês" ou períodos maiores pra ver o número.</div>` : ''}
+
+      <div class="contas-secao-titulo" style="margin-top:22px;">Saúde da usina</div>
+      <details class="panel-details">
+        <summary style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:16px;">${saudeUsina.emoji}</span>
+          <span style="font-weight:700;color:${saudeUsina.cor};">${saudeUsina.texto}</span>
+        </summary>
+        <div style="padding:0 18px 14px;">
+          ${saudeUsinaItens.map(i=>`
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid var(--line);">
+              <span style="color:var(--text-soft);">${i.nome}</span>
+              <span style="color:${i.grave?'var(--danger)':i.atencao?'var(--warn)':'var(--ink)'};font-weight:${i.grave||i.atencao?'600':'400'};">${i.valor}</span>
+            </div>
+          `).join('')}
+        </div>
+      </details>
+      <div class="note" style="margin-top:0;">Esse indicador não diagnostica defeito no equipamento — só resume, de forma objetiva, os sinais já calculados nesta tela.</div>
+
+      ${desempenhoUsina ? `
+      <div class="contas-secao-titulo">Desempenho da usina</div>
+      <div class="fluxo-resumo-4col">
+        <div class="fluxo-resumo-item"><div class="lbl">Geração real (último mês)</div><div class="val">${ultimaLeitura.geracaoKwh} kWh</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Geração esperada (meta)</div><div class="val">${usina.metaMensalKwh} kWh</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Percentual realizado</div><div class="val">${desempenhoUsina.pct.toFixed(0)}%</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Status</div><div class="val" style="font-size:13px;">${desempenhoUsina.emoji} ${desempenhoUsina.texto}</div></div>
+      </div>
+      <div class="note" style="margin-top:6px;">Diferença: ${desempenhoUsina.diffKwh>=0?'+':''}${desempenhoUsina.diffKwh.toFixed(1)} kWh em relação à meta cadastrada.</div>
+      ` : `<div class="note" style="margin-top:10px;">Cadastre uma meta mensal em ⚙️ Dados da usina pra ver o indicador de desempenho (geração real x esperada) aqui — sem meta, não calculo um "esperado" inventado.</div>`}
 
       <div class="contas-secao-titulo" style="margin-top:22px;">Resumo geral</div>
       <div class="fluxo-resumo-4col">
@@ -19647,7 +19725,9 @@ function viewUsinaSolar(){
             <div class="fluxo-resumo-item"><div class="lbl">Modelo</div><div class="val" style="font-size:13px;">${escapeHTML(equip.inversor.modelo||'—')}</div></div>
             <div class="fluxo-resumo-item"><div class="lbl">Nº de série</div><div class="val" style="font-size:13px;">${escapeHTML(equip.inversor.numeroSerie||'—')}</div></div>
             <div class="fluxo-resumo-item"><div class="lbl">Garantia até</div><div class="val" style="font-size:13px;">${equip.inversor.garantiaAte?fmtDate(equip.inversor.garantiaAte):'—'}</div></div>
-          </div>` : `<div class="empty">Nenhum dado do inversor cadastrado ainda.</div>`}
+          </div>
+          ${garantiaInversorStatus ? `<div class="note" style="margin-top:8px;border-color:${garantiaInversorStatus.status==='vencida'?'var(--danger)':garantiaInversorStatus.status==='proxima'?'var(--warn)':'var(--success)'};">${garantiaInversorStatus.emoji} ${garantiaInversorStatus.texto}${garantiaInversorStatus.dias>=0?` — ${garantiaInversorStatus.dias} dia(s) restantes`:''}</div>` : ''}
+          ` : `<div class="empty">Nenhum dado do inversor cadastrado ainda.</div>`}
       </div></div>
       <div class="contas-secao-titulo">Painéis</div>
       <div class="panel"><div class="panel-body" style="padding:14px 18px;">
@@ -19657,7 +19737,9 @@ function viewUsinaSolar(){
             <div class="fluxo-resumo-item"><div class="lbl">Quantidade</div><div class="val">${equip.paineis.quantidade||'—'}</div></div>
             <div class="fluxo-resumo-item"><div class="lbl">Potência unitária</div><div class="val" style="font-size:13px;">${equip.paineis.potenciaUnitariaW?equip.paineis.potenciaUnitariaW+' W':'—'}</div></div>
             <div class="fluxo-resumo-item"><div class="lbl">Garantia até</div><div class="val" style="font-size:13px;">${equip.paineis.garantiaAte?fmtDate(equip.paineis.garantiaAte):'—'}</div></div>
-          </div>` : `<div class="empty">Nenhum dado dos painéis cadastrado ainda.</div>`}
+          </div>
+          ${garantiaPaineisStatus ? `<div class="note" style="margin-top:8px;border-color:${garantiaPaineisStatus.status==='vencida'?'var(--danger)':garantiaPaineisStatus.status==='proxima'?'var(--warn)':'var(--success)'};">${garantiaPaineisStatus.emoji} ${garantiaPaineisStatus.texto}${garantiaPaineisStatus.dias>=0?` — ${garantiaPaineisStatus.dias} dia(s) restantes`:''}</div>` : ''}
+          ` : `<div class="empty">Nenhum dado dos painéis cadastrado ainda.</div>`}
       </div></div>
       ${equip.outros ? `<div class="contas-secao-titulo">Outros equipamentos</div><div class="note" style="margin-top:0;white-space:pre-wrap;">${escapeHTML(equip.outros)}</div>` : ''}
     </div>
