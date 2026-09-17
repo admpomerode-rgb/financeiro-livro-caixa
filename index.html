@@ -5739,7 +5739,8 @@ function acessoRapidoHTML(t){
   const ativosTotal = totalAtivosPatrimoniais();
   const estoqueTotal = totalEstoqueInsumos();
   const ativosGerais = caixaAtual+aReceberTotal+investidoTotal+ativosTotal+estoqueTotal;
-  const plTotal = ativosGerais - (aPagarTotal+cartoesFaturaAtual);
+  const adiantamentoClientesTotal = (state.creditosClientes||[]).reduce((s,c)=>s+Math.max(0,c.valor-(c.valorUsado||0)),0);
+  const plTotal = ativosGerais - (aPagarTotal+cartoesFaturaAtual+adiantamentoClientesTotal);
   const rendimentosMes = movimentosRealizados().filter(ev=>ev.categoria==='Rendimentos' && ev.tipo==='entrada' && ev.data>=t.de && ev.data<=ateReal).reduce((s,ev)=>s+ev.valor,0);
   const variacaoCaixaMes = t.saldoAtual - t.saldoInicial;
   const qtdLancMes = state.lancamentos.filter(l=>{ const d=l.dataPagamento||l.dataVencimento; return d && d>=t.de && d<=ateReal; }).length;
@@ -5977,7 +5978,8 @@ function viewDashboard(){
       const aReceberDash = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
       const aPagarDash = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
       const cartoesDash = state.cartoes.reduce((s,c)=>{ const comp=competenciaAtual(c); return s+(faturaStatus(c.id,comp)==='aberta'?totalCompetencia(c.id,comp):0); },0);
-      const plDash = (caixaDash+aReceberDash+totalInvestimentos()+totalAtivosPatrimoniais()+totalEstoqueInsumos()) - (aPagarDash+cartoesDash);
+      const adiantamentoClientesDash = (state.creditosClientes||[]).reduce((s,c)=>s+Math.max(0,c.valor-(c.valorUsado||0)),0);
+      const plDash = (caixaDash+aReceberDash+totalInvestimentos()+totalAtivosPatrimoniais()+totalEstoqueInsumos()) - (aPagarDash+cartoesDash+adiantamentoClientesDash);
       return `
       <div class="panel" style="margin-top:12px;cursor:pointer;" data-action="ir-demonstracoes-financeiras">
         <div class="panel-body" style="padding:14px 18px;">
@@ -18422,8 +18424,12 @@ function renderBalanco(){
   const investimentos = totalInvestimentos();
   const ativoImobilizado = totalAtivosPatrimoniais();
   const estoqueInsumos = totalEstoqueInsumos();
+  // Adiantamento de Clientes — Passivo: dinheiro que já está no caixa (por isso conta em "Caixa e
+  // Bancos" acima) mas ainda não foi reconhecido como receita, porque é troco/pagamento a mais que
+  // fica guardado pra abater um pedido futuro (ver tela "Créditos de Clientes").
+  const adiantamentoClientes = (state.creditosClientes||[]).reduce((s,c)=>s+Math.max(0,c.valor-(c.valorUsado||0)),0);
   const totalAtivo = caixaBancos + aReceber + investimentos + ativoImobilizado + estoqueInsumos;
-  const totalPassivo = aPagar + cartoesNaoFaturados;
+  const totalPassivo = aPagar + cartoesNaoFaturados + adiantamentoClientes;
   const patrimonioLiquido = totalAtivo - totalPassivo;
 
   return `
@@ -18445,6 +18451,7 @@ function renderBalanco(){
       <div class="report-line"><span>Passivo Circulante</span><span class="v"></span></div>
       <div class="report-line sub"><span>Contas a Pagar</span><span class="v">${brl(aPagar)}</span></div>
       <div class="report-line sub"><span>Faturas de cartão em aberto (não fechadas)</span><span class="v">${brl(cartoesNaoFaturados)}</span></div>
+      ${adiantamentoClientes>0 ? `<div class="report-line sub"><span>Adiantamento de Clientes</span><span class="v">${brl(adiantamentoClientes)}</span></div>` : ''}
       <div class="report-line total"><span>Total do Passivo</span><span class="v">${brl(totalPassivo)}</span></div>
 
       <div class="report-line result"><span>Patrimônio Líquido</span><span class="v" style="color:${patrimonioLiquido>=0?'var(--success)':'var(--danger)'}">${brl(patrimonioLiquido)}</span></div>
@@ -19316,10 +19323,11 @@ function viewCreditosClientes(){
           const saldoItem = c.valor - (c.valorUsado||0);
           const status = saldoItem<=0.004 ? '✅ Usado' : (c.valorUsado>0 ? '🔸 Parcial' : '⏳ Disponível');
           return `
-          <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
-            <div class="desc-cell"><div>${escapeHTML(c.clienteNome)}</div><div class="cat">${fmtDate(c.data)}${c.motivo?' · '+escapeHTML(c.motivo):''} · ${status}</div></div>
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto auto auto;">
+            <div class="desc-cell"><div>${escapeHTML(c.clienteNome)}</div><div class="cat">${fmtDate(c.data)} · conta: ${escapeHTML(nomeConta(c.contaId))}${c.motivo?' · '+escapeHTML(c.motivo):''} · ${status}</div></div>
             <span class="mono" style="font-size:12px;color:var(--text-soft);">${c.valorUsado>0?`usado ${brl(c.valorUsado)}`:''}</span>
             <span class="mono" style="font-weight:600;">${brl(c.valor)}</span>
+            <button class="icon-btn" data-action="excluir-credito-cliente" data-id="${c.id}" title="Excluir (reverte o lançamento no caixa)">✕</button>
           </div>`;
         }).join('') : `<div class="empty">Nenhum crédito registrado ainda.</div>`}
       </div>
@@ -23271,6 +23279,16 @@ function attachViewHandlers(){
   document.getElementById('btnRegistrarCreditoCliente')?.addEventListener('click', openRegistrarCreditoClienteModal);
   document.querySelectorAll('[data-action="usar-credito-cliente"]').forEach(btn=>{
     btn.addEventListener('click', ()=>openUsarCreditoClienteModal(btn.dataset.cliente));
+  });
+  document.querySelectorAll('[data-action="excluir-credito-cliente"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!confirm('Excluir esse crédito? O lançamento que ele criou no caixa também será removido.')) return;
+      const credito = (state.creditosClientes||[]).find(c=>c.id===btn.dataset.id);
+      if(credito?.lancamentoId) state.lancamentos = state.lancamentos.filter(l=>l.id!==credito.lancamentoId);
+      state.creditosClientes = (state.creditosClientes||[]).filter(c=>c.id!==btn.dataset.id);
+      persist(); render();
+      showToast('Crédito excluído e lançamento revertido');
+    });
   });
   document.getElementById('btnEditarUsinaSolar')?.addEventListener('click', ()=>{
     const modal = document.getElementById('modalContent');
@@ -33021,7 +33039,7 @@ function openRegistrarCreditoClienteModal(){
       <div class="field"><label>Valor do crédito (R$)</label><input type="text" inputmode="decimal" id="ccValor"></div>
       <div class="field"><label>Data</label><input type="date" id="ccData" value="${todayISO()}"></div>
     </div>
-    <div class="field"><label>Em qual conta esse valor entrou?</label><select id="ccConta">${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+    <div class="field"><label>Em qual conta esse valor entrou?</label><select id="ccConta">${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}" ${c.principal?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select></div>
     <div class="field"><label>Motivo (opcional)</label><input type="text" id="ccMotivo" placeholder="Ex: Pedido Nº 2574 — pagou R$100, pedido era R$90"></div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
