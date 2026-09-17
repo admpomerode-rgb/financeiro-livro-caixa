@@ -409,7 +409,8 @@
 
   /* Contas bancárias */
   .conta-cards{display:grid;grid-template-columns:repeat(auto-fill, minmax(220px,1fr));gap:14px;margin-bottom:22px;}
-  .conta-card{background:var(--white);border:1px solid var(--line);border-radius:10px;padding:48px 18px 16px;border-top:3px solid var(--accent-c, var(--blue-accent));position:relative;display:flex;flex-direction:column;}
+  .conta-card{background:var(--white);border:1px solid var(--line);border-radius:10px;padding:48px 18px 16px;border-top:3px solid var(--accent-c, var(--blue-accent));position:relative;display:flex;flex-direction:column;min-height:300px;}
+  .conta-cards-compacto .conta-card{min-height:0;}
   .conta-card .conta-card-footer{margin-top:auto;padding-top:14px;}
   .conta-card.conta-principal{box-shadow:0 0 0 2px var(--warn);}
   .conta-card.conta-negativa{background:var(--bg-sutil-vermelho);}
@@ -841,7 +842,7 @@
         <div class="nav-item" data-view="capex" title="Central de CAPEX"><span class="nav-dot"></span><span class="nav-abbr">CX</span><span class="nav-label">Central de CAPEX</span></div>
         <div class="nav-item" data-view="pendencias" title="Central de Pendências"><span class="nav-dot"></span><span class="nav-abbr">PD</span><span class="nav-label">Central de Pendências</span></div>
         <div class="nav-item" data-view="navegacao-objetivo" title="O Que Você Quer Fazer?"><span class="nav-dot"></span><span class="nav-abbr">OB</span><span class="nav-label">O Que Você Quer Fazer?</span></div>
-        <div class="nav-item" data-view="simulacao" title="Simulação &quot;E Se&quot;"><span class="nav-dot"></span><span class="nav-abbr">SE</span><span class="nav-label">Simulação "E Se"</span></div>
+        <div class="nav-item" data-view="simulacao" title="Simulações"><span class="nav-dot"></span><span class="nav-abbr">SE</span><span class="nav-label">Simulações</span></div>
         <div class="nav-item" data-view="diagnostico-dados" title="Diagnóstico de Dados"><span class="nav-dot"></span><span class="nav-abbr">DD</span><span class="nav-label">Diagnóstico de Dados</span></div>
       </div>
       <div class="nav-group" style="--group-accent:#7B5CD6;">
@@ -1859,7 +1860,7 @@ function moreItensDef(){
     { view:'pendencias', icone:'🔔', nome:'Central de Pendências', grupo:'Análise', badge:()=>state.lancamentos.filter(l=>l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento<todayISO()).length },
     { view:'navegacao-objetivo', icone:'🧭', nome:'O Que Você Quer Fazer?', grupo:'Análise' },
     { view:'orcamento', icone:'🗂️', nome:'Orçamento e Planejamento', grupo:'Operacional' },
-    { view:'simulacao', icone:'🔮', nome:'Simulação "E Se"', grupo:'Análise' },
+    { view:'simulacao', icone:'🔮', nome:'Simulações', grupo:'Análise' },
     { view:'categorias', icone:'🏷️', nome:'Categorias', grupo:'Cadastros e Configurações' },
     { view:'fornecedores', icone:'🚚', nome:'Fornecedores', grupo:'Cadastros e Configurações' },
     { view:'descricoes', icone:'📝', nome:'Padronizar Descrições', grupo:'Cadastros e Configurações' },
@@ -7417,7 +7418,7 @@ function viewOrcamentoPlanejamento(){
 
     <div class="report-controls" style="gap:8px;flex-wrap:wrap;">
       <button class="btn ghost sm" data-action="ir-orcamento-anual">📅 Orçamento Anual</button>
-      <button class="btn ghost sm" data-action="ir-simulacao-e-se">🎲 Simulação "E Se"</button>
+      <button class="btn ghost sm" data-action="ir-simulacao-e-se">🎲 Simulações</button>
       <button class="btn ghost sm" data-goto="relatorios">📊 Relatórios</button>
     </div>
     `}
@@ -7486,7 +7487,7 @@ function viewSimulacao(){
   const itens = state.simulacaoAtual||[];
   return `
     <div class="topbar">
-      <div><h1>Simulação "E Se"</h1><p>Teste o impacto de uma decisão no seu caixa dos próximos meses, sem lançar nada de verdade</p></div>
+      <div><h1>Simulações</h1><p>Teste o impacto de uma decisão no seu caixa dos próximos meses, sem lançar nada de verdade</p></div>
       <div style="display:flex;gap:8px;">
         <div class="dropdown-wrap">
           <button class="btn ghost" id="btnCenariosProntos">🎬 Cenários prontos ▾</button>
@@ -10424,7 +10425,7 @@ function viewRelatorios(){
     { id:'dna_financeiro', icone:'🧬', nome:'DNA Financeiro da Empresa', desc:'Perfil resumido combinando liquidez, estabilidade, dependência de clientes e mais' , cat:'Visão Geral e Diagnóstico' },
     { id:'automacoes_inteligentes', icone:'🤖', nome:'Automações Inteligentes', desc:'Regras que detectam condições e sugerem ações — o sistema não move dinheiro sozinho' , cat:'Ferramentas, Simuladores e Automações' },
     { id:'central_negociacao', icone:'🤝', nome:'Central de Negociação', desc:'Compara à vista, 30, 60 e 90 dias, considerando desconto e valor do dinheiro no tempo' , cat:'Ferramentas, Simuladores e Automações' },
-    { id:'laboratorio_financeiro', icone:'🧪', nome:'Laboratório Financeiro', desc:'Salve cenários nomeados (Conservador/Normal/Crescimento) da Simulação "E Se" pra comparar' , cat:'Planejamento, Metas e Decisões' },
+    { id:'laboratorio_financeiro', icone:'🧪', nome:'Laboratório Financeiro', desc:'Salve cenários nomeados (Conservador/Normal/Crescimento) da Simulações pra comparar' , cat:'Planejamento, Metas e Decisões' },
     { id:'linha_tempo_manual', icone:'📌', nome:'Linha do Tempo da Empresa', desc:'Registre marcos importantes (investimento, contratação, novo fornecedor) e veja a evolução' , cat:'Planejamento, Metas e Decisões' },
     { id:'foto_financeira', icone:'📸', nome:'Foto Financeira', desc:'Registre a situação atual e compare com outro momento no tempo' , cat:'Caixa e Liquidez' },
     { id:'maquina_tempo_passado', icone:'⏳', nome:'Máquina do Tempo Financeira', desc:'Veja como estava a situação financeira numa data passada' , cat:'Caixa e Liquidez' },
@@ -16078,15 +16079,15 @@ function renderCentralNegociacao(){
   `;
 }
 
-// Laboratório Financeiro — salva o conjunto atual de itens da Simulação "E Se" como um cenário
+// Laboratório Financeiro — salva o conjunto atual de itens da Simulações como um cenário
 // nomeado (Conservador/Normal/Crescimento), pra comparar vários de uma vez. Não mexe nos dados
 // reais — cada cenário é só uma cópia congelada dos itens hipotéticos e o resultado calculado.
 function renderLaboratorioFinanceiro(){
   const cenarios = state.cenariosLaboratorio||[];
   return `
-    <div class="note" style="margin-top:0;">Salve diferentes combinações de itens hipotéticos (montados na Simulação "E Se") como cenários nomeados, pra comparar lado a lado. Nada aqui altera os dados reais.</div>
+    <div class="note" style="margin-top:0;">Salve diferentes combinações de itens hipotéticos (montados na Simulações) como cenários nomeados, pra comparar lado a lado. Nada aqui altera os dados reais.</div>
     <div class="report-controls"><button class="btn ghost sm" id="btnSalvarCenarioLab">+ Salvar simulação atual como cenário</button></div>
-    ${!cenarios.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum cenário salvo ainda. Monte itens na Simulação "E Se" e depois clique em "Salvar simulação atual como cenário".</div></div>` : `
+    ${!cenarios.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum cenário salvo ainda. Monte itens na Simulações e depois clique em "Salvar simulação atual como cenário".</div></div>` : `
     <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin-bottom:14px;">
       ${cenarios.map(c=>{
         const proj = calcularProjecaoSimulacao(6, c.itens);
@@ -24951,7 +24952,7 @@ function attachViewHandlers(){
     el.addEventListener('click', ()=>openAdicionarOrcamentoModal(el.dataset.cat));
   });
 
-  // Simulação "E Se"
+  // Simulações
   document.getElementById('btnAddItemSimulacao')?.addEventListener('click', ()=>openItemSimulacaoModal());
   document.getElementById('btnCenariosProntos')?.addEventListener('click', (e)=>{
     e.stopPropagation();
@@ -30287,11 +30288,11 @@ function viewMetasReserva(){
 
 function openSalvarCenarioLabModal(){
   const itensAtuais = state.simulacaoAtual||[];
-  if(!itensAtuais.length){ showToast('Monte itens hipotéticos na Simulação "E Se" primeiro'); return; }
+  if(!itensAtuais.length){ showToast('Monte itens hipotéticos na Simulações primeiro'); return; }
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
     <h3>Salvar cenário</h3>
-    <div class="note" style="margin-top:0;">Salva os ${itensAtuais.length} item(ns) hipotético(s) atuais da Simulação "E Se" como um cenário nomeado.</div>
+    <div class="note" style="margin-top:0;">Salva os ${itensAtuais.length} item(ns) hipotético(s) atuais da Simulações como um cenário nomeado.</div>
     <div class="field"><label>Nome do cenário</label><input type="text" id="cenarioLabNome" placeholder="Ex: Conservador, Normal, Crescimento"></div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
