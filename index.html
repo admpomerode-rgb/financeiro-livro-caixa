@@ -2382,6 +2382,40 @@ function custoInvestidoEmData(contaId, dataISO){
     return true;
   }).reduce((s,a)=>s+(a.valorAplicado||0),0);
 }
+// Evolução real do patrimônio (§4 do manual de Investimentos) — usa só os pontos reais do
+// histórico de atualização manual já existente (historicoAtualizacoesInvestimento). Não interpola
+// nem fabrica pontos entre atualizações — cada data no gráfico corresponde a um dia em que pelo
+// menos uma atualização foi de fato registrada. Testado isoladamente antes de usar aqui.
+function evolucaoPatrimonioReal(deISO, ateISO){
+  const historico = (state.historicoAtualizacoesInvestimento||[]).filter(h=>h.data>=deISO && h.data<=ateISO);
+  if(!historico.length) return [];
+  const datasUnicas = [...new Set(historico.map(h=>h.data))].sort();
+  const porItem = {};
+  (state.historicoAtualizacoesInvestimento||[]).filter(h=>h.data<=ateISO).forEach(h=>{
+    if(!porItem[h.itemId]) porItem[h.itemId] = [];
+    porItem[h.itemId].push(h);
+  });
+  Object.values(porItem).forEach(lista=>lista.sort((a,b)=>a.data.localeCompare(b.data)));
+  return datasUnicas.map(data=>{
+    let total = 0;
+    Object.values(porItem).forEach(lista=>{
+      const ateAqui = lista.filter(h=>h.data<=data);
+      if(ateAqui.length) total += ateAqui[ateAqui.length-1].valorNovo;
+    });
+    return { data, total };
+  });
+}
+// Distribuição por instituição (§13) — só usa instituições realmente cadastradas nas contas.
+function distribuicaoPorInstituicao(){
+  const idsContasAtivas = new Set(state.contasInvestimento.filter(c=>!c.arquivada).map(c=>c.id));
+  const porInstituicao = {};
+  state.contasInvestimento.filter(c=>!c.arquivada).forEach(c=>{
+    const nome = c.instituicao || 'Sem instituição informada';
+    porInstituicao[nome] = (porInstituicao[nome]||0) + valorContaInvestimento(c.id);
+  });
+  return Object.entries(porInstituicao).map(([nome,valor])=>({nome,valor})).filter(x=>x.valor>0.004).sort((a,b)=>b.valor-a.valor);
+}
+
 function custoInvestidoHistorico(contaId, dias){
   const hoje = new Date(todayISO()+'T12:00:00');
   const pontos = [];
@@ -10028,6 +10062,21 @@ function viewInvestimentos(){
   const anosMetaInv = state.metaInvestimento || 0;
   const pctMetaInv = anosMetaInv>0 ? Math.min(100, total/anosMetaInv*100) : null;
 
+  // ---- Evolução do patrimônio (§4) — período selecionável, só com pontos reais
+  const evolPeriodoSel = window._invEvolPeriodo || '6m';
+  const evolDe = evolPeriodoSel==='1m' ? addDiasISO(hoje,-30)
+    : evolPeriodoSel==='3m' ? addDiasISO(hoje,-90)
+    : evolPeriodoSel==='6m' ? addDiasISO(hoje,-180)
+    : evolPeriodoSel==='1a' ? addDiasISO(hoje,-365)
+    : evolPeriodoSel==='3a' ? addDiasISO(hoje,-1095)
+    : '2000-01-01';
+  const evolucaoPatrimonio = evolucaoPatrimonioReal(evolDe, hoje);
+  const maxEvolPatrimonio = Math.max(1, ...evolucaoPatrimonio.map(p=>p.total));
+
+  // ---- Onde está meu dinheiro (§13) — distribuição por instituição realmente cadastrada
+  const distInstituicao = distribuicaoPorInstituicao();
+  const totalDistInstituicao = distInstituicao.reduce((s,d)=>s+d.valor,0);
+
   return `
     <div class="topbar">
       <div><h1>Investimentos</h1><p>Carteira de aplicações — renda fixa e renda variável</p></div>
@@ -10050,7 +10099,46 @@ function viewInvestimentos(){
       <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;"><span style="font-weight:600;">🎯 Meta de investimento</span><span class="mono">${brl(total)} / ${brl(anosMetaInv)}</span></div>
       <div style="background:var(--bone);border-radius:5px;height:9px;overflow:hidden;"><div style="width:${pctMetaInv}%;height:100%;background:${pctMetaInv>=100?'var(--success)':'var(--blue-accent)'};"></div></div>
       <div style="font-size:11px;color:var(--text-soft);margin-top:3px;">${pctMetaInv.toFixed(0)}% da meta${pctMetaInv>=100?' — meta batida! 🎉':''}</div>
-    </div></div>` : ''}
+    </div></div>` : `<div class="note" style="margin-top:0;">Configure uma meta patrimonial pra acompanhar sua evolução. <button class="btn ghost sm" id="btnMetaInvestimento2" style="margin-left:8px;">🎯 Definir meta</button></div>`}
+
+    <div class="dash-section-label" style="display:flex;justify-content:space-between;align-items:center;">
+      <span>Evolução do patrimônio</span>
+      <select id="invEvolPeriodoSelect" style="width:auto;font-size:12px;">
+        <option value="1m" ${evolPeriodoSel==='1m'?'selected':''}>1 mês</option>
+        <option value="3m" ${evolPeriodoSel==='3m'?'selected':''}>3 meses</option>
+        <option value="6m" ${evolPeriodoSel==='6m'?'selected':''}>6 meses</option>
+        <option value="1a" ${evolPeriodoSel==='1a'?'selected':''}>1 ano</option>
+        <option value="3a" ${evolPeriodoSel==='3a'?'selected':''}>3 anos</option>
+        <option value="tudo" ${evolPeriodoSel==='tudo'?'selected':''}>Tudo</option>
+      </select>
+    </div>
+    ${evolucaoPatrimonio.length>=2 ? `
+    <div class="panel" style="margin-bottom:16px;"><div class="panel-body" style="padding:16px 18px;">
+      <div style="display:flex;align-items:flex-end;gap:3px;height:90px;">
+        ${evolucaoPatrimonio.map(p=>`
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;" title="${fmtDate(p.data)}: ${brl(p.total)}">
+            <div style="width:100%;max-width:26px;background:var(--blue-accent);opacity:.8;border-radius:2px 2px 0 0;height:${Math.max(2,Math.round(p.total/maxEvolPatrimonio*80))}px;"></div>
+          </div>
+        `).join('')}
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:9.5px;color:var(--text-soft);margin-top:4px;">
+        <span>${fmtDate(evolucaoPatrimonio[0].data)}</span><span>${fmtDate(evolucaoPatrimonio[evolucaoPatrimonio.length-1].data)}</span>
+      </div>
+    </div></div>
+    <div class="note" style="margin-top:0;">Cada ponto é uma data em que você realmente registrou uma atualização de posição — não interpolo nem invento valores entre as atualizações.</div>
+    ` : `<div class="panel" style="margin-bottom:16px;"><div class="empty" style="padding:24px 20px;">Histórico insuficiente para exibir evolução neste período.</div></div>`}
+
+    <div class="dash-section-label">Onde está meu dinheiro</div>
+    ${distInstituicao.length ? `
+    <div class="panel" style="margin-bottom:16px;"><div class="panel-body" style="padding:14px 18px;">
+      ${distInstituicao.map(d=>`
+        <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;">
+          <span>${escapeHTML(d.nome)}</span>
+          <span class="mono">${brl(d.valor)} — ${totalDistInstituicao>0?(d.valor/totalDistInstituicao*100).toFixed(0):0}%</span>
+        </div>
+      `).join('')}
+    </div></div>` : `<div class="panel" style="margin-bottom:16px;"><div class="empty" style="padding:24px 20px;">Nenhuma instituição cadastrada ainda.</div></div>`}
+
     ${Object.keys(composicaoTipo).length>1 ? `
     <div class="dash-section-label">Composição por tipo</div>
     <div class="panel"><div class="panel-body" style="padding:14px 18px;">${svgPizza(Object.entries(composicaoTipo).map(([label,valor])=>({label,valor})))}</div></div>` : ''}
@@ -27542,6 +27630,11 @@ function attachViewHandlers(){
     });
   });
   document.getElementById('btnMetaInvestimento')?.addEventListener('click', ()=>openMetaInvestimentoModal());
+  document.getElementById('btnMetaInvestimento2')?.addEventListener('click', ()=>openMetaInvestimentoModal());
+  document.getElementById('invEvolPeriodoSelect')?.addEventListener('change', (e)=>{
+    window._invEvolPeriodo = e.target.value;
+    render();
+  });
 
   const btnSalvarConfigProcessos = document.getElementById('btnSalvarConfigProcessos');
   if(btnSalvarConfigProcessos) btnSalvarConfigProcessos.addEventListener('click', ()=>{
