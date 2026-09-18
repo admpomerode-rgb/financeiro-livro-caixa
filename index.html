@@ -823,6 +823,7 @@
         <div class="nav-item" data-view="todos-lancamentos" title="Todos os Lançamentos"><span class="nav-dot"></span><span class="nav-abbr">TL</span><span class="nav-label">Todos os Lançamentos</span></div>
         <div class="nav-item" data-view="contas" title="Contas Bancárias"><span class="nav-dot"></span><span class="nav-abbr">CB</span><span class="nav-label">Contas Bancárias</span></div>
         <div class="nav-item" data-view="cartoes" title="Cartões de Crédito"><span class="nav-dot"></span><span class="nav-abbr">CC</span><span class="nav-label">Cartões de Crédito</span></div>
+        <div class="nav-item" data-view="gestao-dividas" title="Gestão de Dívidas"><span class="nav-dot"></span><span class="nav-abbr">GD</span><span class="nav-label">Gestão de Dívidas</span></div>
         <div class="nav-item" data-view="ativos" title="Ativos Patrimoniais"><span class="nav-dot"></span><span class="nav-abbr">AP</span><span class="nav-label">Ativos Patrimoniais</span></div>
         <div class="nav-item" data-view="investimentos" title="Investimentos"><span class="nav-dot"></span><span class="nav-abbr">IV</span><span class="nav-label">Investimentos</span></div>
         <div class="nav-item" data-view="orcamentos-processos" title="Orçamentos e Compras"><span class="nav-dot"></span><span class="nav-abbr">OC</span><span class="nav-label">Orçamentos e Compras</span></div>
@@ -1845,6 +1846,7 @@ function moreItensDef(){
   return [
     { view:'contas', icone:'🏦', nome:'Contas Bancárias', grupo:'Operacional' },
     { view:'cartoes', icone:'💳', nome:'Cartões de Crédito', grupo:'Operacional' },
+    { view:'gestao-dividas', icone:'📉', nome:'Gestão de Dívidas', grupo:'Operacional' },
     { view:'ativos', icone:'📦', nome:'Ativos Patrimoniais', grupo:'Operacional', badge:()=>(state.comprasProcessosPendentes||[]).length },
     { view:'usina-solar', icone:'☀️', nome:'Usina Solar', grupo:'Operacional' },
     { view:'investimentos', icone:'📈', nome:'Investimentos', grupo:'Operacional', badge:()=>(state.notasPendentes||[]).length },
@@ -1991,6 +1993,8 @@ function render(){
   else if(currentView==='extrato') main.innerHTML = viewExtrato(extratoContaId);
   else if(currentView==='conciliacao') main.innerHTML = viewConciliacao(conciliacaoContaId);
   else if(currentView==='cartoes') main.innerHTML = viewCartoes();
+  else if(currentView==='gestao-dividas') main.innerHTML = viewGestaoDividas();
+  else if(currentView==='relatorios-dividas') main.innerHTML = viewRelatoriosDividas();
   else if(currentView==='fatura') main.innerHTML = viewFatura(faturaCartaoId, faturaCompetenciaAtual);
   else if(currentView==='investimentos') main.innerHTML = viewInvestimentos();
   else if(currentView==='ativos-inv') main.innerHTML = viewAtivosInvestimento(invContaId);
@@ -2185,6 +2189,75 @@ function competenciaFromDate(cartao, dataISO){
   }
   return y + '-' + String(m).padStart(2,'0');
 }
+// Soma meses a uma data ISO, limitando ao último dia real do mês de destino — evita que "31 de
+// janeiro + 1 mês" vire "3 de março" (bug comum do Date nativo). Testada isoladamente antes de usar.
+function addMesesISO(dataISO, meses){
+  const [a,m,d] = dataISO.split('-').map(Number);
+  const totalMeses = (m-1) + meses;
+  const anoDestino = a + Math.floor(totalMeses/12);
+  const mesDestino = ((totalMeses % 12)+12)%12;
+  const ultimoDiaMesDestino = new Date(anoDestino, mesDestino+1, 0).getDate();
+  const diaFinal = Math.min(d, ultimoDiaMesDestino);
+  return new Date(anoDestino, mesDestino, diaFinal).toISOString().slice(0,10);
+}
+// Cronograma de parcelas de uma dívida (§14) — derivado dos campos que já existem
+// (dataInicio, numeroParcelas, valorParcela, parcelasPagas), sem precisar guardar uma parcela por
+// data (o cadastro atual não tinha isso). Assume periodicidade mensal, que é a esmagadora maioria
+// dos empréstimos/financiamentos — se um dia precisar de outra periodicidade, dá pra estender.
+function cronogramaDivida(divida){
+  const parcelas = [];
+  for(let i=0;i<(divida.numeroParcelas||0);i++){
+    parcelas.push({
+      numero: i+1,
+      vencimento: addMesesISO(divida.dataInicio, i+1),
+      valor: divida.valorParcela,
+      paga: i < (divida.parcelasPagas||0)
+    });
+  }
+  return parcelas;
+}
+function saldoDevedorDivida(divida){
+  return Math.max(0, (divida.numeroParcelas||0)-(divida.parcelasPagas||0)) * (divida.valorParcela||0);
+}
+function proximaParcelaDivida(divida){
+  return cronogramaDivida(divida).find(p=>!p.paga) || null;
+}
+// Simulação de amortização extraordinária (§17/§18) — mostra o efeito ANTES de confirmar, sem
+// aplicar automaticamente nenhuma regra que o usuário não escolheu. Testada isoladamente antes.
+// Antecipação de parcelas com desconto (§19/§20) — antecipa as próximas N parcelas em aberto,
+// nunca mais do que existem. Testada isoladamente antes.
+function simularAntecipacao(divida, qtdParcelas, valorDesconto){
+  const restantes = divida.numeroParcelas - divida.parcelasPagas;
+  const qtd = Math.max(0, Math.min(qtdParcelas, restantes));
+  const valorOriginal = qtd * divida.valorParcela;
+  const valorAPagar = Math.max(0, valorOriginal - valorDesconto);
+  const novoSaldo = (restantes - qtd) * divida.valorParcela;
+  return { qtdParcelas: qtd, valorOriginal, desconto: valorDesconto, valorAPagar, economia: valorDesconto, novoSaldo, parcelasRestantes: restantes-qtd };
+}
+
+function simularAmortizacao(divida, valorAmortizacao, efeito){
+  const restantes = divida.numeroParcelas - divida.parcelasPagas;
+  const saldoAtual = restantes * divida.valorParcela;
+  const saldoApos = Math.max(0, saldoAtual - valorAmortizacao);
+  if(efeito === 'reduzir-prazo'){
+    const novoRestantes = divida.valorParcela>0 ? Math.ceil(saldoApos / divida.valorParcela) : 0;
+    return { saldoAtual, saldoApos, parcelasRestantesAntes: restantes, parcelasRestantesDepois: novoRestantes, novoValorParcela: divida.valorParcela, parcelasEconomizadas: restantes-novoRestantes };
+  }
+  const novoValorParcela = restantes>0 ? saldoApos/restantes : 0;
+  return { saldoAtual, saldoApos, parcelasRestantesAntes: restantes, parcelasRestantesDepois: restantes, novoValorParcela, reducaoParcela: divida.valorParcela-novoValorParcela };
+}
+
+function statusDivida(divida){
+  if(divida.statusManual==='renegociada') return 'renegociada';
+  if((divida.parcelasPagas||0)>=(divida.numeroParcelas||0) && divida.numeroParcelas>0) return 'quitada';
+  const prox = proximaParcelaDivida(divida);
+  if(!prox) return 'quitada';
+  const hoje = todayISO();
+  if(prox.vencimento < hoje) return 'atrasada';
+  if(addDiasISO(hoje,7) >= prox.vencimento) return 'proxima';
+  return 'em-dia';
+}
+
 function addMonthsComp(comp, n){
   const [y,m] = comp.split('-').map(Number);
   const dt = new Date(y, m-1+n, 1);
@@ -13076,7 +13149,15 @@ function openEmprestimoModal(existing){
   modal.innerHTML = `
     <h3>${isEdit?'Editar':'Novo'} empréstimo/financiamento</h3>
     <div class="field"><label>Nome/descrição</label><input type="text" id="empNome" value="${existing?escapeHTML(existing.nome):''}" placeholder="Ex: Financiamento do forno industrial"></div>
-    <div class="field"><label>Instituição</label><input type="text" id="empInstituicao" value="${existing?escapeHTML(existing.instituicao||''):''}" placeholder="Ex: Banco do Brasil"></div>
+    <div class="field-row">
+      <div class="field"><label>Tipo</label>
+        <select id="empTipo">
+          ${['Empréstimo','Financiamento','Parcelamento','Fornecedor','Tributária','Cartão de Crédito','Sócio','Empresa relacionada','Veículo','Máquina/equipamento','Imóvel','Contrato','Outra'].map(t=>`<option ${existing?.tipo===t?'selected':''}>${t}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Credor</label><input type="text" id="empCredor" value="${existing?escapeHTML(existing.credor||''):''}" placeholder="Ex: Banco do Brasil, Fornecedor X..."></div>
+    </div>
+    <div class="field"><label>Instituição financeira (opcional, se diferente do credor)</label><input type="text" id="empInstituicao" value="${existing?escapeHTML(existing.instituicao||''):''}" placeholder="Ex: Banco do Brasil"></div>
     <div class="cards" style="grid-template-columns:1fr 1fr;">
       <div class="field"><label>Valor total (R$)</label><input type="text" inputmode="decimal" id="empValorTotal" value="${existing?existing.valorTotal:''}"></div>
       <div class="field"><label>Valor da parcela (R$)</label><input type="text" inputmode="decimal" id="empValorParcela" value="${existing?existing.valorParcela:''}"></div>
@@ -13085,6 +13166,10 @@ function openEmprestimoModal(existing){
       <div class="field"><label>Data de início</label><input type="date" id="empDataInicio" value="${existing?existing.dataInicio:todayISO()}"></div>
       <div class="field"><label>Taxa de juros (% a.m., opcional)</label><input type="text" inputmode="decimal" id="empTaxaJuros" value="${existing&&existing.taxaJurosMensal?existing.taxaJurosMensal:''}"></div>
     </div>
+    <div class="field"><label>Conta bancária vinculada (opcional — usada como sugestão ao registrar pagamento)</label>
+      <select id="empConta"><option value="">Nenhuma / decidir na hora do pagamento</option>${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}" ${existing?.contaId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
+    </div>
+    <div class="field"><label>Observação (opcional)</label><input type="text" id="empObservacao" value="${existing?escapeHTML(existing.observacao||''):''}"></div>
     <div class="modal-actions">
       ${isEdit?`<button class="btn danger-o" id="btnExcluirEmprestimo">Excluir</button>`:''}
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
@@ -13110,13 +13195,16 @@ function openEmprestimoModal(existing){
     const parcelasPagas = numBR(document.getElementById('empParcelasPagas').value) || 0;
     if(!nome || isNaN(valorTotal) || isNaN(valorParcela) || isNaN(numeroParcelas)){ showToast('Preencha nome, valor total, valor da parcela e número de parcelas'); return; }
     const payload = {
-      nome, instituicao: document.getElementById('empInstituicao').value.trim(),
+      nome, tipo: document.getElementById('empTipo').value, credor: document.getElementById('empCredor').value.trim() || null,
+      instituicao: document.getElementById('empInstituicao').value.trim(),
       valorTotal, valorParcela, numeroParcelas, parcelasPagas,
       dataInicio: document.getElementById('empDataInicio').value || todayISO(),
-      taxaJurosMensal: numBR(document.getElementById('empTaxaJuros').value) || 0
+      taxaJurosMensal: numBR(document.getElementById('empTaxaJuros').value) || 0,
+      contaId: document.getElementById('empConta').value || null,
+      observacao: document.getElementById('empObservacao').value.trim() || null,
     };
     if(isEdit) Object.assign(existing, payload);
-    else state.emprestimos.push({ id: uid(), ...payload });
+    else state.emprestimos.push({ id: uid(), historicoEventos: [{ tipo:'Contratação', data: new Date().toISOString() }], ...payload });
     persist(); closeModal(); render();
     showToast(isEdit?'Empréstimo atualizado':'Empréstimo cadastrado');
   
@@ -13128,6 +13216,738 @@ function openEmprestimoModal(existing){
 }
 
 // 28. Amortização de Empréstimos/Financiamentos — saldo devedor e parcelas restantes
+// Registrar pagamento de uma parcela de dívida (§16) — cria um lançamento de saída de verdade,
+// na conta REALMENTE escolhida pelo usuário (nunca uma conta padrão automática), e só incrementa
+// parcelasPagas depois que o lançamento foi criado com sucesso. Proteção contra duplo clique via
+// disabled no botão, mesmo padrão já usado em outros salvamentos do sistema.
+function openRegistrarPagamentoDividaModal(dividaId){
+  const divida = state.emprestimos.find(e=>e.id===dividaId);
+  if(!divida) return;
+  const prox = proximaParcelaDivida(divida);
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>💵 Registrar pagamento — ${escapeHTML(divida.nome)}</h3>
+    ${prox ? `<div class="note" style="margin-top:0;">Próxima parcela: nº ${prox.numero}/${divida.numeroParcelas}, venceu/vence em ${fmtDate(prox.vencimento)}, valor previsto ${brl(prox.valor)}.</div>` : `<div class="note" style="margin-top:0;border-color:var(--warn);">Essa dívida já não tem parcelas em aberto pelo cadastro atual.</div>`}
+    <div class="field-row">
+      <div class="field"><label>Valor pago (R$)</label><input type="text" inputmode="decimal" id="pgValor" value="${prox?prox.valor:''}"></div>
+      <div class="field"><label>Data do pagamento</label><input type="date" id="pgData" value="${todayISO()}"></div>
+    </div>
+    <div class="field"><label>Conta bancária</label><select id="pgConta">${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}" ${divida.contaId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+    <div class="field-row">
+      <div class="field"><label>Juros pagos (R$, opcional)</label><input type="text" inputmode="decimal" id="pgJuros"></div>
+      <div class="field"><label>Multa (R$, opcional)</label><input type="text" inputmode="decimal" id="pgMulta"></div>
+    </div>
+    <div class="field"><label>Desconto obtido (R$, opcional)</label><input type="text" inputmode="decimal" id="pgDesconto"></div>
+    <div class="field"><label>Observação (opcional)</label><input type="text" id="pgObservacao"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarPagamentoDivida">Registrar pagamento</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnConfirmarPagamentoDivida').addEventListener('click', ()=>{
+    const btn = document.getElementById('btnConfirmarPagamentoDivida');
+    if(btn.disabled) return;
+    btn.disabled = true;
+    try{
+      const valor = numBR(document.getElementById('pgValor').value);
+      const data = document.getElementById('pgData').value || todayISO();
+      const contaId = document.getElementById('pgConta').value;
+      const jurosPagos = numBR(document.getElementById('pgJuros').value) || 0;
+      const multa = numBR(document.getElementById('pgMulta').value) || 0;
+      const desconto = numBR(document.getElementById('pgDesconto').value) || 0;
+      const observacao = document.getElementById('pgObservacao').value.trim() || null;
+      if(isNaN(valor) || valor<=0){ showToast('Informe o valor pago'); btn.disabled=false; return; }
+      if(!contaId){ showToast('Escolha a conta bancária'); btn.disabled=false; return; }
+      const lancId = uid();
+      state.lancamentos.push({
+        id: lancId, tipo:'saida', categoria: divida.tipo==='Fornecedor'?'Fornecedores':'Despesas Financeiras',
+        descricao: `Pagamento — ${divida.nome}${prox?' (parcela '+prox.numero+'/'+divida.numeroParcelas+')':''}${observacao?' — '+observacao:''}`,
+        valor, contaId, status:'pago', dataVencimento:data, dataPagamento:data,
+        origem:'pagamento-divida', dividaId, criadoEm: new Date().toISOString()
+      });
+      divida.parcelasPagas = (divida.parcelasPagas||0) + 1;
+      divida.historicoEventos = divida.historicoEventos || [];
+      divida.historicoEventos.push({ tipo:'Pagamento', data: new Date().toISOString(), valor, jurosPagos, multa, desconto, lancamentoId: lancId, observacao });
+      persist(); closeModal(); render();
+      showToast(`Pagamento de ${brl(valor)} registrado`);
+    } finally {
+      const b = document.getElementById('btnConfirmarPagamentoDivida');
+      if(b) b.disabled = false;
+    }
+  });
+}
+
+// Quitar dívida (§22) — mostra prévia do saldo antes de confirmar, cria o lançamento final do saldo
+// remanescente (com desconto opcional) e marca a dívida como totalmente paga, preservando histórico.
+function openQuitarDividaModal(dividaId){
+  const divida = state.emprestimos.find(e=>e.id===dividaId);
+  if(!divida) return;
+  const saldoAtual = saldoDevedorDivida(divida);
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>✅ Quitar dívida — ${escapeHTML(divida.nome)}</h3>
+    <div class="note" style="margin-top:0;">Saldo devedor atual: <strong>${brl(saldoAtual)}</strong> (${Math.max(0,divida.numeroParcelas-divida.parcelasPagas)} parcela(s) restante(s)).</div>
+    <div class="field-row">
+      <div class="field"><label>Desconto obtido (R$, opcional)</label><input type="text" inputmode="decimal" id="qtDesconto" value="0"></div>
+      <div class="field"><label>Valor final para quitação (R$)</label><input type="text" inputmode="decimal" id="qtValorFinal" value="${saldoAtual.toFixed(2).replace('.',',')}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Conta de pagamento</label><select id="qtConta">${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}" ${divida.contaId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+      <div class="field"><label>Data</label><input type="date" id="qtData" value="${todayISO()}"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarQuitacaoDivida">Quitar dívida</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnConfirmarQuitacaoDivida').addEventListener('click', ()=>{
+    const btn = document.getElementById('btnConfirmarQuitacaoDivida');
+    if(btn.disabled) return;
+    btn.disabled = true;
+    try{
+      const valorFinal = numBR(document.getElementById('qtValorFinal').value);
+      const desconto = numBR(document.getElementById('qtDesconto').value) || 0;
+      const contaId = document.getElementById('qtConta').value;
+      const data = document.getElementById('qtData').value || todayISO();
+      if(isNaN(valorFinal) || valorFinal<0){ showToast('Informe o valor final'); btn.disabled=false; return; }
+      if(!contaId){ showToast('Escolha a conta bancária'); btn.disabled=false; return; }
+      const lancId = uid();
+      if(valorFinal>0){
+        state.lancamentos.push({
+          id: lancId, tipo:'saida', categoria: divida.tipo==='Fornecedor'?'Fornecedores':'Despesas Financeiras',
+          descricao: `Quitação — ${divida.nome}${desconto>0?' (desconto de '+brl(desconto)+')':''}`,
+          valor: valorFinal, contaId, status:'pago', dataVencimento:data, dataPagamento:data,
+          origem:'pagamento-divida', dividaId, criadoEm: new Date().toISOString()
+        });
+      }
+      divida.parcelasPagas = divida.numeroParcelas;
+      divida.statusManual = 'quitada';
+      divida.historicoEventos = divida.historicoEventos || [];
+      divida.historicoEventos.push({ tipo:'Quitação', data: new Date().toISOString(), valor: valorFinal, desconto, lancamentoId: valorFinal>0?lancId:null });
+      persist(); closeModal(); render();
+      showToast('Dívida quitada');
+    } finally {
+      const b = document.getElementById('btnConfirmarQuitacaoDivida');
+      if(b) b.disabled = false;
+    }
+  });
+}
+
+// Amortização extraordinária (§17/§18) — mostra a prévia (recalculada ao vivo, sem aplicar nada)
+// antes do usuário confirmar. Só aplica a regra que ele escolher (reduzir prazo OU parcela).
+function openAmortizarDividaModal(dividaId){
+  const divida = state.emprestimos.find(e=>e.id===dividaId);
+  if(!divida) return;
+  const saldoAtual = saldoDevedorDivida(divida);
+  const modal = document.getElementById('modalContent');
+  const montarPrevia = () => {
+    const valor = numBR(document.getElementById('amValor')?.value);
+    const efeito = document.getElementById('amEfeito')?.value;
+    const div = document.getElementById('amPrevia');
+    if(!div) return;
+    if(isNaN(valor) || valor<=0){ div.innerHTML = ''; return; }
+    const sim = simularAmortizacao(divida, valor, efeito);
+    div.innerHTML = `
+      <div class="fluxo-resumo-4col">
+        <div class="fluxo-resumo-item"><div class="lbl">Saldo atual</div><div class="val">${brl(sim.saldoAtual)}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Saldo após amortização</div><div class="val">${brl(sim.saldoApos)}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Parcelas restantes (antes)</div><div class="val">${sim.parcelasRestantesAntes}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Parcelas restantes (depois)</div><div class="val">${sim.parcelasRestantesDepois}</div></div>
+      </div>
+      ${efeito==='reduzir-prazo'
+        ? `<div class="note" style="margin-top:8px;border-color:var(--success);">Economiza ${sim.parcelasEconomizadas} parcela(s) — a parcela continua ${brl(divida.valorParcela)}.</div>`
+        : `<div class="note" style="margin-top:8px;border-color:var(--success);">Nova parcela: ${brl(sim.novoValorParcela)} (redução de ${brl(sim.reducaoParcela)}) — continuam ${sim.parcelasRestantesDepois} parcelas.</div>`}
+    `;
+  };
+  modal.innerHTML = `
+    <h3>📉 Amortizar dívida — ${escapeHTML(divida.nome)}</h3>
+    <div class="note" style="margin-top:0;">Saldo devedor atual: <strong>${brl(saldoAtual)}</strong>.</div>
+    <div class="field-row">
+      <div class="field"><label>Valor da amortização (R$)</label><input type="text" inputmode="decimal" id="amValor"></div>
+      <div class="field"><label>Efeito desejado</label>
+        <select id="amEfeito">
+          <option value="reduzir-prazo">Reduzir prazo (mantém a parcela)</option>
+          <option value="reduzir-parcela">Reduzir valor da parcela (mantém o prazo)</option>
+        </select>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Conta de origem</label><select id="amConta">${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}" ${divida.contaId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+      <div class="field"><label>Data</label><input type="date" id="amData" value="${todayISO()}"></div>
+    </div>
+    <div class="field"><label>Observação (opcional)</label><input type="text" id="amObservacao"></div>
+    <div id="amPrevia"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarAmortizacao">Confirmar amortização</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('amValor').addEventListener('input', montarPrevia);
+  document.getElementById('amEfeito').addEventListener('change', montarPrevia);
+  document.getElementById('btnConfirmarAmortizacao').addEventListener('click', ()=>{
+    const btn = document.getElementById('btnConfirmarAmortizacao');
+    if(btn.disabled) return;
+    btn.disabled = true;
+    try{
+      const valor = numBR(document.getElementById('amValor').value);
+      const efeito = document.getElementById('amEfeito').value;
+      const contaId = document.getElementById('amConta').value;
+      const data = document.getElementById('amData').value || todayISO();
+      const observacao = document.getElementById('amObservacao').value.trim() || null;
+      if(isNaN(valor) || valor<=0){ showToast('Informe o valor da amortização'); btn.disabled=false; return; }
+      if(!contaId){ showToast('Escolha a conta bancária'); btn.disabled=false; return; }
+      const sim = simularAmortizacao(divida, valor, efeito);
+      const lancId = uid();
+      state.lancamentos.push({
+        id: lancId, tipo:'saida', categoria:'Despesas Financeiras',
+        descricao: `Amortização extraordinária — ${divida.nome}${observacao?' ('+observacao+')':''}`,
+        valor, contaId, status:'pago', dataVencimento:data, dataPagamento:data,
+        origem:'pagamento-divida', dividaId, criadoEm: new Date().toISOString()
+      });
+      if(efeito==='reduzir-prazo'){
+        divida.parcelasPagas = divida.numeroParcelas - sim.parcelasRestantesDepois;
+      } else {
+        divida.valorParcela = Math.round(sim.novoValorParcela*100)/100;
+      }
+      divida.historicoEventos = divida.historicoEventos || [];
+      divida.historicoEventos.push({ tipo:'Amortização extraordinária', data: new Date().toISOString(), valor, efeito, lancamentoId: lancId, observacao });
+      persist(); closeModal(); render();
+      showToast(`Amortização de ${brl(valor)} registrada`);
+    } finally {
+      const b = document.getElementById('btnConfirmarAmortizacao');
+      if(b) b.disabled = false;
+    }
+  });
+}
+
+// Detalhe completo da dívida (§15) — resumo, cronograma inteiro e histórico de eventos, sem apagar
+// nada do que já existia.
+let dividaDetalheId = null;
+// Antecipar parcelas (§19/§20) — mostra prévia ao vivo antes de confirmar. O desconto fica
+// registrado separadamente no histórico, nunca sobrescrevendo o valor original da dívida.
+function openAntecipacaoParcelasModal(dividaId){
+  const divida = state.emprestimos.find(e=>e.id===dividaId);
+  if(!divida) return;
+  const restantes = divida.numeroParcelas - divida.parcelasPagas;
+  const modal = document.getElementById('modalContent');
+  const montarPrevia = () => {
+    const qtd = numBR(document.getElementById('anQtd')?.value);
+    const desconto = numBR(document.getElementById('anDesconto')?.value) || 0;
+    const div = document.getElementById('anPrevia');
+    if(!div) return;
+    if(isNaN(qtd) || qtd<=0){ div.innerHTML = ''; return; }
+    const sim = simularAntecipacao(divida, qtd, desconto);
+    div.innerHTML = `
+      <div class="fluxo-resumo-4col">
+        <div class="fluxo-resumo-item"><div class="lbl">Parcelas antecipadas</div><div class="val">${sim.qtdParcelas}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Valor original</div><div class="val">${brl(sim.valorOriginal)}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Valor a pagar</div><div class="val">${brl(sim.valorAPagar)}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Economia</div><div class="val" style="color:var(--success);">${brl(sim.economia)}</div></div>
+      </div>
+      <div class="note" style="margin-top:8px;">Novo saldo após a antecipação: ${brl(sim.novoSaldo)} (${sim.parcelasRestantes} parcela(s) restante(s)).</div>
+    `;
+  };
+  modal.innerHTML = `
+    <h3>⏩ Antecipar parcelas — ${escapeHTML(divida.nome)}</h3>
+    <div class="note" style="margin-top:0;">Parcelas em aberto: <strong>${restantes}</strong>, de ${brl(divida.valorParcela)} cada.</div>
+    <div class="field-row">
+      <div class="field"><label>Quantidade de parcelas a antecipar</label><input type="text" inputmode="numeric" id="anQtd" value="1"></div>
+      <div class="field"><label>Desconto concedido (R$, opcional)</label><input type="text" inputmode="decimal" id="anDesconto" value="0"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Conta de pagamento</label><select id="anConta">${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}" ${divida.contaId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+      <div class="field"><label>Data</label><input type="date" id="anData" value="${todayISO()}"></div>
+    </div>
+    <div id="anPrevia"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarAntecipacao">Confirmar antecipação</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('anQtd').addEventListener('input', montarPrevia);
+  document.getElementById('anDesconto').addEventListener('input', montarPrevia);
+  montarPrevia();
+  document.getElementById('btnConfirmarAntecipacao').addEventListener('click', ()=>{
+    const btn = document.getElementById('btnConfirmarAntecipacao');
+    if(btn.disabled) return;
+    btn.disabled = true;
+    try{
+      const qtd = numBR(document.getElementById('anQtd').value);
+      const desconto = numBR(document.getElementById('anDesconto').value) || 0;
+      const contaId = document.getElementById('anConta').value;
+      const data = document.getElementById('anData').value || todayISO();
+      if(isNaN(qtd) || qtd<=0){ showToast('Informe a quantidade de parcelas'); btn.disabled=false; return; }
+      if(!contaId){ showToast('Escolha a conta bancária'); btn.disabled=false; return; }
+      const sim = simularAntecipacao(divida, qtd, desconto);
+      if(sim.valorAPagar>0){
+        const lancId = uid();
+        state.lancamentos.push({
+          id: lancId, tipo:'saida', categoria:'Despesas Financeiras',
+          descricao: `Antecipação de ${sim.qtdParcelas} parcela(s) — ${divida.nome}${desconto>0?' (desconto de '+brl(desconto)+')':''}`,
+          valor: sim.valorAPagar, contaId, status:'pago', dataVencimento:data, dataPagamento:data,
+          origem:'pagamento-divida', dividaId, criadoEm: new Date().toISOString()
+        });
+        divida.historicoEventos = divida.historicoEventos || [];
+        divida.historicoEventos.push({ tipo:'Antecipação de parcelas', data: new Date().toISOString(), valor: sim.valorAPagar, desconto, qtdParcelas: sim.qtdParcelas, lancamentoId: lancId });
+      }
+      divida.parcelasPagas = divida.parcelasPagas + sim.qtdParcelas;
+      persist(); closeModal(); render();
+      showToast(`${sim.qtdParcelas} parcela(s) antecipada(s) — economia de ${brl(sim.economia)}`);
+    } finally {
+      const b = document.getElementById('btnConfirmarAntecipacao');
+      if(b) b.disabled = false;
+    }
+  });
+}
+
+// Renegociação (§21) — preserva o cronograma/histórico da dívida anterior (marcada como
+// "renegociada", não apagada), e cria uma dívida NOVA com as condições novas, vinculada à antiga.
+function openRenegociarDividaModal(dividaId){
+  const divida = state.emprestimos.find(e=>e.id===dividaId);
+  if(!divida) return;
+  const saldoAtual = saldoDevedorDivida(divida);
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>🔄 Renegociar — ${escapeHTML(divida.nome)}</h3>
+    <div class="note" style="margin-top:0;">Saldo atual: <strong>${brl(saldoAtual)}</strong>. A dívida antiga fica marcada como "Renegociada" e seu histórico é preservado — isso cria uma dívida nova com as condições que você definir abaixo.</div>
+    <div class="field-row">
+      <div class="field"><label>Novo saldo (R$)</label><input type="text" inputmode="decimal" id="rgNovoSaldo" value="${saldoAtual.toFixed(2).replace('.',',')}"></div>
+      <div class="field"><label>Entrada (R$, opcional)</label><input type="text" inputmode="decimal" id="rgEntrada" value="0"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Nova taxa de juros (% a.m., opcional)</label><input type="text" inputmode="decimal" id="rgTaxa"></div>
+      <div class="field"><label>Novo número de parcelas</label><input type="text" inputmode="numeric" id="rgParcelas"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Data da renegociação</label><input type="date" id="rgData" value="${todayISO()}"></div>
+      <div class="field"><label>Primeiro vencimento</label><input type="date" id="rgPrimeiroVenc" value="${addMesesISO(todayISO(),1)}"></div>
+    </div>
+    <div class="field"><label>Observações</label><input type="text" id="rgObservacao"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarRenegociacao">Confirmar renegociação</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnConfirmarRenegociacao').addEventListener('click', ()=>{
+    const btn = document.getElementById('btnConfirmarRenegociacao');
+    if(btn.disabled) return;
+    btn.disabled = true;
+    try{
+      const novoSaldo = numBR(document.getElementById('rgNovoSaldo').value);
+      const entrada = numBR(document.getElementById('rgEntrada').value) || 0;
+      const novaTaxa = numBR(document.getElementById('rgTaxa').value) || 0;
+      const novasParcelas = numBR(document.getElementById('rgParcelas').value);
+      const dataRenegociacao = document.getElementById('rgData').value || todayISO();
+      const primeiroVenc = document.getElementById('rgPrimeiroVenc').value;
+      const observacao = document.getElementById('rgObservacao').value.trim() || null;
+      if(isNaN(novoSaldo) || novoSaldo<=0){ showToast('Informe o novo saldo'); btn.disabled=false; return; }
+      if(isNaN(novasParcelas) || novasParcelas<=0){ showToast('Informe o novo número de parcelas'); btn.disabled=false; return; }
+      const saldoFinanciado = Math.max(0, novoSaldo-entrada);
+      const novaParcela = Math.round((saldoFinanciado/novasParcelas)*100)/100;
+      // Marca a dívida antiga como renegociada — preserva TODO o histórico e cronograma dela
+      divida.statusManual = 'renegociada';
+      divida.historicoEventos = divida.historicoEventos || [];
+      divida.historicoEventos.push({ tipo:'Renegociação', data: new Date().toISOString(), valor: novoSaldo, observacao: 'Renegociada — nova dívida criada' });
+      // Cria a dívida nova, vinculada à antiga pelo campo renegociadaDeId
+      const novaDividaId = uid();
+      state.emprestimos.push({
+        id: novaDividaId, nome: divida.nome+' (renegociado)', tipo: divida.tipo, credor: divida.credor,
+        instituicao: divida.instituicao, contaId: divida.contaId,
+        valorTotal: novoSaldo, valorParcela: novaParcela, numeroParcelas: novasParcelas, parcelasPagas: 0,
+        dataInicio: addMesesISO(primeiroVenc||dataRenegociacao, -1),
+        taxaJurosMensal: novaTaxa, observacao,
+        renegociadaDeId: divida.id,
+        historicoEventos: [{ tipo:'Contratação (renegociação)', data: new Date().toISOString(), valor: novoSaldo, observacao: `Renegociada a partir de "${divida.nome}"` }]
+      });
+      persist(); closeModal();
+      dividaDetalheId = novaDividaId;
+      render();
+      showToast('Dívida renegociada — nova dívida criada com as condições novas');
+    } finally {
+      const b = document.getElementById('btnConfirmarRenegociacao');
+      if(b) b.disabled = false;
+    }
+  });
+}
+
+function viewDetalheDivida(dividaId){
+  const divida = state.emprestimos.find(e=>e.id===dividaId);
+  if(!divida) return `<div class="panel"><div class="empty">Dívida não encontrada.</div></div>`;
+  const cronograma = cronogramaDivida(divida);
+  const saldoAtual = saldoDevedorDivida(divida);
+  const valorPago = (divida.parcelasPagas||0)*(divida.valorParcela||0);
+  const pctQuitado = divida.numeroParcelas>0 ? Math.round((divida.parcelasPagas/divida.numeroParcelas)*100) : 0;
+  const historico = [...(divida.historicoEventos||[])].sort((a,b)=>b.data.localeCompare(a.data));
+  const statusAtual = statusDivida(divida);
+  const dividaEncerrada = statusAtual==='quitada' || statusAtual==='renegociada';
+
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-action="voltar-gestao-dividas">← Gestão de Dívidas</span>
+        <h1 style="margin-top:6px;">${escapeHTML(divida.nome)}</h1>
+        <p>${escapeHTML(divida.tipo||'—')}${divida.credor?' · '+escapeHTML(divida.credor):''}</p>
+      </div>
+      <div class="topbar-actions-stack">
+        ${!dividaEncerrada ? `<button class="btn ghost sm" data-action="registrar-pagamento-divida" data-id="${divida.id}">💵 Registrar pagamento</button>` : ''}
+        ${!dividaEncerrada ? `<button class="btn ghost sm" data-action="amortizar-divida" data-id="${divida.id}">📉 Amortizar</button>` : ''}
+        ${!dividaEncerrada ? `<button class="btn ghost sm" data-action="antecipar-parcelas-divida" data-id="${divida.id}">⏩ Antecipar</button>` : ''}
+        ${!dividaEncerrada ? `<button class="btn ghost sm" data-action="renegociar-divida" data-id="${divida.id}">🔄 Renegociar</button>` : ''}
+        ${!dividaEncerrada ? `<button class="btn ghost sm" data-action="quitar-divida" data-id="${divida.id}">✅ Quitar</button>` : ''}
+      </div>
+    </div>
+    ${divida.renegociadaDeId ? `<div class="note" style="margin-top:0;">🔄 Essa dívida veio de uma renegociação. <span style="color:var(--blue-accent);cursor:pointer;" data-action="ver-detalhe-divida" data-id="${divida.renegociadaDeId}">Ver dívida original</span></div>` : ''}
+
+    <div class="dash-section-label" style="margin-top:0;">Resumo</div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:14px;">
+      ${metricCardHTML('Valor original', brl(divida.valorTotal))}
+      ${metricCardHTML('Já pago', brl(valorPago))}
+      ${metricCardHTML('Saldo devedor', brl(saldoAtual))}
+      ${metricCardHTML('% quitado', pctQuitado+'%')}
+    </div>
+    <div class="limit-bar" style="height:9px;margin-bottom:14px;"><div class="limit-bar-fill" style="width:${pctQuitado}%;background:var(--blue-accent);"></div></div>
+
+    <div class="dash-section-label">Cronograma</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;overflow-x:auto;">
+      <div class="ledger-row head" style="grid-template-columns:60px 100px 100px 90px;min-width:400px;"><span>Nº</span><span>Vencimento</span><span>Valor</span><span>Status</span></div>
+      <div style="min-width:400px;">
+        ${cronograma.map(p=>`
+          <div class="ledger-row compact" style="grid-template-columns:60px 100px 100px 90px;">
+            <span style="font-size:12px;">${p.numero}/${divida.numeroParcelas}</span>
+            <span class="mono" style="font-size:11.5px;color:${!p.paga && p.vencimento<todayISO()?'var(--danger)':'inherit'};">${fmtDate(p.vencimento)}</span>
+            <span class="mono" style="font-size:11.5px;">${brl(p.valor)}</span>
+            <span style="font-size:11px;color:${p.paga?'var(--success)':'var(--text-soft)'};">${p.paga?'Paga':'Aberta'}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div></div>
+
+    <div class="dash-section-label">Histórico</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${historico.length ? historico.map(h=>`
+        <div class="ledger-row compact" style="grid-template-columns:100px 1fr auto;">
+          <span class="mono" style="font-size:11px;color:var(--text-soft);">${fmtDate(h.data.slice(0,10))}</span>
+          <span style="font-size:12.5px;">${h.tipo}${h.observacao?' — '+escapeHTML(h.observacao):''}</span>
+          <span class="mono" style="font-size:11.5px;font-weight:600;">${h.valor!=null?brl(h.valor):''}</span>
+        </div>
+      `).join('') : `<div class="empty">Sem eventos registrados além da contratação.</div>`}
+    </div></div>
+  `;
+}
+
+let gestaoDividasFiltro = { tipo:'', status:'' };
+let gestaoDividasBusca = '';
+let relatorioDividaAtivo = 'atuais';
+function viewRelatoriosDividas(){
+  const hoje = todayISO();
+  const dividas = state.emprestimos||[];
+  const comStatus = dividas.map(d=>({ divida:d, status: statusDivida(d), saldo: saldoDevedorDivida(d) }));
+  // Todos os eventos de todas as dívidas, com o nome da dívida junto — base pra vários relatórios
+  const todosEventos = [];
+  dividas.forEach(d=>(d.historicoEventos||[]).forEach(ev=>todosEventos.push({ ...ev, dividaNome:d.nome, dividaId:d.id })));
+
+  const relatorios = [
+    ['atuais','Dívidas atuais'], ['saldo','Saldo devedor'], ['cronograma','Cronograma futuro'],
+    ['vencidas','Parcelas vencidas'], ['juros-pagos','Juros pagos'], ['juros-futuros','Juros futuros'],
+    ['amortizacoes','Amortizações'], ['antecipacoes','Antecipações'], ['descontos','Descontos obtidos'],
+    ['quitadas','Dívidas quitadas'], ['renegociacoes','Renegociações'], ['comprometimento','Comprometimento futuro'],
+    ['credor','Por credor'], ['instituicao','Por instituição'], ['tipo','Por tipo'],
+  ];
+
+  const linha = (a,b) => `<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span style="font-size:12.5px;">${a}</span><span class="mono" style="font-weight:600;">${b}</span></div>`;
+
+  let conteudo = '';
+  if(relatorioDividaAtivo==='atuais'){
+    conteudo = !dividas.length ? `<div class="empty">Não existem dívidas cadastradas.</div>` : comStatus.map(x=>linha(`${escapeHTML(x.divida.nome)} (${escapeHTML(x.divida.tipo||'—')})`, brl(x.saldo))).join('');
+  } else if(relatorioDividaAtivo==='saldo'){
+    const total = comStatus.reduce((s,x)=>s+x.saldo,0);
+    conteudo = `<div class="note" style="margin-top:0;">Saldo devedor total: <strong>${brl(total)}</strong></div>` + comStatus.filter(x=>x.saldo>0).map(x=>linha(escapeHTML(x.divida.nome), brl(x.saldo))).join('');
+  } else if(relatorioDividaAtivo==='cronograma'){
+    const futuras = [];
+    comStatus.forEach(x=>cronogramaDivida(x.divida).filter(p=>!p.paga).forEach(p=>futuras.push({ nome:x.divida.nome, total:x.divida.numeroParcelas, ...p })));
+    futuras.sort((a,b)=>a.vencimento.localeCompare(b.vencimento));
+    conteudo = !futuras.length ? `<div class="empty">Nenhuma parcela futura.</div>` : futuras.slice(0,100).map(p=>linha(`${fmtDate(p.vencimento)} — ${escapeHTML(p.nome)} (${p.numero}/${p.total})`, brl(p.valor))).join('');
+  } else if(relatorioDividaAtivo==='vencidas'){
+    const vencidas = [];
+    comStatus.forEach(x=>cronogramaDivida(x.divida).filter(p=>!p.paga && p.vencimento<hoje).forEach(p=>vencidas.push({ nome:x.divida.nome, ...p })));
+    conteudo = !vencidas.length ? `<div class="empty">Nenhuma parcela vencida — tudo em dia.</div>` : vencidas.map(p=>linha(`${fmtDate(p.vencimento)} — ${escapeHTML(p.nome)}`, brl(p.valor))).join('');
+  } else if(relatorioDividaAtivo==='juros-pagos'){
+    const pagamentosComJuros = todosEventos.filter(ev=>ev.tipo==='Pagamento' && ev.jurosPagos>0);
+    const total = pagamentosComJuros.reduce((s,ev)=>s+(ev.jurosPagos||0),0);
+    conteudo = `<div class="note" style="margin-top:0;">Total de juros pagos registrados: <strong>${brl(total)}</strong></div>` + (!pagamentosComJuros.length ? `<div class="empty">Nenhum pagamento com juros informado ainda.</div>` : pagamentosComJuros.map(ev=>linha(`${fmtDate(ev.data.slice(0,10))} — ${escapeHTML(ev.dividaNome)}`, brl(ev.jurosPagos))).join(''));
+  } else if(relatorioDividaAtivo==='juros-futuros'){
+    conteudo = `<div class="empty">Não calculável com os dados disponíveis — o cadastro atual não separa principal de juros por parcela.</div>`;
+  } else if(relatorioDividaAtivo==='amortizacoes'){
+    const amort = todosEventos.filter(ev=>ev.tipo==='Amortização extraordinária');
+    const total = amort.reduce((s,ev)=>s+(ev.valor||0),0);
+    conteudo = `<div class="note" style="margin-top:0;">Total amortizado extraordinariamente: <strong>${brl(total)}</strong></div>` + (!amort.length ? `<div class="empty">Nenhuma amortização extraordinária registrada.</div>` : amort.map(ev=>linha(`${fmtDate(ev.data.slice(0,10))} — ${escapeHTML(ev.dividaNome)} (${ev.efeito==='reduzir-prazo'?'reduziu prazo':'reduziu parcela'})`, brl(ev.valor))).join(''));
+  } else if(relatorioDividaAtivo==='antecipacoes'){
+    const antec = todosEventos.filter(ev=>ev.tipo==='Antecipação de parcelas');
+    conteudo = !antec.length ? `<div class="empty">Nenhuma antecipação registrada.</div>` : antec.map(ev=>linha(`${fmtDate(ev.data.slice(0,10))} — ${escapeHTML(ev.dividaNome)} (${ev.qtdParcelas} parcela(s))`, brl(ev.valor))).join('');
+  } else if(relatorioDividaAtivo==='descontos'){
+    const comDesconto = todosEventos.filter(ev=>ev.desconto>0);
+    const total = comDesconto.reduce((s,ev)=>s+(ev.desconto||0),0);
+    conteudo = `<div class="note" style="margin-top:0;">Total economizado em descontos: <strong>${brl(total)}</strong></div>` + (!comDesconto.length ? `<div class="empty">Nenhum desconto registrado ainda.</div>` : comDesconto.map(ev=>linha(`${fmtDate(ev.data.slice(0,10))} — ${escapeHTML(ev.dividaNome)} (${ev.tipo})`, brl(ev.desconto))).join(''));
+  } else if(relatorioDividaAtivo==='quitadas'){
+    const quitadas = comStatus.filter(x=>x.status==='quitada');
+    conteudo = !quitadas.length ? `<div class="empty">Nenhuma dívida quitada ainda.</div>` : quitadas.map(x=>linha(escapeHTML(x.divida.nome), brl(x.divida.valorTotal))).join('');
+  } else if(relatorioDividaAtivo==='renegociacoes'){
+    const renegociadas = dividas.filter(d=>d.renegociadaDeId);
+    conteudo = !renegociadas.length ? `<div class="empty">Nenhuma renegociação registrada.</div>` : renegociadas.map(d=>{
+      const origem = dividas.find(o=>o.id===d.renegociadaDeId);
+      return linha(`${escapeHTML(origem?.nome||'(dívida original excluída)')} → ${escapeHTML(d.nome)}`, brl(d.valorTotal));
+    }).join('');
+  } else if(relatorioDividaAtivo==='comprometimento'){
+    const meses12 = Array.from({length:12},(_,i)=>{ const d=new Date(); d.setMonth(d.getMonth()+i); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+    conteudo = meses12.map(m=>{
+      let total=0; comStatus.forEach(x=>cronogramaDivida(x.divida).filter(p=>!p.paga && p.vencimento.slice(0,7)===m).forEach(p=>total+=p.valor));
+      return linha(competenciaLabel(m), brl(total));
+    }).join('');
+  } else if(relatorioDividaAtivo==='credor'){
+    const porCredor = {};
+    comStatus.forEach(x=>{ const k=x.divida.credor||'Sem credor informado'; porCredor[k]=(porCredor[k]||0)+x.saldo; });
+    conteudo = Object.entries(porCredor).sort((a,b)=>b[1]-a[1]).map(([k,v])=>linha(escapeHTML(k), brl(v))).join('') || `<div class="empty">Sem dados.</div>`;
+  } else if(relatorioDividaAtivo==='instituicao'){
+    const porInst = {};
+    comStatus.forEach(x=>{ const k=x.divida.instituicao||'Sem instituição informada'; porInst[k]=(porInst[k]||0)+x.saldo; });
+    conteudo = Object.entries(porInst).sort((a,b)=>b[1]-a[1]).map(([k,v])=>linha(escapeHTML(k), brl(v))).join('') || `<div class="empty">Sem dados.</div>`;
+  } else if(relatorioDividaAtivo==='tipo'){
+    const porTipo = {};
+    comStatus.forEach(x=>{ const k=x.divida.tipo||'Sem tipo informado'; porTipo[k]=(porTipo[k]||0)+x.saldo; });
+    conteudo = Object.entries(porTipo).sort((a,b)=>b[1]-a[1]).map(([k,v])=>linha(escapeHTML(k), brl(v))).join('') || `<div class="empty">Sem dados.</div>`;
+  }
+
+  return `
+    <div class="topbar">
+      <div>
+        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-action="voltar-gestao-dividas">← Gestão de Dívidas</span>
+        <h1 style="margin-top:6px;">Relatórios de Dívidas</h1>
+      </div>
+    </div>
+    <div class="report-controls" style="margin-bottom:14px;flex-wrap:wrap;">
+      <select id="selRelatorioDivida">${relatorios.map(([id,nome])=>`<option value="${id}" ${relatorioDividaAtivo===id?'selected':''}>${nome}</option>`).join('')}</select>
+    </div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${conteudo}
+    </div></div>
+  `;
+}
+
+function viewGestaoDividas(){
+  if(dividaDetalheId) return viewDetalheDivida(dividaDetalheId);
+  const hoje = todayISO();
+  const dividas = state.emprestimos||[];
+  const comStatus = dividas.map(d=>({ divida:d, status: statusDivida(d), saldo: saldoDevedorDivida(d), proxima: proximaParcelaDivida(d) }));
+
+  // ---- Cards principais (§5) — tudo derivado do cronograma calculado, nada inventado
+  const dividaTotal = comStatus.reduce((s,x)=>s+x.saldo,0);
+  const parcelasAbertas = comStatus.reduce((s,x)=>s+Math.max(0,x.divida.numeroParcelas-x.divida.parcelasPagas),0);
+  let vencendoMes=0, proximos90=0, emAtraso=0;
+  const em90dias = addDiasISO(hoje,90);
+  comStatus.forEach(x=>{
+    cronogramaDivida(x.divida).filter(p=>!p.paga).forEach(p=>{
+      if(p.vencimento.slice(0,7)===hoje.slice(0,7)) vencendoMes+=p.valor;
+      if(p.vencimento>=hoje && p.vencimento<=em90dias) proximos90+=p.valor;
+      if(p.vencimento<hoje) emAtraso+=p.valor;
+    });
+  });
+  const amortizado = dividas.reduce((s,d)=>s+(d.parcelasPagas||0)*(d.valorParcela||0),0);
+
+  // ---- Situação geral (§6)
+  const qtdEmDia = comStatus.filter(x=>x.status==='em-dia').length;
+  const qtdProxima = comStatus.filter(x=>x.status==='proxima').length;
+  const qtdAtrasada = comStatus.filter(x=>x.status==='atrasada').length;
+  const qtdQuitada = comStatus.filter(x=>x.status==='quitada').length;
+  const qtdRenegociada = comStatus.filter(x=>x.status==='renegociada').length;
+
+  // ---- Alertas (§33) — só entra quando a condição realmente bate
+  const alertasDividas = [];
+  const parcelasProximas7d = [];
+  comStatus.forEach(x=>{
+    if(x.proxima && x.proxima.vencimento>=hoje && x.proxima.vencimento<=addDiasISO(hoje,7)) parcelasProximas7d.push(x);
+    if(x.status==='atrasada') alertasDividas.push({ texto:`"${x.divida.nome}" está com parcela em atraso`, cor:'var(--danger)' });
+    if(!x.divida.contaId && x.status!=='quitada') alertasDividas.push({ texto:`"${x.divida.nome}" não tem conta bancária vinculada`, cor:'var(--text-soft)' });
+  });
+  if(parcelasProximas7d.length) alertasDividas.unshift({ texto:`${parcelasProximas7d.length} parcela(s) vencem nos próximos 7 dias`, cor:'var(--warn)' });
+
+  // ---- Filtros (§11)
+  const tiposExistentes = [...new Set(dividas.map(d=>d.tipo).filter(Boolean))];
+  let comStatusFiltrado = comStatus;
+  if(gestaoDividasFiltro.tipo) comStatusFiltrado = comStatusFiltrado.filter(x=>x.divida.tipo===gestaoDividasFiltro.tipo);
+  if(gestaoDividasFiltro.status) comStatusFiltrado = comStatusFiltrado.filter(x=>x.status===gestaoDividasFiltro.status);
+  if(gestaoDividasBusca.trim()){
+    const termo = gestaoDividasBusca.trim().toLowerCase();
+    comStatusFiltrado = comStatusFiltrado.filter(x=>(x.divida.nome||'').toLowerCase().includes(termo) || (x.divida.credor||'').toLowerCase().includes(termo) || (x.divida.instituicao||'').toLowerCase().includes(termo));
+  }
+
+  // ---- Comprometimento futuro (§8) — 6 meses
+  const meses6 = Array.from({length:6},(_,i)=>{ const d=new Date(); d.setMonth(d.getMonth()+i); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+  const comprometimentoPorMes = meses6.map(m=>{
+    let total = 0;
+    comStatus.forEach(x=>cronogramaDivida(x.divida).filter(p=>!p.paga && p.vencimento.slice(0,7)===m).forEach(p=>total+=p.valor));
+    return { mes:m, total };
+  });
+  const maxComprometimento = Math.max(1, ...comprometimentoPorMes.map(c=>c.total));
+
+  // ---- Calendário de vencimentos (§9) — reaproveita a mesma grade genérica já criada pra Usina Solar
+  const gdCalMes = window._gdCalendarioMes || hoje.slice(0,7);
+  const gdGrade = gerarGradeMesUsinaSolar(gdCalMes);
+  const parcelasPorDia = {};
+  comStatus.forEach(x=>cronogramaDivida(x.divida).filter(p=>!p.paga).forEach(p=>{
+    if(!parcelasPorDia[p.vencimento]) parcelasPorDia[p.vencimento] = [];
+    parcelasPorDia[p.vencimento].push({ nome:x.divida.nome, valor:p.valor, numero:p.numero, total:x.divida.numeroParcelas, dividaId:x.divida.id, status:x.status });
+  }));
+  const gdDiaSelecionado = window._gdCalendarioDiaSelecionado;
+  const parcelasDiaSelecionado = gdDiaSelecionado ? (parcelasPorDia[gdDiaSelecionado]||[]) : [];
+
+  return `
+    <div class="topbar">
+      <div><h1>Gestão de Dívidas</h1><p>Controle, amortização e planejamento das obrigações financeiras</p></div>
+      <div class="topbar-actions-stack">
+        <button class="btn" id="btnNovaDivida">+ Nova dívida</button>
+        <button class="btn ghost" id="btnRelatoriosDividas">📊 Relatórios</button>
+      </div>
+    </div>
+
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:8px;">
+      ${metricCardHTML('Dívida total', brl(dividaTotal))}
+      ${metricCardHTML('Parcelas em aberto', parcelasAbertas>0?String(parcelasAbertas):'—')}
+      ${metricCardHTML('Vencendo este mês', brl(vencendoMes))}
+      ${metricCardHTML('Próximos 90 dias', brl(proximos90))}
+      ${metricCardHTML('Juros futuros', 'Não calculável com os dados disponíveis')}
+      ${metricCardHTML('Em atraso', brl(emAtraso), emAtraso>0?'var(--danger)':undefined)}
+      ${metricCardHTML('Amortizado', brl(amortizado))}
+      ${metricCardHTML('Obrigações', dividas.length?String(dividas.length):'—')}
+    </div>
+    <div class="note" style="margin-top:0;">"Juros futuros" não é calculado porque o cadastro atual não guarda o CET nem a composição principal/juros de cada parcela — só o valor total da parcela. Dá pra estimar isso no futuro se você quiser cadastrar essa composição.</div>
+
+    <div class="dash-section-label">Situação das dívidas</div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(110px,1fr));margin-bottom:8px;">
+      ${metricCardHTML('Em dia', String(qtdEmDia))}
+      ${metricCardHTML('Próximo do vencimento', String(qtdProxima), qtdProxima>0?'var(--warn)':undefined)}
+      ${metricCardHTML('Em atraso', String(qtdAtrasada), qtdAtrasada>0?'var(--danger)':undefined)}
+      ${metricCardHTML('Renegociadas', String(qtdRenegociada))}
+      ${metricCardHTML('Quitadas', String(qtdQuitada))}
+    </div>
+
+    ${alertasDividas.length ? `
+    <div class="dash-section-label">🔔 Alertas de dívidas</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+      ${alertasDividas.map(a=>`<div class="ledger-row compact" style="grid-template-columns:auto 1fr;"><span style="width:8px;height:8px;border-radius:50%;background:${a.cor};display:inline-block;"></span><span style="font-size:12.5px;">${a.texto}</span></div>`).join('')}
+    </div></div>` : `<div class="note" style="margin-top:0;">Não existem pendências relevantes.</div>`}
+
+    ${dividas.length ? `
+    <div class="dash-section-label">Compromissos futuros (6 meses)</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:18px 8px 8px;">
+      <div style="display:flex;align-items:flex-end;gap:10px;height:110px;">
+        ${comprometimentoPorMes.map(c=>`
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;">
+            <span class="mono" style="font-size:10px;color:var(--text-soft);margin-bottom:4px;">${c.total>0?brl(c.total).replace('R$ ',''):''}</span>
+            <div style="width:100%;max-width:40px;background:var(--blue-accent);opacity:${c.total>0?1:0.15};border-radius:4px 4px 0 0;height:${Math.max(3,Math.round(c.total/maxComprometimento*90))}px;"></div>
+            <span style="font-size:10.5px;color:var(--text-soft);margin-top:4px;">${competenciaLabel(c.mes).split('/')[0].slice(0,3)}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div></div>` : ''}
+
+    <div class="dash-section-label" style="display:flex;justify-content:space-between;align-items:center;">
+      <span>Calendário de dívidas</span>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button class="icon-btn" id="btnGdCalMesAnterior" title="Mês anterior">‹</button>
+        <span style="font-size:12.5px;font-weight:600;min-width:110px;text-align:center;">${competenciaLabel(gdCalMes)}</span>
+        <button class="icon-btn" id="btnGdCalMesProximo" title="Próximo mês">›</button>
+      </div>
+    </div>
+    <div class="panel" style="margin-bottom:8px;"><div class="panel-body" style="padding:14px 18px;">
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;font-size:9.5px;color:var(--text-soft);text-align:center;margin-bottom:4px;">
+        <span>D</span><span>S</span><span>T</span><span>Q</span><span>Q</span><span>S</span><span>S</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;">
+        ${gdGrade.map(dia=>{
+          if(!dia) return `<div></div>`;
+          const eventos = parcelasPorDia[dia];
+          const numDia = Number(dia.slice(8,10));
+          const atrasada = eventos && dia<hoje;
+          const selecionado = dia===gdDiaSelecionado;
+          return `<div data-action="selecionar-dia-cal-divida" data-dia="${dia}" style="cursor:pointer;aspect-ratio:1;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10.5px;position:relative;border:${selecionado?'2px solid var(--blue-accent)':'1px solid var(--line)'};background:${eventos?(atrasada?'rgba(213,71,63,.18)':'rgba(59,111,224,.14)'):'transparent'};" title="${eventos?eventos.length+' parcela(s)':'Sem vencimento'}">${numDia}${eventos?.length?`<span style="position:absolute;bottom:1px;right:2px;font-size:7px;">●</span>`:''}</div>`;
+        }).join('')}
+      </div>
+    </div></div>
+    ${gdDiaSelecionado ? `
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:14px 18px;">
+      <div style="font-weight:600;font-size:13px;margin-bottom:8px;">${fmtDate(gdDiaSelecionado)}</div>
+      ${parcelasDiaSelecionado.length ? parcelasDiaSelecionado.map(p=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto;">
+          <span style="font-size:12.5px;cursor:pointer;color:var(--blue-accent);" data-action="ver-detalhe-divida" data-id="${p.dividaId}">${escapeHTML(p.nome)} (${p.numero}/${p.total})</span>
+          <span class="mono" style="font-weight:600;">${brl(p.valor)}</span>
+        </div>
+      `).join('') : `<div class="empty">Nenhuma parcela vencendo nesse dia.</div>`}
+    </div></div>` : ''}
+
+    <div class="dash-section-label">Minhas dívidas</div>
+    <div class="report-controls" style="margin-bottom:12px;flex-wrap:wrap;">
+      <input type="text" id="gdBuscaInput" placeholder="Pesquisar dívida, credor ou contrato..." value="${escapeHTML(gestaoDividasBusca)}" style="flex:1;min-width:180px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;">
+      <select id="gdFiltroTipo"><option value="">Todos os tipos</option>${tiposExistentes.map(t=>`<option ${gestaoDividasFiltro.tipo===t?'selected':''}>${escapeHTML(t)}</option>`).join('')}</select>
+      <select id="gdFiltroStatus">
+        <option value="">Todos os status</option>
+        <option value="em-dia" ${gestaoDividasFiltro.status==='em-dia'?'selected':''}>Em dia</option>
+        <option value="proxima" ${gestaoDividasFiltro.status==='proxima'?'selected':''}>Próximo do vencimento</option>
+        <option value="atrasada" ${gestaoDividasFiltro.status==='atrasada'?'selected':''}>Em atraso</option>
+        <option value="quitada" ${gestaoDividasFiltro.status==='quitada'?'selected':''}>Quitada</option>
+        <option value="renegociada" ${gestaoDividasFiltro.status==='renegociada'?'selected':''}>Renegociada</option>
+      </select>
+    </div>
+    ${!dividas.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Não existem dívidas cadastradas.</div></div>` : !comStatusFiltrado.length ? `<div class="panel"><div class="empty" style="padding:30px 20px;">Nenhuma dívida encontrada com esse filtro.</div></div>` : comStatusFiltrado.map(x=>{
+      const d = x.divida;
+      const pctRestante = d.numeroParcelas>0 ? Math.round((d.numeroParcelas-d.parcelasPagas)/d.numeroParcelas*100) : 0;
+      const corStatus = { 'em-dia':'var(--success)', 'proxima':'var(--warn)', 'atrasada':'var(--danger)', 'quitada':'var(--text-soft)', 'renegociada':'var(--blue-accent)' }[x.status];
+      const rotuloStatus = { 'em-dia':'Em dia', 'proxima':'Próximo do vencimento', 'atrasada':'Em atraso', 'quitada':'Quitada', 'renegociada':'Renegociada' }[x.status];
+      return `
+      <div class="panel" style="margin-bottom:12px;">
+        <div class="panel-body" style="padding:16px 20px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
+            <div>
+              <div style="font-weight:600;font-size:14px;cursor:pointer;color:var(--blue-accent);" data-action="ver-detalhe-divida" data-id="${d.id}">${escapeHTML(d.nome)}</div>
+              <div style="font-size:11.5px;color:var(--text-soft);margin-top:2px;">${escapeHTML(d.tipo||'—')}${d.credor?' · '+escapeHTML(d.credor):''}</div>
+            </div>
+            <span style="font-size:11px;font-weight:700;color:${corStatus};padding:3px 10px;border-radius:20px;background:${corStatus}1A;">${rotuloStatus}</span>
+          </div>
+          <div class="fluxo-resumo-4col" style="margin-top:12px;">
+            <div class="fluxo-resumo-item"><div class="lbl">Original</div><div class="val" style="font-size:13px;">${brl(d.valorTotal)}</div></div>
+            <div class="fluxo-resumo-item"><div class="lbl">Saldo devedor</div><div class="val" style="font-size:13px;">${brl(x.saldo)}</div></div>
+            <div class="fluxo-resumo-item"><div class="lbl">Parcela</div><div class="val" style="font-size:13px;">${brl(d.valorParcela)}</div></div>
+            <div class="fluxo-resumo-item"><div class="lbl">Próximo vencimento</div><div class="val" style="font-size:13px;">${x.proxima?fmtDate(x.proxima.vencimento):'—'}</div></div>
+          </div>
+          <div style="margin-top:10px;">
+            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-soft);margin-bottom:3px;"><span>Progresso</span><span>${pctRestante}% restante (${d.parcelasPagas}/${d.numeroParcelas} pagas)</span></div>
+            <div class="limit-bar" style="height:8px;"><div class="limit-bar-fill" style="width:${100-pctRestante}%;background:var(--blue-accent);"></div></div>
+          </div>
+          <div class="cartao-actions-row" style="margin-top:12px;">
+            ${(()=>{ const encerrada = x.status==='quitada'||x.status==='renegociada'; return !encerrada ? `
+            <button class="btn ghost sm" data-action="registrar-pagamento-divida" data-id="${d.id}">💵 Registrar pagamento</button>
+            <button class="btn ghost sm" data-action="amortizar-divida" data-id="${d.id}">📉 Amortizar</button>
+            <button class="btn ghost sm" data-action="antecipar-parcelas-divida" data-id="${d.id}">⏩ Antecipar</button>
+            <button class="btn ghost sm" data-action="renegociar-divida" data-id="${d.id}">🔄 Renegociar</button>
+            <button class="btn ghost sm" data-action="quitar-divida" data-id="${d.id}">✅ Quitar</button>
+            ` : ''; })()}
+            <button class="btn ghost sm" data-action="editar-divida" data-id="${d.id}">✎ Editar</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('')}
+  `;
+}
+
 function renderAmortizacaoEmprestimos(){
   const lista = state.emprestimos||[];
   const saldoDevedorTotal = lista.reduce((s,e)=>s+Math.max(0,(e.numeroParcelas-e.parcelasPagas))*e.valorParcela,0);
@@ -24207,6 +25027,59 @@ function attachViewHandlers(){
   document.getElementById('btnVerRelatorioSolar')?.addEventListener('click', ()=>{ window._usinaSolarAbaAtiva = 'relatorios'; render(); });
   document.getElementById('btnRegistrarTarifaSolar')?.addEventListener('click', openRegistrarTarifaSolarModal);
   document.getElementById('btnRegistrarDocumentoSolar')?.addEventListener('click', openRegistrarDocumentoSolarModal);
+  document.getElementById('btnNovaDivida')?.addEventListener('click', ()=>openEmprestimoModal());
+  document.getElementById('btnRelatoriosDividas')?.addEventListener('click', ()=>{ currentView='relatorios-dividas'; render(); });
+  document.getElementById('selRelatorioDivida')?.addEventListener('change', (e)=>{ relatorioDividaAtivo = e.target.value; render(); });
+  document.querySelectorAll('[data-action="editar-divida"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const d = state.emprestimos.find(x=>x.id===btn.dataset.id);
+      if(d) openEmprestimoModal(d);
+    });
+  });
+  document.querySelectorAll('[data-action="registrar-pagamento-divida"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openRegistrarPagamentoDividaModal(btn.dataset.id));
+  });
+  document.querySelectorAll('[data-action="quitar-divida"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openQuitarDividaModal(btn.dataset.id));
+  });
+  document.getElementById('gdFiltroTipo')?.addEventListener('change', (e)=>{ gestaoDividasFiltro.tipo = e.target.value; render(); });
+  document.getElementById('gdFiltroStatus')?.addEventListener('change', (e)=>{ gestaoDividasFiltro.status = e.target.value; render(); });
+  document.getElementById('gdBuscaInput')?.addEventListener('input', (e)=>{ gestaoDividasBusca = e.target.value; render(); });
+  document.querySelectorAll('[data-action="amortizar-divida"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openAmortizarDividaModal(btn.dataset.id));
+  });
+  document.querySelectorAll('[data-action="antecipar-parcelas-divida"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openAntecipacaoParcelasModal(btn.dataset.id));
+  });
+  document.querySelectorAll('[data-action="renegociar-divida"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openRenegociarDividaModal(btn.dataset.id));
+  });
+  document.getElementById('btnGdCalMesAnterior')?.addEventListener('click', ()=>{
+    const mesAtual = window._gdCalendarioMes || todayISO().slice(0,7);
+    const [a,m] = mesAtual.split('-').map(Number);
+    window._gdCalendarioMes = m===1 ? `${a-1}-12` : `${a}-${String(m-1).padStart(2,'0')}`;
+    window._gdCalendarioDiaSelecionado = null;
+    render();
+  });
+  document.getElementById('btnGdCalMesProximo')?.addEventListener('click', ()=>{
+    const mesAtual = window._gdCalendarioMes || todayISO().slice(0,7);
+    const [a,m] = mesAtual.split('-').map(Number);
+    window._gdCalendarioMes = m===12 ? `${a+1}-01` : `${a}-${String(m+1).padStart(2,'0')}`;
+    window._gdCalendarioDiaSelecionado = null;
+    render();
+  });
+  document.querySelectorAll('[data-action="selecionar-dia-cal-divida"]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      window._gdCalendarioDiaSelecionado = window._gdCalendarioDiaSelecionado===el.dataset.dia ? null : el.dataset.dia;
+      render();
+    });
+  });
+  document.querySelectorAll('[data-action="ver-detalhe-divida"]').forEach(el=>{
+    el.addEventListener('click', ()=>{ dividaDetalheId = el.dataset.id; render(); });
+  });
+  document.querySelector('[data-action="voltar-gestao-dividas"]')?.addEventListener('click', ()=>{
+    dividaDetalheId = null; currentView='gestao-dividas'; render();
+  });
   document.querySelectorAll('[data-vk-aprov-filtro]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       window._vkAprovacoesFiltro = btn.dataset.vkAprovFiltro;
