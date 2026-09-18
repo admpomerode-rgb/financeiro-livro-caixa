@@ -20402,17 +20402,19 @@ function viewUsinaSolar(){
   const bandeirasHistorico = faturasAsc.filter(f=>f.bandeira).slice(-12);
   const corBandeira = b => /verde/i.test(b) ? 'var(--success)' : /amarela/i.test(b) ? 'var(--warn)' : /vermelha/i.test(b) ? 'var(--danger)' : 'var(--text-soft)';
 
-  // ---- Distribuição da fatura mais recente (tarifa base x impostos x outras taxas)
+  // ---- Distribuição da fatura mais recente (tarifa base x impostos x outras taxas) — usa os
+  // valores REAIS já cobrados na fatura (depois da compensação da usina), nunca consumo × tarifa
+  // cheia (que dá um número maior que a própria fatura, porque não desconta o que foi compensado).
   let distribuicaoFatura = null;
-  if(ultimaFatura && ultimaFatura.consumoKwh>0 && ultimaFatura.tarifaEnergiaKwh){
-    const baseTarifa = ultimaFatura.tarifaEnergiaKwh * ultimaFatura.consumoKwh;
+  if(ultimaFatura && ultimaFatura.valorTotal>0){
     const impostosF = (ultimaFatura.pisValor||0)+(ultimaFatura.cofinsValor||0)+(ultimaFatura.icmsValor||0);
-    const outrasTaxas = (ultimaFatura.cosipValor||0)+(ultimaFatura.multaValor||0)+(ultimaFatura.jurosValor||0);
+    const outrasTaxas = (ultimaFatura.cosipValor||0)+(ultimaFatura.multaValor||0)+(ultimaFatura.jurosValor||0)+(ultimaFatura.correcaoValor||0);
     const total = ultimaFatura.valorTotal;
+    const tarifaBaseReal = Math.max(0, total - impostosF - outrasTaxas);
     distribuicaoFatura = [
-      { nome:'Tarifa de energia', valor: Math.min(baseTarifa,total), cor:'var(--blue-accent)' },
+      { nome:'Tarifa de energia (base)', valor: tarifaBaseReal, cor:'var(--blue-accent)' },
       { nome:'Impostos (PIS/COFINS/ICMS)', valor: impostosF, cor:'var(--warn)' },
-      { nome:'Outras taxas (COSIP/multa/juros)', valor: outrasTaxas, cor:'var(--danger)' },
+      { nome:'Outras taxas (COSIP/multa/juros/correção)', valor: outrasTaxas, cor:'var(--danger)' },
     ].filter(d=>d.valor>0.01);
   }
 
@@ -20688,49 +20690,8 @@ function viewUsinaSolar(){
     </div>
 
     <div data-aba-painel="geracao" style="display:${abaAtiva==='geracao'?'block':'none'};margin-top:14px;">
-      <div class="contas-secao-titulo" style="margin-top:0;display:flex;justify-content:space-between;align-items:center;">
-        <span>Calendário de geração</span>
-        <div style="display:flex;gap:6px;align-items:center;">
-          <button class="icon-btn" id="btnCalMesAnterior" title="Mês anterior">‹</button>
-          <span style="font-size:12.5px;font-weight:600;min-width:110px;text-align:center;">${competenciaLabel(calMes)}</span>
-          <button class="icon-btn" id="btnCalMesProximo" title="Próximo mês">›</button>
-        </div>
-      </div>
-      <div class="panel"><div class="panel-body" style="padding:14px 18px;">
-        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;font-size:9.5px;color:var(--text-soft);text-align:center;margin-bottom:4px;">
-          <span>D</span><span>S</span><span>T</span><span>Q</span><span>Q</span><span>S</span><span>S</span>
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;">
-          ${gradeCalMes.map(dia=>{
-            if(!dia) return `<div></div>`;
-            const l = leiturasDiaPorData[dia];
-            const outrosEventos = eventosCalPorData[dia];
-            const numDia = Number(dia.slice(8,10));
-            const intensidade = l ? Math.max(0.15, l.geracaoKwh/maxGeracaoDiaCal) : 0;
-            const selecionado = dia===diaSelecionado;
-            const titulo = [l?l.geracaoKwh+' kWh':null, ...(outrosEventos||[]).map(e=>e.tipo)].filter(Boolean).join(' · ') || 'Sem registro';
-            return `<div data-action="selecionar-dia-cal-solar" data-dia="${dia}" style="cursor:pointer;aspect-ratio:1;border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:10.5px;position:relative;border:${selecionado?'2px solid var(--blue-accent)':'1px solid var(--line)'};background:${l?`rgba(217,143,43,${intensidade})`:'transparent'};color:${l&&intensidade>0.5?'#fff':'var(--ink)'};" title="${titulo}">${numDia}${outrosEventos?.length?`<span style="position:absolute;top:1px;right:1px;font-size:7px;">${outrosEventos[0].emoji}</span>`:''}</div>`;
-          }).join('')}
-        </div>
-      </div></div>
-      ${diaSelecionado ? `
-      <div class="panel" style="margin-top:8px;"><div class="panel-body" style="padding:14px 18px;">
-        <div style="font-weight:600;font-size:13px;margin-bottom:8px;">${fmtDate(diaSelecionado)}</div>
-        ${leituraDiaSelecionado ? `
-        <div class="fluxo-resumo-4col">
-          <div class="fluxo-resumo-item"><div class="lbl">Geração</div><div class="val">${leituraDiaSelecionado.geracaoKwh} kWh</div></div>
-          <div class="fluxo-resumo-item"><div class="lbl">Meta do dia</div><div class="val">${metaDiaria?metaDiaria.toFixed(1)+' kWh':'—'}</div></div>
-          <div class="fluxo-resumo-item"><div class="lbl">Diferença</div><div class="val">${metaDiaria?((leituraDiaSelecionado.geracaoKwh-metaDiaria)>=0?'+':'')+(leituraDiaSelecionado.geracaoKwh-metaDiaria).toFixed(1)+' kWh':'—'}</div></div>
-          <div class="fluxo-resumo-item"><div class="lbl">Economia estimada</div><div class="val">${tarifaParaEconomia?brl(leituraDiaSelecionado.geracaoKwh*tarifaParaEconomia):'—'}</div></div>
-        </div>` : `<div class="empty">Sem registro de geração nesse dia.</div>`}
-        ${eventosDiaSelecionado.length ? `
-        <div style="margin-top:10px;">
-          ${eventosDiaSelecionado.map(e=>`<div style="font-size:13px;padding:4px 0;">${e.emoji} ${e.tipo}</div>`).join('')}
-        </div>` : ''}
-      </div></div>` : ''}
-
       ${dadosGeracaoConsumo.length ? `
-      <div class="contas-secao-titulo">Geração x consumo por mês</div>
+      <div class="contas-secao-titulo" style="margin-top:0;">Geração x consumo por mês</div>
       <div class="panel"><div class="panel-body" style="padding:16px 18px;">
         <div class="fluxo-semanas-bars" style="height:110px;">
           ${dadosGeracaoConsumo.map(d=>`
@@ -20872,6 +20833,23 @@ function viewUsinaSolar(){
         <div class="fluxo-resumo-item"><div class="lbl">Saldo de créditos</div><div class="val">${ultimaFatura.saldoCreditosAtualKwh!=null?ultimaFatura.saldoCreditosAtualKwh+' kWh':'—'}</div></div>
         ${ultimaFatura.vencimento ? `<div class="fluxo-resumo-item"><div class="lbl">Vencimento</div><div class="val" style="font-size:13px;">${fmtDate(ultimaFatura.vencimento)}</div></div>` : ''}
       </div>
+
+      ${simulacaoCompleta ? `
+      <div class="panel" style="margin-top:10px;"><div class="panel-body" style="padding:14px 18px;">
+        <div style="font-weight:700;font-size:12px;color:var(--text-soft);margin-bottom:8px;">☀️ Sem a usina, essa fatura seria:</div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;">
+          <span style="font-size:13px;">Com usina (o que você pagou)</span>
+          <span class="mono" style="font-size:15px;font-weight:700;">${brl(simulacaoCompleta.valorFaturaComUsina)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:4px;">
+          <span style="font-size:13px;">Sem usina (estimado)</span>
+          <span class="mono" style="font-size:15px;font-weight:700;color:var(--text-soft);">${brl(simulacaoCompleta.valorFaturaSemUsina)}</span>
+        </div>
+        <div style="text-align:center;margin-top:10px;padding:8px;background:var(--surface-alt,rgba(30,158,107,.08));border-radius:8px;">
+          <span style="font-size:15px;font-weight:700;color:var(--success);">Economia: ${brl(simulacaoCompleta.economiaTotal)} (${simulacaoCompleta.pctEconomia.toFixed(0)}%)</span>
+        </div>
+        <div class="note" style="margin-top:8px;">Estimativa por faixa de ICMS (150 kWh) — detalhamento completo na aba Economia.</div>
+      </div></div>` : ''}
 
       ${analiseAutomatica.length ? `
       <div class="panel" style="margin-top:10px;"><div class="panel-body" style="padding:0;">
