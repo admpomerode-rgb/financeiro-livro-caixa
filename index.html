@@ -2739,6 +2739,49 @@ function viewRelatoriosInvestimentos(){
       ], visaoAnual.map(v=>competenciaLabel(v.mes)))}
     </div></div>
     <div class="note" style="margin-top:0;">Aportes e resgates são reconstituídos com precisão total pelas datas registradas. Já a valorização de mercado dia a dia não é reconstituível retroativamente — o histórico de atualizações manuais (acima) é exato a partir do momento em que cada atualização foi registrada.</div>
+
+    <div class="dash-section-label">13. Relatório de dividendos</div>
+    ${(state.rendimentosInvestimento||[]).length ? (()=>{
+      const rendimentos = state.rendimentosInvestimento;
+      const de12mDiv = de12mISO;
+      const rend12m = rendimentos.filter(r=>r.data>=de12mDiv);
+      const total12m = rend12m.reduce((s,r)=>s+r.valor,0);
+      const porAtivo = {};
+      rend12m.forEach(r=>{ porAtivo[r.ativoNome] = (porAtivo[r.ativoNome]||0)+r.valor; });
+      const rankingAtivos = Object.entries(porAtivo).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor);
+      const porTipo = {};
+      rend12m.forEach(r=>{ porTipo[r.tipo] = (porTipo[r.tipo]||0)+r.valor; });
+      const rankingTipos = Object.entries(porTipo).map(([nome,valor])=>({nome,valor})).sort((a,b)=>b.valor-a.valor);
+      const porMes = mesesAno.map(m=>rendimentos.filter(r=>r.data.slice(0,7)===m).reduce((s,r)=>s+r.valor,0));
+      return `
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:8px;">
+        <div class="card saldo"><div class="label">Recebido (12 meses)</div><div class="value mono">${brl(total12m)}</div></div>
+        <div class="card"><div class="label">Recebido (total histórico)</div><div class="value mono">${brl(rendimentos.reduce((s,r)=>s+r.valor,0))}</div></div>
+        <div class="card"><div class="label">Média mensal (12m)</div><div class="value mono">${brl(total12m/12)}</div></div>
+      </div>
+      <div class="panel" style="margin-bottom:8px;"><div class="panel-body" style="padding:14px 8px;overflow-x:auto;">
+        ${svgLinhasMultiplas([{ nome:'Dividendos', valores:porMes }], mesesAno.map(m=>competenciaLabel(m)))}
+      </div></div>
+      <div class="dash-section-label" style="margin-top:8px;">Por tipo (últimos 12 meses)</div>
+      <div class="panel" style="margin-bottom:8px;"><div class="panel-body" style="padding:18px;">
+        ${svgBarrasHorizontais(rankingTipos, '#7B5CD6')}
+      </div></div>
+      <div class="dash-section-label" style="margin-top:8px;">Por ativo (últimos 12 meses)</div>
+      <div class="panel" style="margin-bottom:8px;"><div class="panel-body" style="padding:18px;">
+        ${svgBarrasHorizontais(rankingAtivos, '#1E9E6B')}
+      </div></div>
+      <div class="dash-section-label">Histórico completo</div>
+      <div class="panel"><div class="panel-body" style="padding:0;">
+        ${[...rendimentos].sort((a,b)=>b.data.localeCompare(a.data)).slice(0,40).map(r=>`
+          <div class="ledger-row compact" style="grid-template-columns:80px 1fr 100px 90px;">
+            <span class="mono" style="font-size:11px;color:var(--text-soft);">${fmtDate(r.data)}</span>
+            <span style="font-size:12px;">${escapeHTML(r.ativoNome)}</span>
+            <span style="font-size:11px;color:var(--text-soft);">${escapeHTML(r.tipo)}</span>
+            <span class="mono" style="font-size:11.5px;font-weight:600;">${brl(r.valor)}</span>
+          </div>
+        `).join('')}
+      </div></div>`;
+    })() : `<div class="panel"><div class="empty" style="padding:24px 20px;">Nenhum dividendo/rendimento registrado ainda. Use "💰 Registrar dividendo" na tela de Investimentos.</div></div>`}
   `;
 }
 // XIRR — retorno anualizado considerando as DATAS REAIS de cada aporte/resgate (não uniformes),
@@ -10083,6 +10126,7 @@ function viewInvestimentos(){
       <div class="topbar-actions-stack">
         <button class="btn ghost" id="btnImportarNota">📄 Importar nota (PDF)</button>
         <button class="btn" id="btnAtualizarPosicoes">🔄 Atualizar posições</button>
+        <button class="btn ghost" id="btnRegistrarRendimento">💰 Registrar dividendo</button>
         <button class="btn ghost" id="btnExportarInvestimentosPDF">📄 Exportar posição</button>
         <button class="btn ghost" id="btnMetaInvestimento">🎯 Definir meta</button>
         <button class="btn ghost" id="btnRelatoriosInvestimentos">📊 Relatórios</button>
@@ -27630,6 +27674,7 @@ function attachViewHandlers(){
     });
   });
   document.getElementById('btnMetaInvestimento')?.addEventListener('click', ()=>openMetaInvestimentoModal());
+  document.getElementById('btnRegistrarRendimento')?.addEventListener('click', ()=>openRegistrarRendimentoModal());
   document.getElementById('btnMetaInvestimento2')?.addEventListener('click', ()=>openMetaInvestimentoModal());
   document.getElementById('invEvolPeriodoSelect')?.addEventListener('change', (e)=>{
     window._invEvolPeriodo = e.target.value;
@@ -33018,6 +33063,78 @@ function openTransformarContaSubcontaModal(contaId){
       const btn_btnConfirmarTransformar_Fim = document.getElementById('btnConfirmarTransformar');
       if(btn_btnConfirmarTransformar_Fim) btn_btnConfirmarTransformar_Fim.disabled = false;
     }
+  });
+}
+
+// Registro de dividendos/rendimentos recebidos (proventos de FIIs, ações, JCP, etc.) — separado
+// da "atualização de valor" (que é valorização de mercado, não dinheiro recebido). Isso aqui É
+// dinheiro de verdade entrando na conta, por isso cria um lançamento real — categorizado
+// "Rendimentos", que já tem ehFinanceira:true e cai no Resultado Financeiro da DRE, não misturado
+// com receita operacional.
+function listaAtivosParaAutocomplete(){
+  const nomes = new Set();
+  state.ativosInvestimento.forEach(a=>{ if(a.ticker) nomes.add(a.ticker); if(a.nome) nomes.add(a.nome); });
+  (state.rendimentosInvestimento||[]).forEach(r=>{ if(r.ativoNome) nomes.add(r.ativoNome); });
+  return [...nomes].sort();
+}
+function openRegistrarRendimentoModal(){
+  const modal = document.getElementById('modalContent');
+  const ativos = listaAtivosParaAutocomplete();
+  modal.innerHTML = `
+    <h3>💰 Registrar dividendo/rendimento</h3>
+    <div class="note" style="margin-top:0;">Pra proventos de FIIs, ações, JCP, etc. — cria um lançamento de verdade na conta escolhida, categorizado "Rendimentos" (já entra separado no Resultado Financeiro da DRE, não na receita operacional).</div>
+    <div class="field">
+      <label>Ativo</label>
+      <input type="text" id="rdAtivo" list="rdAtivosLista" placeholder="Ex: HGLG11">
+      <datalist id="rdAtivosLista">${ativos.map(a=>`<option value="${escapeHTML(a)}">`).join('')}</datalist>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Tipo</label>
+        <select id="rdTipo">
+          <option>Dividendo</option>
+          <option>Rendimento (FII)</option>
+          <option>JCP (Juros sobre Capital Próprio)</option>
+          <option>Aluguel de Ativos</option>
+          <option>Amortização</option>
+          <option>Juros</option>
+          <option>Outro</option>
+        </select>
+      </div>
+      <div class="field"><label>Valor (R$)</label><input type="text" inputmode="decimal" id="rdValor"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Data</label><input type="date" id="rdData" value="${todayISO()}"></div>
+      <div class="field"><label>Conta (onde entrou)</label><select id="rdConta">${state.contas.filter(c=>!c.arquivada).map(c=>`<option value="${c.id}" ${c.principal?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+    </div>
+    <div class="field"><label>Observação (opcional)</label><input type="text" id="rdObservacao"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarRendimento">Registrar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarRendimento').addEventListener('click', ()=>{
+    const ativoNome = document.getElementById('rdAtivo').value.trim();
+    const tipo = document.getElementById('rdTipo').value;
+    const valor = numBR(document.getElementById('rdValor').value);
+    const data = document.getElementById('rdData').value || todayISO();
+    const contaId = document.getElementById('rdConta').value;
+    const observacao = document.getElementById('rdObservacao').value.trim() || null;
+    if(!ativoNome){ showToast('Informe o ativo'); return; }
+    if(isNaN(valor) || valor<=0){ showToast('Informe o valor recebido'); return; }
+    if(!contaId){ showToast('Escolha a conta onde o valor entrou'); return; }
+    const lancId = uid();
+    state.lancamentos.push({
+      id: lancId, tipo:'entrada', categoria:'Rendimentos',
+      descricao: `${tipo} — ${ativoNome}${observacao?' ('+observacao+')':''}`,
+      valor, contaId, status:'recebido', dataVencimento:data, dataPagamento:data,
+      origem:'rendimento-investimento', criadoEm: new Date().toISOString()
+    });
+    if(!state.rendimentosInvestimento) state.rendimentosInvestimento = [];
+    state.rendimentosInvestimento.push({ id: uid(), ativoNome, tipo, valor, data, contaId, lancamentoId: lancId, observacao, criadoEm: new Date().toISOString() });
+    persist(); closeModal(); render();
+    showToast(`${brl(valor)} de ${tipo.toLowerCase()} registrado — ${ativoNome}`);
   });
 }
 
