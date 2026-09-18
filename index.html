@@ -13749,9 +13749,30 @@ function viewGestaoDividas(){
   const dividas = state.emprestimos||[];
   const comStatus = dividas.map(d=>({ divida:d, status: statusDivida(d), saldo: saldoDevedorDivida(d), proxima: proximaParcelaDivida(d) }));
 
+  // ---- Compromissos de cartão de crédito (§26) — busca da estrutura já existente dos Cartões
+  // (state.cartoes/state.comprasCartao), sem duplicar dado nenhum. Cada fatura em aberto de cada
+  // cartão vira um "compromisso" no mesmo formato do cronograma das dívidas, só pra somar nos
+  // totais e aparecer na lista — quem edita/paga continua sendo a tela de Cartões.
+  const compromissosCartao = [];
+  (state.cartoes||[]).forEach(c=>{
+    competenciasDoCartao(c.id).forEach(comp=>{
+      if(faturaStatus(c.id, comp)==='paga') return;
+      const valor = totalCompetencia(c.id, comp);
+      if(valor<=0.004) return;
+      compromissosCartao.push({ cartaoNome:c.nome, cartaoId:c.id, competencia:comp, valor, vencimento:dataVencimentoFatura(c, comp) });
+    });
+  });
+  const dividaTotalCartoes = compromissosCartao.reduce((s,c)=>s+c.valor,0);
+
+  // ---- Contas a Pagar (§25) — TODAS as pendentes, sem filtro (assim que o usuário pediu). Exclui
+  // transferência (não é dívida) e categoria "Cartão de Crédito" (isso já vem calculado separado
+  // ali em cima, via compromissosCartao — incluir de novo aqui contaria a mesma dívida duas vezes).
+  const contasAPagar = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.categoria!=='Cartão de Crédito');
+  const dividaTotalContasPagar = contasAPagar.reduce((s,l)=>s+valorEmAberto(l),0);
+
   // ---- Cards principais (§5) — tudo derivado do cronograma calculado, nada inventado
-  const dividaTotal = comStatus.reduce((s,x)=>s+x.saldo,0);
-  const parcelasAbertas = comStatus.reduce((s,x)=>s+Math.max(0,x.divida.numeroParcelas-x.divida.parcelasPagas),0);
+  const dividaTotal = comStatus.reduce((s,x)=>s+x.saldo,0) + dividaTotalCartoes + dividaTotalContasPagar;
+  const parcelasAbertas = comStatus.reduce((s,x)=>s+Math.max(0,x.divida.numeroParcelas-x.divida.parcelasPagas),0) + compromissosCartao.length + contasAPagar.length;
   let vencendoMes=0, proximos90=0, emAtraso=0;
   const em90dias = addDiasISO(hoje,90);
   comStatus.forEach(x=>{
@@ -13760,6 +13781,18 @@ function viewGestaoDividas(){
       if(p.vencimento>=hoje && p.vencimento<=em90dias) proximos90+=p.valor;
       if(p.vencimento<hoje) emAtraso+=p.valor;
     });
+  });
+  compromissosCartao.forEach(p=>{
+    if(p.vencimento.slice(0,7)===hoje.slice(0,7)) vencendoMes+=p.valor;
+    if(p.vencimento>=hoje && p.vencimento<=em90dias) proximos90+=p.valor;
+    if(p.vencimento<hoje) emAtraso+=p.valor;
+  });
+  contasAPagar.forEach(l=>{
+    const venc = l.dataVencimento;
+    const val = valorEmAberto(l);
+    if(venc && venc.slice(0,7)===hoje.slice(0,7)) vencendoMes+=val;
+    if(venc && venc>=hoje && venc<=em90dias) proximos90+=val;
+    if(venc && venc<hoje) emAtraso+=val;
   });
   const amortizado = dividas.reduce((s,d)=>s+(d.parcelasPagas||0)*(d.valorParcela||0),0);
 
@@ -13807,6 +13840,15 @@ function viewGestaoDividas(){
     if(!parcelasPorDia[p.vencimento]) parcelasPorDia[p.vencimento] = [];
     parcelasPorDia[p.vencimento].push({ nome:x.divida.nome, valor:p.valor, numero:p.numero, total:x.divida.numeroParcelas, dividaId:x.divida.id, status:x.status });
   }));
+  compromissosCartao.forEach(c=>{
+    if(!parcelasPorDia[c.vencimento]) parcelasPorDia[c.vencimento] = [];
+    parcelasPorDia[c.vencimento].push({ nome:`💳 ${c.cartaoNome}`, valor:c.valor, cartaoId:c.cartaoId });
+  });
+  contasAPagar.forEach(l=>{
+    if(!l.dataVencimento) return;
+    if(!parcelasPorDia[l.dataVencimento]) parcelasPorDia[l.dataVencimento] = [];
+    parcelasPorDia[l.dataVencimento].push({ nome:`📋 ${l.descricao||l.categoria||'Conta a pagar'}`, valor:valorEmAberto(l), contaPagarId:l.id });
+  });
   const gdDiaSelecionado = window._gdCalendarioDiaSelecionado;
   const parcelasDiaSelecionado = gdDiaSelecionado ? (parcelasPorDia[gdDiaSelecionado]||[]) : [];
 
@@ -13888,7 +13930,7 @@ function viewGestaoDividas(){
       <div style="font-weight:600;font-size:13px;margin-bottom:8px;">${fmtDate(gdDiaSelecionado)}</div>
       ${parcelasDiaSelecionado.length ? parcelasDiaSelecionado.map(p=>`
         <div class="ledger-row compact" style="grid-template-columns:1fr auto;">
-          <span style="font-size:12.5px;cursor:pointer;color:var(--blue-accent);" data-action="ver-detalhe-divida" data-id="${p.dividaId}">${escapeHTML(p.nome)} (${p.numero}/${p.total})</span>
+          <span style="font-size:12.5px;cursor:pointer;color:var(--blue-accent);" ${p.dividaId?`data-action="ver-detalhe-divida" data-id="${p.dividaId}"`:p.contaPagarId?`data-goto="pagar"`:`data-goto="cartoes"`}>${escapeHTML(p.nome)}${p.numero?` (${p.numero}/${p.total})`:''}</span>
           <span class="mono" style="font-weight:600;">${brl(p.valor)}</span>
         </div>
       `).join('') : `<div class="empty">Nenhuma parcela vencendo nesse dia.</div>`}
@@ -13945,6 +13987,32 @@ function viewGestaoDividas(){
         </div>
       </div>`;
     }).join('')}
+
+    ${compromissosCartao.length ? `
+    <div class="dash-section-label" style="margin-top:22px;">💳 Compromissos de cartões</div>
+    <div class="note" style="margin-top:0;">Isso já está contado nos cards e no calendário acima — vem direto da tela de Cartões, não é um cadastro separado. Pagamento e edição continuam por lá.</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${[...compromissosCartao].sort((a,b)=>a.vencimento.localeCompare(b.vencimento)).map(c=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;cursor:pointer;" data-goto="cartoes">
+          <div class="desc-cell"><div style="font-size:12.5px;">${escapeHTML(c.cartaoNome)}</div><div class="cat">${competenciaLabel(c.competencia)} · vence ${fmtDate(c.vencimento)}</div></div>
+          <span></span>
+          <span class="mono" style="font-weight:600;color:${c.vencimento<hoje?'var(--danger)':'inherit'};">${brl(c.valor)}</span>
+        </div>
+      `).join('')}
+    </div></div>` : ''}
+
+    ${contasAPagar.length ? `
+    <div class="dash-section-label" style="margin-top:22px;">📋 Contas a Pagar</div>
+    <div class="note" style="margin-top:0;">Todas as contas a pagar pendentes, sem filtro — já contadas nos cards acima. Pagamento e edição continuam na tela de Contas a Pagar.</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${[...contasAPagar].sort((a,b)=>(a.dataVencimento||'').localeCompare(b.dataVencimento||'')).map(l=>`
+        <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;cursor:pointer;" data-goto="pagar">
+          <div class="desc-cell"><div style="font-size:12.5px;">${escapeHTML(l.descricao||l.categoria||'—')}</div><div class="cat">${l.categoria?escapeHTML(l.categoria)+' · ':''}vence ${l.dataVencimento?fmtDate(l.dataVencimento):'—'}</div></div>
+          <span></span>
+          <span class="mono" style="font-weight:600;color:${l.dataVencimento && l.dataVencimento<hoje?'var(--danger)':'inherit'};">${brl(valorEmAberto(l))}</span>
+        </div>
+      `).join('')}
+    </div></div>` : ''}
   `;
 }
 
