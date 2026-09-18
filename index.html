@@ -521,6 +521,9 @@
     .fluxo-resumo-4col{grid-template-columns:repeat(2,1fr);}
     .fluxo-saldo-atual-card .val{font-size:26px;}
   }
+  @media (max-width:600px){
+    .field-row{flex-direction:column;gap:0;}
+  }
 
   /* Dashboard — Acesso Rápido */
   .acesso-rapido-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:20px;justify-items:center;}
@@ -29242,7 +29245,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     ` : ''}
     ${tipo==='saida' && !isEdit ? `
     <div class="field">
-      <label>Forma de pagamento</label>
+      <label>Pagar com</label>
       <div class="toggle-row" id="fFormaPagto">
         <button type="button" data-forma="conta" class="active">Conta bancária</button>
         <button type="button" data-forma="cartao" ${!state.cartoes.length?'disabled title="Cadastre um cartão de crédito primeiro"':''}>💳 Cartão de crédito</button>
@@ -29262,21 +29265,21 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       <div class="note" id="fCartaoNote" style="margin-top:0;"></div>
     </div>
     ` : ''}
+    <div class="field">
+      <label>${tipo==='saida' ? 'Fornecedor (opcional)' : 'Cliente (opcional)'}</label>
+      ${tipo==='saida' ? `
+        <input type="hidden" id="fFornecedorSelect" value="${existing?.fornecedor ? ((state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? escapeHTML(existing.fornecedor) : '__outro__') : ''}">
+        <button type="button" id="fFornecedorBtn" class="btn ghost" style="width:100%;display:flex;align-items:center;justify-content:space-between;text-align:left;font-weight:400;">
+          <span id="fFornecedorBtnLabel" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${existing?.fornecedor && (state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? escapeHTML(existing.fornecedor) : '— nenhum —'}</span>
+          <span style="opacity:.5;flex-shrink:0;margin-left:8px;">🔍 Buscar</span>
+        </button>
+        <input type="text" id="fFornecedor" placeholder="Nome do fornecedor" style="margin-top:8px;${existing?.fornecedor && !(state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? '' : 'display:none;'}" value="${existing?.fornecedor && !(state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? escapeHTML(existing.fornecedor) : ''}">
+        <div class="note" id="fContratoAlerta" style="margin-top:8px;"></div>
+      ` : `
+        <input type="text" id="fFornecedor" value="${existing?.fornecedor ? escapeHTML(existing.fornecedor) : ''}">
+      `}
+    </div>
     <div class="field-row">
-      <div class="field">
-        <label>${tipo==='saida' ? 'Fornecedor (opcional)' : 'Cliente (opcional)'}</label>
-        ${tipo==='saida' ? `
-          <input type="hidden" id="fFornecedorSelect" value="${existing?.fornecedor ? ((state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? escapeHTML(existing.fornecedor) : '__outro__') : ''}">
-          <button type="button" id="fFornecedorBtn" class="btn ghost" style="width:100%;display:flex;align-items:center;justify-content:space-between;text-align:left;font-weight:400;">
-            <span id="fFornecedorBtnLabel" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${existing?.fornecedor && (state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? escapeHTML(existing.fornecedor) : '— nenhum —'}</span>
-            <span style="opacity:.5;flex-shrink:0;margin-left:8px;">🔍 Buscar</span>
-          </button>
-          <input type="text" id="fFornecedor" placeholder="Nome do fornecedor" style="margin-top:8px;${existing?.fornecedor && !(state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? '' : 'display:none;'}" value="${existing?.fornecedor && !(state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? escapeHTML(existing.fornecedor) : ''}">
-          <div class="note" id="fContratoAlerta" style="margin-top:8px;"></div>
-        ` : `
-          <input type="text" id="fFornecedor" value="${existing?.fornecedor ? escapeHTML(existing.fornecedor) : ''}">
-        `}
-      </div>
       <div class="field" id="wrapContaDespesa">
         <label>${isEdit && existing?.origem==='vk' && existing?.status==='pendente' ? 'Conta (definida somente ao receber)' : 'Conta'}</label>
         <select id="fConta">
@@ -29286,7 +29289,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
         ${isEdit && existing?.origem==='vk' && existing?.status==='pendente' ? `<div class="note" style="margin-top:6px;">Pedido VK ainda pendente: permanece sem conta bancária. A conta será escolhida somente ao confirmar o recebimento.</div>` : (isEdit && !existing.contaId ? `<div class="note" style="margin-top:6px;">Esse lançamento ainda não tem conta bancária vinculada.</div>` : '')}
       </div>
       <div class="field">
-        <label>Forma de pagamento (opcional)</label>
+        <label>Meio de pagamento (opcional)</label>
         <select id="fFormaPagamento">
           <option value="" ${!existing?.formaPagamento?'selected':''}>Não informado</option>
           ${['Pix','Cartão de crédito','Cartão de débito','Dinheiro','Boleto','Transferência (TED/DOC)','Cheque'].map(f=>`<option value="${f}" ${existing?.formaPagamento===f?'selected':''}>${f}</option>`).join('')}
