@@ -9726,6 +9726,15 @@ function parseFaturaCelesc(linhas){
   const bandeiraMatch = texto.match(/\b(Verde|Amarela|Vermelha\s*1|Vermelha\s*2)\b/i);
   const bandeira = bandeiraMatch ? bandeiraMatch[1] : null;
 
+  // Tipo de ligação (mono/bi/trifásico) — a própria fatura informa isso no cabeçalho. Determina o
+  // "custo de disponibilidade": mesmo com a usina compensando 100% do consumo, a ANEEL exige pagar
+  // um mínimo de kWh por mês (Resolução 1.000/2021, art. 172): 30 kWh monofásico, 50 kWh bifásico,
+  // 100 kWh trifásico. Esse mínimo NUNCA é compensado pelos créditos solares — é o que você vê na
+  // fatura como consumo "não isento" mesmo em meses com créditos de sobra.
+  const tipoLigacaoMatch = texto.match(/\b(MONOF[ÁA]SICO|BIF[ÁA]SICO|TRIF[ÁA]SICO)\b/i);
+  const tipoLigacao = tipoLigacaoMatch ? tipoLigacaoMatch[1].toUpperCase().replace('ASICO','ÁSICO') : null;
+  const custoDisponibilidadeKwh = tipoLigacao==='MONOFÁSICO' ? 30 : tipoLigacao==='BIFÁSICO' ? 50 : tipoLigacao==='TRIFÁSICO' ? 100 : null;
+
   // Impostos — cada um pode aparecer em mais de uma linha (ex: ICMS normal + ICMS isento), soma tudo
   const somaLinhasComRotulo = (rotulo) => {
     const achadas = linhas.filter(l=>new RegExp('^'+rotulo+'\\b','i').test(l.trim()));
@@ -9784,6 +9793,9 @@ function parseFaturaCelesc(linhas){
   const multaValor = somaValorLinhasComRotulo('EG\\) Multa');
   const jurosValor = somaValorLinhasComRotulo('EB\\) Juros');
   const correcaoValor = somaValorLinhasComRotulo('95\\) Correção');
+  // Valor líquido de bandeira tarifária (soma as linhas de consumo/crédito/isenção de bandeira,
+  // códigos variam por fatura — ex: 75/76/78) — o que você realmente pagou de bandeira naquele mês.
+  const bandeiraValor = somaValorLinhasComRotulo('\\d+\\)\\s*Band');
 
   // Alerta de suspensão de fornecimento — a Celesc avisa isso na própria fatura quando há atraso
   const alertaSuspensaoMatch = texto.match(/SUJEITA A SUSPENSÃO DE FORNECIMENTO A PARTIR DE (\d{2}\/\d{2}\/\d{4})[^\n]*?R\$\s*([\d.,]+)/i);
@@ -9833,7 +9845,7 @@ function parseFaturaCelesc(linhas){
   const excedenteDistribuidoKwh = mesReferenciaNaTabela?.excedenteDistribuido ?? null;
   const excedenteRecebidoKwh = mesReferenciaNaTabela?.excedenteRecebido ?? null;
 
-  return { referencia, vencimento, valorTotal, consumoKwh, energiaInjetadaKwh, energiaInjetadaUtilizadaKwh, excedenteDistribuidoKwh, excedenteRecebidoKwh, saldoCreditosAnteriorKwh, creditosUtilizadosKwh, saldoCreditosAtualKwh, bandeira, pisValor, cofinsValor, icmsValor, pisAliquotaPct, cofinsAliquotaPct, icmsAliquotas, tarifaBandeiraKwh, tarifaEnergiaKwh, tarifaTEKwh, tarifaTUSDKwh, cosipValor, multaValor, jurosValor, correcaoValor, alertaSuspensao, proximaLeitura, historicoCreditos };
+  return { referencia, vencimento, valorTotal, consumoKwh, energiaInjetadaKwh, energiaInjetadaUtilizadaKwh, excedenteDistribuidoKwh, excedenteRecebidoKwh, saldoCreditosAnteriorKwh, creditosUtilizadosKwh, saldoCreditosAtualKwh, bandeira, bandeiraValor, pisValor, cofinsValor, icmsValor, pisAliquotaPct, cofinsAliquotaPct, icmsAliquotas, tarifaBandeiraKwh, tarifaEnergiaKwh, tarifaTEKwh, tarifaTUSDKwh, tipoLigacao, custoDisponibilidadeKwh, cosipValor, multaValor, jurosValor, correcaoValor, alertaSuspensao, proximaLeitura, historicoCreditos };
 }
 
 function parseNotaCorretagem(linhas){
@@ -20187,6 +20199,27 @@ function analiseAutomaticaFaturaUsinaSolar(atual, anterior){
 // outra — confirmado pelo usuário e validado batendo com 4 linhas reais da fatura, margem <R$0,001).
 // As ALÍQUOTAS em si (PIS%, COFINS%, ICMS% de cada faixa) vêm sempre da fatura, nunca fixas aqui —
 // só o LIMITE da faixa (150 kWh) é fixo, porque é regra estadual estável, não algo que varia por mês.
+// Gráfico de barras de evolução mensal, reutilizável — usado nos gráficos de geração, consumo,
+// impostos, juros, COSIP e tarifa de energia da Usina Solar (pedido do usuário).
+function graficoBarrasEvolucaoUsina(titulo, dados, cor, formatador){
+  if(!dados || dados.length<2) return `<div class="note" style="margin-top:22px;">Não informado — sem dados suficientes registrados ainda pra montar o gráfico de ${titulo.toLowerCase()}.</div>`;
+  const max = Math.max(...dados.map(d=>d.valor), 0.0001);
+  return `
+    <div class="contas-secao-titulo" style="margin-top:22px;">${titulo}</div>
+    <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+      <div style="display:flex;align-items:flex-end;gap:4px;height:80px;">
+        ${dados.map(d=>`
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;" title="${competenciaLabel(d.mes)}: ${formatador(d.valor)}">
+            <div style="width:100%;max-width:26px;background:${cor};opacity:.8;border-radius:2px 2px 0 0;height:${Math.max(2,Math.round(d.valor/max*68))}px;"></div>
+          </div>
+        `).join('')}
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:9.5px;color:var(--text-soft);margin-top:4px;">
+        <span>${competenciaLabel(dados[0].mes)}</span><span>${competenciaLabel(dados[dados.length-1].mes)}</span>
+      </div>
+    </div></div>`;
+}
+
 const FAIXA_ICMS_RESIDENCIAL_SC_KWH = 150;
 function simularFaturaSemUsinaCompleta(fatura){
   if(!fatura) return null;
@@ -20543,6 +20576,55 @@ function viewUsinaSolar(){
   const evolucaoUsoEstoque = (ultimaFatura?.historicoCreditos||[]).filter(h=>h.creditosUtilizados!=null).slice(-12);
   const maxUsoEstoque = evolucaoUsoEstoque.length ? Math.max(...evolucaoUsoEstoque.map(h=>h.creditosUtilizados), 1) : 1;
 
+  // ---- 6 gráficos de evolução pedidos pelo usuário — geração, consumo, impostos, juros, COSIP e
+  // tarifa/custo por kWh. Todos usam até 12 meses mais recentes de dado real (leituras/faturas).
+  const evolucaoGeracao = leituras.filter(l=>l.periodo==='mes').sort((a,b)=>a.data.localeCompare(b.data)).slice(-12).map(l=>({ mes:l.data.slice(0,7), valor:l.geracaoKwh }));
+  const evolucaoConsumo = faturasAsc.filter(f=>f.consumoKwh!=null).slice(-12).map(f=>({ mes:f.referencia, valor:f.consumoKwh }));
+  const evolucaoImpostos = faturasAsc.filter(f=>f.pisValor!=null||f.cofinsValor!=null||f.icmsValor!=null).slice(-12).map(f=>({ mes:f.referencia, valor:(f.pisValor||0)+(f.cofinsValor||0)+(f.icmsValor||0) }));
+  const evolucaoJuros = faturasAsc.filter(f=>f.jurosValor).slice(-12).map(f=>({ mes:f.referencia, valor:f.jurosValor }));
+  const evolucaoCosip = faturasAsc.filter(f=>f.cosipValor!=null).slice(-12).map(f=>({ mes:f.referencia, valor:f.cosipValor }));
+  // Tarifa/custo por kWh: uso o custo médio que você TERIA por kWh sem a usina (valor da simulação
+  // sem usina ÷ consumo) — esse número reflete de verdade a faixa de ICMS de SC (12% até 150 kWh,
+  // 17% acima), porque sobe quando o consumo do mês passa de 150 kWh. A tarifa base sozinha
+  // (TE+TUSD) não mudaria mês a mês, já que é fixa — por isso não seria um gráfico útil aqui.
+  const evolucaoCustoPorKwh = faturasAsc.filter(f=>f.consumoKwh>0).slice(-12).map(f=>{
+    const sim = simularFaturaSemUsinaCompleta(f);
+    return sim ? { mes:f.referencia, valor:sim.valorFaturaSemUsina/f.consumoKwh } : null;
+  }).filter(Boolean);
+
+  // ---- Autoconsumo instantâneo mês a mês (pedido do usuário: "desses 300, 100 eu já usei na hora,
+  // o resto foi pra rua") — cruza leitura de geração com energia injetada da fatura, mês a mês.
+  const leiturasMesPorData = {};
+  leituras.filter(l=>l.periodo==='mes').forEach(l=>{ leiturasMesPorData[l.data.slice(0,7)] = l.geracaoKwh; });
+  const evolucaoAutoconsumo = faturasAsc.filter(f=>leiturasMesPorData[f.referencia]!=null && f.energiaInjetadaKwh!=null).slice(-12).map(f=>{
+    const geracao = leiturasMesPorData[f.referencia];
+    const autoconsumo = Math.max(0, geracao - f.energiaInjetadaKwh);
+    return { mes:f.referencia, geracao, injetada: f.energiaInjetadaKwh, autoconsumo };
+  });
+  const maxAutoconsumo = evolucaoAutoconsumo.length ? Math.max(...evolucaoAutoconsumo.map(d=>d.geracao), 1) : 1;
+
+  // ---- Valor do estoque de créditos em R$ ao longo do tempo — usa a tarifa DAQUELE mês (não a
+  // atual), já que a tarifa muda com reajustes da Celesc ao longo do tempo.
+  const evolucaoValorEstoque = faturasAsc.filter(f=>f.saldoCreditosAtualKwh!=null && f.tarifaEnergiaKwh).slice(-12).map(f=>({ mes:f.referencia, valor:f.saldoCreditosAtualKwh*f.tarifaEnergiaKwh }));
+
+  // ---- Custo de bandeira tarifária mês a mês (líquido, já descontando o que foi compensado)
+  const evolucaoBandeira = faturasAsc.filter(f=>f.bandeiraValor!=null).slice(-12).map(f=>({ mes:f.referencia, valor:f.bandeiraValor }));
+
+  // ---- Geração: este ano x ano passado, mesmo mês (pedido do usuário no lugar de "performance
+  // ratio" — não achei tabela de irradiação mensal confiável e específica pra Pomerode, então uso
+  // só dado real: a geração do mesmo mês no ano anterior já captura a sazonalidade de verdade).
+  const leiturasMesTodas = leituras.filter(l=>l.periodo==='mes');
+  const comparativoAnoAnoGeracao = leiturasMesTodas.map(l=>{
+    const mes = l.data.slice(0,7);
+    const [ano, mesNum] = mes.split('-');
+    const mesAnoAnterior = `${Number(ano)-1}-${mesNum}`;
+    const leituraAnoAnterior = leiturasMesTodas.find(x=>x.data.slice(0,7)===mesAnoAnterior);
+    return leituraAnoAnterior ? {
+      mes, geracaoAtual: l.geracaoKwh, geracaoAnoAnterior: leituraAnoAnterior.geracaoKwh,
+      diferencaPct: leituraAnoAnterior.geracaoKwh>0 ? ((l.geracaoKwh-leituraAnoAnterior.geracaoKwh)/leituraAnoAnterior.geracaoKwh*100) : null
+    } : null;
+  }).filter(Boolean).sort((a,b)=>a.mes.localeCompare(b.mes)).slice(-12);
+
   // ---- Calendário mensal (§24) — mostra geração por dia (só onde existir leitura tipo "dia")
   const calMes = window._usinaCalendarioMes || todayISO().slice(0,7);
   const gradeCalMes = gerarGradeMesUsinaSolar(calMes);
@@ -20571,33 +20653,33 @@ function viewUsinaSolar(){
 
   return `
     <div class="topbar">
-      <div><h1>☀️ Usina Solar</h1><p>${usina.nome ? escapeHTML(usina.nome)+' — ' : ''}Central de gestão da usina fotovoltaica.</p></div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn ghost sm" id="btnExportarPdfUsina">📄 Exportar PDF</button>
-        <button class="btn ghost sm" id="btnEditarUsinaSolar">⚙️ Dados da usina</button>
+      <div><h1>☀️ Usina Solar</h1><p>${usina.nome ? escapeHTML(usina.nome)+' — ' : ''}${usina.capacidadeKw?`${usina.capacidadeKw} kW`:''}${usina.capacidadeKw && usina.dataInstalacao?' · ':''}${usina.dataInstalacao?`instalada em ${fmtDate(usina.dataInstalacao)}`:(!usina.capacidadeKw?'Central de gestão da usina fotovoltaica.':'')}</p></div>
+      <div class="dropdown-wrap">
+        <button class="icon-btn" data-action="toggle-menu-usina-acoes" title="Mais ações">⋮</button>
+        <div class="dropdown-menu" data-menu-usina-acoes>
+          <button type="button" id="btnExportarPdfUsina">📄 Exportar PDF</button>
+          <button type="button" id="btnEditarUsinaSolar">⚙️ Dados da usina</button>
+          <button type="button" id="btnRegistrarManutencaoSolar">🔧 Registrar manutenção</button>
+          <button type="button" id="btnAtualizarDadosSolar">🔄 Atualizar dados</button>
+          <button type="button" id="btnVerRelatorioSolar">📊 Ver relatório</button>
+        </div>
       </div>
     </div>
 
     <div class="contas-acoes-row">
       <button class="btn" id="btnRegistrarGeracaoSolar">☀️ Registrar geração</button>
       <button class="btn ghost sm" id="btnRegistrarFaturaEnergia">🧾 Registrar fatura</button>
-      <button class="btn ghost sm" id="btnRegistrarManutencaoSolar">🔧 Registrar manutenção</button>
-      <button class="btn ghost sm" id="btnAtualizarDadosSolar">🔄 Atualizar dados</button>
-      <button class="btn ghost sm" id="btnVerRelatorioSolar">📊 Ver relatório</button>
     </div>
 
     ${alertaSuspensaoAtivo ? `
-    <div class="note" style="border-color:var(--danger);background:rgba(220,38,38,.06);margin-top:0;">🔴 <strong>Atenção:</strong> uma fatura registrada avisa suspensão de fornecimento a partir de ${fmtDate(alertaSuspensaoAtivo.data)} (dívida de ${brl(alertaSuspensaoAtivo.valor)}). Se já resolveu isso com a Celesc, pode ignorar.</div>
+    <div class="note" style="border-color:var(--danger);background:rgba(220,38,38,.06);margin-top:10px;">🔴 <strong>Atenção:</strong> uma fatura registrada avisa suspensão de fornecimento a partir de ${fmtDate(alertaSuspensaoAtivo.data)} (dívida de ${brl(alertaSuspensaoAtivo.valor)}). Se já resolveu isso com a Celesc, pode ignorar.</div>
     ` : ''}
     ${alertaCreditoV2 ? `
     <div class="note" style="border-color:var(--warn);margin-top:10px;">⚠️ Os créditos de energia valem 60 meses (Lei 14.300/2022). O mês mais antigo com saldo no histórico (${competenciaLabel(alertaCreditoV2.referencia)}) já tem ${alertaCreditoV2.meses} mês(es) — vale conferir na sua próxima fatura se ainda sobra saldo daquele período, antes que expire.</div>
     ` : ''}
-    ${usina.capacidadeKw || usina.dataInstalacao ? `
-    <div class="note" style="margin-top:10px;">${usina.capacidadeKw?`Capacidade: <strong>${usina.capacidadeKw} kW</strong>`:''}${usina.capacidadeKw && usina.dataInstalacao?' · ':''}${usina.dataInstalacao?`Instalada em <strong>${fmtDate(usina.dataInstalacao)}</strong>`:''} · <span style="color:var(--text-soft);">${usina.atualizacaoModo==='automatica'?'Atualizado automaticamente':'Atualização manual'}</span></div>
-    ` : ''}
 
-    <div class="toggle-row" id="usinaSolarAbaToggle" style="flex-wrap:wrap;margin-top:14px;">
-      ${abas.map(([id,label])=>`<button type="button" data-aba="${id}" class="${abaAtiva===id?'active':''}">${label}</button>`).join('')}
+    <div class="toggle-row" id="usinaSolarAbaToggle" style="flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:14px;">
+      ${abas.map(([id,label])=>`<button type="button" data-aba="${id}" class="${abaAtiva===id?'active':''}" style="white-space:nowrap;flex-shrink:0;">${label}</button>`).join('')}
     </div>
 
     <div data-aba-painel="visao-geral" style="display:${abaAtiva==='visao-geral'?'block':'none'};margin-top:14px;">
@@ -20709,6 +20791,8 @@ function viewUsinaSolar(){
           <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--blue-accent);margin-right:4px;"></span>Consumo</span>
         </div>
       </div></div>` : `<div class="empty">Sem dados de geração registrados para este período.</div>`}
+      ${graficoBarrasEvolucaoUsina('Evolução da geração', evolucaoGeracao, 'var(--warn)', v=>v.toFixed(0)+' kWh')}
+      ${graficoBarrasEvolucaoUsina('Evolução do consumo', evolucaoConsumo, 'var(--blue-accent)', v=>v.toFixed(0)+' kWh')}
 
       ${tabelaConsumoGeracao.length ? `
       <div class="contas-secao-titulo">Tabela: Geração, Consumo, Injetada, Compensada</div>
@@ -20820,6 +20904,12 @@ function viewUsinaSolar(){
         </div>
         <div class="note" style="margin-top:10px;">"Sem usina" é uma <strong>estimativa</strong>, mas bem mais precisa: pego os ${ultimaFatura.consumoKwh} kWh que você consumiu e cobro TE e TUSD separadamente, na faixa de ICMS de Santa Catarina (${simulacaoCompleta.kwhFaixaBaixa} kWh a ${(simulacaoCompleta.icmsBaixa*100).toFixed(0)}% + ${simulacaoCompleta.kwhFaixaAlta} kWh a ${(simulacaoCompleta.icmsAlta*100).toFixed(0)}%, mais PIS/COFINS de ${(simulacaoCompleta.pctPisCofins*100).toFixed(2)}%) — todas essas alíquotas são as mesmas que aparecem na sua fatura real, nenhuma inventada. A COSIP não muda porque é taxa municipal fixa. Multa, juros e correção monetária ficam de fora dos dois lados (são sobre atraso de pagamento, não sobre energia).</div>
       </div></div>` : `<div class="note" style="margin-top:22px;">Sem dados suficientes na última fatura (falta consumo, tarifa TE/TUSD ou alíquota de ICMS) pra simular a conta sem a usina.</div>`}
+
+      ${graficoBarrasEvolucaoUsina('Evolução dos impostos (PIS+COFINS+ICMS)', evolucaoImpostos, 'var(--danger)', v=>brl(v))}
+      ${graficoBarrasEvolucaoUsina('Evolução dos juros pagos', evolucaoJuros, 'var(--danger)', v=>brl(v))}
+      ${graficoBarrasEvolucaoUsina('Evolução da COSIP', evolucaoCosip, 'var(--text-soft)', v=>brl(v))}
+      ${graficoBarrasEvolucaoUsina('Evolução do custo por kWh (sem a usina, refletindo a faixa de ICMS)', evolucaoCustoPorKwh, 'var(--blue-accent)', v=>'R$ '+v.toFixed(4).replace('.',','))}
+      ${evolucaoCustoPorKwh.length>=2 ? `<div class="note" style="margin-top:6px;">Esse valor é o custo médio por kWh que você teria SEM a usina, mês a mês — ele sobe nos meses em que seu consumo passa de 150 kWh, porque a alíquota de ICMS de Santa Catarina sobe de 12% pra 17% acima dessa faixa.</div>` : ''}
     </div>
 
     <div data-aba-painel="faturas" style="display:${abaAtiva==='faturas'?'block':'none'};margin-top:14px;">
@@ -20832,7 +20922,9 @@ function viewUsinaSolar(){
         <div class="fluxo-resumo-item"><div class="lbl">Energia compensada</div><div class="val">${ultimaFatura.energiaInjetadaUtilizadaKwh!=null?ultimaFatura.energiaInjetadaUtilizadaKwh+' kWh':'—'}</div></div>
         <div class="fluxo-resumo-item"><div class="lbl">Saldo de créditos</div><div class="val">${ultimaFatura.saldoCreditosAtualKwh!=null?ultimaFatura.saldoCreditosAtualKwh+' kWh':'—'}</div></div>
         ${ultimaFatura.vencimento ? `<div class="fluxo-resumo-item"><div class="lbl">Vencimento</div><div class="val" style="font-size:13px;">${fmtDate(ultimaFatura.vencimento)}</div></div>` : ''}
+        ${ultimaFatura.custoDisponibilidadeKwh ? `<div class="fluxo-resumo-item"><div class="lbl">Custo de disponibilidade (${ultimaFatura.tipoLigacao.toLowerCase()})</div><div class="val" style="font-size:14px;">${ultimaFatura.custoDisponibilidadeKwh} kWh/mês</div></div>` : ''}
       </div>
+      ${ultimaFatura.custoDisponibilidadeKwh ? `<div class="note" style="margin-top:6px;">Sua ligação é ${ultimaFatura.tipoLigacao.toLowerCase()}, então a ANEEL exige pagar um mínimo de ${ultimaFatura.custoDisponibilidadeKwh} kWh todo mês (Resolução 1.000/2021) — isso NUNCA é compensado pelos créditos solares, mesmo em mês com saldo de sobra. É o consumo que aparece "não isento" na sua fatura mesmo quando a usina cobre o resto.</div>` : ''}
 
       ${simulacaoCompleta ? `
       <div class="panel" style="margin-top:10px;"><div class="panel-body" style="padding:14px 18px;">
@@ -20899,6 +20991,7 @@ function viewUsinaSolar(){
           <span>${competenciaLabel(bandeirasHistorico[0].referencia)}</span><span>${competenciaLabel(bandeirasHistorico[bandeirasHistorico.length-1].referencia)}</span>
         </div>
       </div></div>` : ''}
+      ${graficoBarrasEvolucaoUsina('Custo extra pago por bandeira tarifária', evolucaoBandeira, 'var(--warn)', v=>brl(v))}
 
       ${faturas.length ? `
       <div class="contas-secao-titulo">Autossuficiência e custo por kWh, por fatura</div>
@@ -20976,6 +21069,7 @@ function viewUsinaSolar(){
         ${ultimaFatura.saldoCreditosAtualKwh!=null ? `<div style="font-size:12px;color:var(--text-soft);margin-top:2px;">${ultimaFatura.saldoCreditosAtualKwh} kWh guardados × R$ ${(ultimaFatura.tarifaEnergiaKwh||0).toFixed(6).replace('.',',')}/kWh</div>` : ''}
       </div></div>
       <div class="note" style="margin-top:8px;">É uma <strong>estimativa</strong>, não o valor exato: uso a tarifa BASE de energia (TE+TUSD, sem ICMS/PIS/COFINS) porque é assim que a própria Celesc valoriza o crédito quando ele é abatido de uma fatura futura — sem imposto embutido, do jeito que aparece nas linhas de crédito da sua fatura real. O valor exato só se sabe quando o crédito realmente for usado, porque depende da tarifa vigente e da faixa de consumo daquele mês futuro.</div>
+      ${graficoBarrasEvolucaoUsina('Valor do estoque em R$ ao longo do tempo', evolucaoValorEstoque, 'var(--success)', v=>brl(v))}
 
       ${evolucaoUsoEstoque.length>1 ? `
       <div class="contas-secao-titulo" style="margin-top:22px;">Uso do estoque mês a mês</div>
@@ -20991,12 +21085,48 @@ function viewUsinaSolar(){
           <span>${competenciaLabel(evolucaoUsoEstoque[0].mes)}</span><span>${competenciaLabel(evolucaoUsoEstoque[evolucaoUsoEstoque.length-1].mes)}</span>
         </div>
       </div></div>` : ''}
+
+      ${evolucaoAutoconsumo.length>1 ? `
+      <div class="contas-secao-titulo" style="margin-top:22px;">Autoconsumo instantâneo x injetado, mês a mês</div>
+      <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+        <div style="display:flex;align-items:flex-end;gap:4px;height:90px;">
+          ${evolucaoAutoconsumo.map(d=>`
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;" title="${competenciaLabel(d.mes)}: ${d.autoconsumo} kWh usado na hora + ${d.injetada} kWh pra rede">
+              <div style="width:100%;max-width:26px;display:flex;flex-direction:column;border-radius:2px 2px 0 0;overflow:hidden;">
+                <div style="background:var(--warn);height:${Math.max(1,Math.round(d.autoconsumo/maxAutoconsumo*76))}px;"></div>
+                <div style="background:var(--blue-accent);height:${Math.max(1,Math.round(d.injetada/maxAutoconsumo*76))}px;"></div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:9.5px;color:var(--text-soft);margin-top:4px;">
+          <span>${competenciaLabel(evolucaoAutoconsumo[0].mes)}</span><span>${competenciaLabel(evolucaoAutoconsumo[evolucaoAutoconsumo.length-1].mes)}</span>
+        </div>
+        <div style="display:flex;gap:16px;font-size:11px;color:var(--text-soft);margin-top:8px;">
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--warn);margin-right:4px;"></span>Usado na hora</span>
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--blue-accent);margin-right:4px;"></span>Injetado na rede</span>
+        </div>
+      </div></div>` : `<div class="note" style="margin-top:22px;">Sem dados suficientes pra esse gráfico — precisa de leitura de geração e fatura registradas pro mesmo mês, em pelo menos 2 meses.</div>`}
       ` : `<div class="empty">Registre uma fatura pra ver o estoque de energia aqui.</div>`}
     </div>
 
     <div data-aba-painel="desempenho" style="display:${abaAtiva==='desempenho'?'block':'none'};margin-top:14px;">
       ${recordes ? `
       <div class="contas-secao-titulo" style="margin-top:0;">🏆 Recordes da usina</div>
+
+      ${comparativoAnoAnoGeracao.length ? `
+      <div class="contas-secao-titulo" style="margin-top:0;">📅 Geração: este ano x ano passado (mesmo mês)</div>
+      <div class="panel"><div class="panel-body" style="padding:0;">
+        ${comparativoAnoAnoGeracao.map(c=>`
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
+            <span style="font-size:13px;">${competenciaLabel(c.mes)}</span>
+            <span class="mono" style="font-size:12px;color:var(--text-soft);">${c.geracaoAnoAnterior} → ${c.geracaoAtual} kWh</span>
+            <span class="mono" style="font-weight:600;color:${c.diferencaPct>=0?'var(--success)':'var(--danger)'};">${c.diferencaPct>=0?'+':''}${c.diferencaPct.toFixed(0)}%</span>
+          </div>
+        `).join('')}
+      </div></div>
+      <div class="note" style="margin-top:6px;">Comparo com o mesmo mês do ano anterior (não com uma média teórica de irradiação) — não achei uma tabela de irradiação solar mensal confiável e específica pra Pomerode, então prefiro usar dado real do seu próprio histórico, que já reflete a sazonalidade de verdade.</div>
+      ` : `<div class="note" style="margin-top:0;">Sem dado suficiente ainda pra comparar com o ano anterior — precisa de leitura de geração pro mesmo mês em dois anos diferentes.</div>`}
       <div class="fluxo-resumo-4col">
         <div class="fluxo-resumo-item"><div class="lbl">Maior geração diária</div><div class="val" style="font-size:13px;">${recordes.maiorGeracaoDiaria?`${recordes.maiorGeracaoDiaria.geracaoKwh} kWh (${fmtDate(recordes.maiorGeracaoDiaria.data)})`:'Não informado'}</div></div>
         <div class="fluxo-resumo-item"><div class="lbl">Maior geração mensal</div><div class="val" style="font-size:13px;">${recordes.maiorGeracaoMensal?`${recordes.maiorGeracaoMensal.geracaoKwh} kWh (${competenciaLabel(recordes.maiorGeracaoMensal.data.slice(0,7))})`:'Não informado'}</div></div>
@@ -25229,6 +25359,18 @@ function attachViewHandlers(){
   });
   document.getElementById('btnRegistrarGeracaoSolar')?.addEventListener('click', openRegistrarGeracaoSolarModal);
   document.getElementById('btnRegistrarFaturaEnergia')?.addEventListener('click', openRegistrarFaturaEnergiaModal);
+  document.querySelectorAll('[data-action="toggle-menu-usina-acoes"]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const menu = btn.closest('.dropdown-wrap')?.querySelector('[data-menu-usina-acoes]');
+      document.querySelectorAll('.dropdown-menu[data-menu-usina-acoes]').forEach(m=>{ if(m!==menu) m.classList.remove('open'); });
+      menu?.classList.toggle('open');
+      if(menu) ajustarPosicaoDropdown(menu);
+    });
+  });
+  document.querySelectorAll('[data-menu-usina-acoes] button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ document.querySelectorAll('.dropdown-menu[data-menu-usina-acoes]').forEach(m=>m.classList.remove('open')); });
+  });
   document.getElementById('btnRegistrarManutencaoSolar')?.addEventListener('click', openRegistrarManutencaoSolarModal);
   document.getElementById('btnExportarPdfUsina')?.addEventListener('click', gerarUsinaSolarPDF);
   document.getElementById('btnExportarPdfUsina2')?.addEventListener('click', gerarUsinaSolarPDF);
