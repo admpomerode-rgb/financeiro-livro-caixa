@@ -9736,6 +9736,27 @@ function parseFaturaCelesc(linhas){
   const cofinsValor = somaLinhasComRotulo('COFINS');
   const icmsValor = somaLinhasComRotulo('ICMS');
 
+  // Alíquotas (%) de PIS/COFINS/ICMS — vêm da própria fatura (tabela "Tributo/Base/Alíquota/Valor"),
+  // nunca fixas no código. ICMS pode ter mais de uma faixa (regra de Santa Catarina: até 150 kWh
+  // uma alíquota, acima disso outra) — por isso pega TODAS as linhas de ICMS, não só a primeira.
+  const aliquotaDaPrimeiraLinha = (rotulo) => {
+    const l = linhas.find(x=>new RegExp('^'+rotulo+'\\b','i').test(x.trim()));
+    if(!l) return null;
+    const nums = l.match(/-?\d{1,3}(?:\.\d{3})*(?:,\d+)?/g);
+    return (nums && nums.length>=3) ? numBR(nums[nums.length-2])/100 : null;
+  };
+  const pisAliquotaPct = aliquotaDaPrimeiraLinha('PIS');
+  const cofinsAliquotaPct = aliquotaDaPrimeiraLinha('COFINS');
+  const icmsAliquotas = linhas.filter(l=>/^ICMS\b/i.test(l.trim())).map(l=>{
+    const nums = l.match(/-?\d{1,3}(?:\.\d{3})*(?:,\d+)?/g);
+    return (nums && nums.length>=3) ? numBR(nums[nums.length-2])/100 : null;
+  }).filter(x=>x!=null);
+
+  // Tarifa base da bandeira tarifária (R$/kWh, sem imposto) — pra simulação completa incluir
+  // a bandeira também, do jeito que o usuário pediu ("tudo que está sendo cobrado na fatura").
+  const linhaBandeiraConsumo = linhas.find(l=>/^\(?\d*\)?\s*Band\s/i.test(l.trim()) && !/injetad|isent/i.test(l));
+  const tarifaBandeiraKwh = linhaBandeiraConsumo ? ultimoNumero(linhaBandeiraConsumo) : null;
+
   // Tarifa de energia por kWh — a fatura mostra na coluna "Tarifa unit." de cada item de consumo.
   // A tarifa cheia que você paga por kWh é TE (Tarifa de Energia) + TUSD (Tarifa de Uso do Sistema
   // de Distribuição) somadas — é o valor de referência oficial, não o "custo médio" (que inclui
@@ -9812,7 +9833,7 @@ function parseFaturaCelesc(linhas){
   const excedenteDistribuidoKwh = mesReferenciaNaTabela?.excedenteDistribuido ?? null;
   const excedenteRecebidoKwh = mesReferenciaNaTabela?.excedenteRecebido ?? null;
 
-  return { referencia, vencimento, valorTotal, consumoKwh, energiaInjetadaKwh, energiaInjetadaUtilizadaKwh, excedenteDistribuidoKwh, excedenteRecebidoKwh, saldoCreditosAnteriorKwh, creditosUtilizadosKwh, saldoCreditosAtualKwh, bandeira, pisValor, cofinsValor, icmsValor, tarifaEnergiaKwh, tarifaTEKwh, tarifaTUSDKwh, cosipValor, multaValor, jurosValor, correcaoValor, alertaSuspensao, proximaLeitura, historicoCreditos };
+  return { referencia, vencimento, valorTotal, consumoKwh, energiaInjetadaKwh, energiaInjetadaUtilizadaKwh, excedenteDistribuidoKwh, excedenteRecebidoKwh, saldoCreditosAnteriorKwh, creditosUtilizadosKwh, saldoCreditosAtualKwh, bandeira, pisValor, cofinsValor, icmsValor, pisAliquotaPct, cofinsAliquotaPct, icmsAliquotas, tarifaBandeiraKwh, tarifaEnergiaKwh, tarifaTEKwh, tarifaTUSDKwh, cosipValor, multaValor, jurosValor, correcaoValor, alertaSuspensao, proximaLeitura, historicoCreditos };
 }
 
 function parseNotaCorretagem(linhas){
@@ -11390,6 +11411,30 @@ function renderSuperRelatorioMensal(mesRef){
 
   const nomeMes = new Date(ano, mes-1, 1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
 
+  // ---- Cartões de crédito — turbinando o relatório (não existia quando os Cartões foram feitos)
+  const limiteTotalCartoes = state.cartoes.reduce((s,c)=>s+(c.limite||0),0);
+  const utilizadoCartoes = state.cartoes.reduce((s,c)=>s+dividaCartaoAberta(c.id),0);
+  const faturasDoMes = state.cartoes.reduce((s,c)=>{
+    const comp = competenciaAtual(c);
+    return s + (dataVencimentoFatura(c,comp).slice(0,7)===mesRef ? totalCompetencia(c.id,comp) : 0);
+  }, 0);
+
+  // ---- Gestão de Dívidas (empréstimos/financiamentos) — turbinando o relatório
+  const dividasAtivas = (state.emprestimos||[]).filter(e=>statusDivida(e)!=='quitada' && statusDivida(e)!=='renegociada');
+  const saldoDevedorDividas = dividasAtivas.reduce((s,e)=>s+saldoDevedorDivida(e),0);
+  let dividasVencendoMes=0, dividasAtrasadas=0;
+  dividasAtivas.forEach(e=>cronogramaDivida(e).filter(p=>!p.paga).forEach(p=>{
+    if(p.vencimento.slice(0,7)===mesRef) dividasVencendoMes+=p.valor;
+    if(p.vencimento<hoje) dividasAtrasadas+=p.valor;
+  }));
+
+  // ---- Investimentos — turbinando o relatório
+  const patrimonioInvestido = totalInvestimentos();
+  const dividendosDoMes = (state.rendimentosInvestimento||[]).filter(r=>r.data>=de && r.data<=ate).reduce((s,r)=>s+r.valor,0);
+
+  // ---- Créditos de Clientes — turbinando o relatório
+  const saldoCreditosClientes = (state.creditosClientes||[]).reduce((s,c)=>s+Math.max(0,c.valor-(c.valorUsado||0)),0);
+
   return `
     <div class="report-controls">
       <input type="month" id="mensalMesRef" value="${mesRef}">
@@ -11430,6 +11475,35 @@ function renderSuperRelatorioMensal(mesRef){
     <div class="report-block">
       <div class="report-title">Rentabilidade por produto</div>
       ${produtosOrdenados.map(p=>`<div class="report-line sub"><span>${escapeHTML(p.tag)}</span><span class="v">receita ${brl(p.receita)} · margem ${brl(p.margem)}</span></div>`).join('')}
+    </div>` : ''}
+
+    ${state.cartoes.length ? `
+    <div class="report-block">
+      <div class="report-title">Cartões de crédito</div>
+      <div class="report-line sub"><span>Limite total</span><span class="v">${brl(limiteTotalCartoes)}</span></div>
+      <div class="report-line sub"><span>Utilizado</span><span class="v">${brl(utilizadoCartoes)} (${limiteTotalCartoes>0?(utilizadoCartoes/limiteTotalCartoes*100).toFixed(0):0}%)</span></div>
+      <div class="report-line total"><span>Faturas com vencimento em ${competenciaLabel(mesRef)}</span><span class="v">${brl(faturasDoMes)}</span></div>
+    </div>` : ''}
+
+    ${dividasAtivas.length ? `
+    <div class="report-block">
+      <div class="report-title">Gestão de dívidas</div>
+      <div class="report-line sub"><span>Saldo devedor total</span><span class="v">${brl(saldoDevedorDividas)}</span></div>
+      <div class="report-line sub"><span>Vencendo em ${competenciaLabel(mesRef)}</span><span class="v">${brl(dividasVencendoMes)}</span></div>
+      ${dividasAtrasadas>0 ? `<div class="report-line sub"><span>⚠️ Em atraso</span><span class="v" style="color:var(--danger);">${brl(dividasAtrasadas)}</span></div>` : ''}
+    </div>` : ''}
+
+    ${patrimonioInvestido>0 ? `
+    <div class="report-block">
+      <div class="report-title">Investimentos</div>
+      <div class="report-line sub"><span>Patrimônio investido (atual)</span><span class="v">${brl(patrimonioInvestido)}</span></div>
+      ${dividendosDoMes>0 ? `<div class="report-line sub"><span>Dividendos/rendimentos recebidos em ${competenciaLabel(mesRef)}</span><span class="v" style="color:var(--success);">${brl(dividendosDoMes)}</span></div>` : ''}
+    </div>` : ''}
+
+    ${saldoCreditosClientes>0 ? `
+    <div class="report-block">
+      <div class="report-title">Créditos de clientes</div>
+      <div class="report-line sub"><span>Saldo disponível (a usar em pedidos futuros)</span><span class="v">${brl(saldoCreditosClientes)}</span></div>
     </div>` : ''}
   `;
 }
@@ -19546,9 +19620,15 @@ function renderBalanco(){
   // Bancos" acima) mas ainda não foi reconhecido como receita, porque é troco/pagamento a mais que
   // fica guardado pra abater um pedido futuro (ver tela "Créditos de Clientes").
   const adiantamentoClientes = (state.creditosClientes||[]).reduce((s,c)=>s+Math.max(0,c.valor-(c.valorUsado||0)),0);
+  // Saldo devedor de empréstimos/financiamentos (Gestão de Dívidas) — mesma fórmula já usada em
+  // "Obrigações Futuras" e "Capital de Terceiros". Faltava aqui no Balanço; corrigido.
+  const emprestimosSaldo = (state.emprestimos||[]).reduce((s,e)=>s+Math.max(0,(e.numeroParcelas-e.parcelasPagas))*e.valorParcela,0);
   const totalAtivo = caixaBancos + aReceber + investimentos + ativoImobilizado + estoqueInsumos;
-  const totalPassivo = aPagar + cartoesNaoFaturados + adiantamentoClientes;
+  const totalPassivo = aPagar + cartoesNaoFaturados + adiantamentoClientes + emprestimosSaldo;
   const patrimonioLiquido = totalAtivo - totalPassivo;
+  const pctAtivo = (v) => totalAtivo>0 ? ` <span style="color:var(--text-soft);font-size:11px;">(${(v/totalAtivo*100).toFixed(1)}%)</span>` : '';
+  const pctPassivo = (v) => totalPassivo>0 ? ` <span style="color:var(--text-soft);font-size:11px;">(${(v/totalPassivo*100).toFixed(1)}%)</span>` : '';
+  const liquidezGeral = totalPassivo>0 ? (totalAtivo/totalPassivo) : null;
 
   return `
     <div class="report-controls">
@@ -19558,21 +19638,23 @@ function renderBalanco(){
     <div class="report-block">
       <div class="report-title">Ativo</div>
       <div class="report-line"><span>Ativo Circulante</span><span class="v"></span></div>
-      <div class="report-line sub"><span>Caixa e Bancos</span><span class="v">${brl(caixaBancos)}</span></div>
-      <div class="report-line sub"><span>Contas a Receber</span><span class="v">${brl(aReceber)}</span></div>
-      <div class="report-line sub"><span>Investimentos Financeiros</span><span class="v">${brl(investimentos)}</span></div>
-      <div class="report-line sub"><span>Estoque de Insumos e Matérias-Primas</span><span class="v">${brl(estoqueInsumos)}</span></div>
-      <div class="report-line sub"><span>Ativo Imobilizado (Ativos Patrimoniais, já depreciado)</span><span class="v">${brl(ativoImobilizado)}</span></div>
+      <div class="report-line sub"><span>Caixa e Bancos</span><span class="v">${brl(caixaBancos)}${pctAtivo(caixaBancos)}</span></div>
+      <div class="report-line sub"><span>Contas a Receber</span><span class="v">${brl(aReceber)}${pctAtivo(aReceber)}</span></div>
+      <div class="report-line sub"><span>Investimentos Financeiros</span><span class="v">${brl(investimentos)}${pctAtivo(investimentos)}</span></div>
+      <div class="report-line sub"><span>Estoque de Insumos e Matérias-Primas</span><span class="v">${brl(estoqueInsumos)}${pctAtivo(estoqueInsumos)}</span></div>
+      <div class="report-line sub"><span>Ativo Imobilizado (Ativos Patrimoniais, já depreciado)</span><span class="v">${brl(ativoImobilizado)}${pctAtivo(ativoImobilizado)}</span></div>
       <div class="report-line total"><span>Total do Ativo</span><span class="v">${brl(totalAtivo)}</span></div>
 
       <div class="report-title">Passivo</div>
       <div class="report-line"><span>Passivo Circulante</span><span class="v"></span></div>
-      <div class="report-line sub"><span>Contas a Pagar</span><span class="v">${brl(aPagar)}</span></div>
-      <div class="report-line sub"><span>Faturas de cartão em aberto (não fechadas)</span><span class="v">${brl(cartoesNaoFaturados)}</span></div>
-      ${adiantamentoClientes>0 ? `<div class="report-line sub"><span>Adiantamento de Clientes</span><span class="v">${brl(adiantamentoClientes)}</span></div>` : ''}
+      <div class="report-line sub"><span>Contas a Pagar</span><span class="v">${brl(aPagar)}${pctPassivo(aPagar)}</span></div>
+      <div class="report-line sub"><span>Faturas de cartão em aberto (não fechadas)</span><span class="v">${brl(cartoesNaoFaturados)}${pctPassivo(cartoesNaoFaturados)}</span></div>
+      ${adiantamentoClientes>0 ? `<div class="report-line sub"><span>Adiantamento de Clientes</span><span class="v">${brl(adiantamentoClientes)}${pctPassivo(adiantamentoClientes)}</span></div>` : ''}
+      ${emprestimosSaldo>0 ? `<div class="report-line sub"><span>Empréstimos e Financiamentos (saldo devedor)</span><span class="v">${brl(emprestimosSaldo)}${pctPassivo(emprestimosSaldo)}</span></div>` : ''}
       <div class="report-line total"><span>Total do Passivo</span><span class="v">${brl(totalPassivo)}</span></div>
 
       <div class="report-line result"><span>Patrimônio Líquido</span><span class="v" style="color:${patrimonioLiquido>=0?'var(--success)':'var(--danger)'}">${brl(patrimonioLiquido)}</span></div>
+      <div class="report-line sub"><span>Liquidez Geral (Ativo / Passivo)</span><span class="v">${liquidezGeral===null?'—':liquidezGeral.toFixed(2)}</span></div>
     </div>
     <div class="note" style="border-color:var(--success);color:var(--success);">✓ Balanço fechado — Ativo (${brl(totalAtivo)}) = Passivo + Patrimônio Líquido (${brl(totalPassivo+patrimonioLiquido)})</div>
   `;
@@ -20098,6 +20180,48 @@ function analiseAutomaticaFaturaUsinaSolar(atual, anterior){
   return msgs;
 }
 
+// Simulação completa "fatura sem usina" (pedido explícito do usuário, com dados reais da fatura da
+// Celesc/SC dele) — reconstrói a fatura inteira usando a MESMA fórmula de imposto "por dentro" que a
+// própria Celesc usa (ICMS: 1/(1-alíquota); PIS+COFINS: 1/(1-alíquota), quando não isento), aplicada
+// à faixa de consumo residencial de Santa Catarina (até 150 kWh numa alíquota de ICMS, acima disso
+// outra — confirmado pelo usuário e validado batendo com 4 linhas reais da fatura, margem <R$0,001).
+// As ALÍQUOTAS em si (PIS%, COFINS%, ICMS% de cada faixa) vêm sempre da fatura, nunca fixas aqui —
+// só o LIMITE da faixa (150 kWh) é fixo, porque é regra estadual estável, não algo que varia por mês.
+const FAIXA_ICMS_RESIDENCIAL_SC_KWH = 150;
+function simularFaturaSemUsinaCompleta(fatura){
+  if(!fatura) return null;
+  const { consumoKwh, tarifaTEKwh, tarifaTUSDKwh, pisAliquotaPct, cofinsAliquotaPct, icmsAliquotas, tarifaBandeiraKwh } = fatura;
+  if(!consumoKwh || !tarifaTEKwh || !tarifaTUSDKwh || !icmsAliquotas || !icmsAliquotas.length) return null;
+
+  const cosipValor = fatura.cosipValor||0, multaValor = fatura.multaValor||0, jurosValor = fatura.jurosValor||0, correcaoValor = fatura.correcaoValor||0;
+  const pctPisCofins = (pisAliquotaPct||0) + (cofinsAliquotaPct||0);
+  const icmsBaixa = Math.min(...icmsAliquotas);
+  const icmsAlta = icmsAliquotas.length>1 ? Math.max(...icmsAliquotas) : icmsBaixa;
+  const precoComImposto = (base, aliqIcms) => base * (1/(1-aliqIcms)) * (1/(1-pctPisCofins));
+
+  const kwhFaixaBaixa = Math.min(consumoKwh, FAIXA_ICMS_RESIDENCIAL_SC_KWH);
+  const kwhFaixaAlta = Math.max(0, consumoKwh - FAIXA_ICMS_RESIDENCIAL_SC_KWH);
+
+  const somaPorFaixa = (tarifaBase) => kwhFaixaBaixa*precoComImposto(tarifaBase, icmsBaixa) + kwhFaixaAlta*precoComImposto(tarifaBase, icmsAlta);
+  const valorTE = somaPorFaixa(tarifaTEKwh);
+  const valorTUSD = somaPorFaixa(tarifaTUSDKwh);
+  const valorBandeira = tarifaBandeiraKwh ? somaPorFaixa(tarifaBandeiraKwh) : 0;
+  const valorEnergiaSemUsina = valorTE + valorTUSD + valorBandeira;
+  const valorFaturaSemUsina = valorEnergiaSemUsina + cosipValor;
+
+  const outrosValoresNaoEnergia = cosipValor + multaValor + jurosValor + correcaoValor;
+  const valorEnergiaComUsina = Math.max(0, fatura.valorTotal - outrosValoresNaoEnergia);
+
+  return {
+    kwhFaixaBaixa, kwhFaixaAlta, icmsBaixa, icmsAlta, pctPisCofins,
+    valorTE, valorTUSD, valorBandeira, valorEnergiaSemUsina, cosipValor,
+    valorEnergiaComUsina, valorFaturaSemUsina, valorFaturaComUsina: fatura.valorTotal,
+    economiaTotal: valorFaturaSemUsina - fatura.valorTotal,
+    pctEconomia: valorFaturaSemUsina>0 ? ((valorFaturaSemUsina-fatura.valorTotal)/valorFaturaSemUsina*100) : 0,
+  };
+}
+
+
 function tarifaVigenteEmUsinaSolar(tarifas, data){
   const validas = (tarifas||[]).filter(t => t.dataInicio<=data && (!t.dataFim || t.dataFim>=data));
   if(!validas.length) return null;
@@ -20397,19 +20521,25 @@ function viewUsinaSolar(){
     piorMesProdutividade: produtividadePorMes.length ? [...produtividadePorMes].sort((a,b)=>a.produtividade-b.produtividade)[0] : null,
   } : null;
 
-  // ---- Comparação "com solar x sem solar" (§11 / §7 do complemento) — só estimativa, sempre
-  // identificada como tal. Valor "sem solar" = o que você pagaria se comprasse da distribuidora
-  // toda a energia que consumiu (consumo × tarifa), sem o abatimento da energia injetada.
-  let comparacaoSemSolar = null;
-  if(ultimaFatura?.consumoKwh>0 && ultimaFatura?.tarifaEnergiaKwh){
-    const semSolar = ultimaFatura.consumoKwh * ultimaFatura.tarifaEnergiaKwh;
-    const comSolar = ultimaFatura.valorTotal;
-    comparacaoSemSolar = {
-      semSolar, comSolar, economia: semSolar-comSolar, pct: semSolar>0 ? ((semSolar-comSolar)/semSolar*100) : 0,
-      tarifaUsada: ultimaFatura.tarifaEnergiaKwh, tarifaEhDaFaturaMesma: true,
-      creditosUtilizados: ultimaFatura.creditosUtilizadosKwh ?? null,
-    };
-  }
+  // ---- Simulação completa "com/sem usina" (pedido explícito do usuário) — usa a taxa de impostos
+  // real da própria fatura, nunca inventada. Ver função simularFaturaSemUsinaCompleta.
+  const simulacaoCompleta = ultimaFatura ? simularFaturaSemUsinaCompleta(ultimaFatura) : null;
+
+  // ---- Autoconsumo instantâneo — energia gerada que foi usada na hora, sem passar pela rede
+  // (geração do mês menos o que foi injetado). Só calcula quando os dois dados existem pro mesmo mês.
+  const leituraMesUltimaFatura = ultimaFatura ? leituras.find(l=>l.periodo==='mes' && l.data.slice(0,7)===ultimaFatura.referencia) : null;
+  const autoconsumoInstantaneoKwh = (leituraMesUltimaFatura && ultimaFatura?.energiaInjetadaKwh!=null)
+    ? Math.max(0, leituraMesUltimaFatura.geracaoKwh - ultimaFatura.energiaInjetadaKwh) : null;
+
+  // ---- Estoque de Energia (pedido explícito do usuário) — geração do mês, quanto foi usado do
+  // estoque de créditos naquele mês, e uma estimativa em R$ do que o saldo guardado vale hoje.
+  // Valorizo o kWh do estoque pela tarifa BASE (TE+TUSD, sem imposto) — é a mesma forma que a
+  // própria Celesc usa pra valorizar os créditos quando eles são abatidos (visto na fatura real:
+  // as linhas de crédito não levam ICMS/PIS/COFINS, só a tarifa base). Deixo isso explicado na tela.
+  const valorEstoqueEnergiaReais = (ultimaFatura?.saldoCreditosAtualKwh!=null && ultimaFatura?.tarifaEnergiaKwh)
+    ? ultimaFatura.saldoCreditosAtualKwh * ultimaFatura.tarifaEnergiaKwh : null;
+  const evolucaoUsoEstoque = (ultimaFatura?.historicoCreditos||[]).filter(h=>h.creditosUtilizados!=null).slice(-12);
+  const maxUsoEstoque = evolucaoUsoEstoque.length ? Math.max(...evolucaoUsoEstoque.map(h=>h.creditosUtilizados), 1) : 1;
 
   // ---- Calendário mensal (§24) — mostra geração por dia (só onde existir leitura tipo "dia")
   const calMes = window._usinaCalendarioMes || todayISO().slice(0,7);
@@ -20433,8 +20563,8 @@ function viewUsinaSolar(){
 
   const abas = [
     ['visao-geral','Visão Geral'], ['geracao','Geração'], ['economia','Economia'],
-    ['faturas','Faturas'], ['creditos','Créditos'], ['desempenho','Desempenho'], ['equipamentos','Equipamentos'],
-    ['manutencao','Manutenção'], ['documentos','Documentos'], ['historico','Histórico'], ['relatorios','Relatórios'], ['config','Configuração']
+    ['faturas','Faturas'], ['creditos','Créditos'], ['estoque','Estoque de Energia'], ['desempenho','Desempenho'],
+    ['manutencao','Manutenção'], ['historico','Histórico'], ['relatorios','Relatórios'], ['config','Configuração']
   ];
 
   return `
@@ -20691,31 +20821,44 @@ function viewUsinaSolar(){
       <div class="note" style="margin-top:6px;">A economia é uma <strong>estimativa</strong>: valorizo cada kWh injetado pela tarifa média que você pagou naquele mês (valor da fatura ÷ consumo). Não é o valor oficial de compensação da distribuidora, que segue regras próprias (Fio B, bandeiras, etc.).</div>
       ` : `<div class="note" style="margin-top:0;">Cadastre o "valor investido" em ⚙️ Dados da usina pra ver a estimativa de payback aqui.</div>`}
 
-      ${comparacaoSemSolar ? `
-      <div class="contas-secao-titulo" style="margin-top:22px;">💡 Simulador — Com Solar × Sem Solar (${competenciaLabel(ultimaFatura.referencia)})</div>
+      ${autoconsumoInstantaneoKwh!=null ? `
+      <div class="contas-secao-titulo" style="margin-top:22px;">⚡ Autoconsumo instantâneo (${competenciaLabel(ultimaFatura.referencia)})</div>
+      <div class="fluxo-resumo-4col">
+        <div class="fluxo-resumo-item"><div class="lbl">Geração do mês</div><div class="val">${leituraMesUltimaFatura.geracaoKwh} kWh</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Injetada na rede</div><div class="val">${ultimaFatura.energiaInjetadaKwh} kWh</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Usada na hora (autoconsumo)</div><div class="val">${autoconsumoInstantaneoKwh} kWh</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">% autoconsumida</div><div class="val">${leituraMesUltimaFatura.geracaoKwh>0?(autoconsumoInstantaneoKwh/leituraMesUltimaFatura.geracaoKwh*100).toFixed(0):0}%</div></div>
+      </div>
+      <div class="note" style="margin-top:6px;">Autoconsumo = o que a usina gerou menos o que foi injetado na rede — ou seja, a energia que você usou direto, na hora, sem passar pela distribuidora. Só calculo isso quando existe leitura de geração e fatura para o mesmo mês.</div>
+      ` : `<div class="note" style="margin-top:22px;">Sem dado suficiente pra calcular o autoconsumo instantâneo neste mês — precisa de uma leitura de geração e uma fatura registradas para o mesmo mês.</div>`}
+
+      ${simulacaoCompleta ? `
+      <div class="contas-secao-titulo" style="margin-top:22px;">💡 Simulador completo — Com Usina × Sem Usina (${competenciaLabel(ultimaFatura.referencia)})</div>
       <div class="panel"><div class="panel-body" style="padding:14px 18px;">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
           <div>
-            <div style="font-weight:700;font-size:12px;color:var(--success);margin-bottom:8px;">☀️ COM SOLAR</div>
-            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);"><span>Consumo</span><span class="mono">${ultimaFatura.consumoKwh} kWh</span></div>
-            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);"><span>Energia compensada</span><span class="mono">${ultimaFatura.energiaInjetadaUtilizadaKwh!=null?ultimaFatura.energiaInjetadaUtilizadaKwh+' kWh':'—'}</span></div>
-            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);"><span>Créditos utilizados</span><span class="mono">${comparacaoSemSolar.creditosUtilizados!=null?comparacaoSemSolar.creditosUtilizados+' kWh':'—'}</span></div>
-            <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;font-weight:700;"><span>Valor da fatura</span><span class="mono">${brl(comparacaoSemSolar.comSolar)}</span></div>
+            <div style="font-weight:700;font-size:12px;color:var(--success);margin-bottom:8px;">☀️ COM USINA (fatura real)</div>
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);"><span>Energia + impostos cobrados</span><span class="mono">${brl(simulacaoCompleta.valorEnergiaComUsina)}</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);"><span>COSIP</span><span class="mono">${brl(simulacaoCompleta.cosipValor)}</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);"><span>Multa/juros/correção</span><span class="mono">${brl((ultimaFatura.multaValor||0)+(ultimaFatura.jurosValor||0)+(ultimaFatura.correcaoValor||0))}</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);"><span>&nbsp;</span><span class="mono">&nbsp;</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;font-weight:700;"><span>Total da fatura</span><span class="mono">${brl(simulacaoCompleta.valorFaturaComUsina)}</span></div>
           </div>
           <div>
-            <div style="font-weight:700;font-size:12px;color:var(--text-soft);margin-bottom:8px;">⚡ SEM SOLAR (estimado)</div>
-            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);"><span>Consumo</span><span class="mono">${ultimaFatura.consumoKwh} kWh</span></div>
-            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);"><span>Tarifa aplicável</span><span class="mono">R$ ${comparacaoSemSolar.tarifaUsada.toFixed(6).replace('.',',')}/kWh</span></div>
-            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);"><span>&nbsp;</span><span class="mono">&nbsp;</span></div>
-            <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;font-weight:700;"><span>Valor estimado</span><span class="mono">${brl(comparacaoSemSolar.semSolar)}</span></div>
+            <div style="font-weight:700;font-size:12px;color:var(--text-soft);margin-bottom:8px;">⚡ SEM USINA (estimado, por faixa de ICMS)</div>
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);"><span>Energia (TE)</span><span class="mono">${brl(simulacaoCompleta.valorTE)}</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);"><span>Distribuição (TUSD)</span><span class="mono">${brl(simulacaoCompleta.valorTUSD)}</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);"><span>Bandeira tarifária</span><span class="mono">${brl(simulacaoCompleta.valorBandeira)}</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);"><span>COSIP</span><span class="mono">${brl(simulacaoCompleta.cosipValor)}</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;font-weight:700;"><span>Total estimado sem a usina</span><span class="mono">${brl(simulacaoCompleta.valorFaturaSemUsina)}</span></div>
           </div>
         </div>
         <div style="text-align:center;margin-top:14px;padding:10px;background:var(--surface-alt,rgba(30,158,107,.08));border-radius:8px;">
-          <div style="font-size:11px;color:var(--text-soft);text-transform:uppercase;letter-spacing:.04em;">Economia proporcionada pela usina</div>
-          <div style="font-size:20px;font-weight:700;color:var(--success);">${brl(comparacaoSemSolar.economia)} <span style="font-size:13px;font-weight:400;">(${comparacaoSemSolar.pct.toFixed(0)}%)</span></div>
+          <div style="font-size:11px;color:var(--text-soft);text-transform:uppercase;letter-spacing:.04em;">Economia proporcionada pela usina neste mês</div>
+          <div style="font-size:20px;font-weight:700;color:var(--success);">${brl(simulacaoCompleta.economiaTotal)} <span style="font-size:13px;font-weight:400;">(${simulacaoCompleta.pctEconomia.toFixed(0)}%)</span></div>
         </div>
-        <div class="note" style="margin-top:10px;">"Sem solar" é uma <strong>estimativa</strong> — usei a tarifa desta mesma fatura (dado real do período, não a tarifa de hoje aplicada retroativamente). Não é o valor real de uma fatura sem usina.</div>
-      </div></div>` : ''}
+        <div class="note" style="margin-top:10px;">"Sem usina" é uma <strong>estimativa</strong>, mas bem mais precisa: pego os ${ultimaFatura.consumoKwh} kWh que você consumiu e cobro TE e TUSD separadamente, na faixa de ICMS de Santa Catarina (${simulacaoCompleta.kwhFaixaBaixa} kWh a ${(simulacaoCompleta.icmsBaixa*100).toFixed(0)}% + ${simulacaoCompleta.kwhFaixaAlta} kWh a ${(simulacaoCompleta.icmsAlta*100).toFixed(0)}%, mais PIS/COFINS de ${(simulacaoCompleta.pctPisCofins*100).toFixed(2)}%) — todas essas alíquotas são as mesmas que aparecem na sua fatura real, nenhuma inventada. A COSIP não muda porque é taxa municipal fixa. Multa, juros e correção monetária ficam de fora dos dois lados (são sobre atraso de pagamento, não sobre energia).</div>
+      </div></div>` : `<div class="note" style="margin-top:22px;">Sem dados suficientes na última fatura (falta consumo, tarifa TE/TUSD ou alíquota de ICMS) pra simular a conta sem a usina.</div>`}
     </div>
 
     <div data-aba-painel="faturas" style="display:${abaAtiva==='faturas'?'block':'none'};margin-top:14px;">
@@ -20835,6 +20978,42 @@ function viewUsinaSolar(){
           <span>${competenciaLabel(evolucaoCreditos[0].referencia)}</span><span>${competenciaLabel(evolucaoCreditos[evolucaoCreditos.length-1].referencia)}</span>
         </div>
       </div></div>` : `<div class="note" style="margin-top:22px;">Não informado — sem saldo de créditos suficiente registrado ainda pra montar o gráfico.</div>`}
+    </div>
+
+    <div data-aba-painel="estoque" style="display:${abaAtiva==='estoque'?'block':'none'};margin-top:14px;">
+      ${ultimaFatura ? `
+      <div class="contas-secao-titulo" style="margin-top:0;">🔋 Estoque de energia (${competenciaLabel(ultimaFatura.referencia)})</div>
+      <div class="fluxo-resumo-4col">
+        <div class="fluxo-resumo-item"><div class="lbl">Gerado no mês</div><div class="val">${leituraMesUltimaFatura?leituraMesUltimaFatura.geracaoKwh+' kWh':'Não informado'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Injetado na rede</div><div class="val">${ultimaFatura.energiaInjetadaKwh!=null?ultimaFatura.energiaInjetadaKwh+' kWh':'—'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Usado do estoque neste mês</div><div class="val">${ultimaFatura.creditosUtilizadosKwh!=null?ultimaFatura.creditosUtilizadosKwh+' kWh':'—'}</div></div>
+        <div class="fluxo-resumo-item"><div class="lbl">Saldo em estoque hoje</div><div class="val">${ultimaFatura.saldoCreditosAtualKwh!=null?ultimaFatura.saldoCreditosAtualKwh+' kWh':'—'}</div></div>
+      </div>
+      ${!leituraMesUltimaFatura ? `<div class="note" style="margin-top:6px;">"Gerado no mês" não informado — cadastre uma leitura de geração pra ${competenciaLabel(ultimaFatura.referencia)} na aba Geração pra completar esse número.</div>` : ''}
+
+      <div class="contas-secao-titulo" style="margin-top:22px;">💰 Quanto vale o estoque guardado</div>
+      <div class="panel"><div class="panel-body" style="padding:16px 18px;text-align:center;">
+        <div style="font-size:11px;color:var(--text-soft);text-transform:uppercase;letter-spacing:.04em;">Estimativa em reais do saldo de créditos</div>
+        <div style="font-size:26px;font-weight:700;color:var(--success);margin-top:4px;">${valorEstoqueEnergiaReais!=null?brl(valorEstoqueEnergiaReais):'Não informado'}</div>
+        ${ultimaFatura.saldoCreditosAtualKwh!=null ? `<div style="font-size:12px;color:var(--text-soft);margin-top:2px;">${ultimaFatura.saldoCreditosAtualKwh} kWh guardados × R$ ${(ultimaFatura.tarifaEnergiaKwh||0).toFixed(6).replace('.',',')}/kWh</div>` : ''}
+      </div></div>
+      <div class="note" style="margin-top:8px;">É uma <strong>estimativa</strong>, não o valor exato: uso a tarifa BASE de energia (TE+TUSD, sem ICMS/PIS/COFINS) porque é assim que a própria Celesc valoriza o crédito quando ele é abatido de uma fatura futura — sem imposto embutido, do jeito que aparece nas linhas de crédito da sua fatura real. O valor exato só se sabe quando o crédito realmente for usado, porque depende da tarifa vigente e da faixa de consumo daquele mês futuro.</div>
+
+      ${evolucaoUsoEstoque.length>1 ? `
+      <div class="contas-secao-titulo" style="margin-top:22px;">Uso do estoque mês a mês</div>
+      <div class="panel"><div class="panel-body" style="padding:16px 18px;">
+        <div style="display:flex;align-items:flex-end;gap:4px;height:70px;">
+          ${evolucaoUsoEstoque.map(h=>`
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;" title="${competenciaLabel(h.mes)}: ${h.creditosUtilizados} kWh usados">
+              <div style="width:100%;max-width:26px;background:var(--blue-accent,#3b82f6);opacity:.75;border-radius:2px 2px 0 0;height:${Math.max(2,Math.round(h.creditosUtilizados/maxUsoEstoque*60))}px;"></div>
+            </div>
+          `).join('')}
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:9.5px;color:var(--text-soft);margin-top:4px;">
+          <span>${competenciaLabel(evolucaoUsoEstoque[0].mes)}</span><span>${competenciaLabel(evolucaoUsoEstoque[evolucaoUsoEstoque.length-1].mes)}</span>
+        </div>
+      </div></div>` : ''}
+      ` : `<div class="empty">Registre uma fatura pra ver o estoque de energia aqui.</div>`}
     </div>
 
     <div data-aba-painel="desempenho" style="display:${abaAtiva==='desempenho'?'block':'none'};margin-top:14px;">
