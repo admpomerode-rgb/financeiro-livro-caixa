@@ -830,6 +830,7 @@
         <div class="nav-item" data-view="ativos" title="Ativos Patrimoniais"><span class="nav-dot"></span><span class="nav-abbr">AP</span><span class="nav-label">Ativos Patrimoniais</span></div>
         <div class="nav-item" data-view="investimentos" title="Investimentos"><span class="nav-dot"></span><span class="nav-abbr">IV</span><span class="nav-label">Investimentos</span></div>
         <div class="nav-item" data-view="orcamentos-processos" title="Orçamentos e Compras"><span class="nav-dot"></span><span class="nav-abbr">OC</span><span class="nav-label">Orçamentos e Compras</span></div>
+        <div class="nav-item" data-view="gestao-os" title="Gestão de Ordens de Serviço"><span class="nav-dot"></span><span class="nav-abbr">OS</span><span class="nav-label">Gestão de O.S.</span></div>
         <div class="nav-item" data-view="comissoes" title="Comissões"><span class="nav-dot"></span><span class="nav-abbr">CM</span><span class="nav-label">Comissões</span></div>
         <div class="nav-item" data-view="vendas" title="Vendas"><span class="nav-dot"></span><span class="nav-abbr">VD</span><span class="nav-label">Vendas</span></div>
         <div class="nav-item" data-view="creditos-clientes" title="Créditos de Clientes"><span class="nav-dot"></span><span class="nav-abbr">CC</span><span class="nav-label">Créditos de Clientes</span></div>
@@ -1137,6 +1138,7 @@ function aplicarMigracoes(s){
   }
   if(!s.orcamentosProcessos) s.orcamentosProcessos = [];
   if(!s.orcamentosProcessosContador) s.orcamentosProcessosContador = 0;
+  if(!s.osVkIndustrial) s.osVkIndustrial = []; // espelho local (fetch manual) da coleção "os_processos" compartilhada
   if(!s.contas) s.contas = [];
   // Migração: garante uma conta padrão e associa lançamentos antigos sem conta
   if(s.contas.length===0){
@@ -1854,6 +1856,7 @@ function moreItensDef(){
     { view:'usina-solar', icone:'☀️', nome:'Usina Solar', grupo:'Operacional' },
     { view:'investimentos', icone:'📈', nome:'Investimentos', grupo:'Operacional', badge:()=>(state.notasPendentes||[]).length },
     { view:'orcamentos-processos', icone:'📋', nome:'Orçamentos e Compras', grupo:'Operacional', badge:()=>(state.orcamentosProcessos||[]).filter(o=>o.status==='pendente').length },
+    { view:'gestao-os', icone:'🔧', nome:'Gestão de Ordens de Serviço', grupo:'Operacional', badge:()=>(state.osVkIndustrial||[]).filter(o=>o.status==='pendente'||o.statusProcesso&&!o.lancamentoFinanceiroId).length },
     { view:'comissoes', icone:'🤝', nome:'Comissões', grupo:'Operacional' },
     { view:'vendas', icone:'📈', nome:'Vendas', grupo:'Operacional' },
     { view:'creditos-clientes', icone:'💳', nome:'Créditos de Clientes', grupo:'Operacional' },
@@ -2031,6 +2034,7 @@ function render(){
   else if(currentView==='custos-margem-produtos') main.innerHTML = viewCustosMargemProdutos();
   else if(currentView==='processos') main.innerHTML = viewProcessosConfig();
   else if(currentView==='orcamentos-processos') main.innerHTML = viewOrcamentosProcessos();
+  else if(currentView==='gestao-os') main.innerHTML = viewGestaoOSFinanceiro();
   else if(currentView==='configuracoes') main.innerHTML = viewConfiguracoes();
   else if(currentView==='configuracao-detalhe') main.innerHTML = viewConfiguracaoDetalhe();
   else if(currentView==='central-decisao') main.innerHTML = viewCentralDecisao();
@@ -23611,6 +23615,69 @@ async function sincronizarProcessos(){
   }
 }
 
+// ---- Gestão de Ordens de Serviço (integração VK Industrial → Livro de Processos → Livro Caixa) ----
+// Busca manual (mesmo padrão do sincronizarProcessos acima: fetch único, não listener permanente)
+// da coleção compartilhada "os_processos". Precisa da mesma config já usada pro Livro de Processos
+// (state.processosConfig) — são o mesmo projeto Firebase, então não precisa de config separada.
+async function sincronizarOSVkIndustrial(){
+  const cfg = state.processosConfig;
+  if(!cfg.firebaseConfig){ showToast('Cole a configuração do Firebase do Livro de Processos antes de sincronizar'); render(); return; }
+  if(!cfg.email || !cfg.senha){ showToast('Informe o e-mail e a senha de acesso ao Livro de Processos'); render(); return; }
+  if(typeof firebase === 'undefined'){ showToast('Não foi possível carregar o Firebase — confira a internet'); render(); return; }
+  try{
+    if(!processosFirebaseApp) processosFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'livro-processos');
+    const auth = processosFirebaseApp.auth();
+    if(!auth.currentUser) await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
+    const db = processosFirebaseApp.firestore();
+    const snap = await db.collection('os_processos').get({ source: 'server' }).catch(tratarFalhaLeituraColecao('os_processos', 'sincronizarOSVkIndustrial'));
+    if(snap._falhouLeitura){
+      showToast(`Não consegui verificar "${snap._colecaoComFalha}" no Livro de Processos — tente sincronizar de novo`);
+      render();
+      return;
+    }
+    state.osVkIndustrial = snap.docs.map(d=>({ id: d.id, ...d.data() }));
+    persist();
+    showToast(`${state.osVkIndustrial.length} O.S. do VK Industrial sincronizada(s).`);
+    render();
+  }catch(e){
+    console.error('Erro ao sincronizar O.S. do VK Industrial:', e);
+    let msg = 'Falha ao sincronizar';
+    if(e.code==='auth/wrong-password' || e.code==='auth/user-not-found' || e.code==='auth/invalid-credential') msg = 'E-mail ou senha incorretos';
+    else if(e.code==='permission-denied') msg = 'Sem permissão para ler os dados — confira o login';
+    else if(e.message) msg += ': ' + e.message;
+    showToast(msg);
+    render();
+  }
+}
+// Escreve de volta na coleção compartilhada o status financeiro — pra o VK Industrial conseguir
+// mostrar isso na O.S. (pedido nº 19 do documento 3: "retorno ao Industrial").
+async function avisarStatusFinanceiroVkIndustrial(pedidoDocId, dadosRetorno){
+  const cfg = state.processosConfig;
+  if(!cfg.firebaseConfig || !cfg.email || !cfg.senha) return; // integração não configurada — não trava o resto
+  try{
+    if(!processosFirebaseApp) processosFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'livro-processos');
+    const auth = processosFirebaseApp.auth();
+    if(!auth.currentUser) await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
+    const db = processosFirebaseApp.firestore();
+    await db.collection('os_processos').doc(pedidoDocId).update(dadosRetorno);
+  }catch(e){
+    console.error('Erro ao avisar status financeiro pro VK Industrial:', e);
+  }
+}
+// Protegido contra duplicidade (pedido nº 6/17 do documento 3): uma O.S. não pode ter dois
+// lançamentos financeiros pro mesmo pedido — testado isoladamente antes de usar aqui.
+function jaTemObrigacaoFinanceira(pedidoId){
+  return (state.lancamentos||[]).some(l=>l.origemIdExterno===pedidoId);
+}
+function statusFinanceiroOS(pedido){
+  const lanc = (state.lancamentos||[]).find(l=>l.origemIdExterno===pedido.id);
+  if(!lanc) return 'sem_obrigacao';
+  if(lanc.status==='pago') return 'pago';
+  if(lanc.valorPagoParcial>0) return 'parcial';
+  return 'pendente';
+}
+
+
 function openAprovarOrcamentoModal(o, respostaAtual){
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
@@ -23963,6 +24030,146 @@ function viewOrcamentosProcessos(){
     </details>` : ''}
     <div class="note" style="margin-top:0;">💡 Ao aprovar ou recusar, o Livro de Processos é avisado automaticamente — a decisão aparece de volta no processo lá.</div>
   `;
+}
+
+function viewGestaoOSFinanceiro(){
+  const todos = state.osVkIndustrial||[];
+  const hoje = todayISO();
+  const comLancamento = (p)=>(state.lancamentos||[]).find(l=>l.origemIdExterno===p.id);
+  const statusFin = (p)=>statusFinanceiroOS(p);
+  const atrasada = (p)=>{ const l=comLancamento(p); return l && l.status!=='pago' && l.dataVencimento && l.dataVencimento<hoje; };
+
+  const aguardandoProcesso = todos.filter(p=>p.status==='pendente');
+  const semObrigacao = todos.filter(p=>p.status==='processo_criado' && statusFin(p)==='sem_obrigacao');
+  const aguardandoPagamento = todos.filter(p=>statusFin(p)==='pendente');
+  const parcialmentePagas = todos.filter(p=>statusFin(p)==='parcial');
+  const pagas = todos.filter(p=>statusFin(p)==='pago');
+  const atrasadas = todos.filter(atrasada);
+
+  const custoPrevisto = todos.filter(p=>statusFin(p)==='sem_obrigacao').reduce((s,p)=>s+(p.valorEstimado||0),0);
+  const valorAprovadoTotal = todos.reduce((s,p)=>s+(p.valorAprovado||0),0);
+  const valorRealizadoTotal = (state.lancamentos||[]).filter(l=>l.origemSistemaExterno==='VK Industrial').reduce((s,l)=>s+(l.valor||0),0);
+  const valorPagoTotal = (state.lancamentos||[]).filter(l=>l.origemSistemaExterno==='VK Industrial' && l.status==='pago').reduce((s,l)=>s+(l.valor||0),0);
+
+  return `
+    <div class="topbar">
+      <div>
+        <h1>Gestão de Ordens de Serviço</h1>
+        <p>O.S. do VK Industrial com relação ao Livro Caixa — obrigação financeira, pagamento e retorno de status.</p>
+      </div>
+      <button class="btn" id="btnSincronizarOSVk">🔄 Sincronizar com o Livro de Processos</button>
+    </div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:16px;">
+      <div class="card"><div class="label">Aguardando processo</div><div class="value mono">${aguardandoProcesso.length}</div></div>
+      <div class="card"><div class="label">Sem obrigação criada</div><div class="value mono">${semObrigacao.length}</div></div>
+      <div class="card"><div class="label">Aguardando pagamento</div><div class="value mono">${aguardandoPagamento.length}</div></div>
+      <div class="card"><div class="label">Parcialmente pagas</div><div class="value mono">${parcialmentePagas.length}</div></div>
+      <div class="card saldo"><div class="label">Pagas</div><div class="value mono">${pagas.length}</div></div>
+      <div class="card"><div class="label">Atrasadas</div><div class="value mono" style="${atrasadas.length?'color:var(--danger);':''}">${atrasadas.length}</div></div>
+      <div class="card"><div class="label">Custo previsto</div><div class="value mono">${brl(custoPrevisto)}</div></div>
+      <div class="card"><div class="label">Valor aprovado</div><div class="value mono">${brl(valorAprovadoTotal)}</div></div>
+      <div class="card"><div class="label">Valor realizado</div><div class="value mono">${brl(valorRealizadoTotal)}</div></div>
+      <div class="card"><div class="label">Valor pago</div><div class="value mono">${brl(valorPagoTotal)}</div></div>
+    </div>
+    ${!todos.length ? `<div class="empty">Nenhuma O.S. sincronizada ainda — clique em "Sincronizar" acima.</div>` : todos.slice().sort((a,b)=>(b.criadoEm||'').localeCompare(a.criadoEm||'')).map(p=>{
+      const lanc = comLancamento(p);
+      const sf = statusFin(p);
+      return `
+      <div class="panel" style="margin-bottom:14px;overflow:hidden;">
+        <div class="panel-head">
+          <h2>${escapeHTML(p.numeroOS||'—')} — ${escapeHTML(p.tituloOS||'')}${atrasada(p)?' <span style="color:var(--danger);font-size:12px;font-weight:600;">⚠️ Atrasada</span>':''}</h2>
+          <span class="mono" style="font-weight:700;font-size:15px;">${p.valorEstimado?brl(p.valorEstimado):'—'}</span>
+        </div>
+        <div style="padding:14px 20px;background:var(--bone);border-bottom:1px solid var(--line);font-size:12.5px;line-height:1.6;">
+          ${p.setor?`Setor: ${escapeHTML(p.setor)} · `:''}${p.local?`Local: ${escapeHTML(p.local)} · `:''}${p.prioridade?`Prioridade: ${escapeHTML(p.prioridade)}`:''}<br>
+          ${p.descricao?escapeHTML(p.descricao)+'<br>':''}
+          Processo: ${p.numeroProcesso?`<strong>${escapeHTML(p.numeroProcesso)}</strong> (${escapeHTML(p.statusProcesso||'—')})`:'ainda não criado no Livro de Processos'}
+        </div>
+        <div style="padding:14px 20px;">
+          ${lanc ? `
+            <div style="font-size:13px;">Obrigação financeira: <strong>${brl(lanc.valor)}</strong> · vencimento ${fmtDate(lanc.dataVencimento)} · status <strong>${sf==='pago'?'Pago':sf==='parcial'?'Parcial':'Pendente'}</strong>${lanc.status==='pago'?` em ${fmtDate(lanc.dataPagamento)}`:''}</div>
+            <div class="sub" style="margin-top:4px;">Conta: ${escapeHTML(nomeConta(lanc.contaId)||'—')} · Fornecedor: ${escapeHTML(lanc.fornecedor||'—')}</div>
+            <button class="btn ghost sm" style="margin-top:8px;" data-goto="contas">Ver em Contas a Pagar</button>
+          ` : p.status==='processo_criado' ? `
+            <button class="btn sm" data-criar-obrigacao-os="${p.id}">+ Criar obrigação financeira</button>
+          ` : `<div class="sub">Aguardando o Livro de Processos criar o processo — nada a fazer aqui ainda.</div>`}
+        </div>
+      </div>`;
+    }).join('')}
+  `;
+}
+
+function openCriarObrigacaoOSModal(pedidoId){
+  const p = (state.osVkIndustrial||[]).find(x=>x.id===pedidoId);
+  if(!p) return;
+  if(jaTemObrigacaoFinanceira(p.id)){ showToast('Essa O.S. já tem uma obrigação financeira criada.'); return; }
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Criar obrigação financeira — ${escapeHTML(p.numeroOS||'')}</h3>
+    <div class="note" style="margin-top:0;">Isso cria uma conta a pagar de verdade em Contas a Pagar — usa o mesmo mecanismo financeiro já existente, não um sistema à parte.</div>
+    <div class="field"><label>Fornecedor</label><input type="text" id="obFornecedor" placeholder="Nome do fornecedor" value="${escapeHTML(p.fornecedorNome||'')}"></div>
+    <div class="field"><label>Descrição</label><input type="text" id="obDescricao" value="${escapeHTML((p.numeroOS?p.numeroOS+' — ':'')+(p.tituloOS||''))}"></div>
+    <div class="field-row">
+      <div class="field"><label>Valor (R$)</label><input type="text" inputmode="decimal" id="obValor" placeholder="0,00" value="${p.valorEstimado?String(p.valorEstimado).replace('.',','):''}"></div>
+      <div class="field"><label>Vencimento</label><input type="date" id="obVencimento"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Categoria</label><input type="text" id="obCategoria" value="Manutenção"></div>
+      <div class="field"><label>Centro de custo</label><select id="obCentroCusto"><option value="">— nenhum —</option>${(state.centrosCusto||[]).map(c=>`<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join('')}</select></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Conta bancária</label><select id="obConta"><option value="">— selecione ao pagar —</option>${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+      <div class="field"><label>Forma de pagamento</label><input type="text" id="obFormaPagamento" placeholder="Pix, boleto, transferência..."></div>
+    </div>
+    <div class="field"><label>Observação</label><textarea id="obObservacao" rows="2"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarObrigacaoOS">Criar obrigação financeira</button>
+    </div>
+  `;
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnConfirmarObrigacaoOS').addEventListener('click', async ()=>{
+    const btn = document.getElementById('btnConfirmarObrigacaoOS');
+    if(btn.disabled) return;
+    btn.disabled = true;
+    try{
+      // Proteção final contra duplicidade — confere de novo bem na hora de salvar (clique duplo,
+      // duas abas abertas, etc. — pedido nº 6/17 do documento 3).
+      if(jaTemObrigacaoFinanceira(p.id)){ showToast('Essa O.S. já tem uma obrigação financeira criada.'); closeModal(); return; }
+      const valor = parseFloat(document.getElementById('obValor').value.replace(',','.'))||0;
+      if(valor<=0){ showToast('Informe um valor maior que zero.'); btn.disabled=false; return; }
+      const vencimento = document.getElementById('obVencimento').value || todayISO();
+      const novoId = uid();
+      state.lancamentos.push({
+        id: novoId, tipo:'saida', origem:'manual', criadoEm: new Date().toISOString(),
+        descricao: document.getElementById('obDescricao').value.trim(),
+        categoria: document.getElementById('obCategoria').value.trim() || 'Manutenção',
+        centroCusto: document.getElementById('obCentroCusto').value || '',
+        valor, fornecedor: document.getElementById('obFornecedor').value.trim(),
+        formaPagamento: document.getElementById('obFormaPagamento').value.trim(),
+        contaId: document.getElementById('obConta').value || null,
+        dataVencimento: vencimento, status: 'pendente', dataPagamento: null,
+        observacao: document.getElementById('obObservacao').value.trim(),
+        tags: [],
+        // ---- vínculo com a O.S. do VK Industrial (pedido nº 6 do documento 3) ----
+        origemSistemaExterno: 'VK Industrial', origemTipoExterno: 'ordemServico',
+        origemIdExterno: p.id, osId: p.osId||null, numeroOS: p.numeroOS||null, processoId: p.processoId||null,
+      });
+      registrarLog('Obrigação financeira criada (O.S.)', `${escapeHTML(p.numeroOS||'')} — ${brl(valor)}`);
+      persist();
+      closeModal();
+      showToast('Obrigação financeira criada.');
+      await avisarStatusFinanceiroVkIndustrial(p.id, {
+        lancamentoFinanceiroId: novoId, valorObrigacao: valor, vencimentoObrigacao: vencimento,
+        valorPago: 0, situacaoFinanceira: 'pendente', contaBancariaNome: null,
+      });
+      render();
+    } finally {
+      const btnFim = document.getElementById('btnConfirmarObrigacaoOS');
+      if(btnFim) btnFim.disabled = false;
+    }
+  });
+  document.getElementById('modalOverlay').classList.add('open');
 }
 
 function viewVK(){
@@ -28948,6 +29155,15 @@ function attachViewHandlers(){
     sincronizarProcessos();
   });
   document.getElementById('btnNovoOrcamentoManual')?.addEventListener('click', ()=>openNovoOrcamentoManualModal());
+  const btnSincronizarOSVk = document.getElementById('btnSincronizarOSVk');
+  if(btnSincronizarOSVk) btnSincronizarOSVk.addEventListener('click', ()=>{
+    btnSincronizarOSVk.textContent = 'Sincronizando...';
+    btnSincronizarOSVk.disabled = true;
+    sincronizarOSVkIndustrial();
+  });
+  document.querySelectorAll('[data-criar-obrigacao-os]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openCriarObrigacaoOSModal(btn.dataset.criarObrigacaoOs));
+  });
   document.querySelectorAll('[data-action="aprovar-orcamento-processo"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const o = (state.orcamentosProcessos||[]).find(x=>x.id===btn.dataset.id);
@@ -29897,6 +30113,16 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       registrarReprogramacaoSePreciso(existing, existing.dataVencimento, payload.dataVencimento);
       ultimaAcaoDesfazer = { tipo:'editar', lancamentoId:existing.id, snapshotAntes:JSON.parse(JSON.stringify(existing)) };
       Object.assign(existing, payload);
+      // Se esse lançamento veio de uma O.S. do VK Industrial, avisa o status financeiro de volta
+      // (pedido nº 19 do documento 3: "retorno ao Industrial") — não trava o salvamento se falhar.
+      if(existing.origemIdExterno){
+        avisarStatusFinanceiroVkIndustrial(existing.origemIdExterno, {
+          lancamentoFinanceiroId: existing.id, valorObrigacao: existing.valor,
+          vencimentoObrigacao: existing.dataVencimento, valorPago: existing.status==='pago' ? existing.valor : 0,
+          situacaoFinanceira: existing.status==='pago' ? 'pago' : 'pendente',
+          contaBancariaNome: existing.contaId ? (nomeConta(existing.contaId)||null) : null,
+        }).catch(()=>{});
+      }
     } else {
       if(tipo==='saida' && payload.status==='pago' && !ehMovimentoDeCapital(payload)){
         const caixaLivreAgora = calcularCaixaLivreAssistente();
