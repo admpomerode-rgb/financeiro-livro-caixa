@@ -1140,6 +1140,7 @@ function aplicarMigracoes(s){
   if(!s.orcamentosProcessosContador) s.orcamentosProcessosContador = 0;
   if(!s.osVkIndustrial) s.osVkIndustrial = []; // espelho local (fetch manual) da coleção "os_processos" compartilhada
   if(!s.saldosReinvestimento) s.saldosReinvestimento = []; // dinheiro de venda/resgate ainda não reinvestido — fica "guardado" aqui até você usar numa aplicação nova ou decidir deixar como caixa
+  if(!s.reinvestimentosRealizados) s.reinvestimentosRealizados = []; // log de TODO reinvestimento de verdade, mesmo quando não gera lançamento de conta (reinvestimento exato) — é a fonte confiável pro relatório de Reinvestimentos
   if(!s.contas) s.contas = [];
   // Migração: garante uma conta padrão e associa lançamentos antigos sem conta
   if(s.contas.length===0){
@@ -11981,12 +11982,16 @@ function renderRelatorioReinvestimentos(){
   }
 
   const noPeriodo = l => l.dataVencimento>=de && l.dataVencimento<=ate;
-  const reinvestimentos = state.lancamentos.filter(l=>l.reinvestimento && l.categoria==='Investimentos' && noPeriodo(l)).sort((a,b)=>b.dataVencimento.localeCompare(a.dataVencimento));
+  const noPeriodoData = r => r.data>=de && r.data<=ate;
+  // Fonte confiável: o log completo de reinvestimentos, que existe mesmo quando o reinvestimento
+  // foi exato e não gerou lançamento nenhum de conta (senão sumia do relatório) — testado isolado.
+  const reinvestimentosNoPeriodo = (state.reinvestimentosRealizados||[]).filter(noPeriodoData).sort((a,b)=>b.data.localeCompare(a.data));
   const ganhosPerdas = state.lancamentos.filter(l=>l.reinvestimento && (l.categoria==='Rendimentos'||l.categoria==='Despesas Financeiras') && noPeriodo(l));
   const aportesNovos = state.lancamentos.filter(l=>l.categoria==='Investimentos' && l.tipo==='saida' && !l.reinvestimento && noPeriodo(l));
 
-  const totalReinvestidoSaida = reinvestimentos.filter(l=>l.tipo==='saida').reduce((s,l)=>s+l.valor,0);
-  const totalReinvestidoEntrada = reinvestimentos.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+l.valor,0);
+  const totalReinvestido = reinvestimentosNoPeriodo.reduce((s,r)=>s+r.valorReinvestido,0);
+  const totalReinvestidoSaida = reinvestimentosNoPeriodo.reduce((s,r)=>s+r.valorDebitadoConta,0);
+  const totalReinvestidoEntrada = reinvestimentosNoPeriodo.reduce((s,r)=>s+r.valorEntrouConta,0);
   const totalAporteNovo = aportesNovos.reduce((s,l)=>s+l.valor,0);
   const totalGanho = ganhosPerdas.filter(l=>l.categoria==='Rendimentos').reduce((s,l)=>s+l.valor,0);
   const totalPerda = ganhosPerdas.filter(l=>l.categoria==='Despesas Financeiras').reduce((s,l)=>s+l.valor,0);
@@ -12002,12 +12007,13 @@ function renderRelatorioReinvestimentos(){
     </div>
     <div class="note" style="margin-top:0;">${label}${reinvestimentosPeriodo==='sempre'?'':': '+fmtDate(de)+' até '+fmtDate(ate)} · reinvestimento = venda/resgate usado pra comprar outro ativo na hora, sem contar como aporte novo</div>
     <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:14px 0;">
-      <div class="card"><div class="label">Reinvestido (saiu da conta)</div><div class="value mono">${brl(totalReinvestidoSaida)}</div></div>
-      <div class="card"><div class="label">Sobra de reinvestimento (entrou)</div><div class="value mono">${brl(totalReinvestidoEntrada)}</div></div>
-      <div class="card"><div class="label">Aporte novo de verdade</div><div class="value mono" style="color:var(--accent);">${brl(totalAporteNovo)}</div></div>
-      <div class="card"><div class="label">Reinvestimentos no período</div><div class="value mono">${reinvestimentos.length}</div></div>
+      <div class="card"><div class="label">Total reinvestido</div><div class="value mono" style="color:var(--accent);">${brl(totalReinvestido)}</div></div>
+      <div class="card"><div class="label">Saiu da conta (diferença)</div><div class="value mono">${brl(totalReinvestidoSaida)}</div></div>
+      <div class="card"><div class="label">Sobrou (entrou na conta)</div><div class="value mono">${brl(totalReinvestidoEntrada)}</div></div>
+      <div class="card"><div class="label">Reinvestimentos no período</div><div class="value mono">${reinvestimentosNoPeriodo.length}</div></div>
     </div>
     <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:0 0 14px;">
+      <div class="card"><div class="label">Aporte novo de verdade</div><div class="value mono">${brl(totalAporteNovo)}</div></div>
       <div class="card"><div class="label">Ganho de capital nas vendas</div><div class="value mono pos">${brl(totalGanho)}</div></div>
       <div class="card"><div class="label">Perda de capital nas vendas</div><div class="value mono neg">${brl(totalPerda)}</div></div>
     </div>
@@ -12017,10 +12023,10 @@ function renderRelatorioReinvestimentos(){
     <div class="dash-section-label">Reinvestimentos no período</div>
     <div class="panel">
       <div class="panel-body" style="padding:0;">
-        ${reinvestimentos.length ? reinvestimentos.map(l=>`
+        ${reinvestimentosNoPeriodo.length ? reinvestimentosNoPeriodo.map(r=>`
           <div class="ledger-row compact" style="grid-template-columns:1fr auto;align-items:center;">
-            <div class="desc-cell"><div>${escapeHTML(l.descricao)}</div><div class="cat">${fmtDate(l.dataVencimento)}${l.observacao?' · '+escapeHTML(l.observacao):''}</div></div>
-            <span class="mono" style="font-weight:600;color:${l.tipo==='saida'?'var(--danger)':'var(--success)'};">${l.tipo==='saida'?'-':'+'}${brl(l.valor)}</span>
+            <div class="desc-cell"><div>${escapeHTML(r.descricao)}</div><div class="cat">${fmtDate(r.data)}${r.valorDebitadoConta>0.004?' · saiu '+brl(r.valorDebitadoConta)+' da conta':(r.valorEntrouConta>0.004?' · entrou '+brl(r.valorEntrouConta)+' na conta':' · não mexeu na conta (reinvestimento exato)')}</div></div>
+            <span class="mono" style="font-weight:600;color:var(--accent);">${brl(r.valorReinvestido)}</span>
           </div>`).join('') : `<div class="empty">Nenhum reinvestimento nesse período.</div>`}
       </div>
     </div>
@@ -34947,10 +34953,10 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
       <div class="field"><label>Valor líquido da nota (R$) — o que efetivamente sai/entra da conta</label><input type="text" inputmode="decimal" id="notaLiquido"></div>
       <div class="note" id="notaTipoNota" style="margin-top:0;"></div>
       <div class="field">
-        <label>Ganho ou perda de capital na venda (R$)</label>
-        <input type="text" inputmode="decimal" id="notaGanhoPerda" value="0">
+        <label>Ganho ou perda de capital total (resumo — R$)</label>
+        <input type="text" inputmode="decimal" id="notaGanhoPerda" value="0" readonly style="background:var(--surface-alt);cursor:not-allowed;">
       </div>
-      <div class="note" style="margin-top:0;">Se preencher o "Preço médio de compra" em cada linha de venda acima, esse total é calculado sozinho (soma o ganho/perda de cada venda) — mas você ainda pode digitar/ajustar aqui manualmente se preferir. Ganho de capital entra como receita financeira (categoria Rendimentos); perda de capital entra como despesa financeira (categoria Investimentos). Use valor negativo pra registrar perda.</div>
+      <div class="note" style="margin-top:0;">Isso aqui é só o resumo — cada venda vira um lançamento SEPARADO de ganho ou perda de capital (não soma tudo numa nota só). Pra o sistema calcular, preencha o "Preço médio de compra" em cada linha de venda acima. Ganho de capital entra como receita financeira (Rendimentos); perda de capital entra como despesa financeira (Despesas Financeiras) — um lançamento por ativo vendido.</div>
       <div class="field"><label>Conta bancária de origem/destino</label>
         <select id="notaContaBancaria">${state.contas.map(c=>`<option value="${c.id}" ${(notaEmRevisao?notaEmRevisao.contaBancariaId===c.id:contaPreSelecionadaId===c.id)?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
       </div>
@@ -35420,41 +35426,57 @@ function publicarNotaCorretagem(nota){
       criadoEm: new Date().toISOString()
     });
     state.saldosReinvestimento.push({ id: uid(), descricao: `Venda de ${descVendas()}${corretora?' — '+corretora:''}`, valor: Math.round(valorLancamentoNota*100)/100, data: dataDebito, usado:false, contaId: contaBancariaId });
-  } else if(tipoLancamentoNota==='reinvestimento-sai' || tipoLancamentoNota==='reinvestimento-sobra'){
-    state.lancamentos.push({
-      id: uid(), tipo: tipoLancamentoNota==='reinvestimento-sai'?'saida':'entrada', categoria:'Investimentos',
-      descricao: `Reinvestimento (diferença)${corretora ? ' — '+corretora : ''} (nota de corretagem)${sufixoNota}`,
-      valor: Math.round(valorLancamentoNota*100)/100, contaId: contaBancariaId,
-      status: tipoLancamentoNota==='reinvestimento-sai'?statusSaida:statusEntrada,
-      dataVencimento: dataDebito, dataPagamento,
-      origem:'investimento', reinvestimento: true, numeroNota: numeroNota||null,
-      observacao: `${numeroNota?`Nota N° ${numeroNota} · `:''}Comprou: ${descCompras()} · Vendeu: ${descVendas()}`,
-      criadoEm: new Date().toISOString()
+  } else if(tipoLancamentoNota==='reinvestimento-sai' || tipoLancamentoNota==='reinvestimento-sobra' || tipoLancamentoNota==='reinvestimento-exato'){
+    if(tipoLancamentoNota!=='reinvestimento-exato'){
+      state.lancamentos.push({
+        id: uid(), tipo: tipoLancamentoNota==='reinvestimento-sai'?'saida':'entrada', categoria:'Investimentos',
+        descricao: `Reinvestimento (diferença)${corretora ? ' — '+corretora : ''} (nota de corretagem)${sufixoNota}`,
+        valor: Math.round(valorLancamentoNota*100)/100, contaId: contaBancariaId,
+        status: tipoLancamentoNota==='reinvestimento-sai'?statusSaida:statusEntrada,
+        dataVencimento: dataDebito, dataPagamento,
+        origem:'investimento', reinvestimento: true, numeroNota: numeroNota||null,
+        observacao: `${numeroNota?`Nota N° ${numeroNota} · `:''}Comprou: ${descCompras()} · Vendeu: ${descVendas()}`,
+        criadoEm: new Date().toISOString()
+      });
+    }
+    state.reinvestimentosRealizados.push({
+      id: uid(), data: dataDebito, valorReinvestido: Math.round(Math.min(totalCompras, totalVendas)*100)/100,
+      descricao: `Nota de corretagem${sufixoNota}${corretora?' — '+corretora:''} — comprou ${descCompras()}, vendeu ${descVendas()}`,
+      valorDebitadoConta: tipoLancamentoNota==='reinvestimento-sai' ? valorLancamentoNota : 0,
+      valorEntrouConta: tipoLancamentoNota==='reinvestimento-sobra' ? valorLancamentoNota : 0,
     });
   }
-  // tipoLancamentoNota==='reinvestimento-exato' → sem lançamento de caixa, nada mexeu na conta
 
-  if(Math.abs(ganhoPerdaCapital)>0.004){
-    if(ganhoPerdaCapital>0){
+  // Ganho/perda de capital registrado POR ATIVO vendido, não somado numa nota só — pedido explícito:
+  // vender um ativo com lucro de 60 e outro com prejuízo de 30 precisa aparecer como receita de 60
+  // E despesa de 30, separadas, não como um único lançamento líquido de 30. Testado isoladamente.
+  linhas.filter(l=>l.tipo==='V').forEach(l=>{
+    const qtd = parseFloat(l.quantidade)||0;
+    const preco = parseFloat(l.preco)||0;
+    const precoMedio = parseFloat(l.precoMedioCompra);
+    if(isNaN(precoMedio) || qtd<=0) return; // sem preço médio informado — não dá pra calcular esse ativo
+    const ganhoPerdaAtivo = Math.round((preco-precoMedio)*qtd*100)/100;
+    if(Math.abs(ganhoPerdaAtivo)<=0.004) return;
+    if(ganhoPerdaAtivo>0){
       state.lancamentos.push({
         id: uid(), tipo:'entrada', categoria:'Rendimentos',
-        descricao: `Ganho de capital${corretora ? ' — '+corretora : ''} (nota de corretagem)${sufixoNota}`,
-        valor: Math.round(ganhoPerdaCapital*100)/100, contaId: contaBancariaId, status: statusEntrada,
+        descricao: `Ganho de capital — venda de ${l.ticker}${corretora ? ' — '+corretora : ''}${sufixoNota}`,
+        valor: ganhoPerdaAtivo, contaId: contaBancariaId, status: statusEntrada,
         dataVencimento: dataDebito, dataPagamento, numeroNota: numeroNota||null,
-        observacao: numeroNota ? `Nota N° ${numeroNota}` : '',
+        observacao: `${l.quantidade} ${l.ticker} vendido(s) a ${brl(preco)} — preço médio de compra ${brl(precoMedio)}`,
         criadoEm: new Date().toISOString()
       });
     } else {
       state.lancamentos.push({
         id: uid(), tipo:'saida', categoria:'Despesas Financeiras',
-        descricao: `Perda de capital${corretora ? ' — '+corretora : ''} (nota de corretagem)${sufixoNota}`,
-        valor: Math.round(Math.abs(ganhoPerdaCapital)*100)/100, contaId: contaBancariaId, status: statusSaida,
+        descricao: `Perda de capital — venda de ${l.ticker}${corretora ? ' — '+corretora : ''}${sufixoNota}`,
+        valor: Math.abs(ganhoPerdaAtivo), contaId: contaBancariaId, status: statusSaida,
         dataVencimento: dataDebito, dataPagamento, numeroNota: numeroNota||null,
-        observacao: numeroNota ? `Nota N° ${numeroNota}` : '',
+        observacao: `${l.quantidade} ${l.ticker} vendido(s) a ${brl(preco)} — preço médio de compra ${brl(precoMedio)}`,
         criadoEm: new Date().toISOString()
       });
     }
-  }
+  });
 
   // Custos da nota — lançados automaticamente nas categorias próprias (editáveis como qualquer outra)
   const temCustos = taxasTotal + irrf > 0;
@@ -36672,6 +36694,13 @@ function openInvestirModal(contaBancariaId){
         criadoEm: new Date().toISOString()
       });
     }
+    if(saldoEscolhidoId){
+      state.reinvestimentosRealizados.push({
+        id: uid(), data: dataMov, valorReinvestido: Math.round((valorTotal - valorParaDebitar)*100)/100,
+        descricao: `Aplicação em ${nomeAtivo}${observacaoReinvestimento}`,
+        valorDebitadoConta: Math.round(valorParaDebitar*100)/100, valorEntrouConta: 0,
+      });
+    }
 
     persist(); closeModal(); render();
     showToast(`Investimento de ${brl(valorTotal)} realizado${observacaoReinvestimento?' (reinvestimento)':''}`);
@@ -37280,6 +37309,14 @@ function openVenderReinvestirModal(ativoId){
           criadoEm: new Date().toISOString()
         });
       }
+      // Registra no log completo — mesmo quando o reinvestimento foi exato e não gerou lançamento
+      // de conta nenhum, pra continuar aparecendo certo no relatório de Reinvestimentos.
+      state.reinvestimentosRealizados.push({
+        id: uid(), data, valorReinvestido: Math.round(Math.min(valorVenda, valorNovo)*100)/100,
+        descricao: `Vender e reinvestir — ${a.nome} → ${nomeNovo}`,
+        valorDebitadoConta: diferencaCaixa>0 ? Math.round(diferencaCaixa*100)/100 : 0,
+        valorEntrouConta: diferencaCaixa<0 ? Math.round(Math.abs(diferencaCaixa)*100)/100 : 0,
+      });
 
       // 4. Ganho/perda de capital da venda — lançamento separado
       if(Math.abs(ganhoPerdaCapital)>0.004){
