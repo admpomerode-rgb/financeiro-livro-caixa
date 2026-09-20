@@ -34957,7 +34957,7 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
         <input type="text" inputmode="decimal" id="notaGanhoPerda" value="0" readonly style="background:var(--surface-alt);cursor:not-allowed;">
       </div>
       <div class="note" style="margin-top:0;">Isso aqui é só o resumo — cada venda vira um lançamento SEPARADO de ganho ou perda de capital (não soma tudo numa nota só). Pra o sistema calcular, preencha o "Preço médio de compra" em cada linha de venda acima. Ganho de capital entra como receita financeira (Rendimentos); perda de capital entra como despesa financeira (Despesas Financeiras) — um lançamento por ativo vendido.</div>
-      <div class="field"><label>Conta bancária de origem/destino</label>
+      <div class="field"><label id="notaContaLabel">Conta bancária de origem/destino</label>
         <select id="notaContaBancaria">${state.contas.map(c=>`<option value="${c.id}" ${(notaEmRevisao?notaEmRevisao.contaBancariaId===c.id:contaPreSelecionadaId===c.id)?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
       </div>
     </div>
@@ -34988,8 +34988,18 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     const match = subContaId ? doTicker.find(a=>a.subContaId===subContaId) : null;
     return (match || doTicker[0]).precoMedio ?? null;
   };
+  // Numa venda, detecta sozinho de qual subconta é o ativo (não faz sentido perguntar de novo algo
+  // que o sistema já sabe) — testada isoladamente antes de usar aqui.
+  const detectarSubcontaDaVenda = (ticker)=>{
+    if(!ticker) return null;
+    const contaSelecionadaId = document.getElementById('notaContaInvestimento')?.value || '';
+    const ativo = state.ativosInvestimento.find(a=>a.ticker===ticker && a.contaId===contaSelecionadaId && !a.resgatado && (a.quantidade||0)>0);
+    if(!ativo || !ativo.subContaId) return null;
+    return state.subcontasInvestimento.find(s=>s.id===ativo.subContaId) || null;
+  };
   const linhaOperacaoHTML = (op, idx)=>{
     const ehVenda = op.tipo==='V';
+    const subcontaDetectada = ehVenda ? detectarSubcontaDaVenda(op.ticker) : null;
     const precoMedioSugerido = ehVenda ? (op.precoMedioCompra!=null ? op.precoMedioCompra : precoMedioAtivo(op.ticker, op.subContaId)) : null;
     const qtdNum = numBR(op.quantidade)||0, precoNum = numBR(op.preco)||0, precoMedioNum = numBR(precoMedioSugerido)||0;
     const ganhoCalc = ehVenda && precoMedioSugerido!=null ? (precoNum-precoMedioNum)*qtdNum : null;
@@ -35011,13 +35021,24 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
       <div class="field" style="max-width:90px;"><label>Qtd</label><input type="text" inputmode="decimal" class="op-qtd" value="${op.quantidade||''}"></div>
       <div class="field"><label>Preço unit.</label><input type="text" inputmode="decimal" class="op-preco" value="${op.preco||''}"></div>
       <div class="field" style="max-width:120px;"><label>Total</label><input type="text" class="op-total-display mono" value="${qtdNum && precoNum ? brl(qtdNum*precoNum) : ''}" readonly style="background:var(--bone);color:var(--text-soft);font-weight:600;"></div>
+      ${ehVenda ? (subcontaDetectada ? `
+      <div class="field" style="min-width:150px;"><label>Subconta (detectada sozinha)</label>
+        <input type="text" class="mono" value="${escapeHTML(subcontaDetectada.nome)}" readonly style="background:var(--bone);color:var(--text-soft);font-weight:600;">
+        <input type="hidden" class="op-subconta" value="${subcontaDetectada.id}">
+      </div>` : `
+      <div class="field" style="min-width:150px;"><label>Subconta (de onde está saindo)</label>
+        <select class="op-subconta">
+          <option value="">— nenhuma —</option>
+          ${opcoesSubcontaRV()}
+        </select>
+      </div>`) : `
       <div class="field" style="min-width:150px;"><label>Subconta</label>
         <select class="op-subconta">
           <option value="">— nenhuma —</option>
           ${opcoesSubcontaRV()}
           <option value="__nova__">+ Criar nova…</option>
         </select>
-      </div>
+      </div>`}
       <button type="button" class="icon-btn btn-remover-op" style="margin-bottom:14px;">✕</button>
       ${ehVenda ? `
       <div class="field" style="max-width:140px;"><label>Preço médio de compra</label><input type="text" inputmode="decimal" class="op-preco-medio" value="${precoMedioSugerido!=null?precoMedioSugerido:''}" placeholder="0,00"></div>
@@ -35072,6 +35093,13 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     const { tipo, valor } = calcularLancamentosNota(totalC, totalV);
     const avisoEl = document.getElementById('notaReinvestimentoAviso');
     const liquidoEl = document.getElementById('notaLiquido');
+    const contaLabelEl = document.getElementById('notaContaLabel');
+    if(contaLabelEl){
+      contaLabelEl.textContent = (tipo==='reinvestimento-sai' || tipo==='reinvestimento-sobra') ? 'Conta bancária (só a diferença passa por ela)'
+        : tipo==='reinvestimento-exato' ? 'Conta bancária (nada mexe nela — deixe a de sempre)'
+        : tipo==='so-venda' ? 'Conta bancária de destino (onde entra o dinheiro da venda)'
+        : 'Conta bancária de origem (de onde sai o dinheiro da compra)';
+    }
     if(avisoEl){
       if(tipo==='reinvestimento-sai' || tipo==='reinvestimento-sobra' || tipo==='reinvestimento-exato'){
         avisoEl.style.display = 'block';
