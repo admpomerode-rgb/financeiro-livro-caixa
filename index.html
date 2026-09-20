@@ -1336,6 +1336,19 @@ window.addEventListener('beforeunload', (e)=>{
     e.returnValue = '';
   }
 });
+// beforeunload sozinho não é confiável em celular — muitos navegadores mobile (e o modo PWA
+// instalado) simplesmente ignoram esse evento, sem mostrar aviso nenhum e sem esperar nada. Isso
+// já causou perda de dado de verdade: um F5, troca de app ou bloqueio de tela dentro da janela de
+// 500ms do debounce (ou com um salvamento ainda em andamento) fazia a mudança nunca chegar no
+// Firestore — ao reabrir, voltava a versão antiga. visibilitychange dispara de forma confiável
+// nesses casos (app indo pra segundo plano), então usamos ele como salvamento de segurança extra.
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState==='hidden' && saveTimeoutPendente){
+    clearTimeout(saveTimeout);
+    saveTimeoutPendente = false;
+    salvarStateNoFirestore().catch(e=>console.error('Erro ao salvar no Firestore (visibilitychange):', e));
+  }
+});
 
 // Log de auditoria removido (usuário pediu, ele nunca tinha tela pra ser visto e só ocupava
 // espaço) — mantida como função vazia pra não precisar mexer nos ~41 lugares que a chamavam.
