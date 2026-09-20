@@ -2408,6 +2408,13 @@ function custoAtivo(a){
   if(a.tipoAtivo==='rendafixa' || a.tipoAtivo==='interno' || a.manual) return a.valorAplicado||0;
   return (a.quantidade||0) * (a.precoMedio||0);
 }
+// Vender um ativo e reinvestir em outro na hora — só a DIFERENÇA sai/entra da conta bancária,
+// o ganho/perda de capital da venda é lançamento separado. Testada isoladamente antes de usar.
+function calcularVendaReinvestimento(valorVenda, valorAplicadoOrigem, valorNovoAtivo){
+  const ganhoPerdaCapital = Math.round((valorVenda - valorAplicadoOrigem) * 100) / 100;
+  const diferencaCaixa = Math.round((valorNovoAtivo - valorVenda) * 100) / 100; // >0 sai da conta, <0 entra
+  return { ganhoPerdaCapital, diferencaCaixa };
+}
 function totalSubconta(subcontaId){
   const s = state.subcontasInvestimento.find(x=>x.id===subcontaId);
   if(s && s.valorManual!=null) return s.valorManual;
@@ -10578,6 +10585,7 @@ function rowAtivoHTML(a){
       <span class="mono" style="font-weight:600;">${brl(valor)}</span>
       <div class="row-actions">
         ${isRF ? `<button class="icon-btn" data-action="resgatar-ativo-rf" data-id="${a.id}" title="Registrar resgate">💰</button>` : ''}
+        ${!a.resgatado ? `<button class="icon-btn" data-action="vender-reinvestir-ativo" data-id="${a.id}" title="Vender e reinvestir em outro ativo">🔁</button>` : ''}
         ${isManual ? `<button class="icon-btn" data-action="atualizar-valor-ativo" data-id="${a.id}" title="Atualizar valor">🔄</button>` : ''}
         <button class="icon-btn" data-action="editar-ativo" data-id="${a.id}" title="Editar">✎</button>
         <button class="icon-btn" data-action="excluir-ativo" data-id="${a.id}" title="Excluir">✕</button>
@@ -29033,6 +29041,9 @@ function attachViewHandlers(){
   document.querySelectorAll('[data-action="resgatar-ativo-rf"]').forEach(btn=>{
     btn.addEventListener('click', ()=> openResgateModal(btn.dataset.id));
   });
+  document.querySelectorAll('[data-action="vender-reinvestir-ativo"]').forEach(btn=>{
+    btn.addEventListener('click', ()=> openVenderReinvestirModal(btn.dataset.id));
+  });
   document.querySelectorAll('[data-action="realocar-ativo-orfao"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       if(!state.contasInvestimento.length){ showToast('Crie uma conta de investimento primeiro'); return; }
@@ -36943,6 +36954,153 @@ function openResgateModal(ativoId){
     }finally{
       const btn_btnConfirmarResgate_Fim = document.getElementById('btnConfirmarResgate');
       if(btn_btnConfirmarResgate_Fim) btn_btnConfirmarResgate_Fim.disabled = false;
+    }
+  });
+}
+
+function openVenderReinvestirModal(ativoId){
+  const a = state.ativosInvestimento.find(x=>x.id===ativoId);
+  if(!a) return;
+  const custo = custoAtivo(a);
+  const valorSugerido = valorAtivo(a);
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Vender e reinvestir — ${escapeHTML(a.nome||'')}</h3>
+    <div class="note" style="margin-top:0;">Vende esse ativo e usa o valor pra comprar outro na hora — só a <strong>diferença</strong> mexe na sua conta bancária, não o valor cheio. O ganho ou perda de capital dessa venda vira lançamento separado, e isso não conta como aporte novo nos relatórios.</div>
+
+    <label style="font-size:12.5px;font-weight:700;display:block;margin:14px 0 6px;">1. Venda de "${escapeHTML(a.nome||'')}"</label>
+    <div class="note" style="margin-top:0;">Valor aplicado nele: <strong>${brl(custo)}</strong></div>
+    <div class="field"><label>Valor de venda (R$)</label><input type="text" inputmode="decimal" id="vrValorVenda" value="${brl(valorSugerido).replace('R$ ','')}"></div>
+    <div class="note" id="vrGanhoPerdaPreview" style="margin-top:0;"></div>
+
+    <label style="font-size:12.5px;font-weight:700;display:block;margin:16px 0 6px;">2. Novo ativo comprado com esse dinheiro</label>
+    <div class="field"><label>Nome do novo ativo</label><input type="text" id="vrNomeNovo" placeholder="Ex: Tesouro Selic 2029"></div>
+    <div class="field">
+      <label>Classe</label>
+      <div class="toggle-row" id="vrClasseToggle">
+        <button type="button" data-classe="rendafixa" class="active">Renda Fixa</button>
+        <button type="button" data-classe="renda_variavel">Renda Variável (manual)</button>
+        <button type="button" data-classe="interno">Na Empresa</button>
+      </div>
+    </div>
+    <div class="field"><label>Valor investido no novo ativo (R$)</label><input type="text" inputmode="decimal" id="vrValorNovo" value="${brl(valorSugerido).replace('R$ ','')}"></div>
+    <div class="field-row" id="vrCamposRF">
+      <div class="field"><label>Taxa anual (% a.a., opcional)</label><input type="text" inputmode="decimal" id="vrTaxaAnual"></div>
+      <div class="field"><label>Vencimento (opcional)</label><input type="date" id="vrVencimento"></div>
+    </div>
+    <div class="field">
+      <label>Conta bancária de referência (por onde passa a diferença, se houver)</label>
+      <select id="vrConta">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select>
+    </div>
+    <div class="field"><label>Data da operação</label><input type="date" id="vrData" value="${todayISO()}"></div>
+    <div class="note" id="vrDiferencaPreview" style="margin-top:0;"></div>
+
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarVenderReinvestir">Confirmar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+
+  let classeAtual = 'rendafixa';
+  document.getElementById('vrClasseToggle').addEventListener('click', (e)=>{
+    const btn = e.target.closest('button[data-classe]');
+    if(!btn) return;
+    classeAtual = btn.dataset.classe;
+    document.querySelectorAll('#vrClasseToggle button').forEach(b=>b.classList.toggle('active', b.dataset.classe===classeAtual));
+    document.getElementById('vrCamposRF').style.display = classeAtual==='rendafixa' ? 'flex' : 'none';
+  });
+
+  const valorVendaEl = document.getElementById('vrValorVenda');
+  const valorNovoEl = document.getElementById('vrValorNovo');
+  const ganhoPreview = document.getElementById('vrGanhoPerdaPreview');
+  const diferencaPreview = document.getElementById('vrDiferencaPreview');
+  const atualizarPreviews = ()=>{
+    const { ganhoPerdaCapital, diferencaCaixa } = calcularVendaReinvestimento(numBR(valorVendaEl.value)||0, custo, numBR(valorNovoEl.value)||0);
+    ganhoPreview.innerHTML = Math.abs(ganhoPerdaCapital)>0.004
+      ? `${ganhoPerdaCapital>=0?'Ganho':'Perda'} de capital: <strong style="color:${ganhoPerdaCapital>=0?'var(--success)':'var(--danger)'}">${brl(Math.abs(ganhoPerdaCapital))}</strong> (${ganhoPerdaCapital>=0?'entra como receita financeira':'entra como despesa financeira'})`
+      : 'Sem ganho ou perda de capital nessa venda.';
+    diferencaPreview.innerHTML = Math.abs(diferencaCaixa)>0.004
+      ? `${diferencaCaixa>=0?'Sai':'Entra'} da conta bancária: <strong>${brl(Math.abs(diferencaCaixa))}</strong>`
+      : 'Reinveste exatamente o valor vendido — nada mexe na conta bancária.';
+  };
+  valorVendaEl.addEventListener('input', atualizarPreviews);
+  valorNovoEl.addEventListener('input', atualizarPreviews);
+  atualizarPreviews();
+
+  document.getElementById('btnConfirmarVenderReinvestir').addEventListener('click', ()=>{
+    const btnEl = document.getElementById('btnConfirmarVenderReinvestir');
+    if(btnEl.disabled) return;
+    btnEl.disabled = true;
+    try{
+      const valorVenda = numBR(valorVendaEl.value);
+      const valorNovo = numBR(valorNovoEl.value);
+      const nomeNovo = document.getElementById('vrNomeNovo').value.trim();
+      const contaId = document.getElementById('vrConta').value;
+      const data = document.getElementById('vrData').value || todayISO();
+      if(isNaN(valorVenda) || valorVenda<0){ showToast('Preencha o valor de venda'); btnEl.disabled=false; return; }
+      if(isNaN(valorNovo) || valorNovo<=0){ showToast('Preencha o valor do novo ativo'); btnEl.disabled=false; return; }
+      if(!nomeNovo){ showToast('Dê um nome pro novo ativo'); btnEl.disabled=false; return; }
+      if(!contaId){ showToast('Escolha a conta bancária de referência'); btnEl.disabled=false; return; }
+
+      const { ganhoPerdaCapital, diferencaCaixa } = calcularVendaReinvestimento(valorVenda, custo, valorNovo);
+
+      // 1. Baixa o ativo vendido
+      if(a.tipoAtivo==='rendafixa'){
+        a.resgatado = true; a.dataResgate = data; a.valorResgatado = valorVenda;
+      } else if(a.manual || a.tipoAtivo==='interno'){
+        a.resgatado = true; a.dataResgate = data; a.valorResgatado = valorVenda;
+      } else {
+        a.quantidade = 0; a.resgatado = true; a.dataResgate = data; a.valorResgatado = valorVenda; // ativo de mercado (RV com ticker) — venda total dessa posição
+      }
+
+      // 2. Cria o novo ativo (sempre como ativo manual — RF, RV manual ou Interno)
+      state.ativosInvestimento.push({
+        id: uid(), tipoAtivo: classeAtual, manual: classeAtual==='renda_variavel',
+        contaId: a.contaId, subContaId: a.subContaId||null,
+        nome: nomeNovo, valorAplicado: valorNovo, valorAtualManual: null,
+        dataAplicacao: data, taxaAnual: classeAtual==='rendafixa' ? (numBR(document.getElementById('vrTaxaAnual').value)||0) : null,
+        vencimento: classeAtual==='rendafixa' ? (document.getElementById('vrVencimento').value||null) : null,
+        reinvestidoDe: a.id,
+      });
+
+      // 3. Só a diferença mexe na conta — UM lançamento só, marcado como reinvestimento (não conta
+      // como aporte novo em relatórios que olham esse campo)
+      if(Math.abs(diferencaCaixa)>0.004){
+        state.lancamentos.push({
+          id: uid(), tipo: diferencaCaixa>0?'saida':'entrada', categoria:'Investimentos',
+          descricao: `${diferencaCaixa>0?'Reinvestimento (diferença)':'Sobra de reinvestimento'} — ${a.nome} → ${nomeNovo}`,
+          valor: Math.round(Math.abs(diferencaCaixa)*100)/100, contaId,
+          dataVencimento: data, status: diferencaCaixa>0?'pago':'recebido', dataPagamento: data,
+          origem:'investimento', reinvestimento: true,
+          criadoEm: new Date().toISOString()
+        });
+      }
+
+      // 4. Ganho/perda de capital da venda — lançamento separado
+      if(Math.abs(ganhoPerdaCapital)>0.004){
+        if(ganhoPerdaCapital>0){
+          state.lancamentos.push({
+            id: uid(), tipo:'entrada', categoria:'Rendimentos', descricao:`Ganho de capital — venda de ${a.nome}`,
+            valor: Math.round(ganhoPerdaCapital*100)/100, contaId, dataVencimento: data, status:'recebido', dataPagamento: data,
+            reinvestimento: true, criadoEm: new Date().toISOString()
+          });
+        } else {
+          state.lancamentos.push({
+            id: uid(), tipo:'saida', categoria:'Despesas Financeiras', descricao:`Perda de capital — venda de ${a.nome}`,
+            valor: Math.round(Math.abs(ganhoPerdaCapital)*100)/100, contaId, dataVencimento: data, status:'pago', dataPagamento: data,
+            reinvestimento: true, criadoEm: new Date().toISOString()
+          });
+        }
+      }
+
+      registrarLog('Venda e reinvestimento registrados', `"${a.nome}" (${brl(valorVenda)}) → "${nomeNovo}" (${brl(valorNovo)})`);
+      persist(); closeModal(); render();
+      showToast('Venda e reinvestimento registrados');
+    } finally {
+      const btnFim = document.getElementById('btnConfirmarVenderReinvestir');
+      if(btnFim) btnFim.disabled = false;
     }
   });
 }
