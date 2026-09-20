@@ -1139,6 +1139,7 @@ function aplicarMigracoes(s){
   if(!s.orcamentosProcessos) s.orcamentosProcessos = [];
   if(!s.orcamentosProcessosContador) s.orcamentosProcessosContador = 0;
   if(!s.osVkIndustrial) s.osVkIndustrial = []; // espelho local (fetch manual) da coleção "os_processos" compartilhada
+  if(!s.saldosReinvestimento) s.saldosReinvestimento = []; // dinheiro de venda/resgate ainda não reinvestido — fica "guardado" aqui até você usar numa aplicação nova ou decidir deixar como caixa
   if(!s.contas) s.contas = [];
   // Migração: garante uma conta padrão e associa lançamentos antigos sem conta
   if(s.contas.length===0){
@@ -2427,6 +2428,25 @@ function calcularVendaReinvestimento(valorVenda, valorAplicadoOrigem, valorNovoA
   const ganhoPerdaCapital = Math.round((valorVenda - valorAplicadoOrigem) * 100) / 100;
   const diferencaCaixa = Math.round((valorNovoAtivo - valorVenda) * 100) / 100; // >0 sai da conta, <0 entra
   return { ganhoPerdaCapital, diferencaCaixa };
+}
+// Nota de corretagem com compra E venda juntas = reinvestimento — só a diferença deve mexer na
+// conta bancária. Testada isoladamente antes de usar.
+function calcularLancamentosNota(totalCompras, totalVendas){
+  const ehReinvestimento = totalCompras>0 && totalVendas>0;
+  if(!ehReinvestimento){
+    return { tipo: totalCompras>0?'so-compra':(totalVendas>0?'so-venda':'nenhuma'), valor: totalCompras||totalVendas||0 };
+  }
+  const diferenca = Math.round((totalCompras - totalVendas)*100)/100;
+  if(Math.abs(diferenca)<0.005) return { tipo:'reinvestimento-exato', valor: 0 };
+  return { tipo: diferenca>0?'reinvestimento-sai':'reinvestimento-sobra', valor: Math.abs(diferenca) };
+}
+// Usar um saldo "guardado" (de venda/resgate anterior) numa aplicação nova — calcula quanto
+// realmente sai da conta e quanto sobra do saldo pra continuar disponível. Testada isoladamente.
+function aplicarSaldoDisponivel(valorInvestimento, valorSaldoDisponivel){
+  const usado = Math.min(valorInvestimento, valorSaldoDisponivel);
+  const debitarDaConta = Math.round((valorInvestimento - usado) * 100) / 100;
+  const saldoRestante = Math.round((valorSaldoDisponivel - usado) * 100) / 100;
+  return { usado: Math.round(usado*100)/100, debitarDaConta, saldoRestante };
 }
 function totalSubconta(subcontaId){
   const s = state.subcontasInvestimento.find(x=>x.id===subcontaId);
@@ -34823,6 +34843,7 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
       <label style="font-size:12.5px;font-weight:600;display:block;margin:10px 0 6px;">Operações identificadas</label>
       <div id="notaOperacoesTable"></div>
       <button type="button" class="btn ghost sm" id="btnAdicionarLinhaOp" style="margin-top:8px;">+ Adicionar linha</button>
+      <div class="note" id="notaReinvestimentoAviso" style="margin-top:8px;display:none;"></div>
 
       <label style="font-size:12.5px;font-weight:600;display:block;margin:16px 0 6px;">Taxas da nota (R$)</label>
       <div class="field-row">
@@ -34959,6 +34980,26 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
       const preco = numBR(row.querySelector('.op-preco').value)||0;
       display.value = (qtd && preco) ? brl(qtd*preco) : '';
     });
+    // Detecta compra+venda juntas na mesma nota = reinvestimento — avisa e já sugere o valor
+    // líquido certo (só a diferença), em vez do usuário ter que calcular e digitar isso na mão.
+    const ops = lerOperacoesDoDOM();
+    const totalC = ops.filter(o=>o.tipo==='C').reduce((s,o)=>s+(numBR(o.quantidade)||0)*(numBR(o.preco)||0),0);
+    const totalV = ops.filter(o=>o.tipo==='V').reduce((s,o)=>s+(numBR(o.quantidade)||0)*(numBR(o.preco)||0),0);
+    const { tipo, valor } = calcularLancamentosNota(totalC, totalV);
+    const avisoEl = document.getElementById('notaReinvestimentoAviso');
+    const liquidoEl = document.getElementById('notaLiquido');
+    if(avisoEl){
+      if(tipo==='reinvestimento-sai' || tipo==='reinvestimento-sobra' || tipo==='reinvestimento-exato'){
+        avisoEl.style.display = 'block';
+        avisoEl.style.borderColor = 'var(--accent)';
+        avisoEl.innerHTML = tipo==='reinvestimento-exato'
+          ? `🔁 Compra e venda identificadas juntas nessa nota — é um reinvestimento, e o valor comprado bate exatamente com o vendido. <strong>Nada mexe na conta bancária.</strong>`
+          : `🔁 Compra e venda identificadas juntas nessa nota — é um reinvestimento. Só a diferença de <strong>${brl(valor)}</strong> ${tipo==='reinvestimento-sai'?'sai da':'entra na'} conta (preenchido abaixo, mas você pode ajustar).`;
+        if(liquidoEl && !liquidoEl.dataset.editadoManualmente) liquidoEl.value = valor ? brl(valor).replace('R$ ','') : '0';
+      } else {
+        avisoEl.style.display = 'none';
+      }
+    }
   };
   const recalcularGanhosVenda = ()=>{
     let somaGanhos = 0, temAlgumCalculado = false;
@@ -35015,6 +35056,7 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     operacoesAtuais.push({ tipo:'C', tipoAtivo:'acao', ticker:'', quantidade:'', preco:'', subContaId:null });
     pintarOperacoes();
   });
+  document.getElementById('notaLiquido').addEventListener('input', (e)=>{ e.target.dataset.editadoManualmente = 'true'; });
 
   // Data de débito acompanha o pregão (D+2 úteis) até o usuário mexer nela manualmente
   let debitoEditadoManualmente = !!(notaEmRevisao && notaEmRevisao.dataDebito);
@@ -35264,27 +35306,48 @@ function publicarNotaCorretagem(nota){
 
   const numeroNota = (nota.numeroNota||'').trim();
   const sufixoNota = numeroNota ? ` — Nota N° ${numeroNota}` : '';
+  const descCompras = () => linhas.filter(l=>l.tipo==='C').map(l=>`${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', ');
+  const descVendas = () => linhas.filter(l=>l.tipo==='V').map(l=>`${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', ');
 
-  if(totalCompras>0){
+  // Uma nota com compra E venda juntas é reinvestimento — o dinheiro da venda nem chegou a sair
+  // pra fora, então só a DIFERENÇA deve mexer na conta bancária, num lançamento só (não dois de
+  // valor cheio, que inflam "quanto entrou/saiu" e contam a venda inteira como aporte novo).
+  // Testada isoladamente antes de usar aqui.
+  const { tipo: tipoLancamentoNota, valor: valorLancamentoNota } = calcularLancamentosNota(totalCompras, totalVendas);
+
+  if(tipoLancamentoNota==='so-compra'){
     state.lancamentos.push({
       id: uid(), tipo:'saida', categoria:'Investimentos',
       descricao: `Compra de ativos${corretora ? ' — '+corretora : ''} (nota de corretagem)${sufixoNota}`,
-      valor: Math.round(totalCompras*100)/100, contaId: contaBancariaId, status: statusSaida,
+      valor: Math.round(valorLancamentoNota*100)/100, contaId: contaBancariaId, status: statusSaida,
       dataVencimento: dataDebito, dataPagamento,
-      origem:'investimento', numeroNota: numeroNota||null, observacao: `${numeroNota?`Nota N° ${numeroNota} · `:''}Operações: `+linhas.filter(l=>l.tipo==='C').map(l=>`${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', '),
+      origem:'investimento', numeroNota: numeroNota||null, observacao: `${numeroNota?`Nota N° ${numeroNota} · `:''}Operações: `+descCompras(),
       criadoEm: new Date().toISOString()
     });
-  }
-  if(totalVendas>0){
+  } else if(tipoLancamentoNota==='so-venda'){
     state.lancamentos.push({
       id: uid(), tipo:'entrada', categoria:'Investimentos',
       descricao: `Venda de ativos${corretora ? ' — '+corretora : ''} (nota de corretagem)${sufixoNota}`,
-      valor: Math.round(totalVendas*100)/100, contaId: contaBancariaId, status: statusEntrada,
+      valor: Math.round(valorLancamentoNota*100)/100, contaId: contaBancariaId, status: statusEntrada,
       dataVencimento: dataDebito, dataPagamento,
-      origem:'investimento', numeroNota: numeroNota||null, observacao: `${numeroNota?`Nota N° ${numeroNota} · `:''}Operações: `+linhas.filter(l=>l.tipo==='V').map(l=>`${l.quantidade} ${l.ticker} a ${brl(l.preco)}`).join(', '),
+      origem:'investimento', numeroNota: numeroNota||null, observacao: `${numeroNota?`Nota N° ${numeroNota} · `:''}Operações: `+descVendas(),
+      criadoEm: new Date().toISOString()
+    });
+    state.saldosReinvestimento.push({ id: uid(), descricao: `Venda de ${descVendas()}${corretora?' — '+corretora:''}`, valor: Math.round(valorLancamentoNota*100)/100, data: dataDebito, usado:false, contaId: contaBancariaId });
+  } else if(tipoLancamentoNota==='reinvestimento-sai' || tipoLancamentoNota==='reinvestimento-sobra'){
+    state.lancamentos.push({
+      id: uid(), tipo: tipoLancamentoNota==='reinvestimento-sai'?'saida':'entrada', categoria:'Investimentos',
+      descricao: `Reinvestimento (diferença)${corretora ? ' — '+corretora : ''} (nota de corretagem)${sufixoNota}`,
+      valor: Math.round(valorLancamentoNota*100)/100, contaId: contaBancariaId,
+      status: tipoLancamentoNota==='reinvestimento-sai'?statusSaida:statusEntrada,
+      dataVencimento: dataDebito, dataPagamento,
+      origem:'investimento', reinvestimento: true, numeroNota: numeroNota||null,
+      observacao: `${numeroNota?`Nota N° ${numeroNota} · `:''}Comprou: ${descCompras()} · Vendeu: ${descVendas()}`,
       criadoEm: new Date().toISOString()
     });
   }
+  // tipoLancamentoNota==='reinvestimento-exato' → sem lançamento de caixa, nada mexeu na conta
+
   if(Math.abs(ganhoPerdaCapital)>0.004){
     if(ganhoPerdaCapital>0){
       state.lancamentos.push({
@@ -36291,6 +36354,7 @@ function openInvestirModal(contaBancariaId){
   modal.innerHTML = `
     <h3>Investir — a partir de ${escapeHTML(contaBancaria.nome)}</h3>
     <p style="font-size:12.5px;color:var(--text-soft);margin-bottom:14px;">Saldo disponível: <strong class="mono">${brl(saldoConta(contaBancariaId))}</strong></p>
+    <div id="invSaldosDisponiveisBox"></div>
     <div class="field">
       <label>Tipo de investimento</label>
       <div class="toggle-row" id="invTipoToggle">
@@ -36366,6 +36430,24 @@ function openInvestirModal(contaBancariaId){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('btnUsarNotaCorretagem').addEventListener('click', ()=>openImportarNotaModal(contaBancariaId));
+
+  const saldosDisponiveis = state.saldosReinvestimento.filter(s=>!s.usado && s.valor>0.004);
+  if(saldosDisponiveis.length){
+    document.getElementById('invSaldosDisponiveisBox').innerHTML = `
+      <div class="note" style="margin-bottom:14px;border-color:var(--accent);">
+        <strong>💰 Você tem dinheiro de venda/resgate anterior ainda não reinvestido:</strong>
+        <div style="margin-top:8px;">
+          <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;cursor:pointer;">
+            <input type="radio" name="invSaldoUsar" value="" checked> Não usar — sai valor novo da conta normalmente
+          </label>
+          ${saldosDisponiveis.map(s=>`
+          <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;cursor:pointer;">
+            <input type="radio" name="invSaldoUsar" value="${s.id}"> ${escapeHTML(s.descricao)} — <strong>${brl(s.valor)}</strong> (${fmtDate(s.data)})
+          </label>`).join('')}
+        </div>
+        <div style="margin-top:6px;">Se usar, esse valor entra como reinvestimento — só a diferença (se sobrar aplicação a mais) sai da conta de verdade.</div>
+      </div>`;
+  }
 
   let tipoInv = 'rendafixa';
   const grupos = { rendafixa:'grupoInvRendaFixa', rendavariavel:'grupoInvRendaVariavel', interno:'grupoInvInterno' };
@@ -36477,17 +36559,36 @@ function openInvestirModal(contaBancariaId){
     state.ativosInvestimento.push({ id: ativoId, contaId: contaInvId, subContaId, ...ativoPayload });
 
     const dataMov = ativoPayload.dataAplicacao || document.getElementById('invDataOperacao')?.value || todayISO();
-    state.lancamentos.push({
-      id: uid(), tipo:'saida', categoria:'Investimentos',
-      descricao: `Aplicação — ${nomeAtivo}`,
-      valor: valorTotal, contaId: contaBancariaId, status:'pago',
-      dataVencimento: dataMov, dataPagamento: dataMov,
-      origem:'investimento', investimentoAtivoId: ativoId,
-      criadoEm: new Date().toISOString()
-    });
+
+    // Se escolheu usar um saldo de venda/resgate anterior, só a diferença sai da conta de verdade
+    // — testado isoladamente antes de usar aqui.
+    const saldoEscolhidoId = document.querySelector('input[name="invSaldoUsar"]:checked')?.value || null;
+    let observacaoReinvestimento = '';
+    let valorParaDebitar = valorTotal;
+    if(saldoEscolhidoId){
+      const saldo = state.saldosReinvestimento.find(s=>s.id===saldoEscolhidoId);
+      if(saldo){
+        const { usado, debitarDaConta, saldoRestante } = aplicarSaldoDisponivel(valorTotal, saldo.valor);
+        valorParaDebitar = debitarDaConta;
+        saldo.valor = saldoRestante;
+        saldo.usado = saldoRestante<=0.004;
+        observacaoReinvestimento = ` — reinvestindo ${brl(usado)} de "${saldo.descricao}"`;
+      }
+    }
+
+    if(valorParaDebitar>0.004){
+      state.lancamentos.push({
+        id: uid(), tipo:'saida', categoria:'Investimentos',
+        descricao: `Aplicação — ${nomeAtivo}${observacaoReinvestimento}`,
+        valor: Math.round(valorParaDebitar*100)/100, contaId: contaBancariaId, status:'pago',
+        dataVencimento: dataMov, dataPagamento: dataMov,
+        origem:'investimento', investimentoAtivoId: ativoId, reinvestimento: !!saldoEscolhidoId,
+        criadoEm: new Date().toISOString()
+      });
+    }
 
     persist(); closeModal(); render();
-    showToast(`Investimento de ${brl(valorTotal)} realizado`);
+    showToast(`Investimento de ${brl(valorTotal)} realizado${observacaoReinvestimento?' (reinvestimento)':''}`);
   
     }finally{
       const btn_btnSalvarInvestimento_Fim = document.getElementById('btnSalvarInvestimento');
@@ -36960,6 +37061,9 @@ function openResgateModal(ativoId){
     a.dataResgate = dataResgate;
     a.valorResgatado = valorRetornado;
     a.rendimentoResgate = rendimento;
+    if(valorRetornado>0){
+      state.saldosReinvestimento.push({ id: uid(), descricao: `Resgate de "${a.nome}"`, valor: valorRetornado, data: dataResgate, usado:false, contaId });
+    }
     registrarLog('Resgate de renda fixa registrado', `"${a.nome}" — retornou ${brl(valorRetornado)} (rendimento ${brl(rendimento)})`);
     persist(); closeModal(); render();
     showToast('Resgate lançado na conta');
