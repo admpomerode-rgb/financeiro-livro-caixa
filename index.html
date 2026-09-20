@@ -34840,6 +34840,13 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
         <div class="field"><label>Nº da nota</label><input type="text" id="notaNumero" placeholder="Ex: 12345"></div>
         <div class="field"><label>Corretora</label><input type="text" id="notaCorretora" placeholder="Ex: XP Investimentos"></div>
       </div>
+      <div class="field">
+        <label>Conta de investimento (área de Investimentos)</label>
+        <select id="notaContaInvestimento">
+          ${(state.contasInvestimento.filter(c=>c.tipo==='renda_variavel')).map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('') || `<option value="">Nenhuma cadastrada ainda</option>`}
+        </select>
+        <div class="note" style="margin-top:6px;">Escolhida aqui, as subcontas abaixo mostram só as dessa conta — sem misturar com as de outras corretoras.</div>
+      </div>
       <label style="font-size:12.5px;font-weight:600;display:block;margin:10px 0 6px;">Operações identificadas</label>
       <div id="notaOperacoesTable"></div>
       <button type="button" class="btn ghost sm" id="btnAdicionarLinhaOp" style="margin-top:8px;">+ Adicionar linha</button>
@@ -34890,19 +34897,14 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
   let arquivoNomeAtual = notaEmRevisao ? (notaEmRevisao.arquivoNome||'') : '';
 
   const opcoesSubcontaRV = ()=>{
-    const contasRV = state.contasInvestimento.filter(c=>c.tipo==='renda_variavel');
-    const idsContasRV = new Set(contasRV.map(c=>c.id));
-    const subs = state.subcontasInvestimento.filter(s=>idsContasRV.has(s.contaId));
-    const mostrarNomeConta = contasRV.length>1;
-    return subs.map(s=>{
-      const nomeConta = mostrarNomeConta ? (contasRV.find(c=>c.id===s.contaId)?.nome || '') : '';
-      return `<option value="${s.id}">${escapeHTML(s.nome)}${nomeConta?` (${escapeHTML(nomeConta)})`:''}</option>`;
-    }).join('');
+    const contaSelecionadaId = document.getElementById('notaContaInvestimento')?.value || '';
+    const subs = state.subcontasInvestimento.filter(s=>s.contaId===contaSelecionadaId);
+    return subs.map(s=>`<option value="${s.id}">${escapeHTML(s.nome)}</option>`).join('');
   };
   const precoMedioAtivo = (ticker, subContaId)=>{
     if(!ticker) return null;
-    const idsContasRV = new Set(state.contasInvestimento.filter(c=>c.tipo==='renda_variavel').map(c=>c.id));
-    const doTicker = state.ativosInvestimento.filter(a=>idsContasRV.has(a.contaId) && a.ticker===ticker && !a.manual && !a.resgatado);
+    const contaSelecionadaId = document.getElementById('notaContaInvestimento')?.value || '';
+    const doTicker = state.ativosInvestimento.filter(a=>a.contaId===contaSelecionadaId && a.ticker===ticker && !a.manual && !a.resgatado);
     if(!doTicker.length) return null;
     const match = subContaId ? doTicker.find(a=>a.subContaId===subContaId) : null;
     return (match || doTicker[0]).precoMedio ?? null;
@@ -34957,12 +34959,15 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     if(selectEl.value!=='__nova__') return;
     const nome = (prompt('Nome da nova subconta (ex: MXRF11, SNEL11, Longo Prazo):')||'').trim();
     if(!nome){ selectEl.value=''; return; }
-    let contaAlvo = state.contasInvestimento.find(c=>c.tipo==='renda_variavel');
-    if(!contaAlvo){
-      contaAlvo = { id: uid(), nome:'Renda Variável', instituicao:'', instituicaoDominio:'', tipo:'renda_variavel', cor: CONTA_CORES[state.contasInvestimento.length % CONTA_CORES.length] };
+    const contaSelect = document.getElementById('notaContaInvestimento');
+    let contaAlvoId = contaSelect?.value || '';
+    if(!contaAlvoId){
+      const contaAlvo = { id: uid(), nome:'Renda Variável', instituicao:'', instituicaoDominio:'', tipo:'renda_variavel', cor: CONTA_CORES[state.contasInvestimento.length % CONTA_CORES.length] };
       state.contasInvestimento.push(contaAlvo);
+      contaAlvoId = contaAlvo.id;
+      if(contaSelect){ const opt = document.createElement('option'); opt.value = contaAlvo.id; opt.textContent = contaAlvo.nome; contaSelect.appendChild(opt); contaSelect.value = contaAlvo.id; }
     }
-    const nova = { id: uid(), contaId: contaAlvo.id, nome, cor: CONTA_CORES[state.subcontasInvestimento.length % CONTA_CORES.length] };
+    const nova = { id: uid(), contaId: contaAlvoId, nome, cor: CONTA_CORES[state.subcontasInvestimento.length % CONTA_CORES.length] };
     state.subcontasInvestimento.push(nova);
     persist();
     document.querySelectorAll('.op-subconta').forEach(sel=>{
@@ -35057,6 +35062,12 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     pintarOperacoes();
   });
   document.getElementById('notaLiquido').addEventListener('input', (e)=>{ e.target.dataset.editadoManualmente = 'true'; });
+  document.getElementById('notaContaInvestimento')?.addEventListener('change', ()=>{
+    // Trocou de conta — as subcontas escolhidas nas linhas eram de outra conta, então zera pra não
+    // salvar um vínculo errado sem querer.
+    operacoesAtuais = lerOperacoesDoDOM().map(op=>({ ...op, subContaId:null }));
+    pintarOperacoes();
+  });
 
   // Data de débito acompanha o pregão (D+2 úteis) até o usuário mexer nela manualmente
   let debitoEditadoManualmente = !!(notaEmRevisao && notaEmRevisao.dataDebito);
@@ -35082,6 +35093,7 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     dataPregao: document.getElementById('notaData').value || todayISO(),
     dataDebito: document.getElementById('notaDataDebito').value || document.getElementById('notaData').value || todayISO(),
     corretora: document.getElementById('notaCorretora').value.trim(),
+    contaInvestimentoId: document.getElementById('notaContaInvestimento')?.value || '',
     numeroNota: document.getElementById('notaNumero').value.trim(),
     operacoes: lerOperacoesDoDOM(),
     taxas: {
@@ -35104,6 +35116,7 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     document.getElementById('notaData').value = notaEmRevisao.dataPregao || todayISO();
     document.getElementById('notaDataDebito').value = notaEmRevisao.dataDebito || addDiasUteis(notaEmRevisao.dataPregao, 2);
     document.getElementById('notaCorretora').value = notaEmRevisao.corretora || '';
+    if(notaEmRevisao.contaInvestimentoId) document.getElementById('notaContaInvestimento').value = notaEmRevisao.contaInvestimentoId;
     document.getElementById('notaNumero').value = notaEmRevisao.numeroNota || '';
     const t = notaEmRevisao.taxas || {};
     document.getElementById('notaTxCorretagem').value = t.corretagem || 0;
@@ -35265,7 +35278,7 @@ function publicarNotaCorretagem(nota){
   const totalVendas = linhas.filter(l=>l.tipo==='V').reduce((s,l)=>s+l.quantidade*l.preco,0);
   const ganhoPerdaCapital = nota.ganhoPerdaCapital || 0;
 
-  let contaInvPadrao = state.contasInvestimento.find(c=>c.tipo==='renda_variavel');
+  let contaInvPadrao = (nota.contaInvestimentoId && state.contasInvestimento.find(c=>c.id===nota.contaInvestimentoId)) || state.contasInvestimento.find(c=>c.tipo==='renda_variavel');
   if(!contaInvPadrao){
     contaInvPadrao = { id: uid(), nome:'Renda Variável', instituicao:'', instituicaoDominio:'', tipo:'renda_variavel', cor: CONTA_CORES[state.contasInvestimento.length % CONTA_CORES.length] };
     state.contasInvestimento.push(contaInvPadrao);
