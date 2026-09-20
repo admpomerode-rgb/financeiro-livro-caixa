@@ -1675,6 +1675,7 @@ function viewCustosMargemProdutos(){
 let previsaoDiasAtivo = 30;
 let orcamentoAnualAno = new Date().getFullYear();
 let descontosBonifPeriodo = 'mes';
+let reinvestimentosPeriodo = 'mes';
 let dreCentroAtivo = 'todos';
 let mesGlobalRef = todayISO().slice(0,7);
 let categoriaLancamentosAtual = null;
@@ -10854,6 +10855,7 @@ function viewRelatorios(){
     { id:'socios', icone:'🤝', nome:'Split entre Sócios', desc:'Divide o lucro/prejuízo do mês entre os sócios cadastrados, por percentual de participação' , cat:'Planejamento, Metas e Decisões' },
     { id:'orcamento_anual', icone:'📆', nome:'Orçamento Anual', desc:'Orçado x realizado do ano inteiro, com acompanhamento por trimestre' , cat:'Planejamento, Metas e Decisões' },
     { id:'descontos_bonificacoes', icone:'🏷️', nome:'Descontos e Bonificações', desc:'Pedidos com desconto aplicado e pedidos de bonificação, vindos do VK Industrial' , cat:'Vendas, Clientes e Comercial' },
+    { id:'reinvestimentos', icone:'🔁', nome:'Reinvestimentos', desc:'Quanto foi reinvestido (venda/resgate usado pra comprar outro ativo) x quanto foi aporte de dinheiro novo' , cat:'Investimentos e Patrimônio' },
   ];
   cards.forEach((c,i)=>{ c.numero = i+1; });
   const categoriasOrdem = ['Visão Geral e Diagnóstico','Caixa e Liquidez','Vendas, Clientes e Comercial','Custos, Despesas e Fornecedores','Produtos e Margem','Cartões e Dívidas','Investimentos e Patrimônio','Crescimento e Projeções','Planejamento, Metas e Decisões','Impostos e Calendários','Ferramentas, Simuladores e Automações'];
@@ -11958,6 +11960,70 @@ function renderSplitSocios(){
       ${state.socios.length ? `<div class="note" style="margin:0;border-radius:0;border-top:1px solid var(--line);">Soma das participações: <strong style="color:${Math.abs(somaPct-100)<0.5?'var(--success)':'var(--warn)'}">${somaPct}%</strong>${Math.abs(somaPct-100)>=0.5 ? ' — ajuste os percentuais pra somar 100%' : ''}</div>` : ''}
     </div>
     <div class="note" style="margin-top:0;">O valor de cada sócio é calculado sobre o resultado (lucro ou prejuízo) do mês selecionado no navegador de mês — isso é só um cálculo de referência, não gera lançamento nem transferência automática.</div>
+  `;
+}
+
+function renderRelatorioReinvestimentos(){
+  let de, ate, label;
+  const hoje = new Date();
+  if(reinvestimentosPeriodo==='ano'){
+    de = new Date(hoje.getFullYear(), 0, 1).toISOString().slice(0,10);
+    ate = todayISO();
+    label = 'Ano atual (' + hoje.getFullYear() + ')';
+  } else if(reinvestimentosPeriodo==='sempre'){
+    de = '0000-01-01'; ate = '9999-12-31'; label = 'Desde o início';
+  } else {
+    const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
+    de = `${mesGlobalRef}-01`;
+    const ultimoDiaMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
+    ate = mesGlobalRef === todayISO().slice(0,7) ? todayISO() : ultimoDiaMes;
+    label = new Date(anoM, mesM-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
+  }
+
+  const noPeriodo = l => l.dataVencimento>=de && l.dataVencimento<=ate;
+  const reinvestimentos = state.lancamentos.filter(l=>l.reinvestimento && l.categoria==='Investimentos' && noPeriodo(l)).sort((a,b)=>b.dataVencimento.localeCompare(a.dataVencimento));
+  const ganhosPerdas = state.lancamentos.filter(l=>l.reinvestimento && (l.categoria==='Rendimentos'||l.categoria==='Despesas Financeiras') && noPeriodo(l));
+  const aportesNovos = state.lancamentos.filter(l=>l.categoria==='Investimentos' && l.tipo==='saida' && !l.reinvestimento && noPeriodo(l));
+
+  const totalReinvestidoSaida = reinvestimentos.filter(l=>l.tipo==='saida').reduce((s,l)=>s+l.valor,0);
+  const totalReinvestidoEntrada = reinvestimentos.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+l.valor,0);
+  const totalAporteNovo = aportesNovos.reduce((s,l)=>s+l.valor,0);
+  const totalGanho = ganhosPerdas.filter(l=>l.categoria==='Rendimentos').reduce((s,l)=>s+l.valor,0);
+  const totalPerda = ganhosPerdas.filter(l=>l.categoria==='Despesas Financeiras').reduce((s,l)=>s+l.valor,0);
+  const saldosDisponiveisAgora = (state.saldosReinvestimento||[]).filter(s=>!s.usado && s.valor>0.004);
+
+  return `
+    <div class="report-controls">
+      <select id="reinvestimentosPeriodoSel">
+        <option value="mes" ${reinvestimentosPeriodo==='mes'?'selected':''}>Mês selecionado (${mesGlobalRef})</option>
+        <option value="ano" ${reinvestimentosPeriodo==='ano'?'selected':''}>Ano atual</option>
+        <option value="sempre" ${reinvestimentosPeriodo==='sempre'?'selected':''}>Desde o início</option>
+      </select>
+    </div>
+    <div class="note" style="margin-top:0;">${label}${reinvestimentosPeriodo==='sempre'?'':': '+fmtDate(de)+' até '+fmtDate(ate)} · reinvestimento = venda/resgate usado pra comprar outro ativo na hora, sem contar como aporte novo</div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:14px 0;">
+      <div class="card"><div class="label">Reinvestido (saiu da conta)</div><div class="value mono">${brl(totalReinvestidoSaida)}</div></div>
+      <div class="card"><div class="label">Sobra de reinvestimento (entrou)</div><div class="value mono">${brl(totalReinvestidoEntrada)}</div></div>
+      <div class="card"><div class="label">Aporte novo de verdade</div><div class="value mono" style="color:var(--accent);">${brl(totalAporteNovo)}</div></div>
+      <div class="card"><div class="label">Reinvestimentos no período</div><div class="value mono">${reinvestimentos.length}</div></div>
+    </div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:0 0 14px;">
+      <div class="card"><div class="label">Ganho de capital nas vendas</div><div class="value mono pos">${brl(totalGanho)}</div></div>
+      <div class="card"><div class="label">Perda de capital nas vendas</div><div class="value mono neg">${brl(totalPerda)}</div></div>
+    </div>
+    ${saldosDisponiveisAgora.length ? `
+    <div class="note" style="border-color:var(--accent);">💰 Tem ${brl(saldosDisponiveisAgora.reduce((s,x)=>s+x.valor,0))} de venda/resgate ainda não reinvestido, esperando pra ser usado na próxima aplicação: ${saldosDisponiveisAgora.map(s=>`${escapeHTML(s.descricao)} (${brl(s.valor)})`).join(', ')}</div>
+    ` : ''}
+    <div class="dash-section-label">Reinvestimentos no período</div>
+    <div class="panel">
+      <div class="panel-body" style="padding:0;">
+        ${reinvestimentos.length ? reinvestimentos.map(l=>`
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto;align-items:center;">
+            <div class="desc-cell"><div>${escapeHTML(l.descricao)}</div><div class="cat">${fmtDate(l.dataVencimento)}${l.observacao?' · '+escapeHTML(l.observacao):''}</div></div>
+            <span class="mono" style="font-weight:600;color:${l.tipo==='saida'?'var(--danger)':'var(--success)'};">${l.tipo==='saida'?'-':'+'}${brl(l.valor)}</span>
+          </div>`).join('') : `<div class="empty">Nenhum reinvestimento nesse período.</div>`}
+      </div>
+    </div>
   `;
 }
 
@@ -26827,6 +26893,7 @@ function attachViewHandlers(){
         relatorioAtivo==='breakeven' ? renderRelatorioBreakEven() :
         relatorioAtivo==='valuation' ? renderRelatorioValuation() :
         relatorioAtivo==='mensal' ? renderSuperRelatorioMensal(mensalMesRef) :
+        relatorioAtivo==='reinvestimentos' ? renderRelatorioReinvestimentos() :
         renderIndicadores('mes');
       bindReportInner();
     };
@@ -27320,6 +27387,12 @@ function attachViewHandlers(){
       if(descontosBonifPeriodoSel) descontosBonifPeriodoSel.addEventListener('change', ()=>{
         descontosBonifPeriodo = descontosBonifPeriodoSel.value;
         document.getElementById('reportPanel').innerHTML = renderDescontosBonificacoes();
+        bindReportInner();
+      });
+      const reinvestimentosPeriodoSel = document.getElementById('reinvestimentosPeriodoSel');
+      if(reinvestimentosPeriodoSel) reinvestimentosPeriodoSel.addEventListener('change', ()=>{
+        reinvestimentosPeriodo = reinvestimentosPeriodoSel.value;
+        document.getElementById('reportPanel').innerHTML = renderRelatorioReinvestimentos();
         bindReportInner();
       });
       document.getElementById('btnPdfDescontosBonif')?.addEventListener('click', ()=>{
