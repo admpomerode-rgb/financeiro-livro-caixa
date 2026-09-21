@@ -24524,11 +24524,11 @@ function viewCentral360(){
     </div>
     <div class="dash-section-label">O que precisa de atenção agora</div>
     <div class="panel"><div style="padding:14px 18px;">
-      ${aPagarVencido>0 ? `<div class="ledger-row compact"><div class="desc-cell"><div>⚠️ Tem conta vencida sem pagar</div></div><span class="mono neg">${brl(aPagarVencido)}</span></div>` : ''}
-      ${osAbertas>0 ? `<div class="ledger-row compact"><div class="desc-cell"><div>🔧 O.S. do VK Industrial aguardando financeiro</div></div><span class="mono">${osAbertas}</span></div>` : ''}
-      ${processosAguardando>0 ? `<div class="ledger-row compact"><div class="desc-cell"><div>📁 Notas de corretagem aguardando aprovação</div></div><span class="mono">${processosAguardando}</span></div>` : ''}
-      ${(state.vkAprovacoes||[]).length>0 ? `<div class="ledger-row compact"><div class="desc-cell"><div>🏭 Pedidos do VK Industrial aguardando aprovação</div></div><span class="mono">${state.vkAprovacoes.length}</span></div>` : ''}
-      ${(state.mesesFechados||[]).length>0 ? `<div class="ledger-row compact"><div class="desc-cell"><div>🔒 Meses fechados</div></div><span class="mono">${state.mesesFechados.length}</span></div>` : ''}
+      ${aPagarVencido>0 ? `<div class="ledger-row compact"><span class="dot" style="background:var(--danger);"></span><div class="desc-cell"><div>Conta vencida sem pagar</div></div><span class="mono neg">${brl(aPagarVencido)}</span></div>` : ''}
+      ${osAbertas>0 ? `<div class="ledger-row compact"><span class="dot" style="background:var(--amber);"></span><div class="desc-cell"><div>O.S. do VK Industrial aguardando financeiro</div></div><span class="mono">${osAbertas}</span></div>` : ''}
+      ${processosAguardando>0 ? `<div class="ledger-row compact"><span class="dot" style="background:var(--amber);"></span><div class="desc-cell"><div>Notas de corretagem aguardando aprovação</div></div><span class="mono">${processosAguardando}</span></div>` : ''}
+      ${(state.vkAprovacoes||[]).length>0 ? `<div class="ledger-row compact"><span class="dot" style="background:var(--amber);"></span><div class="desc-cell"><div>Pedidos do VK Industrial aguardando aprovação</div></div><span class="mono">${state.vkAprovacoes.length}</span></div>` : ''}
+      ${(state.mesesFechados||[]).length>0 ? `<div class="ledger-row compact"><span class="dot" style="background:var(--text-soft);"></span><div class="desc-cell"><div>Meses fechados</div></div><span class="mono">${state.mesesFechados.length}</span></div>` : ''}
       ${!(aPagarVencido>0 || osAbertas>0 || processosAguardando>0 || (state.vkAprovacoes||[]).length>0) ? `<div class="empty">Nada pendente no momento.</div>` : ''}
     </div></div>
   `;
