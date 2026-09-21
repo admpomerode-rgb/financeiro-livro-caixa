@@ -34957,8 +34957,12 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
         <input type="text" inputmode="decimal" id="notaGanhoPerda" value="0" readonly style="background:var(--surface-alt);cursor:not-allowed;">
       </div>
       <div class="note" style="margin-top:0;">Isso aqui é só o resumo — cada venda vira um lançamento SEPARADO de ganho ou perda de capital (não soma tudo numa nota só). Pra o sistema calcular, preencha o "Preço médio de compra" em cada linha de venda acima. Ganho de capital entra como receita financeira (Rendimentos); perda de capital entra como despesa financeira (Despesas Financeiras) — um lançamento por ativo vendido.</div>
-      <div class="field"><label id="notaContaLabel">Conta bancária de origem/destino</label>
-        <select id="notaContaBancaria">${state.contas.map(c=>`<option value="${c.id}" ${(notaEmRevisao?notaEmRevisao.contaBancariaId===c.id:contaPreSelecionadaId===c.id)?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
+      <div class="field">
+        <div id="notaContaResumo" style="font-size:13px;padding:9px 11px;background:var(--surface-alt);border:1px solid var(--line);border-radius:7px;display:flex;justify-content:space-between;align-items:center;">
+          <span id="notaContaLabel">Conta bancária: <strong>${escapeHTML((state.contas.find(c=>c.id===(notaEmRevisao?notaEmRevisao.contaBancariaId:contaPreSelecionadaId))||state.contas[0])?.nome||'')}</strong></span>
+          <a href="#" id="notaContaTrocarLink" style="font-size:12.5px;">trocar</a>
+        </div>
+        <select id="notaContaBancaria" style="display:none;margin-top:8px;">${state.contas.map(c=>`<option value="${c.id}" ${(notaEmRevisao?notaEmRevisao.contaBancariaId===c.id:contaPreSelecionadaId===c.id)?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select>
       </div>
     </div>
     <div class="modal-actions">
@@ -35095,10 +35099,12 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     const liquidoEl = document.getElementById('notaLiquido');
     const contaLabelEl = document.getElementById('notaContaLabel');
     if(contaLabelEl){
-      contaLabelEl.textContent = (tipo==='reinvestimento-sai' || tipo==='reinvestimento-sobra') ? 'Conta bancária (só a diferença passa por ela)'
-        : tipo==='reinvestimento-exato' ? 'Conta bancária (nada mexe nela — deixe a de sempre)'
-        : tipo==='so-venda' ? 'Conta bancária de destino (onde entra o dinheiro da venda)'
-        : 'Conta bancária de origem (de onde sai o dinheiro da compra)';
+      const nomeContaAtual = state.contas.find(c=>c.id===document.getElementById('notaContaBancaria')?.value)?.nome || '';
+      const prefixo = (tipo==='reinvestimento-sai' || tipo==='reinvestimento-sobra') ? 'Só a diferença passa por: '
+        : tipo==='reinvestimento-exato' ? 'Nada mexe na conta — nenhum lançamento nesta: '
+        : tipo==='so-venda' ? 'Dinheiro da venda entra em: '
+        : 'Dinheiro da compra sai de: ';
+      contaLabelEl.innerHTML = `${prefixo}<strong>${escapeHTML(nomeContaAtual)}</strong>`;
     }
     if(avisoEl){
       if(tipo==='reinvestimento-sai' || tipo==='reinvestimento-sobra' || tipo==='reinvestimento-exato'){
@@ -35169,6 +35175,17 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     pintarOperacoes();
   });
   document.getElementById('notaLiquido').addEventListener('input', (e)=>{ e.target.dataset.editadoManualmente = 'true'; });
+  document.getElementById('notaContaTrocarLink')?.addEventListener('click', (e)=>{
+    e.preventDefault();
+    document.getElementById('notaContaResumo').style.display = 'none';
+    document.getElementById('notaContaBancaria').style.display = 'block';
+    document.getElementById('notaContaBancaria').focus();
+  });
+  document.getElementById('notaContaBancaria')?.addEventListener('change', ()=>{
+    document.getElementById('notaContaBancaria').style.display = 'none';
+    document.getElementById('notaContaResumo').style.display = 'flex';
+    recalcularTotaisOperacoes();
+  });
   document.getElementById('notaContaInvestimento')?.addEventListener('change', ()=>{
     // Trocou de conta — as subcontas escolhidas nas linhas eram de outra conta, então zera pra não
     // salvar um vínculo errado sem querer.
@@ -35182,7 +35199,8 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     const el = document.getElementById('notaTipoNota');
     if(!el) return;
     const dataDebitoAtual = document.getElementById('notaDataDebito').value;
-    if(!dataDebitoAtual) return;
+    if(!dataDebitoAtual){ el.innerHTML = ''; el.style.display = 'none'; return; }
+    el.style.display = 'block';
     const jaDebitouAgora = dataDebitoAtual <= todayISO();
     el.innerHTML = jaDebitouAgora
       ? `✓ A data de débito (${fmtDate(dataDebitoAtual)}) já passou — ao publicar, o valor é descontado/creditado na conta na hora, como já pago.`
