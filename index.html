@@ -1482,6 +1482,25 @@ function calcularFechamentoCaixa(saldoEsperado, valorContado){
   const diferenca = Math.round((valorContado - saldoEsperado)*100)/100;
   return { diferenca, status: Math.abs(diferenca)<0.01 ? 'bateu' : (diferenca>0?'sobra':'falta') };
 }
+// Relatório executivo — testada isoladamente antes de usar.
+function gerarTextoRelatorioExecutivo(dados){
+  const linhas = [];
+  linhas.push(`RELATÓRIO EXECUTIVO — ${dados.dataGeracao}`);
+  linhas.push('');
+  linhas.push(`Situação atual: ${dados.scoreLabel} (score ${dados.score}/100)`);
+  linhas.push(`Caixa: ${dados.caixa}`);
+  linhas.push(`Disponível de verdade: ${dados.disponivel}`);
+  linhas.push(`A receber: ${dados.aReceber}`);
+  linhas.push(`A pagar: ${dados.aPagar}`);
+  linhas.push(`Dívidas: ${dados.dividas}`);
+  linhas.push(`Investido: ${dados.investido}`);
+  linhas.push(`Patrimônio: ${dados.patrimonio}`);
+  linhas.push('');
+  linhas.push('PRINCIPAIS RISCOS E ALERTAS:');
+  if(dados.riscos.length) dados.riscos.forEach(r => linhas.push(`- ${r}`));
+  else linhas.push('- Nenhum risco relevante identificado no momento.');
+  return linhas.join('\n');
+}
 // ---- Detecção de anomalia (lançamento fora do padrão da categoria) ----
 // Testada isoladamente antes de usar.
 function calcularMediaDesvio(valores){
@@ -24490,16 +24509,24 @@ function viewPermissoes(){
   `;
 }
 
+let central360Visao = 'mes';
+function intervaloVisao360(visao, hojeISO){
+  const hoje = new Date(hojeISO+'T12:00:00');
+  if(visao==='hoje') return { de: hojeISO, ate: hojeISO };
+  if(visao==='mes'){ const fim = new Date(hoje.getFullYear(), hoje.getMonth()+1, 0); return { de: hojeISO.slice(0,8)+'01', ate: fim.toISOString().slice(0,10) }; }
+  if(visao==='30d'){ const f=new Date(hoje); f.setDate(f.getDate()+30); return { de: hojeISO, ate: f.toISOString().slice(0,10) }; }
+  if(visao==='90d'){ const f=new Date(hoje); f.setDate(f.getDate()+90); return { de: hojeISO, ate: f.toISOString().slice(0,10) }; }
+  if(visao==='ano') return { de: hojeISO.slice(0,4)+'-01-01', ate: hojeISO.slice(0,4)+'-12-31' };
+  return { de: hojeISO, ate: hojeISO };
+}
 function viewCentral360(){
   const hoje = todayISO();
+  const { de, ate } = intervaloVisao360(central360Visao, hoje);
   const caixa = (state.contas||[]).reduce((s,c)=>s+saldoConta(c.id),0);
-  const aPagar = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente').reduce((s,l)=>s+l.valor,0);
-  const aReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente').reduce((s,l)=>s+l.valor,0);
+  const aPagar = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.dataVencimento>=de && l.dataVencimento<=ate).reduce((s,l)=>s+l.valor,0);
+  const aReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.dataVencimento>=de && l.dataVencimento<=ate).reduce((s,l)=>s+l.valor,0);
   const aPagarVencido = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.dataVencimento<hoje).reduce((s,l)=>s+l.valor,0);
-  const faturasCartao = (state.cartoes||[]).reduce((s,c)=>{
-    const comp = competenciaAtual(c);
-    return s + totalCompetencia(c.id, comp);
-  },0);
+  const faturasCartao = (state.cartoes||[]).reduce((s,c)=>{ const comp = competenciaAtual(c); return s + totalCompetencia(c.id, comp); },0);
   const dividasAtivas = (state.emprestimos||[]).filter(e=>statusDivida(e)!=='quitada' && statusDivida(e)!=='renegociada');
   const saldoDividas = dividasAtivas.reduce((s,e)=>s+saldoDevedorDivida(e),0);
   const investido = (state.ativosInvestimento||[]).filter(a=>!a.resgatado).reduce((s,a)=>s+valorAtivo(a),0);
@@ -24509,33 +24536,79 @@ function viewCentral360(){
   const provReservado = provAtivos.reduce((s,p)=>s+totalReservadoProvisionamento(p.id,'realizada'),0);
   const osAbertas = (state.osVkIndustrial||[]).filter(o=>o.status!=='processo_criado' || !(state.lancamentos||[]).some(l=>l.origemIdExterno===o.id)).length;
   const processosAguardando = (state.notasPendentes||[]).length;
-
   const disponivelReal = caixa - aPagarVencido;
+
+  const health = calcularHealthScoreEm(hoje, hoje.slice(0,7));
+  const corScore = s => s>=70?'var(--success)':(s>=40?'var(--amber)':'var(--danger)');
+  const labelScore = s => s>=70?'🟢 Confortável':(s>=40?'🟡 Atenção':'🔴 Crítico');
 
   return `
     <div class="topbar">
-      <div><h1>🌐 Central Financeira 360°</h1><p>Tudo num lugar só — reaproveita os dados que já existem, não duplica nada.</p></div>
+      <div><h1>🌐 Central Financeira 360°</h1><p>Visão completa da situação financeira da empresa — reaproveita os dados que já existem, não duplica nada.</p></div>
+      <button class="btn ghost" id="btnGerarRelatorioExecutivo">📄 Gerar Relatório Executivo</button>
     </div>
+    <div class="report-controls" style="margin-bottom:14px;">
+      <select id="central360VisaoSel">
+        <option value="hoje" ${central360Visao==='hoje'?'selected':''}>Hoje</option>
+        <option value="mes" ${central360Visao==='mes'?'selected':''}>Este mês</option>
+        <option value="30d" ${central360Visao==='30d'?'selected':''}>Próximos 30 dias</option>
+        <option value="90d" ${central360Visao==='90d'?'selected':''}>Próximos 90 dias</option>
+        <option value="ano" ${central360Visao==='ano'?'selected':''}>Este ano</option>
+      </select>
+    </div>
+
+    <div class="dash-section-label">Situação financeira agora</div>
     <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:16px;">
       <div class="card saldo"><div class="label">Temos em caixa</div><div class="value mono">${brl(caixa)}</div></div>
       <div class="card"><div class="label">Disponível de verdade</div><div class="value mono ${disponivelReal<0?'neg':''}">${brl(disponivelReal)}</div><div class="sub" style="font-size:11px;">caixa menos o que já venceu</div></div>
-      <div class="card"><div class="label">A receber</div><div class="value mono pos">${brl(aReceber)}</div></div>
-      <div class="card"><div class="label">A pagar</div><div class="value mono neg">${brl(aPagar)}</div></div>
-      <div class="card"><div class="label">Vencido, ainda não pago</div><div class="value mono ${aPagarVencido>0?'neg':''}">${brl(aPagarVencido)}</div></div>
-      <div class="card"><div class="label">Faturas de cartão abertas</div><div class="value mono">${brl(faturasCartao)}</div></div>
-      <div class="card"><div class="label">Devendo (empréstimos)</div><div class="value mono">${brl(saldoDividas)}</div></div>
-      <div class="card"><div class="label">Investido</div><div class="value mono">${brl(investido)}</div></div>
-      <div class="card"><div class="label">Patrimônio (ativos)</div><div class="value mono">${brl(patrimonio)}</div></div>
-      <div class="card"><div class="label">Provisionado (falta reservar)</div><div class="value mono">${brl(Math.max(0,provFuturo-provReservado))}</div></div>
+      <div class="card" style="cursor:pointer;" data-goto="receber"><div class="label">A receber (${central360Visao==='hoje'?'hoje':central360Visao==='mes'?'este mês':central360Visao==='ano'?'este ano':'período'})</div><div class="value mono pos">${brl(aReceber)}</div></div>
+      <div class="card" style="cursor:pointer;" data-goto="pagar"><div class="label">A pagar (${central360Visao==='hoje'?'hoje':central360Visao==='mes'?'este mês':central360Visao==='ano'?'este ano':'período'})</div><div class="value mono neg">${brl(aPagar)}</div></div>
+      <div class="card" style="cursor:pointer;" data-goto="pagar"><div class="label">Vencido, ainda não pago</div><div class="value mono ${aPagarVencido>0?'neg':''}">${brl(aPagarVencido)}</div></div>
+      <div class="card" style="cursor:pointer;" data-goto="cartoes"><div class="label">Faturas de cartão abertas</div><div class="value mono">${brl(faturasCartao)}</div></div>
+      <div class="card" style="cursor:pointer;" data-goto="gestao-dividas"><div class="label">Devendo (empréstimos)</div><div class="value mono">${brl(saldoDividas)}</div></div>
+      <div class="card" style="cursor:pointer;" data-goto="investimentos"><div class="label">Investido</div><div class="value mono">${brl(investido)}</div></div>
+      <div class="card" style="cursor:pointer;" data-goto="ativos"><div class="label">Patrimônio (ativos)</div><div class="value mono">${brl(patrimonio)}</div></div>
+      <div class="card" style="cursor:pointer;" data-goto="provisionamentos"><div class="label">Provisionado (falta reservar)</div><div class="value mono">${brl(Math.max(0,provFuturo-provReservado))}</div></div>
     </div>
+
+    <div class="dash-section-label">Saúde financeira</div>
+    <div class="panel" style="margin-bottom:16px;">
+      <div style="padding:14px 18px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <div style="font-size:32px;font-weight:800;color:${corScore(health.scoreTotal)};">${health.scoreTotal}<span style="font-size:14px;color:var(--text-soft);">/100</span></div>
+        <div>
+          <div style="font-weight:700;">${labelScore(health.scoreTotal)}</div>
+          <div class="sub" style="font-size:12px;">Margem líquida ${health.margemLiquidaPct.toFixed(1)}% · fôlego de caixa ${health.foldegoDias} dia(s)${health.atrasos>0?' · '+brl(health.atrasos)+' em atraso':''}</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="central360PossoGastar">${possoGastarHojeHTML()}</div>
+    <div id="central360OQueMudou">${painelOQueMudouHTML()}</div>
+
     <div class="dash-section-label">O que precisa de atenção agora</div>
     <div class="panel"><div style="padding:14px 18px;">
-      ${aPagarVencido>0 ? `<div class="ledger-row compact"><span class="dot" style="background:var(--danger);"></span><div class="desc-cell"><div>Conta vencida sem pagar</div></div><span class="mono neg">${brl(aPagarVencido)}</span></div>` : ''}
-      ${osAbertas>0 ? `<div class="ledger-row compact"><span class="dot" style="background:var(--amber);"></span><div class="desc-cell"><div>O.S. do VK Industrial aguardando financeiro</div></div><span class="mono">${osAbertas}</span></div>` : ''}
-      ${processosAguardando>0 ? `<div class="ledger-row compact"><span class="dot" style="background:var(--amber);"></span><div class="desc-cell"><div>Notas de corretagem aguardando aprovação</div></div><span class="mono">${processosAguardando}</span></div>` : ''}
-      ${(state.vkAprovacoes||[]).length>0 ? `<div class="ledger-row compact"><span class="dot" style="background:var(--amber);"></span><div class="desc-cell"><div>Pedidos do VK Industrial aguardando aprovação</div></div><span class="mono">${state.vkAprovacoes.length}</span></div>` : ''}
-      ${(state.mesesFechados||[]).length>0 ? `<div class="ledger-row compact"><span class="dot" style="background:var(--text-soft);"></span><div class="desc-cell"><div>Meses fechados</div></div><span class="mono">${state.mesesFechados.length}</span></div>` : ''}
+      ${aPagarVencido>0 ? `<div class="ledger-row compact" style="cursor:pointer;" data-goto="pagar"><span class="dot" style="background:var(--danger);"></span><div class="desc-cell"><div>Conta vencida sem pagar</div></div><span class="mono neg">${brl(aPagarVencido)}</span></div>` : ''}
+      ${osAbertas>0 ? `<div class="ledger-row compact" style="cursor:pointer;" data-goto="gestao-os"><span class="dot" style="background:var(--amber);"></span><div class="desc-cell"><div>O.S. do VK Industrial aguardando financeiro</div></div><span class="mono">${osAbertas}</span></div>` : ''}
+      ${processosAguardando>0 ? `<div class="ledger-row compact" style="cursor:pointer;" data-goto="orcamentos-processos"><span class="dot" style="background:var(--amber);"></span><div class="desc-cell"><div>Notas de corretagem aguardando aprovação</div></div><span class="mono">${processosAguardando}</span></div>` : ''}
+      ${(state.vkAprovacoes||[]).length>0 ? `<div class="ledger-row compact" style="cursor:pointer;" data-goto="integracoes"><span class="dot" style="background:var(--amber);"></span><div class="desc-cell"><div>Pedidos do VK Industrial aguardando aprovação</div></div><span class="mono">${state.vkAprovacoes.length}</span></div>` : ''}
+      ${(state.mesesFechados||[]).length>0 ? `<div class="ledger-row compact" style="cursor:pointer;" data-goto="fechamento-mensal"><span class="dot" style="background:var(--text-soft);"></span><div class="desc-cell"><div>Meses fechados</div></div><span class="mono">${state.mesesFechados.length}</span></div>` : ''}
       ${!(aPagarVencido>0 || osAbertas>0 || processosAguardando>0 || (state.vkAprovacoes||[]).length>0) ? `<div class="empty">Nada pendente no momento.</div>` : ''}
+    </div></div>
+
+    <div class="dash-section-label">Radar financeiro</div>
+    ${renderCentralAlertas()}
+
+    <div class="dash-section-label">Aprofundar</div>
+    <div class="panel"><div style="padding:14px 18px;display:flex;flex-wrap:wrap;gap:8px;">
+      <button class="btn ghost sm" data-abrir-relatorio="para_onde_foi_dinheiro">Para onde foi o dinheiro?</button>
+      <button class="btn ghost sm" data-abrir-relatorio="onde_esta_ganhando">Onde estou ganhando?</button>
+      <button class="btn ghost sm" data-abrir-relatorio="onde_esta_perdendo">Onde estou perdendo?</button>
+      <button class="btn ghost sm" data-abrir-relatorio="concentracao_clientes">Concentração de clientes</button>
+      <button class="btn ghost sm" data-abrir-relatorio="yoy">Comparativo ano a ano</button>
+      <button class="btn ghost sm" data-abrir-relatorio="stress">Cenário de stress</button>
+      <button class="btn ghost sm" data-abrir-relatorio="laboratorio_financeiro">Laboratório financeiro (cenários)</button>
+      <button class="btn ghost sm" data-abrir-relatorio="capital_giro">Capital de giro</button>
+      <button class="btn ghost sm" data-goto="busca-global">🔍 Busca global</button>
     </div></div>
   `;
 }
@@ -29762,6 +29835,57 @@ function attachViewHandlers(){
       if(!(await avisoModal({mensagem:'Excluir de vez? Não dá mais pra desfazer depois disso.', tipo:'perigo', textoConfirmar:'Excluir de vez'}))) return;
       excluirDefinitivoDaLixeira(btn.dataset.lixeiraExcluir);
       persist(); render(); showToast('Excluído de vez.');
+    });
+  });
+  document.getElementById('central360VisaoSel')?.addEventListener('change', (e)=>{
+    central360Visao = e.target.value;
+    render();
+  });
+  document.querySelectorAll('[data-abrir-relatorio]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      relatorioAtivo = btn.dataset.abrirRelatorio;
+      currentView = 'relatorio-detalhe';
+      render();
+    });
+  });
+  document.getElementById('btnGerarRelatorioExecutivo')?.addEventListener('click', ()=>{
+    const hoje = todayISO();
+    const health = calcularHealthScoreEm(hoje, hoje.slice(0,7));
+    const corLabel = s => s>=70?'Confortável':(s>=40?'Atenção':'Crítico');
+    const caixa = (state.contas||[]).reduce((s,c)=>s+saldoConta(c.id),0);
+    const aPagarVencido = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.dataVencimento<hoje).reduce((s,l)=>s+l.valor,0);
+    const aPagarTotal = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente').reduce((s,l)=>s+l.valor,0);
+    const aReceberTotal = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente').reduce((s,l)=>s+l.valor,0);
+    const dividasAtivas2 = (state.emprestimos||[]).filter(e=>statusDivida(e)!=='quitada' && statusDivida(e)!=='renegociada');
+    const saldoDividas2 = dividasAtivas2.reduce((s,e)=>s+saldoDevedorDivida(e),0);
+    const investido2 = (state.ativosInvestimento||[]).filter(a=>!a.resgatado).reduce((s,a)=>s+valorAtivo(a),0);
+    const riscos = [];
+    if(aPagarVencido>0) riscos.push(`${state.lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente'&&l.dataVencimento<hoje).length} conta(s) vencida(s) — ${brl(aPagarVencido)}`);
+    const osAbertas2 = (state.osVkIndustrial||[]).filter(o=>o.status!=='processo_criado' || !(state.lancamentos||[]).some(l=>l.origemIdExterno===o.id)).length;
+    if(osAbertas2>0) riscos.push(`${osAbertas2} O.S. do VK Industrial aguardando financeiro`);
+    if((state.notasPendentes||[]).length>0) riscos.push(`${state.notasPendentes.length} nota(s) de corretagem aguardando aprovação`);
+    if((state.vkAprovacoes||[]).length>0) riscos.push(`${state.vkAprovacoes.length} pedido(s) do VK Industrial aguardando aprovação`);
+
+    const texto = gerarTextoRelatorioExecutivo({
+      dataGeracao: fmtDate(hoje), scoreLabel: corLabel(health.scoreTotal), score: health.scoreTotal,
+      caixa: brl(caixa), disponivel: brl(caixa-aPagarVencido), aReceber: brl(aReceberTotal), aPagar: brl(aPagarTotal),
+      dividas: brl(saldoDividas2), investido: brl(investido2), patrimonio: brl(totalAtivosPatrimoniais()),
+      riscos,
+    });
+    const modal = document.getElementById('modalContent');
+    modal.innerHTML = `
+      <h3>📄 Relatório Executivo</h3>
+      <textarea readonly rows="16" style="width:100%;font-family:'IBM Plex Mono',monospace;font-size:12.5px;">${escapeHTML(texto)}</textarea>
+      <div class="modal-actions">
+        <button class="btn ghost" id="btnCancelarModal">Fechar</button>
+        <button class="btn" id="btnCopiarRelatorioExecutivo">Copiar texto</button>
+      </div>
+    `;
+    document.getElementById('modalOverlay').classList.add('open');
+    document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+    document.getElementById('btnCopiarRelatorioExecutivo').addEventListener('click', ()=>{
+      navigator.clipboard?.writeText(texto);
+      showToast('Copiado!');
     });
   });
   document.getElementById('btnLimparLixeiraAntiga')?.addEventListener('click', async ()=>{
