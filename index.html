@@ -1141,6 +1141,13 @@ function aplicarMigracoes(s){
   if(!s.osVkIndustrial) s.osVkIndustrial = []; // espelho local (fetch manual) da coleção "os_processos" compartilhada
   if(!s.saldosReinvestimento) s.saldosReinvestimento = []; // dinheiro de venda/resgate ainda não reinvestido — fica "guardado" aqui até você usar numa aplicação nova ou decidir deixar como caixa
   if(!s.reinvestimentosRealizados) s.reinvestimentosRealizados = []; // log de TODO reinvestimento de verdade, mesmo quando não gera lançamento de conta (reinvestimento exato) — é a fonte confiável pro relatório de Reinvestimentos
+  if(!s.lixeira) s.lixeira = []; // registros excluídos ficam aqui por 90 dias antes de sumir de vez — dá pra restaurar
+  if(!s.mesesFechados) s.mesesFechados = []; // meses (YYYY-MM) travados contra edição/exclusão de lançamento — fechamento mensal
+  if(!s.historicoFechamentoMensal) s.historicoFechamentoMensal = []; // log de quando cada mês foi fechado/reaberto, com motivo
+  if(!s.integridadeIgnorados) s.integridadeIgnorados = []; // avisos de duplicidade/órfão que o usuário já viu e decidiu ignorar
+  if(!s.usuariosPermissao) s.usuariosPermissao = []; // papel de cada e-mail (admin/operador/visualizacao) — vazio = sem restrição nenhuma ainda
+  if(!s.avaliacoesFornecedor) s.avaliacoesFornecedor = []; // avaliação manual (nota 1-5 + comentário) — não dá pra automatizar prazo de entrega, esse dado não existe no sistema
+  if(!s.fechamentosCaixaFisico) s.fechamentosCaixaFisico = []; // conferência de gaveta (contado x esperado) pras contas tipo "caixa"
   if(!s.contas) s.contas = [];
   // Migração: garante uma conta padrão e associa lançamentos antigos sem conta
   if(s.contas.length===0){
@@ -1357,6 +1364,179 @@ document.addEventListener('visibilitychange', ()=>{
 function registrarLog(){}
 
 function uid(){ return 'l' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+// ---- Lixeira segura ----
+// Move um registro pra lixeira em vez de apagar de vez — testada isoladamente antes de usar.
+// "tipo" identifica de qual lista veio (pra saber onde restaurar) e "descricaoResumo" é só pra
+// exibir na lista da lixeira sem precisar recalcular nada.
+function moverParaLixeira(tipo, dados, descricaoResumo){
+  state.lixeira.push({ id: uid(), tipo, dados: JSON.parse(JSON.stringify(dados)), descricaoResumo, excluidoEm: new Date().toISOString() });
+}
+const LIXEIRA_TIPO_LISTA = {
+  lancamento: 'lancamentos', contaBancaria: 'contas', cartao: 'cartoes',
+  ativoInvestimento: 'ativosInvestimento', contaInvestimento: 'contasInvestimento',
+  ativoPatrimonial: 'ativosPatrimoniais', provisionamento: 'provisionamentos',
+  contrato: 'contratos', fornecedor: 'fornecedores', emprestimo: 'emprestimos',
+  categoria: 'categorias', recorrencia: 'recorrencias', meta: 'metasReserva',
+};
+function restaurarDaLixeira(lixeiraId){
+  const item = state.lixeira.find(x=>x.id===lixeiraId);
+  if(!item) return false;
+  const listaNome = LIXEIRA_TIPO_LISTA[item.tipo];
+  if(!listaNome || !state[listaNome]){ showToast('Não sei mais restaurar esse tipo de registro.'); return false; }
+  state[listaNome].push(item.dados);
+  state.lixeira = state.lixeira.filter(x=>x.id!==lixeiraId);
+  return true;
+}
+function excluirDefinitivoDaLixeira(lixeiraId){
+  state.lixeira = state.lixeira.filter(x=>x.id!==lixeiraId);
+}
+function itensAntigosNaLixeira(diasLimite){
+  const hoje = new Date();
+  return state.lixeira.filter(x=>(hoje - new Date(x.excluidoEm))/86400000 > diasLimite);
+}
+// ---- Fechamento mensal ----
+// Testadas isoladamente antes de usar.
+function mesEstaFechado(dataISO, mesesFechados){
+  if(!dataISO) return false;
+  const mes = dataISO.slice(0,7);
+  return (mesesFechados||[]).includes(mes);
+}
+function podeFecharMes(mes, mesesFechados){
+  return !(mesesFechados||[]).includes(mes);
+}
+function fecharMes(mes, motivo){
+  if(!podeFecharMes(mes, state.mesesFechados)) return false;
+  state.mesesFechados.push(mes);
+  state.historicoFechamentoMensal.push({ id: uid(), mes, acao:'fechado', motivo: motivo||null, data: new Date().toISOString() });
+  return true;
+}
+function reabrirMes(mes, motivo){
+  if(!motivo || !motivo.trim()) return false; // reabertura exige justificativa — "reabertura controlada"
+  state.mesesFechados = state.mesesFechados.filter(m=>m!==mes);
+  state.historicoFechamentoMensal.push({ id: uid(), mes, acao:'reaberto', motivo: motivo.trim(), data: new Date().toISOString() });
+  return true;
+}
+// ---- Detecção de duplicidade e órfão ----
+// Testadas isoladamente antes de usar.
+function normalizarTextoIntegridade(t){ return (t||'').trim().toLowerCase().replace(/\s+/g,' '); }
+function detectarDuplicidades(lancamentos, janelaDias){
+  const grupos = {};
+  lancamentos.forEach(l=>{
+    const chave = `${l.tipo}|${l.valor}|${normalizarTextoIntegridade(l.descricao)}`;
+    if(!grupos[chave]) grupos[chave] = [];
+    grupos[chave].push(l);
+  });
+  const suspeitos = [];
+  Object.values(grupos).forEach(grupo=>{
+    if(grupo.length<2) return;
+    grupo.sort((a,b)=>(a.dataVencimento||'').localeCompare(b.dataVencimento||''));
+    for(let i=1;i<grupo.length;i++){
+      const dias = Math.abs((new Date(grupo[i].dataVencimento) - new Date(grupo[i-1].dataVencimento))/86400000);
+      if(dias<=janelaDias) suspeitos.push([grupo[i-1], grupo[i]]);
+    }
+  });
+  return suspeitos;
+}
+function detectarOrfaos(lancamentos, contasValidas, cartoesValidos){
+  const idsContas = new Set(contasValidas.map(c=>c.id));
+  const idsCartoes = new Set(cartoesValidos.map(c=>c.id));
+  return lancamentos.filter(l=>(l.contaId && !idsContas.has(l.contaId)) || (l.cartaoId && !idsCartoes.has(l.cartaoId)));
+}
+// ---- Permissões ----
+// Testada isoladamente antes de usar. Sem ninguém cadastrado, ou e-mail não cadastrado na lista =
+// sem restrição (trata como admin) — pra nunca travar quem já usa o sistema sozinho.
+const PERMISSAO_REGRAS = {
+  admin: ['ver','criar','editar','excluir','fechar_mes','aprovar_qualquer_valor'],
+  operador: ['ver','criar','editar'],
+  visualizacao: ['ver'],
+};
+function usuarioTemPermissao(usuarios, emailLogado, acao){
+  if(!usuarios || !usuarios.length) return true;
+  const u = usuarios.find(x=>x.email===emailLogado);
+  if(!u) return true;
+  return (PERMISSAO_REGRAS[u.papel]||[]).includes(acao);
+}
+function emailLogadoAtual(){ return (typeof auth!=='undefined' && auth.currentUser && auth.currentUser.email) || null; }
+function podeAgora(acao){ return usuarioTemPermissao(state.usuariosPermissao, emailLogadoAtual(), acao); }
+// Alçada financeira: usa o limite PRÓPRIO da pessoa logada se ela tiver um cadastrado, senão cai
+// no limite geral do sistema — testada isoladamente antes de usar.
+function limiteAprovacaoEfetivo(usuarios, emailLogado, limiteGeral){
+  const u = (usuarios||[]).find(x=>x.email===emailLogado);
+  if(u && u.limiteAprovacao!=null) return u.limiteAprovacao;
+  return limiteGeral;
+}
+// Avaliação de fornecedor — testada isoladamente antes de usar.
+function mediaAvaliacaoFornecedor(fornecedorId, avaliacoes){
+  const dele = (avaliacoes||[]).filter(a=>a.fornecedorId===fornecedorId);
+  if(!dele.length) return null;
+  return { media: dele.reduce((s,a)=>s+a.nota,0)/dele.length, qtd: dele.length };
+}
+// Fechamento de caixa físico — testada isoladamente antes de usar.
+function calcularFechamentoCaixa(saldoEsperado, valorContado){
+  const diferenca = Math.round((valorContado - saldoEsperado)*100)/100;
+  return { diferenca, status: Math.abs(diferenca)<0.01 ? 'bateu' : (diferenca>0?'sobra':'falta') };
+}
+// ---- Detecção de anomalia (lançamento fora do padrão da categoria) ----
+// Testada isoladamente antes de usar.
+function calcularMediaDesvio(valores){
+  if(valores.length<3) return null;
+  const media = valores.reduce((s,v)=>s+v,0)/valores.length;
+  const variancia = valores.reduce((s,v)=>s+(v-media)**2,0)/valores.length;
+  return { media, desvio: Math.sqrt(variancia) };
+}
+function detectarAnomalias(lancamentos){
+  const porCategoria = {};
+  lancamentos.forEach(l=>{
+    if(!porCategoria[l.categoria]) porCategoria[l.categoria] = [];
+    porCategoria[l.categoria].push(l);
+  });
+  const anomalias = [];
+  Object.values(porCategoria).forEach(itens=>{
+    if(itens.length<4) return;
+    const ordenado = [...itens].sort((a,b)=>(a.dataVencimento||'').localeCompare(b.dataVencimento||''));
+    const maisRecente = ordenado[ordenado.length-1];
+    const historico = ordenado.slice(0,-1).map(l=>l.valor);
+    const stats = calcularMediaDesvio(historico);
+    if(!stats || stats.desvio<=0) return;
+    const limiar = stats.media + 2.5*stats.desvio;
+    if(maisRecente.valor > limiar) anomalias.push({ lancamento: maisRecente, mediaHistorica: stats.media, limiar });
+  });
+  return anomalias;
+}
+// ---- Sugestão automática de categoria ----
+// Testada isoladamente antes de usar. Olha lançamentos parecidos no passado (mesmo tipo,
+// descrição contendo o que foi digitado) e sugere a categoria mais usada entre eles.
+function normalizarTextoSugestao(t){ return (t||'').trim().toLowerCase().replace(/\s+/g,' '); }
+function sugerirCategoria(descricaoDigitada, lancamentos, tipo){
+  const alvo = normalizarTextoSugestao(descricaoDigitada);
+  if(alvo.length<3) return null;
+  const parecidos = lancamentos.filter(l=>l.tipo===tipo && normalizarTextoSugestao(l.descricao).includes(alvo));
+  if(!parecidos.length) return null;
+  const contagem = {};
+  parecidos.forEach(l=>{ contagem[l.categoria] = (contagem[l.categoria]||0)+1; });
+  const [categoriaMaisUsada, qtd] = Object.entries(contagem).sort((a,b)=>b[1]-a[1])[0];
+  const contagemFornecedor = {};
+  parecidos.forEach(l=>{ if(l.fornecedor) contagemFornecedor[l.fornecedor] = (contagemFornecedor[l.fornecedor]||0)+1; });
+  const fornecedorOrdenado = Object.entries(contagemFornecedor).sort((a,b)=>b[1]-a[1])[0];
+  return { categoria: categoriaMaisUsada, confianca: qtd/parecidos.length, baseadoEm: parecidos.length, fornecedor: fornecedorOrdenado ? fornecedorOrdenado[0] : null };
+}
+// ---- Previsão de inadimplência ----
+// Testadas isoladamente antes de usar. Olha o histórico de atraso do cliente e aplica nas contas
+// a receber ainda em aberto — diferente de um ranking histórico, aqui é sobre o que ainda vai vencer.
+function calcularTaxaAtrasoCliente(clienteNome, lancamentos){
+  const recebidos = lancamentos.filter(l=>l.tipo==='entrada' && l.clienteNome===clienteNome && l.status==='recebido' && l.dataPagamento && l.dataVencimento);
+  if(recebidos.length<2) return null;
+  const atrasados = recebidos.filter(l=>l.dataPagamento > l.dataVencimento).length;
+  return { taxa: atrasados/recebidos.length, baseadoEm: recebidos.length };
+}
+function preverInadimplencia(lancamentos){
+  const pendentes = lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.clienteNome);
+  return pendentes.map(l=>{
+    const stats = calcularTaxaAtrasoCliente(l.clienteNome, lancamentos);
+    if(!stats) return null;
+    return { lancamento: l, risco: stats.taxa, baseadoEm: stats.baseadoEm };
+  }).filter(Boolean).filter(x=>x.risco>=0.5).sort((a,b)=>b.risco-a.risco);
+}
 function brl(v){ return (v<0?'-':'') + 'R$ ' + Math.abs(v).toLocaleString('pt-BR',{minimumFractionDigits:2, maximumFractionDigits:2}); }
 function numBR(v){
   if(v==null) return NaN;
@@ -1677,6 +1857,7 @@ let previsaoDiasAtivo = 30;
 let orcamentoAnualAno = new Date().getFullYear();
 let descontosBonifPeriodo = 'mes';
 let reinvestimentosPeriodo = 'mes';
+let fechamentoMesSelecionado = null;
 let dreCentroAtivo = 'todos';
 let mesGlobalRef = todayISO().slice(0,7);
 let categoriaLancamentosAtual = null;
@@ -1896,6 +2077,18 @@ function moreItensDef(){
     { view:'recorrencias', icone:'🔁', nome:'Recorrentes', grupo:'Operacional' },
     { view:'metas', icone:'🎯', nome:'Metas de Reserva', grupo:'Operacional' },
     { view:'integracoes', icone:'🔌', nome:'Central de Integrações', grupo:'Cadastros e Configurações', badge:()=>(state.vkAprovacoes||[]).length+(state.faturasPendentes||[]).length },
+    { view:'lixeira', icone:'🗑️', nome:'Lixeira', grupo:'Cadastros e Configurações', badge:()=>(state.lixeira||[]).length },
+    { view:'fechamento-mensal', icone:'🔒', nome:'Fechamento Mensal', grupo:'Cadastros e Configurações' },
+    { view:'integridade', icone:'🔎', nome:'Verificação de Integridade', grupo:'Cadastros e Configurações', badge:()=>{
+      const d = detectarDuplicidades(state.lancamentos, 3).filter(p=>!state.integridadeIgnorados.includes(p[1].id)).length;
+      const o = detectarOrfaos(state.lancamentos, state.contas, state.cartoes).filter(l=>!state.integridadeIgnorados.includes(l.id)).length;
+      const a = detectarAnomalias(state.lancamentos).filter(x=>!state.integridadeIgnorados.includes(x.lancamento.id)).length;
+      const ri = preverInadimplencia(state.lancamentos).filter(x=>!state.integridadeIgnorados.includes(x.lancamento.id)).length;
+      return d+o+a+ri;
+    } },
+    { view:'permissoes', icone:'🔐', nome:'Usuários e Permissões', grupo:'Cadastros e Configurações' },
+    { view:'central-360', icone:'🎯', nome:'Central Financeira 360°', grupo:'Operacional' },
+    { view:'caixa-fisico', icone:'💵', nome:'Caixa Físico', grupo:'Operacional' },
     { view:'configuracoes', icone:'⚙️', nome:'Configurações', grupo:'Cadastros e Configurações' },
   ];
 }
@@ -2051,6 +2244,12 @@ function render(){
   else if(currentView==='processos') main.innerHTML = viewProcessosConfig();
   else if(currentView==='orcamentos-processos') main.innerHTML = viewOrcamentosProcessos();
   else if(currentView==='gestao-os') main.innerHTML = viewGestaoOSFinanceiro();
+  else if(currentView==='lixeira') main.innerHTML = viewLixeira();
+  else if(currentView==='fechamento-mensal') main.innerHTML = viewFechamentoMensal();
+  else if(currentView==='integridade') main.innerHTML = viewIntegridade();
+  else if(currentView==='permissoes') main.innerHTML = viewPermissoes();
+  else if(currentView==='central-360') main.innerHTML = viewCentral360();
+  else if(currentView==='caixa-fisico') main.innerHTML = viewCaixaFisico();
   else if(currentView==='configuracoes') main.innerHTML = viewConfiguracoes();
   else if(currentView==='configuracao-detalhe') main.innerHTML = viewConfiguracaoDetalhe();
   else if(currentView==='central-decisao') main.innerHTML = viewCentralDecisao();
@@ -24145,6 +24344,250 @@ function viewOrcamentosProcessos(){
   `;
 }
 
+function viewFechamentoMensal(){
+  const mesesFechados = (state.mesesFechados||[]).slice().sort().reverse();
+  const historico = (state.historicoFechamentoMensal||[]).slice().sort((a,b)=>b.data.localeCompare(a.data)).slice(0,20);
+  const mesParaFechar = fechamentoMesSelecionado || mesGlobalRef;
+  const pendentesNoMes = state.lancamentos.filter(l=>(l.dataVencimento||'').slice(0,7)===mesParaFechar && l.status==='pendente').length;
+  const jaFechado = mesesFechados.includes(mesParaFechar);
+
+  return `
+    <div class="topbar">
+      <div><h1>🔒 Fechamento Mensal</h1><p>Trava um mês contra edição ou exclusão de lançamento sem querer. Reabrir exige justificativa, fica registrado.</p></div>
+    </div>
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-head"><h2>Fechar um mês</h2></div>
+      <div style="padding:16px 18px;">
+        <div class="field"><label>Mês</label><input type="month" id="fechamentoMesInput" value="${mesParaFechar}"></div>
+        ${jaFechado ? `<div class="note" style="border-color:var(--accent);">Esse mês já está fechado.</div>` :
+          pendentesNoMes>0 ? `<div class="note" style="border-color:var(--amber);">⚠️ Ainda tem ${pendentesNoMes} lançamento(s) pendente(s) nesse mês — fechar mesmo assim não apaga nada, só trava edição, mas confira antes se está tudo certo.</div>` : ''}
+        ${!jaFechado ? `<button class="btn" id="btnFecharMes" style="margin-top:10px;">Fechar ${mesParaFechar}</button>` : ''}
+      </div>
+    </div>
+    <div class="dash-section-label">Meses fechados</div>
+    ${!mesesFechados.length ? `<div class="empty">Nenhum mês fechado ainda.</div>` : mesesFechados.map(mes=>`
+      <div class="panel" style="margin-bottom:10px;">
+        <div style="padding:14px 18px;display:flex;justify-content:space-between;align-items:center;">
+          <div style="font-weight:600;">🔒 ${new Date(mes+'-01').toLocaleDateString('pt-BR',{month:'long',year:'numeric'})}</div>
+          <button class="btn ghost sm" data-reabrir-mes="${mes}">Reabrir</button>
+        </div>
+      </div>`).join('')}
+    <div class="dash-section-label" style="margin-top:20px;">Histórico</div>
+    <div class="panel"><div class="panel-body" style="padding:0;">
+      ${historico.length ? historico.map(h=>`
+        <div class="ledger-row compact"><div class="desc-cell"><div>${h.acao==='fechado'?'🔒 Fechado':'🔓 Reaberto'} — ${new Date(h.mes+'-01').toLocaleDateString('pt-BR',{month:'long',year:'numeric'})}</div><div class="cat">${fmtDate(h.data.slice(0,10))}${h.motivo?' · '+escapeHTML(h.motivo):''}</div></div></div>
+      `).join('') : `<div class="empty">Sem histórico ainda.</div>`}
+    </div></div>
+  `;
+}
+
+function viewIntegridade(){
+  const duplicidades = detectarDuplicidades(state.lancamentos, 3).filter(p=>!state.integridadeIgnorados.includes(p[1].id));
+  const orfaos = detectarOrfaos(state.lancamentos, state.contas, state.cartoes).filter(l=>!state.integridadeIgnorados.includes(l.id));
+  const anomalias = detectarAnomalias(state.lancamentos).filter(a=>!state.integridadeIgnorados.includes(a.lancamento.id));
+  const riscoInadimplencia = preverInadimplencia(state.lancamentos).filter(r=>!state.integridadeIgnorados.includes(r.lancamento.id));
+  return `
+    <div class="topbar">
+      <div><h1>🔎 Verificação de Integridade</h1><p>Roda sozinho, só avisa — nunca corrige nada automaticamente. Você decide o que fazer.</p></div>
+    </div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:16px;">
+      <div class="card"><div class="label">Possíveis duplicidades</div><div class="value mono">${duplicidades.length}</div></div>
+      <div class="card"><div class="label">Lançamentos órfãos</div><div class="value mono">${orfaos.length}</div></div>
+      <div class="card"><div class="label">Fora do padrão</div><div class="value mono">${anomalias.length}</div></div>
+      <div class="card"><div class="label">Risco de atraso</div><div class="value mono">${riscoInadimplencia.length}</div></div>
+    </div>
+    <div class="dash-section-label">Contas a receber com risco de atraso (histórico do cliente)</div>
+    ${!riscoInadimplencia.length ? `<div class="empty">Nenhuma conta a receber pendente com risco alto identificado.</div>` : riscoInadimplencia.map(r=>`
+      <div class="panel" style="margin-bottom:10px;">
+        <div style="padding:14px 18px;">
+          <div style="font-weight:600;">${escapeHTML(r.lancamento.clienteNome)} — ${brl(r.lancamento.valor)} <span style="color:var(--danger);font-size:12px;">${Math.round(r.risco*100)}% de risco</span></div>
+          <div class="sub" style="font-size:12px;">Vence ${fmtDate(r.lancamento.dataVencimento)} · esse cliente atrasou em ${Math.round(r.risco*100)}% das últimas ${r.baseadoEm} cobranças</div>
+          <div class="row" style="margin-top:8px;">
+            <button class="btn ghost sm" data-ver-lancamento="${r.lancamento.id}">Ver / cobrar antes</button>
+            <button class="btn ghost sm" data-integridade-ignorar="${r.lancamento.id}">Ignorar</button>
+          </div>
+        </div>
+      </div>`).join('')}
+    <div class="dash-section-label" style="margin-top:20px;">Lançamentos fora do padrão da categoria</div>
+    ${!anomalias.length ? `<div class="empty">Nada fora do padrão encontrado.</div>` : anomalias.map(a=>`
+      <div class="panel" style="margin-bottom:10px;">
+        <div style="padding:14px 18px;">
+          <div style="font-weight:600;">${escapeHTML(a.lancamento.descricao)} — ${brl(a.lancamento.valor)}</div>
+          <div class="sub" style="font-size:12px;">Categoria ${escapeHTML(a.lancamento.categoria)} · média histórica ${brl(a.mediaHistorica)} — esse valor está bem acima do normal pra essa categoria</div>
+          <div class="row" style="margin-top:8px;">
+            <button class="btn ghost sm" data-ver-lancamento="${a.lancamento.id}">Ver / corrigir</button>
+            <button class="btn ghost sm" data-integridade-ignorar="${a.lancamento.id}">Está certo, ignorar</button>
+          </div>
+        </div>
+      </div>`).join('')}
+    <div class="dash-section-label" style="margin-top:20px;">Possíveis duplicidades (mesmo tipo, valor e descrição, até 3 dias de diferença)</div>
+    ${!duplicidades.length ? `<div class="empty">Nada suspeito encontrado.</div>` : duplicidades.map(([a,b])=>`
+      <div class="panel" style="margin-bottom:10px;">
+        <div style="padding:14px 18px;">
+          <div style="font-weight:600;">${escapeHTML(b.descricao)} — ${brl(b.valor)}</div>
+          <div class="sub" style="font-size:12px;">${fmtDate(a.dataVencimento)} e ${fmtDate(b.dataVencimento)} — dois lançamentos parecidos</div>
+          <div class="row" style="margin-top:8px;">
+            <button class="btn ghost sm" data-ver-lancamento="${b.id}">Ver o mais recente</button>
+            <button class="btn ghost sm" data-integridade-ignorar="${b.id}">Não é duplicidade, ignorar</button>
+          </div>
+        </div>
+      </div>`).join('')}
+    <div class="dash-section-label" style="margin-top:20px;">Lançamentos órfãos (referenciam conta ou cartão que não existe mais)</div>
+    ${!orfaos.length ? `<div class="empty">Nenhum órfão encontrado.</div>` : orfaos.map(l=>`
+      <div class="panel" style="margin-bottom:10px;">
+        <div style="padding:14px 18px;">
+          <div style="font-weight:600;">${escapeHTML(l.descricao)} — ${brl(l.valor)}</div>
+          <div class="sub" style="font-size:12px;">${fmtDate(l.dataVencimento)} — referencia uma conta/cartão que já foi excluído</div>
+          <div class="row" style="margin-top:8px;">
+            <button class="btn ghost sm" data-ver-lancamento="${l.id}">Ver / corrigir</button>
+            <button class="btn ghost sm" data-integridade-ignorar="${l.id}">Ignorar</button>
+          </div>
+        </div>
+      </div>`).join('')}
+  `;
+}
+
+function viewPermissoes(){
+  const usuarios = state.usuariosPermissao||[];
+  return `
+    <div class="topbar">
+      <div><h1>🔐 Usuários e Permissões</h1><p>Sem ninguém cadastrado aqui, todo mundo que loga tem acesso total — normal pra quem usa sozinho. Cadastre só se quiser limitar o acesso de alguém.</p></div>
+    </div>
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-head"><h2>Adicionar usuário</h2></div>
+      <div style="padding:16px 18px;">
+        <div class="field-row">
+          <div class="field"><label>E-mail (o mesmo do login)</label><input type="email" id="permEmail" placeholder="nome@email.com"></div>
+          <div class="field"><label>Papel</label>
+            <select id="permPapel">
+              <option value="admin">Admin — acesso total</option>
+              <option value="operador">Operador — cria e edita, não exclui nem fecha mês</option>
+              <option value="visualizacao">Visualização — só olha, não mexe em nada</option>
+            </select>
+          </div>
+        </div>
+        <div class="field"><label>Limite de aprovação de despesa (R$, opcional — deixe vazio pra sem limite)</label><input type="text" inputmode="decimal" id="permLimite" placeholder="0,00"></div>
+        <button class="btn" id="btnAddPermissao" style="margin-top:8px;">Adicionar</button>
+      </div>
+    </div>
+    <div class="dash-section-label">Usuários cadastrados</div>
+    ${!usuarios.length ? `<div class="empty">Nenhum usuário cadastrado — acesso é livre pra todo mundo que loga.</div>` : usuarios.map(u=>`
+      <div class="panel" style="margin-bottom:10px;">
+        <div style="padding:14px 18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+          <div>
+            <div style="font-weight:600;">${escapeHTML(u.email)}</div>
+            <div class="sub" style="font-size:12px;">${{admin:'Admin',operador:'Operador',visualizacao:'Visualização'}[u.papel]||u.papel}${u.limiteAprovacao?' · limite de aprovação '+brl(u.limiteAprovacao):''}</div>
+          </div>
+          <button class="btn ghost sm" data-remover-permissao="${u.email}">Remover</button>
+        </div>
+      </div>`).join('')}
+  `;
+}
+
+function viewCentral360(){
+  const hoje = todayISO();
+  const caixa = (state.contas||[]).reduce((s,c)=>s+saldoConta(c.id),0);
+  const aPagar = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente').reduce((s,l)=>s+l.valor,0);
+  const aReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente').reduce((s,l)=>s+l.valor,0);
+  const aPagarVencido = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.dataVencimento<hoje).reduce((s,l)=>s+l.valor,0);
+  const faturasCartao = (state.cartoes||[]).reduce((s,c)=>{
+    const comp = competenciaAtual(c);
+    return s + totalCompetencia(c.id, comp);
+  },0);
+  const dividasAtivas = (state.emprestimos||[]).filter(e=>statusDivida(e)!=='quitada' && statusDivida(e)!=='renegociada');
+  const saldoDividas = dividasAtivas.reduce((s,e)=>s+saldoDevedorDivida(e),0);
+  const investido = (state.ativosInvestimento||[]).filter(a=>!a.resgatado).reduce((s,a)=>s+valorAtivo(a),0);
+  const patrimonio = totalAtivosPatrimoniais();
+  const provAtivos = (state.provisionamentos||[]).filter(p=>p.status!=='arquivado');
+  const provFuturo = provAtivos.reduce((s,p)=>s+metaReservaProvisionamento(p),0);
+  const provReservado = provAtivos.reduce((s,p)=>s+totalReservadoProvisionamento(p.id,'realizada'),0);
+  const osAbertas = (state.osVkIndustrial||[]).filter(o=>o.status!=='processo_criado' || !(state.lancamentos||[]).some(l=>l.origemIdExterno===o.id)).length;
+  const processosAguardando = (state.notasPendentes||[]).length;
+
+  const disponivelReal = caixa - aPagarVencido;
+
+  return `
+    <div class="topbar">
+      <div><h1>🎯 Central Financeira 360°</h1><p>Tudo num lugar só — reaproveita os dados que já existem, não duplica nada.</p></div>
+    </div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:16px;">
+      <div class="card saldo"><div class="label">Temos em caixa</div><div class="value mono">${brl(caixa)}</div></div>
+      <div class="card"><div class="label">Disponível de verdade</div><div class="value mono ${disponivelReal<0?'neg':''}">${brl(disponivelReal)}</div><div class="sub" style="font-size:11px;">caixa menos o que já venceu</div></div>
+      <div class="card"><div class="label">A receber</div><div class="value mono pos">${brl(aReceber)}</div></div>
+      <div class="card"><div class="label">A pagar</div><div class="value mono neg">${brl(aPagar)}</div></div>
+      <div class="card"><div class="label">Vencido, ainda não pago</div><div class="value mono ${aPagarVencido>0?'neg':''}">${brl(aPagarVencido)}</div></div>
+      <div class="card"><div class="label">Faturas de cartão abertas</div><div class="value mono">${brl(faturasCartao)}</div></div>
+      <div class="card"><div class="label">Devendo (empréstimos)</div><div class="value mono">${brl(saldoDividas)}</div></div>
+      <div class="card"><div class="label">Investido</div><div class="value mono">${brl(investido)}</div></div>
+      <div class="card"><div class="label">Patrimônio (ativos)</div><div class="value mono">${brl(patrimonio)}</div></div>
+      <div class="card"><div class="label">Provisionado (falta reservar)</div><div class="value mono">${brl(Math.max(0,provFuturo-provReservado))}</div></div>
+    </div>
+    <div class="dash-section-label">O que precisa de atenção agora</div>
+    <div class="panel"><div style="padding:14px 18px;">
+      ${aPagarVencido>0 ? `<div class="ledger-row compact"><div class="desc-cell"><div>⚠️ Tem conta vencida sem pagar</div></div><span class="mono neg">${brl(aPagarVencido)}</span></div>` : ''}
+      ${osAbertas>0 ? `<div class="ledger-row compact"><div class="desc-cell"><div>🔧 O.S. do VK Industrial aguardando financeiro</div></div><span class="mono">${osAbertas}</span></div>` : ''}
+      ${processosAguardando>0 ? `<div class="ledger-row compact"><div class="desc-cell"><div>📁 Notas de corretagem aguardando aprovação</div></div><span class="mono">${processosAguardando}</span></div>` : ''}
+      ${(state.vkAprovacoes||[]).length>0 ? `<div class="ledger-row compact"><div class="desc-cell"><div>🏭 Pedidos do VK Industrial aguardando aprovação</div></div><span class="mono">${state.vkAprovacoes.length}</span></div>` : ''}
+      ${(state.mesesFechados||[]).length>0 ? `<div class="ledger-row compact"><div class="desc-cell"><div>🔒 Meses fechados</div></div><span class="mono">${state.mesesFechados.length}</span></div>` : ''}
+      ${!(aPagarVencido>0 || osAbertas>0 || processosAguardando>0 || (state.vkAprovacoes||[]).length>0) ? `<div class="empty">Nada pendente no momento.</div>` : ''}
+    </div></div>
+  `;
+}
+
+function viewCaixaFisico(){
+  const caixas = (state.contas||[]).filter(c=>c.tipo==='caixa');
+  if(!caixas.length) return `<div class="topbar"><div><h1>💵 Caixa Físico</h1><p>Nenhuma conta do tipo "Caixa físico" cadastrada.</p></div></div><div class="empty">Crie uma conta bancária com o tipo "Caixa físico" pra usar sangria, suprimento e fechamento diário.</div>`;
+  return `
+    <div class="topbar"><div><h1>💵 Caixa Físico</h1><p>Sangria, suprimento e conferência de gaveta — só pras contas marcadas como caixa físico.</p></div></div>
+    ${caixas.map(c=>{
+      const saldo = saldoConta(c.id);
+      const historico = (state.fechamentosCaixaFisico||[]).filter(f=>f.contaId===c.id).sort((a,b)=>b.data.localeCompare(a.data)).slice(0,10);
+      return `
+      <div class="panel" style="margin-bottom:16px;">
+        <div class="panel-head"><h2>${escapeHTML(c.nome)}</h2><span class="mono" style="font-weight:700;">${brl(saldo)}</span></div>
+        <div style="padding:14px 18px;">
+          <div class="row">
+            <button class="btn ghost sm" data-sangria-caixa="${c.id}">↓ Sangria (retirar)</button>
+            <button class="btn ghost sm" data-suprimento-caixa="${c.id}">↑ Suprimento (repor)</button>
+            <button class="btn sm" data-fechar-caixa="${c.id}">✓ Fechar o dia</button>
+          </div>
+          ${historico.length ? `
+          <div class="dash-section-label" style="margin-top:14px;">Últimos fechamentos</div>
+          ${historico.map(f=>`<div class="ledger-row compact"><div class="desc-cell"><div>${f.status==='bateu'?'✅ Bateu certinho':(f.status==='sobra'?'⬆️ Sobrou':'⬇️ Faltou')}</div><div class="cat">${fmtDate(f.data)} · esperado ${brl(f.saldoEsperado)}, contado ${brl(f.valorContado)}</div></div>${f.status!=='bateu'?`<span class="mono ${f.status==='falta'?'neg':'pos'}">${brl(Math.abs(f.diferenca))}</span>`:''}</div>`).join('')}
+          ` : ''}
+        </div>
+      </div>`;
+    }).join('')}
+  `;
+}
+
+function viewLixeira(){
+  const lista = (state.lixeira||[]).slice().sort((a,b)=>b.excluidoEm.localeCompare(a.excluidoEm));
+  const antigos = itensAntigosNaLixeira(90);
+  return `
+    <div class="topbar">
+      <div><h1>🗑️ Lixeira</h1><p>Registros excluídos ficam aqui por 90 dias — dá pra restaurar a qualquer momento antes disso.</p></div>
+      ${antigos.length ? `<button class="btn ghost" id="btnLimparLixeiraAntiga">Excluir ${antigos.length} com mais de 90 dias</button>` : ''}
+    </div>
+    ${!lista.length ? `<div class="empty">A lixeira está vazia.</div>` : lista.map(item=>{
+      const dias = Math.floor((new Date() - new Date(item.excluidoEm))/86400000);
+      return `
+      <div class="panel" style="margin-bottom:10px;">
+        <div style="padding:14px 18px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+          <div>
+            <div style="font-weight:600;">${escapeHTML(item.descricaoResumo||item.tipo)}</div>
+            <div class="sub" style="font-size:11.5px;">Excluído em ${fmtDate(item.excluidoEm.slice(0,10))} · há ${dias} dia(s)${dias>90?' · <span style="color:var(--danger);">será apagado de vez em breve</span>':''}</div>
+          </div>
+          <div class="row">
+            <button class="btn ghost sm" data-lixeira-restaurar="${item.id}">↩️ Restaurar</button>
+            <button class="btn danger-o sm" data-lixeira-excluir="${item.id}">Excluir de vez</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('')}
+  `;
+}
+
 function viewGestaoOSFinanceiro(){
   const todos = state.osVkIndustrial||[];
   const hoje = todayISO();
@@ -25221,6 +25664,11 @@ function abrirQuitarModal(id){
 async function excluirLancamento(id){
   const l = state.lancamentos.find(x=>x.id===id);
   if(!l) return;
+  if(!podeAgora('excluir')){ showToast('Seu usuário não tem permissão pra excluir lançamentos.'); return; }
+  if(mesEstaFechado(l.dataVencimento, state.mesesFechados)){
+    showToast(`O mês ${l.dataVencimento.slice(0,7)} está fechado — reabra em Configurações > Fechamento Mensal pra poder excluir isso.`);
+    return;
+  }
   const ehFaturaAbertaSombra = l.origem==='cartao' && !state.faturasFechadas.some(f=>idsLancamentosFatura(f).includes(l.id));
   const msg = l.origem==='transferencia' ? 'Excluir esta transferência? As duas pontas (saída e entrada) serão removidas.'
     : ehFaturaAbertaSombra ? 'Esse valor é a soma das despesas da fatura ainda aberta — excluir aqui não apaga as despesas, e ele volta a aparecer sozinho na próxima vez que alguma delas mudar. Pra remover de verdade, exclua as despesas dentro da tela da fatura. Excluir mesmo assim?'
@@ -25228,12 +25676,14 @@ async function excluirLancamento(id){
   if(!(await avisoModal({mensagem: msg, tipo:'aviso', textoConfirmar:'Continuar'}))) return;
   registrarLog('Lançamento excluído', `${l.tipo==='entrada'?'Receita':'Despesa'} "${l.descricao}" — ${brl(l.valor)}`);
   if(l.origem==='transferencia' && l.transferenciaId){
+    state.lancamentos.filter(x=>x.transferenciaId===l.transferenciaId).forEach(x=>moverParaLixeira('lancamento', x, `Transferência — ${x.descricao}`));
     state.lancamentos = state.lancamentos.filter(x=>x.transferenciaId!==l.transferenciaId);
   } else {
+    moverParaLixeira('lancamento', l, `${l.tipo==='entrada'?'Receita':'Despesa'} — ${l.descricao} — ${brl(l.valor)}`);
     state.lancamentos = state.lancamentos.filter(x=>x.id!==id);
     if(l.origem==='cartao') state.faturasFechadas = state.faturasFechadas.filter(f=>!idsLancamentosFatura(f).includes(id));
   }
-  persist(); render(); showToast('Lançamento excluído');
+  persist(); render(); showToast('Lançamento excluído — fica na Lixeira por 90 dias, dá pra restaurar');
 }
 
 async function executarAcaoSelecaoLote(acao){
@@ -25244,6 +25694,9 @@ async function executarAcaoSelecaoLote(acao){
     if(!(await avisoModal({mensagem: `Apagar ${lancs.length} lançamento(s)?${temTransf?' As transferências terão as duas pontas (saída e entrada) removidas.':''} Essa ação não pode ser desfeita.`, tipo:'perigo', textoConfirmar:'Excluir'}))) return;
     const ids = new Set(lancs.map(l=>l.id));
     const transfIds = new Set(lancs.filter(l=>l.origem==='transferencia' && l.transferenciaId).map(l=>l.transferenciaId));
+    state.lancamentos.filter(l=> ids.has(l.id) || (l.transferenciaId && transfIds.has(l.transferenciaId))).forEach(l=>{
+      moverParaLixeira('lancamento', l, `${l.tipo==='entrada'?'Receita':'Despesa'} — ${l.descricao} — ${brl(l.valor)}`);
+    });
     state.lancamentos = state.lancamentos.filter(l=> !ids.has(l.id) && !(l.transferenciaId && transfIds.has(l.transferenciaId)));
     lancs.forEach(l=>{ if(l.origem==='cartao') state.faturasFechadas = state.faturasFechadas.filter(f=>!idsLancamentosFatura(f).includes(l.id)); });
     registrarLog('Lançamentos apagados em lote', `${lancs.length} lançamento(s) removido(s) de uma vez`);
@@ -28123,6 +28576,9 @@ function attachViewHandlers(){
   document.querySelectorAll('[data-action="editar-fornecedor"]').forEach(btn=>{
     btn.addEventListener('click', ()=>openFornecedorModal((state.fornecedores||[]).find(x=>x.id===btn.dataset.id)));
   });
+  document.querySelectorAll('[data-action="avaliar-fornecedor"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>openAvaliarFornecedorModal(btn.dataset.id));
+  });
   document.querySelectorAll('[data-action="excluir-fornecedor"]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       if(!(await avisoModal({mensagem: 'Excluir este fornecedor? Os lançamentos já feitos com ele não são apagados.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
@@ -29287,6 +29743,112 @@ function attachViewHandlers(){
   document.querySelectorAll('[data-criar-obrigacao-os]').forEach(btn=>{
     btn.addEventListener('click', ()=>openCriarObrigacaoOSModal(btn.dataset.criarObrigacaoOs));
   });
+  document.querySelectorAll('[data-lixeira-restaurar]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(restaurarDaLixeira(btn.dataset.lixeiraRestaurar)){
+        registrarLog('Item restaurado da lixeira', '');
+        persist(); render(); showToast('Restaurado.');
+      }
+    });
+  });
+  document.querySelectorAll('[data-lixeira-excluir]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      if(!(await avisoModal({mensagem:'Excluir de vez? Não dá mais pra desfazer depois disso.', tipo:'perigo', textoConfirmar:'Excluir de vez'}))) return;
+      excluirDefinitivoDaLixeira(btn.dataset.lixeiraExcluir);
+      persist(); render(); showToast('Excluído de vez.');
+    });
+  });
+  document.getElementById('btnLimparLixeiraAntiga')?.addEventListener('click', async ()=>{
+    const antigos = itensAntigosNaLixeira(90);
+    if(!(await avisoModal({mensagem:`Excluir de vez ${antigos.length} item(ns) com mais de 90 dias? Não dá pra desfazer.`, tipo:'perigo', textoConfirmar:'Excluir de vez'}))) return;
+    const idsAntigos = new Set(antigos.map(x=>x.id));
+    state.lixeira = state.lixeira.filter(x=>!idsAntigos.has(x.id));
+    persist(); render(); showToast('Itens antigos removidos de vez.');
+  });
+  document.querySelectorAll('[data-sangria-caixa]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const valorStr = prompt('Valor da sangria (retirada do caixa físico):');
+      if(valorStr===null) return;
+      const valor = numBR(valorStr);
+      if(!valor || valor<=0){ showToast('Valor inválido.'); return; }
+      state.lancamentos.push({ id: uid(), tipo:'saida', categoria:'Sangria de Caixa', descricao:'Sangria de caixa físico', valor, contaId: btn.dataset.sangriaCaixa, dataVencimento: todayISO(), status:'pago', dataPagamento: todayISO(), criadoEm: new Date().toISOString() });
+      persist(); render(); showToast('Sangria registrada.');
+    });
+  });
+  document.querySelectorAll('[data-suprimento-caixa]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const valorStr = prompt('Valor do suprimento (reforço no caixa físico):');
+      if(valorStr===null) return;
+      const valor = numBR(valorStr);
+      if(!valor || valor<=0){ showToast('Valor inválido.'); return; }
+      state.lancamentos.push({ id: uid(), tipo:'entrada', categoria:'Suprimento de Caixa', descricao:'Suprimento de caixa físico', valor, contaId: btn.dataset.suprimentoCaixa, dataVencimento: todayISO(), status:'recebido', dataPagamento: todayISO(), criadoEm: new Date().toISOString() });
+      persist(); render(); showToast('Suprimento registrado.');
+    });
+  });
+  document.querySelectorAll('[data-fechar-caixa]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const contaId = btn.dataset.fecharCaixa;
+      const saldoEsperado = saldoConta(contaId);
+      const valorStr = prompt(`Quanto tem de verdade na gaveta agora? (esperado: ${brl(saldoEsperado)})`);
+      if(valorStr===null) return;
+      const valorContado = numBR(valorStr);
+      if(isNaN(valorContado)){ showToast('Valor inválido.'); return; }
+      const { diferenca, status } = calcularFechamentoCaixa(saldoEsperado, valorContado);
+      state.fechamentosCaixaFisico.push({ id: uid(), contaId, data: todayISO(), saldoEsperado, valorContado, diferenca, status });
+      persist(); render();
+      showToast(status==='bateu' ? 'Bateu certinho!' : `${status==='sobra'?'Sobrou':'Faltou'} ${brl(Math.abs(diferenca))} — registrado.`);
+    });
+  });
+
+  document.getElementById('btnAddPermissao')?.addEventListener('click', ()=>{
+    const email = document.getElementById('permEmail').value.trim().toLowerCase();
+    if(!email || !email.includes('@')){ showToast('Preencha um e-mail válido'); return; }
+    if((state.usuariosPermissao||[]).some(u=>u.email===email)){ showToast('Esse e-mail já está cadastrado — remova antes de adicionar de novo com outro papel.'); return; }
+    const limite = numBR(document.getElementById('permLimite').value);
+    state.usuariosPermissao.push({ email, papel: document.getElementById('permPapel').value, limiteAprovacao: limite>0?limite:null });
+    persist(); render(); showToast('Usuário cadastrado.');
+  });
+  document.querySelectorAll('[data-remover-permissao]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      state.usuariosPermissao = state.usuariosPermissao.filter(u=>u.email!==btn.dataset.removerPermissao);
+      persist(); render(); showToast('Removido.');
+    });
+  });
+
+  document.querySelectorAll('[data-ver-lancamento]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const l = state.lancamentos.find(x=>x.id===btn.dataset.verLancamento);
+      if(l) openLancamentoModal(l.tipo, l);
+    });
+  });
+  document.querySelectorAll('[data-integridade-ignorar]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      state.integridadeIgnorados.push(btn.dataset.integridadeIgnorar);
+      persist(); render(); showToast('Ignorado — não vai mais aparecer aqui.');
+    });
+  });
+
+  document.getElementById('fechamentoMesInput')?.addEventListener('change', (e)=>{
+    fechamentoMesSelecionado = e.target.value;
+    render();
+  });
+  document.getElementById('btnFecharMes')?.addEventListener('click', async ()=>{
+    if(!podeAgora('fechar_mes')){ showToast('Só usuário admin pode fechar o mês.'); return; }
+    const mes = document.getElementById('fechamentoMesInput').value;
+    if(!(await avisoModal({mensagem:`Fechar ${mes}? Depois disso, nenhum lançamento com vencimento nesse mês pode ser editado ou excluído até reabrir.`, tipo:'aviso', textoConfirmar:'Fechar mês'}))) return;
+    fecharMes(mes, null);
+    persist(); render(); showToast(`${mes} fechado.`);
+  });
+  document.querySelectorAll('[data-reabrir-mes]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      if(!podeAgora('fechar_mes')){ showToast('Só usuário admin pode reabrir o mês.'); return; }
+      const motivo = prompt('Por que está reabrindo esse mês? (obrigatório, fica registrado no histórico)');
+      if(motivo===null) return;
+      if(!motivo.trim()){ showToast('Precisa escrever o motivo pra reabrir.'); return; }
+      reabrirMes(btn.dataset.reabrirMes, motivo);
+      persist(); render(); showToast('Mês reaberto.');
+    });
+  });
   document.querySelectorAll('[data-action="aprovar-orcamento-processo"]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const o = (state.orcamentosProcessos||[]).find(x=>x.id===btn.dataset.id);
@@ -29821,6 +30383,30 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       });
     });
     document.getElementById('fVencimento')?.addEventListener('change', atualizarAvisoProvisionamento);
+    if(!isEdit){
+      let categoriaEscolhidaManualmente = false;
+      document.getElementById('fCategoria')?.addEventListener('change', ()=>{ categoriaEscolhidaManualmente = true; });
+      document.getElementById('fDescricao')?.addEventListener('input', (e)=>{
+        const sug = sugerirCategoria(e.target.value, state.lancamentos, tipo);
+        const box = document.getElementById('fSugestaoCategoria');
+        if(!box) return;
+        if(!sug){ box.innerHTML = ''; return; }
+        box.innerHTML = `<div class="note" style="margin-top:6px;padding:6px 10px;font-size:12px;">💡 Categoria sugerida: <strong>${escapeHTML(sug.categoria)}</strong>${sug.fornecedor?` · Fornecedor: <strong>${escapeHTML(sug.fornecedor)}</strong>`:''} (baseado em ${sug.baseadoEm} lançamento(s) parecido(s)) <a href="#" id="fAplicarSugestao" style="margin-left:6px;">usar</a></div>`;
+        document.getElementById('fAplicarSugestao')?.addEventListener('click', (ev)=>{
+          ev.preventDefault();
+          const catSelect = document.getElementById('fCategoria');
+          if(catSelect){ catSelect.value = sug.categoria; categoriaEscolhidaManualmente = true; }
+          const fornSelect = document.getElementById('fFornecedor');
+          if(fornSelect && sug.fornecedor) fornSelect.value = sug.fornecedor;
+          box.innerHTML = '';
+        });
+        if(!categoriaEscolhidaManualmente && sug.confianca>=0.7){
+          const catSelect = document.getElementById('fCategoria');
+          if(catSelect) catSelect.value = sug.categoria;
+        }
+      });
+    }
+
     document.getElementById('fValor')?.addEventListener('input', atualizarAvisoProvisionamento);
     atualizarAvisoProvisionamento();
   }
@@ -29901,6 +30487,12 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     if(btn_btnAprovarDespesa_Click.disabled) return;
     btn_btnAprovarDespesa_Click.disabled = true;
     try{
+    const alcadaAprovador = limiteAprovacaoEfetivo(state.usuariosPermissao, emailLogadoAtual(), Infinity);
+    if(existing.valor > alcadaAprovador){
+      showToast(`Sua alçada é de ${brl(alcadaAprovador)} — esse valor precisa de aprovação de alguém com alçada maior.`);
+      btn_btnAprovarDespesa_Click.disabled = false;
+      return;
+    }
     existing.aprovacao = 'aprovada';
     registrarLog('Despesa aprovada', `"${existing.descricao}" — ${brl(existing.valor)} liberada para pagamento`);
     persist(); closeModal(); render();
@@ -30094,6 +30686,16 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     const valor = valorTravado ? existing.valor : numBR(document.getElementById('fValor').value);
     if(!valor || isNaN(valor) || valor<=0){ showToast('Preencha um valor válido'); return; }
 
+    if(!podeAgora(isEdit?'editar':'criar')){ showToast(`Seu usuário não tem permissão pra ${isEdit?'editar':'criar'} lançamentos.`); return; }
+
+    // Trava de mês fechado — se o vencimento cai num mês já fechado, não deixa salvar (nem editar
+    // um lançamento que já estava nesse mês). Testada isoladamente antes de usar.
+    const vencimentoParaChecar = document.getElementById('fVencimento')?.value || (isEdit ? existing.dataVencimento : todayISO());
+    if(mesEstaFechado(vencimentoParaChecar, state.mesesFechados) || (isEdit && mesEstaFechado(existing.dataVencimento, state.mesesFechados))){
+      showToast(`O mês ${mesEstaFechado(vencimentoParaChecar, state.mesesFechados)?vencimentoParaChecar.slice(0,7):existing.dataVencimento.slice(0,7)} está fechado — reabra em Configurações > Fechamento Mensal pra poder mexer nisso.`);
+      return;
+    }
+
     // Aviso de possível duplicidade: mesmo tipo, valor e descrição, lançado HOJE — não bloqueia,
     // só avisa, porque pode ser coincidência real (duas vendas diferentes do mesmo valor, por
     // exemplo). Só compara com o que foi criado hoje pra não incomodar em contas recorrentes que
@@ -30222,12 +30824,13 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     // Regra financeira VK: pendente = sem conta, inclusive se um recebido for revertido para pendente.
     if(existing?.origem==='vk' && status==='pendente') payload.contaId = null;
     const cfgAprov = state.aprovacaoConfig || {};
-    if(tipo==='saida' && cfgAprov.ativo && valor > (cfgAprov.limite||0) && existing?.aprovacao!=='aprovada'){
+    const limiteEfetivo = limiteAprovacaoEfetivo(state.usuariosPermissao, emailLogadoAtual(), cfgAprov.limite||0);
+    if(tipo==='saida' && cfgAprov.ativo && valor > limiteEfetivo && existing?.aprovacao!=='aprovada'){
       payload.aprovacao = 'pendente';
       if(payload.status==='pago'){
         payload.status = 'pendente';
         payload.dataPagamento = null;
-        showToast(`Despesa acima de ${brl(cfgAprov.limite)} — entrou como aguardando aprovação e só pode ser paga depois de aprovada`);
+        showToast(`Despesa acima da sua alçada (${brl(limiteEfetivo)}) — entrou como aguardando aprovação e só pode ser paga depois de aprovada`);
       }
     }
     if(isEdit){
@@ -31935,17 +32538,19 @@ function viewFornecedores(){
       </div>
       <div class="panel-body">
         ${dadosPorFornecedor.length ? dadosPorFornecedor.map(f=>{
+          const aval = mediaAvaliacaoFornecedor(f.id, state.avaliacoesFornecedor);
           return `
           <div class="ledger-row fornecedor-row" data-id="${f.id}">
             <span class="dot" style="background:${corStatus[f.status]};" title="${iconeStatus[f.status]}"></span>
             <div class="desc-cell" data-action="editar-fornecedor" data-id="${f.id}" style="cursor:pointer;">
               <div style="text-transform:lowercase;">${escapeHTML(f.nome)}</div>
-              <div class="cat">${escapeHTML(f.cnpjCpf||'sem CNPJ/CPF cadastrado')}${f.contratoPrecoFixo ? ` · 📑 contrato ${brl(f.contratoPrecoFixo)}${f.contratoVigenciaFim?' até '+fmtDate(f.contratoVigenciaFim):''}` : ''}${f.aPagar>0?' · a pagar '+brl(f.aPagar):''}</div>
+              <div class="cat">${escapeHTML(f.cnpjCpf||'sem CNPJ/CPF cadastrado')}${f.contratoPrecoFixo ? ` · 📑 contrato ${brl(f.contratoPrecoFixo)}${f.contratoVigenciaFim?' até '+fmtDate(f.contratoVigenciaFim):''}` : ''}${f.aPagar>0?' · a pagar '+brl(f.aPagar):''}${aval?` · ⭐ ${aval.media.toFixed(1)} (${aval.qtd})`:''}</div>
             </div>
             <span class="fornecedor-contato" style="font-size:12.5px;color:var(--text-soft);">${escapeHTML(f.telefone||f.email||'—')}</span>
             <span class="mono" style="font-weight:600;">${brl(f.totalComprado)}</span>
             <div class="row-actions">
               <button class="icon-btn" data-action="ver-fornecedor" data-id="${f.id}" title="Ver lançamentos">📋</button>
+              <button class="icon-btn" data-action="avaliar-fornecedor" data-id="${f.id}" title="Avaliar">⭐</button>
               <button class="icon-btn" data-action="editar-fornecedor" data-id="${f.id}" title="Editar">✎</button>
               <button class="icon-btn" data-action="excluir-fornecedor" data-id="${f.id}" title="Excluir">✕</button>
             </div>
@@ -31954,6 +32559,37 @@ function viewFornecedores(){
       </div>
     </div>
   `;
+}
+
+function openAvaliarFornecedorModal(fornecedorId){
+  const f = state.fornecedores.find(x=>x.id===fornecedorId);
+  if(!f) return;
+  const historico = (state.avaliacoesFornecedor||[]).filter(a=>a.fornecedorId===fornecedorId).sort((a,b)=>b.data.localeCompare(a.data));
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>⭐ Avaliar ${escapeHTML(f.nome)}</h3>
+    <div class="field"><label>Nota (1 a 5)</label>
+      <select id="avalNota"><option value="5">5 - Excelente</option><option value="4">4 - Bom</option><option value="3">3 - Regular</option><option value="2">2 - Ruim</option><option value="1">1 - Péssimo</option></select>
+    </div>
+    <div class="field"><label>Comentário (opcional)</label><textarea id="avalComentario" rows="3" placeholder="Ex: atrasou a entrega, qualidade caiu, etc."></textarea></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarAvaliacao">Salvar avaliação</button>
+    </div>
+    ${historico.length ? `
+    <div class="dash-section-label" style="margin-top:16px;">Histórico</div>
+    ${historico.map(a=>`<div class="ledger-row compact"><div class="desc-cell"><div>⭐ ${a.nota} — ${a.comentario?escapeHTML(a.comentario):'sem comentário'}</div><div class="cat">${fmtDate(a.data)}</div></div></div>`).join('')}
+    ` : ''}
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarAvaliacao').addEventListener('click', ()=>{
+    state.avaliacoesFornecedor.push({
+      id: uid(), fornecedorId, nota: parseInt(document.getElementById('avalNota').value,10),
+      comentario: document.getElementById('avalComentario').value.trim(), data: todayISO(),
+    });
+    persist(); closeModal(); render(); showToast('Avaliação salva.');
+  });
 }
 
 function openFornecedorModal(existing){
