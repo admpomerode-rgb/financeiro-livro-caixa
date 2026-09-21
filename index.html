@@ -831,6 +831,8 @@
         <div class="nav-item" data-view="investimentos" title="Investimentos"><span class="nav-dot"></span><span class="nav-abbr">IV</span><span class="nav-label">Investimentos</span></div>
         <div class="nav-item" data-view="orcamentos-processos" title="Orçamentos e Compras"><span class="nav-dot"></span><span class="nav-abbr">OC</span><span class="nav-label">Orçamentos e Compras</span></div>
         <div class="nav-item" data-view="gestao-os" title="Gestão de Ordens de Serviço"><span class="nav-dot"></span><span class="nav-abbr">OS</span><span class="nav-label">Gestão de O.S.</span></div>
+        <div class="nav-item" data-view="central-360" title="Central Financeira 360°"><span class="nav-dot"></span><span class="nav-abbr">C3</span><span class="nav-label">Central Financeira 360°</span></div>
+        <div class="nav-item" data-view="caixa-fisico" title="Caixa Físico"><span class="nav-dot"></span><span class="nav-abbr">CX</span><span class="nav-label">Caixa Físico</span></div>
         <div class="nav-item" data-view="comissoes" title="Comissões"><span class="nav-dot"></span><span class="nav-abbr">CM</span><span class="nav-label">Comissões</span></div>
         <div class="nav-item" data-view="vendas" title="Vendas"><span class="nav-dot"></span><span class="nav-abbr">VD</span><span class="nav-label">Vendas</span></div>
         <div class="nav-item" data-view="creditos-clientes" title="Créditos de Clientes"><span class="nav-dot"></span><span class="nav-abbr">CC</span><span class="nav-label">Créditos de Clientes</span></div>
@@ -858,6 +860,10 @@
         <div class="nav-item" data-view="descricoes" title="Padronizar Descrições"><span class="nav-dot"></span><span class="nav-abbr">DS</span><span class="nav-label">Padronizar Descrições</span></div>
         <div class="nav-item" data-view="integracoes" title="Central de Integrações"><span class="nav-dot"></span><span class="nav-abbr">IN</span><span class="nav-label">Central de Integrações</span></div>
         <div class="nav-item" data-view="configuracoes" title="Configurações do Sistema"><span class="nav-dot"></span><span class="nav-abbr">CF</span><span class="nav-label">Configurações</span></div>
+        <div class="nav-item" data-view="lixeira" title="Lixeira"><span class="nav-dot"></span><span class="nav-abbr">LX</span><span class="nav-label">Lixeira</span></div>
+        <div class="nav-item" data-view="fechamento-mensal" title="Fechamento Mensal"><span class="nav-dot"></span><span class="nav-abbr">FM</span><span class="nav-label">Fechamento Mensal</span></div>
+        <div class="nav-item" data-view="integridade" title="Verificação de Integridade"><span class="nav-dot"></span><span class="nav-abbr">VI</span><span class="nav-label">Verificação de Integridade</span></div>
+        <div class="nav-item" data-view="permissoes" title="Usuários e Permissões"><span class="nav-dot"></span><span class="nav-abbr">UP</span><span class="nav-label">Usuários e Permissões</span></div>
       </div>
     </nav>
     <div class="sidebar-footer">
@@ -2055,10 +2061,10 @@ function moreItensDef(){
     { view:'orcamentos-processos', icone:'📋', nome:'Orçamentos e Compras', grupo:'Operacional', badge:()=>(state.orcamentosProcessos||[]).filter(o=>o.status==='pendente').length },
     { view:'gestao-os', icone:'🔧', nome:'Gestão de Ordens de Serviço', grupo:'Operacional', badge:()=>(state.osVkIndustrial||[]).filter(o=>o.status==='pendente'||o.statusProcesso&&!o.lancamentoFinanceiroId).length },
     { view:'comissoes', icone:'🤝', nome:'Comissões', grupo:'Operacional' },
-    { view:'vendas', icone:'📈', nome:'Vendas', grupo:'Operacional' },
-    { view:'creditos-clientes', icone:'💳', nome:'Créditos de Clientes', grupo:'Operacional' },
-    { view:'centros-custo', icone:'🏗️', nome:'Centro de Custos', grupo:'Análise' },
-    { view:'a-receber-representante', icone:'💵', nome:'A Receber do Representante', grupo:'Operacional', badge:()=>todasFilasRecebimentoRep().filter(r=>!r.conferido).length },
+    { view:'vendas', icone:'🛒', nome:'Vendas', grupo:'Operacional' },
+    { view:'creditos-clientes', icone:'👛', nome:'Créditos de Clientes', grupo:'Operacional' },
+    { view:'centros-custo', icone:'🧮', nome:'Centro de Custos', grupo:'Análise' },
+    { view:'a-receber-representante', icone:'🤲', nome:'A Receber do Representante', grupo:'Operacional', badge:()=>todasFilasRecebimentoRep().filter(r=>!r.conferido).length },
     { view:'relatorios', icone:'📊', nome:'Relatórios', grupo:'Análise' },
     { view:'busca-global', icone:'🔍', nome:'Busca Global', grupo:'Análise' },
     { view:'central-decisao', icone:'🧭', nome:'Central de Decisão', grupo:'Análise' },
@@ -2066,7 +2072,7 @@ function moreItensDef(){
     { view:'capex', icone:'🏗️', nome:'Central de CAPEX', grupo:'Operacional' },
     { view:'retiradas', icone:'💸', nome:'Central de Retiradas', grupo:'Operacional' },
     { view:'pendencias', icone:'🔔', nome:'Central de Pendências', grupo:'Análise', badge:()=>state.lancamentos.filter(l=>l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento<todayISO()).length },
-    { view:'navegacao-objetivo', icone:'🧭', nome:'O Que Você Quer Fazer?', grupo:'Análise' },
+    { view:'navegacao-objetivo', icone:'🗺️', nome:'O Que Você Quer Fazer?', grupo:'Análise' },
     { view:'orcamento', icone:'🗂️', nome:'Orçamento e Planejamento', grupo:'Operacional' },
     { view:'simulacao', icone:'🔮', nome:'Simulações', grupo:'Análise' },
     { view:'categorias', icone:'🏷️', nome:'Categorias', grupo:'Cadastros e Configurações' },
@@ -2087,7 +2093,7 @@ function moreItensDef(){
       return d+o+a+ri;
     } },
     { view:'permissoes', icone:'🔐', nome:'Usuários e Permissões', grupo:'Cadastros e Configurações' },
-    { view:'central-360', icone:'🎯', nome:'Central Financeira 360°', grupo:'Operacional' },
+    { view:'central-360', icone:'🌐', nome:'Central Financeira 360°', grupo:'Operacional' },
     { view:'caixa-fisico', icone:'💵', nome:'Caixa Físico', grupo:'Operacional' },
     { view:'configuracoes', icone:'⚙️', nome:'Configurações', grupo:'Cadastros e Configurações' },
   ];
@@ -24508,7 +24514,7 @@ function viewCentral360(){
 
   return `
     <div class="topbar">
-      <div><h1>🎯 Central Financeira 360°</h1><p>Tudo num lugar só — reaproveita os dados que já existem, não duplica nada.</p></div>
+      <div><h1>🌐 Central Financeira 360°</h1><p>Tudo num lugar só — reaproveita os dados que já existem, não duplica nada.</p></div>
     </div>
     <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:16px;">
       <div class="card saldo"><div class="label">Temos em caixa</div><div class="value mono">${brl(caixa)}</div></div>
