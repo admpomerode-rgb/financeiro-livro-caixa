@@ -28519,6 +28519,7 @@ function attachViewHandlers(){
   // Metas de Reserva
   document.getElementById('btnNovaMeta')?.addEventListener('click', ()=>openMetaModal());
   document.getElementById('btnEditarMetasFinanceiras')?.addEventListener('click', ()=>openMetasFinanceirasModal());
+  document.getElementById('btnEditarMissaoMes')?.addEventListener('click', ()=>openMetasFinanceirasModal());
   document.getElementById('btnNovaDecisaoFinanceira')?.addEventListener('click', ()=>openNovaDecisaoModal());
   document.querySelectorAll('.cofre-nome-input').forEach(inp=>{
     inp.addEventListener('change', ()=>{
@@ -34061,7 +34062,7 @@ function viewMetasReserva(){
     <div class="panel" style="border:2px solid var(--blue-accent);">
       <div class="panel-body" style="padding:20px;text-align:center;">
         <div style="font-size:12px;font-weight:700;color:var(--blue-accent);letter-spacing:0.5px;">🎯 MISSÃO DO MÊS</div>
-        <div style="font-size:16px;font-weight:700;margin-top:4px;">Faturar ${brl(mf.faturamento)}</div>
+        <div style="font-size:16px;font-weight:700;margin-top:4px;">Faturar ${brl(mf.faturamento)} <button class="icon-btn" id="btnEditarMissaoMes" title="Editar meta" style="font-size:12px;">✎</button></div>
         <div style="display:flex;justify-content:center;gap:24px;margin-top:14px;flex-wrap:wrap;">
           <div><div style="font-size:11px;color:var(--text-soft);">Atual</div><div style="font-size:15px;font-weight:700;">${brl(dadosMesAtualMeta.receita)}</div></div>
           <div><div style="font-size:11px;color:var(--text-soft);">Faltam</div><div style="font-size:15px;font-weight:700;color:${bateu?'var(--success)':'var(--warn)'};">${bateu?'Meta batida! 🎉':brl(falta)}</div></div>
@@ -34368,9 +34369,15 @@ function openMetasFinanceirasModal(){
   modal.innerHTML = `
     <h3>Metas financeiras do mês</h3>
     <div class="note" style="margin-top:0;">Essas metas valem pro mês corrente e se atualizam sozinhas — não precisa recriar todo mês, só ajustar o valor se quiser.</div>
-    <div class="field"><label>Meta de faturamento (R$, deixe 0 pra não usar)</label><input type="text" inputmode="decimal" id="mfFaturamento" value="${mf.faturamento||''}" placeholder="0,00"></div>
-    <div class="field"><label>Meta de lucro líquido (R$, deixe 0 pra não usar)</label><input type="text" inputmode="decimal" id="mfLucro" value="${mf.lucro||''}" placeholder="0,00"></div>
-    <div class="field"><label>Meta de redução de despesa (% vs mês passado, deixe 0 pra não usar)</label><input type="text" inputmode="decimal" id="mfReducaoDespesa" value="${mf.reducaoDespesaPct||''}" placeholder="Ex: 10"></div>
+    <div class="field"><label>Meta de faturamento (R$, deixe 0 pra não usar)</label>
+      <div class="row" style="align-items:center;"><input type="text" inputmode="decimal" id="mfFaturamento" value="${mf.faturamento||''}" placeholder="0,00" style="flex:1;">${mf.faturamento>0?`<button type="button" class="icon-btn" id="btnLimparMetaFaturamento" title="Excluir essa meta">✕</button>`:''}</div>
+    </div>
+    <div class="field"><label>Meta de lucro líquido (R$, deixe 0 pra não usar)</label>
+      <div class="row" style="align-items:center;"><input type="text" inputmode="decimal" id="mfLucro" value="${mf.lucro||''}" placeholder="0,00" style="flex:1;">${mf.lucro>0?`<button type="button" class="icon-btn" id="btnLimparMetaLucro" title="Excluir essa meta">✕</button>`:''}</div>
+    </div>
+    <div class="field"><label>Meta de redução de despesa (% vs mês passado, deixe 0 pra não usar)</label>
+      <div class="row" style="align-items:center;"><input type="text" inputmode="decimal" id="mfReducaoDespesa" value="${mf.reducaoDespesaPct||''}" placeholder="Ex: 10" style="flex:1;">${mf.reducaoDespesaPct>0?`<button type="button" class="icon-btn" id="btnLimparMetaReducao" title="Excluir essa meta">✕</button>`:''}</div>
+    </div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       <button class="btn" id="btnSalvarMetasFinanceiras">Salvar</button>
@@ -34378,6 +34385,21 @@ function openMetasFinanceirasModal(){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnLimparMetaFaturamento')?.addEventListener('click', ()=>{
+    state.metasFinanceirasMes.faturamento = 0;
+    persist(); closeModal(); render();
+    showToast('Meta de faturamento excluída.');
+  });
+  document.getElementById('btnLimparMetaLucro')?.addEventListener('click', ()=>{
+    state.metasFinanceirasMes.lucro = 0;
+    persist(); closeModal(); render();
+    showToast('Meta de lucro excluída.');
+  });
+  document.getElementById('btnLimparMetaReducao')?.addEventListener('click', ()=>{
+    state.metasFinanceirasMes.reducaoDespesaPct = 0;
+    persist(); closeModal(); render();
+    showToast('Meta de redução de despesa excluída.');
+  });
   document.getElementById('btnSalvarMetasFinanceiras').addEventListener('click', ()=>{
     const btn_btnSalvarMetasFinanceiras_Click = document.getElementById('btnSalvarMetasFinanceiras');
     if(btn_btnSalvarMetasFinanceiras_Click.disabled) return;
