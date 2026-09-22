@@ -829,7 +829,7 @@
         <div class="nav-item" data-view="gestao-dividas" title="Gestão de Dívidas"><span class="nav-dot"></span><span class="nav-abbr">GD</span><span class="nav-label">Gestão de Dívidas</span></div>
         <div class="nav-item" data-view="ativos" title="Ativos Patrimoniais"><span class="nav-dot"></span><span class="nav-abbr">AP</span><span class="nav-label">Ativos Patrimoniais</span></div>
         <div class="nav-item" data-view="investimentos" title="Investimentos"><span class="nav-dot"></span><span class="nav-abbr">IV</span><span class="nav-label">Investimentos</span></div>
-        <div class="nav-item" data-view="orcamentos-processos" title="Orçamentos e Compras"><span class="nav-dot"></span><span class="nav-abbr">OC</span><span class="nav-label">Orçamentos e Compras</span></div>
+        <div class="nav-item" data-view="orcamentos-processos" title="Aprovação de Orçamentos"><span class="nav-dot"></span><span class="nav-abbr">OC</span><span class="nav-label">Aprovação de Orçamentos</span></div>
         <div class="nav-item" data-view="gestao-os" title="Gestão de Ordens de Serviço"><span class="nav-dot"></span><span class="nav-abbr">OS</span><span class="nav-label">Gestão de O.S.</span></div>
         <div class="nav-item" data-view="central-360" title="Central Financeira 360°"><span class="nav-dot"></span><span class="nav-abbr">C3</span><span class="nav-label">Central Financeira 360°</span></div>
         <div class="nav-item" data-view="caixa-fisico" title="Caixa Físico"><span class="nav-dot"></span><span class="nav-abbr">CX</span><span class="nav-label">Caixa Físico</span></div>
@@ -1384,6 +1384,7 @@ const LIXEIRA_TIPO_LISTA = {
   ativoPatrimonial: 'ativosPatrimoniais', provisionamento: 'provisionamentos',
   contrato: 'contratos', fornecedor: 'fornecedores', emprestimo: 'emprestimos',
   categoria: 'categorias', recorrencia: 'recorrencias', meta: 'metasReserva',
+  orcamentoProcesso: 'orcamentosProcessos',
 };
 function restaurarDaLixeira(lixeiraId){
   const item = state.lixeira.find(x=>x.id===lixeiraId);
@@ -2093,7 +2094,7 @@ function moreItensDef(){
     { view:'ativos', icone:'📦', nome:'Ativos Patrimoniais', grupo:'Operacional', badge:()=>(state.comprasProcessosPendentes||[]).length },
     { view:'usina-solar', icone:'☀️', nome:'Usina Solar', grupo:'Operacional' },
     { view:'investimentos', icone:'📈', nome:'Investimentos', grupo:'Operacional', badge:()=>(state.notasPendentes||[]).length },
-    { view:'orcamentos-processos', icone:'📋', nome:'Orçamentos e Compras', grupo:'Operacional', badge:()=>(state.orcamentosProcessos||[]).filter(o=>o.status==='pendente').length },
+    { view:'orcamentos-processos', icone:'📋', nome:'Aprovação de Orçamentos', grupo:'Operacional', badge:()=>(state.orcamentosProcessos||[]).filter(o=>o.status==='pendente').length },
     { view:'gestao-os', icone:'🔧', nome:'Gestão de Ordens de Serviço', grupo:'Operacional', badge:()=>(state.osVkIndustrial||[]).filter(o=>o.status==='pendente'||o.statusProcesso&&!o.lancamentoFinanceiroId).length },
     { view:'comissoes', icone:'🤝', nome:'Comissões', grupo:'Operacional' },
     { view:'vendas', icone:'🛒', nome:'Vendas', grupo:'Operacional' },
@@ -24184,11 +24185,11 @@ function viewProcessosConfig(){
     <div class="panel vk-status-panel" style="cursor:pointer;" data-goto="orcamentos-processos">
       <div class="vk-status-row">
         <div>
-          <div class="vk-status-label">Orçamentos e Compras</div>
+          <div class="vk-status-label">Aprovação de Orçamentos</div>
           <div class="vk-status-value">${orcamentosPendentes.length} item(ns)</div>
           <div class="vk-status-sub">Pedidos de orçamento feitos dentro de um processo — aprove ou recuse aqui</div>
         </div>
-        <button class="btn lg" data-goto="orcamentos-processos">📋 Ver Orçamentos e Compras</button>
+        <button class="btn lg" data-goto="orcamentos-processos">📋 Ver Aprovação de Orçamentos</button>
       </div>
     </div>
     <div class="panel">
@@ -24220,7 +24221,7 @@ function viewProcessosConfig(){
   ],
   valorTotal: 850  // opcional — se não vier, soma os itens sozinho
 }</div>
-        A sincronização acima detecta orçamentos novos, gera um <strong>número sequencial</strong> pra cada um e grava de volta no próprio documento (campo <code>numero</code>). O orçamento entra na fila de "Orçamentos e Compras" pra aprovar ou recusar — a decisão (<code>status: "aprovado"</code> ou <code>"recusado"</code>, mais <code>decididoEm</code>) é gravada de volta automaticamente no documento, pra aparecer no processo lá. As pesquisas de preço (2ª etapa, depois do pedido inicial aprovado) usam exatamente essa mesma coleção e o mesmo fluxo de aprovação, reaproveitando o mesmo número do pedido original — não precisam de nada especial.
+        A sincronização acima detecta orçamentos novos, gera um <strong>número sequencial</strong> pra cada um e grava de volta no próprio documento (campo <code>numero</code>). O orçamento entra na fila de "Aprovação de Orçamentos" pra aprovar ou recusar — a decisão (<code>status: "aprovado"</code> ou <code>"recusado"</code>, mais <code>decididoEm</code>) é gravada de volta automaticamente no documento, pra aparecer no processo lá. As pesquisas de preço (2ª etapa, depois do pedido inicial aprovado) usam exatamente essa mesma coleção e o mesmo fluxo de aprovação, reaproveitando o mesmo número do pedido original — não precisam de nada especial.
       </div>
     </div>
     <div class="panel">
@@ -24324,7 +24325,7 @@ function viewOrcamentosProcessos(){
     <div class="topbar">
       <div>
         <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="processos">← Integração Livro de Processos</span>
-        <h1 style="margin-top:6px;">Orçamentos e Compras</h1>
+        <h1 style="margin-top:6px;">Aprovação de Orçamentos</h1>
         <p>Orçamentos pedidos dentro de um processo (e as compras que eles geram), aguardando aprovação, decisão ou revisão</p>
       </div>
       <button class="btn" id="btnNovoOrcamentoManual">+ Novo orçamento manual</button>
@@ -24390,15 +24391,17 @@ function viewOrcamentosProcessos(){
     ${decididos.length ? `
     <details class="panel-details" style="margin-bottom:14px;" open>
       <summary>Já decididos (${decididos.length}) — continuam aqui, nunca somem</summary>
+      <div style="padding:10px 20px 0;"><button class="btn ghost sm" id="btnExcluirOrcamentosAntigos">🗑️ Excluir decididos com mais de 90 dias</button></div>
       <div class="panel-body" style="padding:0;">
         ${decididos.slice(0,50).map(o=>`
-          <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
+          <div class="ledger-row compact" style="grid-template-columns:1fr auto auto auto;">
             <div class="desc-cell">
               <div>Orçamento N° ${o.numero}${o.processoTitulo?' — '+escapeHTML(o.processoTitulo):''}</div>
               <div class="cat">${o.decididoEm ? new Date(o.decididoEm).toLocaleString('pt-BR') : ''}${o.motivoRecusa ? ' · Motivo: '+escapeHTML(o.motivoRecusa) : ''}${o.detalhesCompra && o.detalhesCompra.loja ? ' · Loja: '+escapeHTML(o.detalhesCompra.loja) : ''}${o.resposta ? ' · Resposta: '+escapeHTML(o.resposta) : ''}</div>
             </div>
             <span class="mono">${brl(o.valorTotal)}</span>
             <span style="font-size:11.5px;font-weight:600;color:${o.status==='aprovado'?'var(--success)':'var(--danger)'};">${o.status==='aprovado'?'✓ Aprovado':'✕ Recusado'}</span>
+            <button class="icon-btn" data-excluir-orcamento="${o.id}" title="Excluir (vai pra Lixeira)">🗑️</button>
           </div>
         `).join('')}
       </div>
@@ -29875,6 +29878,27 @@ function attachViewHandlers(){
       persist(); render(); showToast('Excluído de vez.');
     });
   });
+  document.querySelectorAll('[data-excluir-orcamento]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const o = state.orcamentosProcessos.find(x=>x.id===btn.dataset.excluirOrcamento);
+      if(!o) return;
+      moverParaLixeira('orcamentoProcesso', o, `Orçamento N° ${o.numero}${o.processoTitulo?' — '+o.processoTitulo:''} — ${brl(o.valorTotal)}`);
+      state.orcamentosProcessos = state.orcamentosProcessos.filter(x=>x.id!==o.id);
+      persist(); render(); showToast('Orçamento excluído — fica na Lixeira por 90 dias.');
+    });
+  });
+  document.getElementById('btnExcluirOrcamentosAntigos')?.addEventListener('click', async ()=>{
+    const limite90 = new Date(); limite90.setDate(limite90.getDate()-90);
+    const limite90ISO = limite90.toISOString();
+    const antigos = (state.orcamentosProcessos||[]).filter(o=>o.status!=='pendente' && o.decididoEm && o.decididoEm<limite90ISO);
+    if(!antigos.length){ showToast('Nenhum orçamento decidido com mais de 90 dias.'); return; }
+    if(!(await avisoModal({mensagem:`Excluir ${antigos.length} orçamento(s) decidido(s) há mais de 90 dias? Vão pra Lixeira, dá pra restaurar depois.`, tipo:'aviso', textoConfirmar:'Excluir'}))) return;
+    antigos.forEach(o=>moverParaLixeira('orcamentoProcesso', o, `Orçamento N° ${o.numero}${o.processoTitulo?' — '+o.processoTitulo:''} — ${brl(o.valorTotal)}`));
+    const idsAntigos = new Set(antigos.map(o=>o.id));
+    state.orcamentosProcessos = state.orcamentosProcessos.filter(o=>!idsAntigos.has(o.id));
+    persist(); render(); showToast(`${antigos.length} orçamento(s) movido(s) pra Lixeira.`);
+  });
+
   document.getElementById('central360VisaoSel')?.addEventListener('change', (e)=>{
     central360Visao = e.target.value;
     render();
@@ -33618,7 +33642,7 @@ function levantarPendencias(){
 
   // Orçamentos de processo aguardando decisão
   const orcPendentes = (state.orcamentosProcessos||[]).filter(o=>o.status==='pendente');
-  if(orcPendentes.length) pendencias.push({ chave:'orcamentos-pendentes', prioridade:'media', texto:`${orcPendentes.length} orçamento(s) aguardando decisão (Orçamentos e Compras)`, view:'orcamentos-processos', icone:'📋' });
+  if(orcPendentes.length) pendencias.push({ chave:'orcamentos-pendentes', prioridade:'media', texto:`${orcPendentes.length} orçamento(s) aguardando decisão (Aprovação de Orçamentos)`, view:'orcamentos-processos', icone:'📋' });
 
   // Investimentos com posição pendente de atualização
   const investPendentes = itensAtualizaveisInvestimento().map(it=>({ ...it, status: statusAtualizacaoItem(it.dataUltimaAtualizacao, it.periodicidade) })).filter(it=>it.status==='pendente');
