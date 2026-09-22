@@ -1154,6 +1154,7 @@ function aplicarMigracoes(s){
   if(!s.usuariosPermissao) s.usuariosPermissao = []; // papel de cada e-mail (admin/operador/visualizacao) — vazio = sem restrição nenhuma ainda
   if(!s.avaliacoesFornecedor) s.avaliacoesFornecedor = []; // avaliação manual (nota 1-5 + comentário) — não dá pra automatizar prazo de entrega, esse dado não existe no sistema
   if(!s.fechamentosCaixaFisico) s.fechamentosCaixaFisico = []; // conferência de gaveta (contado x esperado) pras contas tipo "caixa"
+  if(!s.limitesProcesso) s.limitesProcesso = {}; // { processoId: { limite, aprovadoEm } } — teto de compras liberado pro processo inteiro, orçamentos seguintes do mesmo processo não podem passar disso
   if(!s.contas) s.contas = [];
   // Migração: garante uma conta padrão e associa lançamentos antigos sem conta
   if(s.contas.length===0){
@@ -1500,6 +1501,21 @@ function gerarTextoRelatorioExecutivo(dados){
   if(dados.riscos.length) dados.riscos.forEach(r => linhas.push(`- ${r}`));
   else linhas.push('- Nenhum risco relevante identificado no momento.');
   return linhas.join('\n');
+}
+// Limite de compras por processo — testada isoladamente antes de usar. Um processo sem limite
+// definido ainda deixa passar livre (primeira aprovação é quem define o teto); daí em diante,
+// soma tudo que já foi aprovado nesse mesmo processo e não deixa passar do limite liberado.
+function verificarLimiteProcesso(processoId, valorNovoOrcamento, limitesProcesso, orcamentosProcessos){
+  const limiteInfo = limitesProcesso[processoId];
+  if(!limiteInfo) return { permitido: true, motivo: null };
+  const jaAprovadoNoProcesso = orcamentosProcessos
+    .filter(o=>o.processoId===processoId && o.status==='aprovado')
+    .reduce((s,o)=>s+o.valorTotal,0);
+  const totalComEsse = jaAprovadoNoProcesso + valorNovoOrcamento;
+  if(totalComEsse > limiteInfo.limite){
+    return { permitido: false, motivo: `Isso ultrapassa o limite de ${brl(limiteInfo.limite)} liberado pro processo (já aprovado: ${brl(jaAprovadoNoProcesso)}, esse pedido: ${brl(valorNovoOrcamento)}, total ficaria ${brl(totalComEsse)})` };
+  }
+  return { permitido: true, motivo: null };
 }
 // ---- Detecção de anomalia (lançamento fora do padrão da categoria) ----
 // Testada isoladamente antes de usar.
@@ -24016,16 +24032,22 @@ function statusFinanceiroOS(pedido){
 
 
 function openAprovarOrcamentoModal(o, respostaAtual){
+  const limiteExistente = o.processoId ? state.limitesProcesso[o.processoId] : null;
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
     <h3>Aprovar Orçamento N° ${o.numero}</h3>
     <div class="note" style="margin-top:0;">Preenche os dados da compra que vai ser feita.${o.processoOrcamentoId ? ' Isso volta pro Livro de Processos.' : ''}</div>
+    ${limiteExistente ? `<div class="note" style="border-color:var(--accent);">🔒 Esse processo já tem um limite de compras liberado: <strong>${brl(limiteExistente.limite)}</strong> (definido em ${fmtDate(limiteExistente.aprovadoEm.slice(0,10))}). Esse orçamento não pode fazer o total do processo passar disso.</div>` : ''}
     <div class="field"><label>Loja / fornecedor</label><input type="text" id="apvLoja" placeholder="Ex: Casa do Forneiro Ltda"></div>
     <div class="field"><label>Descrição</label><input type="text" id="apvDescricao" placeholder="O que vai ser comprado"></div>
     <div class="field-row">
-      <div class="field"><label>Valor (R$)</label><input type="text" inputmode="decimal" id="apvValor" placeholder="0,00"></div>
+      <div class="field"><label>Valor (R$)</label><input type="text" inputmode="decimal" id="apvValor" placeholder="0,00" value="${o.valorTotal?String(o.valorTotal).replace('.',','):''}"></div>
       <div class="field"><label>Link (Drive, site, etc.)</label><input type="text" id="apvLink" placeholder="https://..."></div>
     </div>
+    ${o.processoId && !limiteExistente ? `
+    <div class="field"><label>Limite de compras liberado pro processo (R$) — opcional</label><input type="text" inputmode="decimal" id="apvLimiteProcesso" placeholder="Deixe vazio se não quiser travar futuros orçamentos desse processo"></div>
+    <div class="note" style="margin-top:0;">Se preencher, orçamentos futuros vinculados a esse mesmo processo não vão poder passar desse total, mesmo somando com esse aqui.</div>
+    ` : ''}
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       <button class="btn" id="btnConfirmarAprovacaoOrc">Confirmar aprovação</button>
@@ -24041,6 +24063,21 @@ function openAprovarOrcamentoModal(o, respostaAtual){
     const descricao = document.getElementById('apvDescricao').value.trim();
     const valor = parseFloat(document.getElementById('apvValor').value.replace(',','.'))||0;
     const link = document.getElementById('apvLink').value.trim();
+
+    if(o.processoId){
+      const { permitido, motivo } = verificarLimiteProcesso(o.processoId, valor, state.limitesProcesso, state.orcamentosProcessos);
+      if(!permitido){
+        showToast(motivo);
+        btn_btnConfirmarAprovacaoOrc_Click.disabled = false;
+        return;
+      }
+      const campoLimiteNovo = document.getElementById('apvLimiteProcesso');
+      if(campoLimiteNovo){
+        const limiteDigitado = parseFloat(campoLimiteNovo.value.replace(',','.'))||0;
+        if(limiteDigitado>0) state.limitesProcesso[o.processoId] = { limite: limiteDigitado, aprovadoEm: new Date().toISOString() };
+      }
+    }
+
     closeModal();
     decidirOrcamentoProcesso(o.id, 'aprovado', {
       resposta: respostaAtual,
@@ -24318,6 +24355,7 @@ function viewOrcamentosProcessos(){
           <h2>Orçamento N° ${o.numero}${o.processoTitulo?' — '+escapeHTML(o.processoTitulo):''}${o.adiado ? ' <span style="color:var(--warn);font-size:12px;font-weight:600;">⏳ Adiado</span>' : ''}</h2>
           <span class="mono" style="font-weight:700;font-size:15px;">${brl(o.valorTotal)}</span>
         </div>
+        ${o.processoId && state.limitesProcesso[o.processoId] ? `<div class="note" style="margin:0;border-radius:0;border-left:none;border-right:none;border-top:none;">🔒 Limite liberado pro processo: <strong>${brl(state.limitesProcesso[o.processoId].limite)}</strong></div>` : ''}
 
         ${o.descricaoPedido || o.driveLink ? `
         <div style="padding:14px 20px;background:var(--bone);border-bottom:1px solid var(--line);">
@@ -24350,8 +24388,8 @@ function viewOrcamentosProcessos(){
       </div>
     `).join('') : `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum orçamento aguardando decisão no momento.</div></div>`}
     ${decididos.length ? `
-    <details class="panel-details" style="margin-bottom:14px;">
-      <summary>Já decididos (${decididos.length})</summary>
+    <details class="panel-details" style="margin-bottom:14px;" open>
+      <summary>Já decididos (${decididos.length}) — continuam aqui, nunca somem</summary>
       <div class="panel-body" style="padding:0;">
         ${decididos.slice(0,50).map(o=>`
           <div class="ledger-row compact" style="grid-template-columns:1fr auto auto;">
