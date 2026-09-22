@@ -1155,6 +1155,7 @@ function aplicarMigracoes(s){
   if(!s.avaliacoesFornecedor) s.avaliacoesFornecedor = []; // avaliação manual (nota 1-5 + comentário) — não dá pra automatizar prazo de entrega, esse dado não existe no sistema
   if(!s.fechamentosCaixaFisico) s.fechamentosCaixaFisico = []; // conferência de gaveta (contado x esperado) pras contas tipo "caixa"
   if(!s.limitesProcesso) s.limitesProcesso = {}; // { processoId: { limite, aprovadoEm } } — teto de compras liberado pro processo inteiro, orçamentos seguintes do mesmo processo não podem passar disso
+  if(!s.capexProcessosPedidos) s.capexProcessosPedidos = []; // espelho local (fetch manual) da coleção "capex_processos" compartilhada — pedidos de abertura de processo feitos a partir de um projeto de CAPEX
   if(!s.contas) s.contas = [];
   // Migração: garante uma conta padrão e associa lançamentos antigos sem conta
   if(s.contas.length===0){
@@ -20047,6 +20048,20 @@ function capexPagoProjeto(projetoId){
   return state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem==='ativo_patrimonial' && idsAtivos.has(l.ativoPatrimonialId)).reduce((s,l)=>s+l.valor,0);
 }
 const STATUS_CAPEX = ['Planejado','Aprovado','Em execução','Parcialmente realizado','Concluído','Cancelado'];
+// Payback: em quantos meses o investimento se paga, com a economia + receita adicional esperada.
+// Testada isoladamente antes de usar.
+function calcularPaybackCapex(orcamento, economiaEsperadaMensal, receitaAdicionalEsperadaMensal){
+  const ganhoMensal = (economiaEsperadaMensal||0) + (receitaAdicionalEsperadaMensal||0);
+  if(ganhoMensal<=0 || orcamento<=0) return null;
+  return Math.ceil(orcamento / ganhoMensal);
+}
+// "Disponível" pode sobrar; "custo previsto até conclusão" é quanto AINDA falta gastar de verdade
+// pra terminar — nunca negativo (se já estourou o orçamento, isso vira outro indicador, não esse).
+// Testada isoladamente antes de usar.
+function custoPrevistoAteConclusao(orcamento, realizado, comprometido, status){
+  if(['Concluído','Cancelado'].includes(status)) return 0;
+  return Math.max(0, orcamento - realizado - comprometido);
+}
 function corStatusCapex(status){
   return { 'Planejado':'var(--text-soft)', 'Aprovado':'var(--blue-accent)', 'Em execução':'var(--warn)', 'Parcialmente realizado':'var(--warn)', 'Concluído':'var(--success)', 'Cancelado':'var(--danger)' }[status] || 'var(--text-soft)';
 }
@@ -20054,6 +20069,7 @@ function corStatusCapex(status){
 function viewCapex(){
   const projetosAtivos = state.capexProjetos.filter(p=>p.status!=='Cancelado');
   const hoje = todayISO();
+  const anoAtual = hoje.slice(0,4);
   const linhas = state.capexProjetos.map(p=>{
     const realizado = capexRealizadoProjeto(p.id);
     const pago = capexPagoProjeto(p.id);
@@ -20061,15 +20077,35 @@ function viewCapex(){
     const disponivel = (p.orcamento||0) - realizado - comprometido;
     const pctUtilizado = p.orcamento>0 ? Math.round((realizado+comprometido)/p.orcamento*100) : null;
     const atrasado = p.dataPrevista && p.dataPrevista<hoje && !['Concluído','Cancelado'].includes(p.status);
-    return { ...p, realizado, pago, comprometido, disponivel, pctUtilizado, atrasado };
+    const payback = calcularPaybackCapex(p.orcamento, p.economiaEsperadaMensal, p.receitaAdicionalEsperadaMensal);
+    const custoPrevisto = custoPrevistoAteConclusao(p.orcamento||0, realizado, comprometido, p.status);
+    const temAtivoVinculado = state.ativosPatrimoniais.some(a=>a.capexProjetoId===p.id);
+    return { ...p, realizado, pago, comprometido, disponivel, pctUtilizado, atrasado, payback, custoPrevisto, temAtivoVinculado };
   });
+  const linhasDoAno = linhas.filter(l=>(l.criadoEm||'').slice(0,4)===anoAtual);
 
   const capexPlanejadoTotal = projetosAtivos.reduce((s,p)=>s+(p.orcamento||0),0);
   const capexRealizadoTotal = projetosAtivos.reduce((s,p)=>s+capexRealizadoProjeto(p.id),0);
   const capexComprometidoTotal = projetosAtivos.reduce((s,p)=>s+(p.comprometido||0),0);
   const capexDisponivelTotal = capexPlanejadoTotal - capexRealizadoTotal - capexComprometidoTotal;
   const pctOrcamentoUtilizado = capexPlanejadoTotal>0 ? Math.round((capexRealizadoTotal+capexComprometidoTotal)/capexPlanejadoTotal*100) : null;
+  const capexPrevistoFimAno = linhasDoAno.filter(l=>!['Concluído','Cancelado'].includes(l.status)).reduce((s,l)=>s+l.disponivel,0);
 
+  // Evolução mensal (últimos 12 meses): planejado = orçamento dos projetos criados naquele mês;
+  // realizado = pago de verdade (ativo patrimonial), olhando a data de pagamento — testado isolado.
+  const meses12 = Array.from({length:12},(_,i)=>{ const d=new Date(); d.setMonth(d.getMonth()-(11-i)); return d.toISOString().slice(0,7); });
+  const pagoPorMes = {};
+  state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem==='ativo_patrimonial' && l.dataPagamento).forEach(l=>{
+    const mes = l.dataPagamento.slice(0,7);
+    pagoPorMes[mes] = (pagoPorMes[mes]||0) + l.valor;
+  });
+  const evolucaoMensal = meses12.map(mes=>({
+    mes, planejado: state.capexProjetos.filter(p=>(p.criadoEm||'').slice(0,7)===mes).reduce((s,p)=>s+(p.orcamento||0),0),
+    realizado: pagoPorMes[mes]||0, comprometido: state.capexProjetos.filter(p=>(p.criadoEm||'').slice(0,7)===mes).reduce((s,p)=>s+(p.comprometido||0),0),
+  }));
+  const labelsMeses12 = meses12.map(m=>competenciaLabel(m));
+
+  // Seção atenção — expandida com governança (sem orçamento/responsável/prazo/ativo/justificativa)
   const alertas = [];
   linhas.filter(l=>l.status!=='Cancelado').forEach(l=>{
     if(l.orcamento>0 && (l.realizado+l.comprometido)>l.orcamento) alertas.push({ tipo:'🚨', texto:`Projeto "${l.nome}" ultrapassou o orçamento previsto.` });
@@ -20077,44 +20113,99 @@ function viewCapex(){
     if(l.atrasado) alertas.push({ tipo:'⏰', texto:`Projeto "${l.nome}" está com execução atrasada (previsto para ${fmtDate(l.dataPrevista)}).` });
   });
   if(capexComprometidoTotal>0 && capexComprometidoTotal>capexDisponivelTotal) alertas.push({ tipo:'⚠️', texto:`Existem ${brl(capexComprometidoTotal)} comprometidos em CAPEX ainda não pagos.` });
+  const semOrcamento = linhas.filter(l=>!['Concluído','Cancelado'].includes(l.status) && !(l.orcamento>0));
+  const semResponsavel = linhas.filter(l=>!['Concluído','Cancelado'].includes(l.status) && !l.responsavel);
+  const semPrazo = linhas.filter(l=>!['Concluído','Cancelado'].includes(l.status) && !l.dataPrevista);
+  const semAtivoVinculado = linhas.filter(l=>l.status==='Concluído' && !l.temAtivoVinculado);
+  const semJustificativa = linhas.filter(l=>!['Concluído','Cancelado'].includes(l.status) && !l.justificativa);
+  if(semOrcamento.length) alertas.push({ tipo:'📋', texto:`${semOrcamento.length} projeto(s) sem orçamento definido.` });
+  if(semResponsavel.length) alertas.push({ tipo:'👤', texto:`${semResponsavel.length} projeto(s) sem responsável.` });
+  if(semPrazo.length) alertas.push({ tipo:'📅', texto:`${semPrazo.length} projeto(s) sem prazo definido.` });
+  if(semAtivoVinculado.length) alertas.push({ tipo:'🔗', texto:`${semAtivoVinculado.length} projeto(s) concluído(s) sem ativo patrimonial vinculado.` });
+  if(semJustificativa.length) alertas.push({ tipo:'📝', texto:`${semJustificativa.length} projeto(s) sem justificativa registrada.` });
 
   const porCategoria = {};
   projetosAtivos.forEach(p=>{ porCategoria[p.categoria] = (porCategoria[p.categoria]||0) + capexRealizadoProjeto(p.id); });
   const dadosDonutCategoria = Object.entries(porCategoria).filter(([,v])=>v>0).map(([nome,valor])=>({nome,valor}));
+
+  const porArea = {};
+  projetosAtivos.filter(p=>p.area).forEach(p=>{ porArea[p.area] = (porArea[p.area]||0) + capexRealizadoProjeto(p.id); });
+  const porFornecedor = {};
+  projetosAtivos.filter(p=>p.fornecedor).forEach(p=>{ porFornecedor[p.fornecedor] = (porFornecedor[p.fornecedor]||0) + capexRealizadoProjeto(p.id); });
 
   const projetosConcluidos = state.capexProjetos.filter(p=>p.status==='Concluído').length;
   const projetosEmAndamento = state.capexProjetos.filter(p=>!['Concluído','Cancelado'].includes(p.status)).length;
 
   return `
     <div class="topbar">
-      <div><h1>Central de CAPEX</h1><p>Investimentos de capital — do planejamento até a realização, sobre os Ativos Patrimoniais já cadastrados</p></div>
+      <div><h1>Central de CAPEX ${anoAtual}</h1><p>Investimentos de capital — do planejamento até a realização, sobre os Ativos Patrimoniais já cadastrados</p></div>
+      <button class="btn ghost" id="btnSincronizarCapexProcessos">🔄 Sincronizar processos</button>
       <button class="btn" id="btnNovoProjetoCapex">+ Novo projeto</button>
     </div>
 
-    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:14px;">
-      <div class="card"><div class="label">CAPEX planejado</div><div class="value mono">${brl(capexPlanejadoTotal)}</div></div>
-      <div class="card"><div class="label">CAPEX realizado</div><div class="value mono" style="color:var(--danger);">${brl(capexRealizadoTotal)}</div></div>
-      <div class="card"><div class="label">CAPEX comprometido</div><div class="value mono">${brl(capexComprometidoTotal)}</div></div>
-      <div class="card"><div class="label">CAPEX disponível</div><div class="value mono" style="color:${capexDisponivelTotal>=0?'var(--success)':'var(--danger)'};">${brl(capexDisponivelTotal)}</div></div>
-      <div class="card"><div class="label">% do orçamento utilizado</div><div class="value mono" style="${pctOrcamentoUtilizado===null?'font-size:12.5px;color:var(--text-soft);':''}">${pctOrcamentoUtilizado!==null?pctOrcamentoUtilizado+'%':'Sem orçamento definido'}</div></div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:14px;">
+      <div class="card"><div class="label">🏗️ Orçamento CAPEX</div><div class="value mono">${brl(capexPlanejadoTotal)}</div></div>
+      <div class="card"><div class="label">✅ Realizado</div><div class="value mono" style="color:var(--danger);">${brl(capexRealizadoTotal)}</div></div>
+      <div class="card"><div class="label">🟡 Comprometido</div><div class="value mono">${brl(capexComprometidoTotal)}</div></div>
+      <div class="card"><div class="label">💰 Ainda disponível</div><div class="value mono" style="color:${capexDisponivelTotal>=0?'var(--success)':'var(--danger)'};">${brl(capexDisponivelTotal)}</div></div>
+      <div class="card"><div class="label">📅 Previsto até o fim do ano</div><div class="value mono">${brl(capexPrevistoFimAno)}</div></div>
+      <div class="card"><div class="label">📊 % utilizado</div><div class="value mono" style="${pctOrcamentoUtilizado===null?'font-size:12.5px;color:var(--text-soft);':''}">${pctOrcamentoUtilizado!==null?pctOrcamentoUtilizado+'%':'Sem orçamento'}</div></div>
     </div>
     <div class="cards" style="grid-template-columns:1fr 1fr;margin-bottom:14px;">
       <div class="card"><div class="label">Projetos ativos</div><div class="value mono">${projetosEmAndamento}</div></div>
       <div class="card"><div class="label">Projetos concluídos</div><div class="value mono">${projetosConcluidos}</div></div>
     </div>
 
+    ${state.capexProjetos.length ? `
+    <div class="dash-section-label">📈 Evolução do CAPEX (últimos 12 meses)</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:14px 18px;">
+      ${svgLinhasMultiplas([
+        { nome:'Planejado', valores: evolucaoMensal.map(m=>m.planejado), cor:'#8A8F98' },
+        { nome:'Realizado', valores: evolucaoMensal.map(m=>m.realizado), cor:'#E24C4C' },
+        { nome:'Comprometido', valores: evolucaoMensal.map(m=>m.comprometido), cor:'#E2A93A' },
+      ], labelsMeses12)}
+    </div></div>` : ''}
+
     ${alertas.length ? `
-    <div class="dash-section-label">Alertas</div>
+    <div class="dash-section-label">🚨 Atenção</div>
     <div class="panel" style="margin-bottom:14px;border-left:3px solid var(--warn);"><div class="panel-body" style="padding:0;">
       ${alertas.map(a=>`<div class="ledger-row compact" style="grid-template-columns:auto 1fr;">${a.tipo} <span style="font-size:12.5px;">${a.texto}</span></div>`).join('')}
+    </div></div>` : ''}
+
+    ${state.capexProjetos.length ? `
+    <div class="dash-section-label">💵 CAPEX × Caixa — pressão no fluxo de caixa desse mês</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:14px 18px;">
+      ${(()=>{
+        const mesAtual = hoje.slice(0,7);
+        const capexPagoMes = pagoPorMes[mesAtual]||0;
+        const totalSaidasMes = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento && l.dataPagamento.slice(0,7)===mesAtual && l.origem!=='transferencia').reduce((s,l)=>s+l.valor,0);
+        const pct = totalSaidasMes>0 ? Math.round(capexPagoMes/totalSaidasMes*100) : null;
+        return `<div class="row" style="gap:24px;flex-wrap:wrap;">
+          <div><div class="label" style="font-size:11px;color:var(--text-soft);">CAPEX pago esse mês</div><div class="mono" style="font-size:18px;font-weight:700;">${brl(capexPagoMes)}</div></div>
+          <div><div class="label" style="font-size:11px;color:var(--text-soft);">Total de saídas do mês</div><div class="mono" style="font-size:18px;font-weight:700;">${brl(totalSaidasMes)}</div></div>
+          <div><div class="label" style="font-size:11px;color:var(--text-soft);">% das saídas que é CAPEX</div><div class="mono" style="font-size:18px;font-weight:700;color:${pct!==null&&pct>=40?'var(--warn)':'inherit'};">${pct!==null?pct+'%':'—'}</div></div>
+        </div>`;
+      })()}
     </div></div>` : ''}
 
     ${!state.capexProjetos.length ? `
     <div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum projeto de CAPEX cadastrado ainda.</div></div>
     ` : `
-    ${dadosDonutCategoria.length ? `<div class="dash-section-label">CAPEX por categoria</div><div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:14px 18px;">${svgPizza(dadosDonutCategoria, true)}</div></div>` : ''}
+    <div class="field-row" style="margin-bottom:14px;">
+      ${dadosDonutCategoria.length ? `<div style="flex:1;"><div class="dash-section-label">CAPEX por categoria</div><div class="panel"><div class="panel-body" style="padding:14px 18px;">${svgPizza(dadosDonutCategoria, true)}</div></div></div>` : ''}
+    </div>
+    ${Object.keys(porArea).length ? `
+    <div class="dash-section-label">CAPEX por área</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+      ${Object.entries(porArea).sort((a,b)=>b[1]-a[1]).map(([area,v])=>`<div class="ledger-row compact"><div class="desc-cell"><div>${escapeHTML(area)}</div></div><span class="mono">${brl(v)}</span></div>`).join('')}
+    </div></div>` : ''}
+    ${Object.keys(porFornecedor).length ? `
+    <div class="dash-section-label">CAPEX por fornecedor</div>
+    <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;">
+      ${Object.entries(porFornecedor).sort((a,b)=>b[1]-a[1]).map(([f,v])=>`<div class="ledger-row compact"><div class="desc-cell"><div>${escapeHTML(f)}</div></div><span class="mono">${brl(v)}</span></div>`).join('')}
+    </div></div>` : ''}
 
-    <div class="dash-section-label">Projetos</div>
+    <div class="dash-section-label">🏗️ Projetos de investimento</div>
     ${linhas.map(l=>`
       <div class="panel" style="margin-bottom:12px;">
         <div class="panel-body" style="padding:14px 18px;cursor:pointer;" data-action="editar-projeto-capex" data-id="${l.id}">
@@ -20122,7 +20213,7 @@ function viewCapex(){
             <span style="font-weight:600;font-size:13.5px;">${escapeHTML(l.nome)}${l.atrasado?' <span style="color:var(--danger);font-size:11px;">⏰ atrasado</span>':''}</span>
             <span style="font-size:11px;font-weight:600;color:${corStatusCapex(l.status)};">${l.status}</span>
           </div>
-          <div style="font-size:11px;color:var(--text-soft);margin-bottom:8px;">${escapeHTML(l.categoria)} · ${l.tipo==='expansao'?'Expansão':'Manutenção/Substituição'}${l.responsavel?' · '+escapeHTML(l.responsavel):''}${l.dataPrevista?' · previsto '+fmtDate(l.dataPrevista):''}</div>
+          <div style="font-size:11px;color:var(--text-soft);margin-bottom:8px;">${escapeHTML(l.categoria)} · ${l.tipo==='expansao'?'Expansão':'Manutenção/Substituição'}${l.area?' · '+escapeHTML(l.area):''}${l.responsavel?' · '+escapeHTML(l.responsavel):''}${l.dataPrevista?' · previsto '+fmtDate(l.dataPrevista):''}${l.processoId?' · 🔗 processo vinculado':''}</div>
           ${l.orcamento>0 ? `
           <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-soft);margin-bottom:4px;">
             <span>Realizado: ${brl(l.realizado)}${l.comprometido>0?' · Comprometido: '+brl(l.comprometido):''}</span><span class="mono">de ${brl(l.orcamento)}</span>
@@ -20131,8 +20222,13 @@ function viewCapex(){
             <div style="width:${Math.min(100,l.pctUtilizado)}%;height:100%;background:${l.pctUtilizado>100?'var(--danger)':l.pctUtilizado>=90?'var(--warn)':'var(--success)'};"></div>
           </div>
           <div style="font-size:10.5px;color:var(--text-soft);margin-top:3px;text-align:right;">${l.pctUtilizado}% utilizado · Disponível: ${brl(l.disponivel)}</div>
+          <div style="font-size:10.5px;color:var(--text-soft);margin-top:2px;">Pago de verdade (saiu do caixa): <strong>${brl(l.pago)}</strong>${l.comprometido>0?` · Comprometido (obrigação, ainda não pago): ${brl(l.comprometido)}`:''}${l.custoPrevisto>0?` · Falta gastar pra concluir: ${brl(l.custoPrevisto)}`:''}</div>
           ` : `<div style="font-size:11px;color:var(--text-soft);">Realizado: ${brl(l.realizado)} · Sem orçamento definido</div>`}
+          ${l.payback || l.economiaEsperadaMensal || l.receitaAdicionalEsperadaMensal ? `
+          <div style="font-size:10.5px;color:var(--blue-accent);margin-top:6px;">${l.payback?`📆 Payback estimado: ${l.payback} mês(es)`:''}${l.economiaEsperadaMensal?` · Economia esperada: ${brl(l.economiaEsperadaMensal)}/mês`:''}${l.receitaAdicionalEsperadaMensal?` · Receita adicional: ${brl(l.receitaAdicionalEsperadaMensal)}/mês`:''}</div>
+          ` : ''}
         </div>
+        <div style="padding:0 18px 12px;"><button type="button" class="btn ghost sm" data-action="ver-ficha-capex" data-id="${l.id}">📄 Ver ficha completa</button></div>
       </div>
     `).join('')}
     `}
@@ -20158,7 +20254,7 @@ function renderCapexDepreciacao(mesRef){
   return `
     <div class="report-controls"><input type="month" id="capexDeprecMes" value="${mesRef}"></div>
     <div class="note" style="margin-top:0;">Considera só ativos vinculados a algum projeto de CAPEX.</div>
-    <div class="cards" style="grid-template-columns:1fr 1fr 1fr;">
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
       <div class="card"><div class="label">CAPEX realizado no mês</div><div class="value mono">${brl(capexRealizadoMes)}</div></div>
       <div class="card"><div class="label">Depreciação do mês</div><div class="value mono">${brl(depreciacaoMes)}</div></div>
       <div class="card"><div class="label">CAPEX / Depreciação</div><div class="value mono" style="${relacao===null?'font-size:12.5px;color:var(--text-soft);':''}">${relacao!==null?relacao.toFixed(2)+'x':'Sem depreciação no período'}</div></div>
@@ -20176,7 +20272,7 @@ function renderCapexFCL(mesRef){
   const fcl = ebitdaMes - investimentoAtivos;
   return `
     <div class="report-controls"><input type="month" id="capexFclMes" value="${mesRef}"></div>
-    <div class="cards" style="grid-template-columns:1fr 1fr 1fr;">
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
       <div class="card"><div class="label">EBITDA do mês</div><div class="value mono">${brl(ebitdaMes)}</div></div>
       <div class="card"><div class="label">CAPEX pago (Ativos Patrimoniais)</div><div class="value mono" style="color:var(--danger);">${brl(investimentoAtivos)}</div></div>
       <div class="card saldo"><div class="label">Fluxo de Caixa Livre</div><div class="value mono" style="color:${fcl>=0?'var(--success)':'var(--danger)'};">${brl(fcl)}</div></div>
@@ -20184,6 +20280,109 @@ function renderCapexFCL(mesRef){
     <div class="note" style="margin-top:0;">Mesmo cálculo já usado no relatório de Fluxo de Caixa Livre — aqui só destacado com o rótulo de CAPEX.</div>
   `;
 }
+function openFichaCapexModal(projetoId){
+  const p = state.capexProjetos.find(x=>x.id===projetoId);
+  if(!p) return;
+  const realizado = capexRealizadoProjeto(p.id);
+  const pago = capexPagoProjeto(p.id);
+  const comprometido = p.comprometido||0;
+  const disponivel = (p.orcamento||0) - realizado - comprometido;
+  const pctUtilizado = p.orcamento>0 ? Math.round((realizado+comprometido)/p.orcamento*100) : null;
+  const payback = calcularPaybackCapex(p.orcamento, p.economiaEsperadaMensal, p.receitaAdicionalEsperadaMensal);
+  const ativosVinculados = state.ativosPatrimoniais.filter(a=>a.capexProjetoId===p.id);
+  const pagamentosVinculados = state.lancamentos.filter(l=>l.origem==='ativo_patrimonial' && ativosVinculados.some(a=>a.id===l.ativoPatrimonialId));
+  const etapasLinhaTempo = ['Planejado','Aprovado','Em execução','Parcialmente realizado','Concluído'];
+  const etapaAtual = etapasLinhaTempo.indexOf(p.status);
+
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>📄 ${escapeHTML(p.nome)}</h3>
+    <div class="note" style="margin-top:0;">Ficha completa do projeto — resumo, objetivo, retorno esperado, financeiro e linha do tempo.</div>
+
+    <div class="dash-section-label" style="margin-top:10px;">Resumo</div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(110px,1fr));margin-bottom:10px;">
+      <div class="card"><div class="label">Orçamento</div><div class="value mono" style="font-size:14px;">${brl(p.orcamento||0)}</div></div>
+      <div class="card"><div class="label">Realizado</div><div class="value mono" style="font-size:14px;">${brl(realizado)}</div></div>
+      <div class="card"><div class="label">Comprometido</div><div class="value mono" style="font-size:14px;">${brl(comprometido)}</div></div>
+      <div class="card"><div class="label">Restante</div><div class="value mono" style="font-size:14px;">${brl(disponivel)}</div></div>
+    </div>
+    ${pctUtilizado!==null ? `<div class="note" style="margin-top:0;">${pctUtilizado}% utilizado</div>` : ''}
+
+    ${p.descricao || p.justificativa ? `
+    <div class="dash-section-label">Objetivo</div>
+    <div class="note" style="margin-top:0;">${escapeHTML(p.descricao||p.justificativa||'')}</div>` : ''}
+
+    ${(p.economiaEsperadaMensal || p.receitaAdicionalEsperadaMensal || payback) ? `
+    <div class="dash-section-label">Retorno</div>
+    <div class="note" style="margin-top:0;">
+      ${p.economiaEsperadaMensal ? `Economia esperada: <strong>${brl(p.economiaEsperadaMensal)}/mês</strong><br>` : ''}
+      ${p.receitaAdicionalEsperadaMensal ? `Receita adicional: <strong>${brl(p.receitaAdicionalEsperadaMensal)}/mês</strong><br>` : ''}
+      ${payback ? `Payback estimado: <strong>${payback} mês(es)</strong>` : ''}
+    </div>` : ''}
+
+    <div class="dash-section-label">Financeiro</div>
+    <div class="note" style="margin-top:0;">
+      ${p.processoTitulo ? `Processo: <strong>${escapeHTML(p.processoTitulo)}</strong><br>` : 'Sem processo vinculado<br>'}
+      ${p.fornecedor ? `Fornecedor: <strong>${escapeHTML(p.fornecedor)}</strong><br>` : ''}
+      Pago de verdade: <strong>${brl(pago)}</strong>${pagamentosVinculados.length ? ` (${pagamentosVinculados.length} pagamento(s))` : ''}<br>
+      ${ativosVinculados.length ? `Ativo(s) criado(s): <strong>${ativosVinculados.map(a=>escapeHTML(a.nome)).join(', ')}</strong>` : 'Nenhum ativo patrimonial vinculado ainda'}
+    </div>
+
+    <div class="dash-section-label">Linha do tempo</div>
+    <div class="note" style="margin-top:0;display:flex;flex-wrap:wrap;gap:6px;">
+      ${p.status==='Cancelado' ? `<span style="color:var(--danger);font-weight:600;">✕ Cancelado</span>` :
+        etapasLinhaTempo.map((etapa,i)=>`<span style="${i<=etapaAtual?'color:var(--success);font-weight:600;':'color:var(--text-soft);'}">${i<=etapaAtual?'✓':'○'} ${etapa}</span>`).join('<span style="color:var(--text-soft);">→</span>')}
+    </div>
+
+    <div class="dash-section-label">Rastreamento CAPEX → Processo → Compra → Pagamento → Ativo</div>
+    <div class="note" style="margin-top:0;">
+      ${p.processoId?'✓':'○'} Processo aberto no Livro de Processos${p.processoTitulo?' — '+escapeHTML(p.processoTitulo):''}<br>
+      ${(state.orcamentosProcessos||[]).some(o=>o.processoId===p.processoId && o.status==='aprovado')?'✓':'○'} Orçamento aprovado<br>
+      ${ativosVinculados.length?'✓':'○'} Compra registrada (ativo patrimonial criado)${ativosVinculados.length?' — '+ativosVinculados.map(a=>escapeHTML(a.nome)).join(', '):''}<br>
+      ${pago>0?'✓':'○'} Pagamento realizado${pago>0?' — '+brl(pago):''}<br>
+      ${p.status==='Concluído'?'✓':'○'} Projeto concluído
+    </div>
+
+    <div class="dash-section-label">Documentos vinculados</div>
+    <div id="capexDocsLista">
+      ${(p.documentos||[]).length ? p.documentos.map((d,i)=>`
+        <div class="ledger-row compact"><div class="desc-cell"><div>${escapeHTML(d.tipo)} — ${escapeHTML(d.nome)}</div><div class="cat"><a href="${escapeHTML(d.link)}" target="_blank" rel="noopener">${escapeHTML(d.link)}</a></div></div><button class="icon-btn" data-remover-doc-capex="${i}">✕</button></div>
+      `).join('') : `<div class="note" style="margin-top:0;">Nenhum documento vinculado ainda.</div>`}
+    </div>
+    <div class="field-row" style="margin-top:8px;">
+      <div class="field"><label>Tipo</label><select id="capexDocTipo"><option>Orçamento</option><option>Contrato</option><option>NF</option><option>Garantia</option><option>Outro</option></select></div>
+      <div class="field"><label>Nome</label><input type="text" id="capexDocNome" placeholder="Ex: NF 12345"></div>
+    </div>
+    <div class="field"><label>Link (Drive, site, etc.)</label><input type="text" id="capexDocLink" placeholder="https://..."></div>
+    <button type="button" class="btn ghost sm" id="btnAdicionarDocCapex" style="margin-bottom:10px;">+ Adicionar documento</button>
+
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Fechar</button>
+      <button class="btn" id="btnEditarDaFicha">Editar projeto</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnEditarDaFicha').addEventListener('click', ()=>openProjetoCapexModal(p));
+  document.getElementById('btnAdicionarDocCapex').addEventListener('click', ()=>{
+    const nome = document.getElementById('capexDocNome').value.trim();
+    const link = document.getElementById('capexDocLink').value.trim();
+    if(!nome || !link){ showToast('Preencha nome e link do documento'); return; }
+    if(!p.documentos) p.documentos = [];
+    p.documentos.push({ tipo: document.getElementById('capexDocTipo').value, nome, link, data: new Date().toISOString() });
+    persist();
+    openFichaCapexModal(projetoId);
+    showToast('Documento vinculado.');
+  });
+  document.querySelectorAll('[data-remover-doc-capex]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      p.documentos.splice(parseInt(btn.dataset.removerDocCapex,10),1);
+      persist();
+      openFichaCapexModal(projetoId);
+    });
+  });
+}
+
 function openProjetoCapexModal(existing){
   const isEdit = !!existing;
   const modal = document.getElementById('modalContent');
@@ -20203,6 +20402,27 @@ function openProjetoCapexModal(existing){
       <div class="field"><label>Data prevista (opcional)</label><input type="date" id="cpDataPrevista" value="${existing?.dataPrevista||''}"></div>
     </div>
     <div class="field-row">
+      <div class="field"><label>Setor (opcional — vai pro equipamento no VK Industrial)</label><input type="text" id="cpSetor" value="${existing?escapeHTML(existing.setor||''):''}" placeholder="Ex: Produção"></div>
+      <div class="field"><label>Local (opcional)</label><input type="text" id="cpLocal" value="${existing?escapeHTML(existing.local||''):''}" placeholder="Ex: Galpão 2"></div>
+    </div>
+    <div class="field"><label>Patrimônio (opcional)</label><input type="text" id="cpPatrimonio" value="${existing?escapeHTML(existing.patrimonio||''):''}"></div>
+    <div class="field-row">
+      <div class="field"><label>Área (opcional)</label><select id="cpArea">
+        <option value="">— não informado —</option>
+        ${['Produção','Administrativo','Logística','Comercial','TI','Infraestrutura','Outro'].map(a=>`<option ${existing?.area===a?'selected':''}>${a}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>Fornecedor (opcional)</label><input type="text" id="cpFornecedor" value="${existing?escapeHTML(existing.fornecedor||''):''}"></div>
+    </div>
+    <div class="field"><label>Origem do investimento (opcional)</label><select id="cpOrigem">
+      <option value="">— não informado —</option>
+      ${['Necessidade operacional','Expansão','Manutenção','Exigência legal','Redução de custo','Oportunidade'].map(o=>`<option ${existing?.origemInvestimento===o?'selected':''}>${o}</option>`).join('')}
+    </select></div>
+    <div class="field"><label>Justificativa (opcional) — por que a empresa está fazendo esse investimento</label><textarea id="cpJustificativa" style="min-height:50px;">${existing?escapeHTML(existing.justificativa||''):''}</textarea></div>
+    <div class="field-row">
+      <div class="field"><label>Economia esperada (R$/mês, opcional)</label><input type="text" inputmode="decimal" id="cpEconomiaEsperada" value="${existing?.economiaEsperadaMensal||''}" placeholder="0,00"></div>
+      <div class="field"><label>Receita adicional esperada (R$/mês, opcional)</label><input type="text" inputmode="decimal" id="cpReceitaEsperada" value="${existing?.receitaAdicionalEsperadaMensal||''}" placeholder="0,00"></div>
+    </div>
+    <div class="field-row">
       <div class="field"><label>Orçamento previsto (R$, opcional)</label><input type="text" inputmode="decimal" id="cpOrcamento" value="${existing?.orcamento||''}" placeholder="0,00"></div>
       <div class="field"><label>Comprometido — contratado, ainda não pago (R$, opcional)</label><input type="text" inputmode="decimal" id="cpComprometido" value="${existing?.comprometido||''}" placeholder="0,00"></div>
     </div>
@@ -20215,6 +20435,23 @@ function openProjetoCapexModal(existing){
       <div class="field"><label>Status</label><select id="cpStatus">${STATUS_CAPEX.map(s=>`<option ${(existing?existing.status===s:s==='Planejado')?'selected':''}>${s}</option>`).join('')}</select></div>
     </div>
     <div class="field"><label>Observações (opcional)</label><textarea id="cpObservacoes" style="min-height:50px;">${existing?escapeHTML(existing.observacoes||''):''}</textarea></div>
+    <div class="field">
+      <label>Processo vinculado no Livro de Processos (opcional)</label>
+      <select id="cpProcessoId"><option value="">${existing?.processoId ? escapeHTML(existing.processoTitulo||'Carregando...') : 'Carregando lista de processos...'}</option></select>
+      ${isEdit && !existing.processoId ? `<button type="button" class="btn ghost sm" id="btnPedirProcessoCapex" style="margin-top:8px;">🛒 Preciso comprar — pedir abertura de processo</button>${existing.capexPedidoProcessoId ? '<div class="note" style="margin-top:6px;">Pedido já enviado, aguardando o Livro de Processos criar — sincronize daqui a pouco.</div>' : ''}` : ''}
+      ${isEdit && existing.processoId ? (()=>{
+        const orcamentosDoProcesso = (state.orcamentosProcessos||[]).filter(o=>o.processoId===existing.processoId);
+        if(!orcamentosDoProcesso.length) return `<div class="note" style="margin-top:8px;">Nenhum orçamento chegou ainda pra esse processo — os pedidos de cotação feitos lá aparecem aqui sozinhos, não precisa abrir processo novo.</div>`;
+        const pendentesCount = orcamentosDoProcesso.filter(o=>o.status==='pendente').length;
+        return `
+        <div class="note" style="margin-top:8px;border-color:var(--accent);">
+          <strong>${orcamentosDoProcesso.length} orçamento(s) desse processo</strong>${pendentesCount?` — ${pendentesCount} aguardando decisão`:''}:
+          ${orcamentosDoProcesso.slice(0,5).map(o=>`<div style="margin-top:4px;font-size:12px;">N° ${o.numero} — ${brl(o.valorTotal)} — ${o.status==='pendente'?'⏳ pendente':(o.status==='aprovado'?'✓ aprovado':'✕ recusado')}</div>`).join('')}
+          <button type="button" id="btnVerOrcamentosDoProcesso" class="btn ghost sm" style="font-size:12px;margin-top:6px;">Ver na Aprovação de Orçamentos →</button>
+        </div>`;
+      })() : ''}
+      <div class="note" style="margin-top:6px;">Vinculando, toda mudança relevante nesse projeto (status, valores, conclusão) vira um andamento de verdade lá no processo. Quando o status virar "Concluído", também cria (ou atualiza) o equipamento correspondente no cadastro do VK Industrial.</div>
+    </div>
     ${isEdit ? `<div class="note" style="margin-top:0;">Pra vincular ativos comprados a este projeto, edite o ativo em "Ativos Patrimoniais" e escolha este projeto no campo "Projeto de CAPEX".</div>` : ''}
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
@@ -20223,14 +20460,34 @@ function openProjetoCapexModal(existing){
     </div>`;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  buscarProcessosParaVincular().then(lista=>{
+    const sel = document.getElementById('cpProcessoId');
+    if(!sel) return;
+    if(!lista){ sel.innerHTML = `<option value="">Não foi possível carregar — confira a integração</option>`; return; }
+    sel.innerHTML = `<option value="">— nenhum —</option>` + lista.map(p=>`<option value="${p.id}" data-titulo="${escapeHTML(p.titulo)}" ${existing?.processoId===p.id?'selected':''}>${escapeHTML(p.titulo)}</option>`).join('');
+  });
+  document.getElementById('btnPedirProcessoCapex')?.addEventListener('click', async (e)=>{
+    e.target.disabled = true;
+    await pedirProcessoParaCapex(existing);
+    closeModal();
+    render();
+  });
+  document.getElementById('btnVerOrcamentosDoProcesso')?.addEventListener('click', ()=>{
+    closeModal();
+    currentView = 'orcamentos-processos';
+    document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view===currentView));
+    render();
+  });
   document.getElementById('btnExcluirProjetoCapex')?.addEventListener('click', async ()=>{
     const vinculados = state.ativosPatrimoniais.filter(a=>a.capexProjetoId===existing.id).length;
     const aviso = vinculados>0 ? `\n\nAtenção: existem ${vinculados} ativo(s) patrimonial(is) vinculado(s) a este projeto — eles NÃO serão excluídos, só perdem o vínculo com o projeto.` : '';
     if(!(await avisoModal({mensagem: `Excluir o projeto "${existing.nome}"?${aviso}`, tipo:'perigo', textoConfirmar:'Excluir'}))) return;
+    const processoIdExcluido = existing.processoId, nomeExcluido = existing.nome;
     state.ativosPatrimoniais.forEach(a=>{ if(a.capexProjetoId===existing.id) a.capexProjetoId = null; });
     state.capexProjetos = state.capexProjetos.filter(p=>p.id!==existing.id);
     persist(); closeModal(); render();
     showToast('Projeto excluído');
+    if(processoIdExcluido) notificarProcessoCapex(processoIdExcluido, nomeExcluido, ['Projeto de CAPEX excluído no Livro Caixa.']);
   });
   document.getElementById('btnSalvarProjetoCapex').addEventListener('click', ()=>{
     const btn_btnSalvarProjetoCapex_Click = document.getElementById('btnSalvarProjetoCapex');
@@ -20239,18 +20496,33 @@ function openProjetoCapexModal(existing){
     try{
     const nome = document.getElementById('cpNome').value.trim();
     if(!nome){ showToast('Dê um nome ao projeto'); return; }
+    const processoSel = document.getElementById('cpProcessoId');
+    const processoId = processoSel?.value || null;
+    const processoTitulo = processoId ? (processoSel.options[processoSel.selectedIndex]?.dataset.titulo || processoSel.options[processoSel.selectedIndex]?.textContent) : null;
     const dados = {
       nome, descricao: document.getElementById('cpDescricao').value.trim(),
       categoria: document.getElementById('cpCategoria').value, tipo: document.getElementById('cpTipo').value,
       responsavel: document.getElementById('cpResponsavel').value.trim(), dataPrevista: document.getElementById('cpDataPrevista').value || null,
       orcamento: numBR(document.getElementById('cpOrcamento').value) || 0, comprometido: numBR(document.getElementById('cpComprometido').value) || 0,
       prioridade: document.getElementById('cpPrioridade').value, status: document.getElementById('cpStatus').value,
-      observacoes: document.getElementById('cpObservacoes').value.trim()
+      observacoes: document.getElementById('cpObservacoes').value.trim(),
+      setor: document.getElementById('cpSetor').value.trim(), local: document.getElementById('cpLocal').value.trim(),
+      patrimonio: document.getElementById('cpPatrimonio').value.trim(),
+      area: document.getElementById('cpArea').value, fornecedor: document.getElementById('cpFornecedor').value.trim(),
+      origemInvestimento: document.getElementById('cpOrigem').value, justificativa: document.getElementById('cpJustificativa').value.trim(),
+      economiaEsperadaMensal: numBR(document.getElementById('cpEconomiaEsperada').value)||0,
+      receitaAdicionalEsperadaMensal: numBR(document.getElementById('cpReceitaEsperada').value)||0,
+      processoId, processoTitulo,
     };
+    // Detecta o que mudou de relevante pra mandar um andamento real pro processo vinculado — testado
+    // isoladamente antes de usar (mudança de status, de orçamento, de comprometido, ou vínculo novo).
+    const mudancas = isEdit ? diffCapexParaAndamento(existing, dados) : (processoId ? ['Projeto de CAPEX criado e vinculado a este processo.'] : []);
     if(isEdit){ Object.assign(existing, dados); }
     else { state.capexProjetos.push({ id:uid(), ...dados, criadoEm:new Date().toISOString() }); }
     persist(); closeModal(); render();
     showToast(isEdit?'Projeto atualizado':'Projeto criado');
+    if(processoId && mudancas.length) notificarProcessoCapex(processoId, nome, mudancas);
+    if(dados.status==='Concluído') criarOuAtualizarEquipamentoVK(isEdit?existing:state.capexProjetos[state.capexProjetos.length-1]);
   
     }finally{
       const btn_btnSalvarProjetoCapex_Fim = document.getElementById('btnSalvarProjetoCapex');
@@ -26842,9 +27114,13 @@ function attachViewHandlers(){
     });
   });
   document.getElementById('btnNovoProjetoCapex')?.addEventListener('click', ()=>openProjetoCapexModal());
+  document.getElementById('btnSincronizarCapexProcessos')?.addEventListener('click', ()=>sincronizarCapexProcessos());
   document.querySelector('[data-action="ir-relatorios-capex"]')?.addEventListener('click', ()=>{ currentView='relatorios-capex'; render(); });
   document.querySelectorAll('[data-action="editar-projeto-capex"]').forEach(el=>{
     el.addEventListener('click', ()=>openProjetoCapexModal(state.capexProjetos.find(p=>p.id===el.dataset.id)));
+  });
+  document.querySelectorAll('[data-action="ver-ficha-capex"]').forEach(el=>{
+    el.addEventListener('click', ()=>openFichaCapexModal(el.dataset.id));
   });
   document.querySelector('[data-action="ir-capex-depreciacao"]')?.addEventListener('click', ()=>{
     const desenhar = (mes)=>{
@@ -34485,6 +34761,139 @@ function openContaModal(existing){
 // ele — mesmo mecanismo e mesmo formato de evento que notificarProcessoTransferencia. Também grava
 // um campo "contaVinculadaLivroCaixa" com o saldo da conta nesse momento — é um retrato (snapshot),
 // não atualiza sozinho depois; atualiza de novo quando você reabrir e salvar a conta.
+// Detecta o que mudou de relevante num projeto de CAPEX, pra virar andamento no processo vinculado
+// — testada isoladamente antes de usar.
+// Escreve um pedido de abertura de processo na coleção compartilhada "capex_processos", no
+// Firestore do Livro de Processos — mesmo padrão já usado pra O.S. → Processo (coleção
+// "os_processos"), só que partindo de um projeto de CAPEX em vez de uma O.S. do VK Industrial.
+async function pedirProcessoParaCapex(projeto){
+  const cfg = state.processosConfig;
+  if(!cfg.firebaseConfig || !cfg.email || !cfg.senha){ showToast('Configure a integração com o Livro de Processos primeiro (Central de Integrações)'); return; }
+  try{
+    if(!processosFirebaseApp) processosFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'livro-processos');
+    const auth = processosFirebaseApp.auth();
+    if(!auth.currentUser) await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
+    const db = processosFirebaseApp.firestore();
+    const pedidoId = uid();
+    await db.collection('capex_processos').doc(pedidoId).set({
+      origemSistema: 'Livro Caixa', origemTipo: 'capex',
+      capexProjetoId: projeto.id, nomeProjeto: projeto.nome, descricao: projeto.descricao||'',
+      categoria: projeto.categoria||null, setor: projeto.setor||null, local: projeto.local||null,
+      prioridade: (projeto.prioridade||'Média').toLowerCase(), valorEstimado: projeto.orcamento||0,
+      criadoEm: new Date().toISOString(), status: 'pendente',
+    });
+    projeto.capexPedidoProcessoId = pedidoId;
+    persist();
+    showToast('Pedido de abertura de processo enviado pro Livro de Processos.');
+  }catch(e){
+    console.error('Erro ao pedir processo a partir do CAPEX:', e);
+    showToast('Não consegui enviar o pedido — confira a conexão/configuração');
+  }
+}
+// Busca de volta os pedidos de CAPEX→Processo (fetch manual, mesmo padrão de sincronizarOSVkIndustrial)
+// e, pros que já tiverem processo criado, liga automaticamente no projeto de CAPEX correspondente —
+// sem precisar escolher na mão no seletor.
+async function sincronizarCapexProcessos(){
+  const cfg = state.processosConfig;
+  if(!cfg.firebaseConfig || !cfg.email || !cfg.senha){ showToast('Configure a integração com o Livro de Processos primeiro'); return; }
+  try{
+    if(!processosFirebaseApp) processosFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'livro-processos');
+    const auth = processosFirebaseApp.auth();
+    if(!auth.currentUser) await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
+    const db = processosFirebaseApp.firestore();
+    const snap = await db.collection('capex_processos').get({ source: 'server' }).catch(tratarFalhaLeituraColecao('capex_processos', 'sincronizarCapexProcessos'));
+    if(snap._falhouLeitura){ showToast('Não consegui verificar os pedidos de processo do CAPEX'); return; }
+    state.capexProcessosPedidos = snap.docs.map(d=>({ id: d.id, ...d.data() }));
+    let ligados = 0;
+    state.capexProcessosPedidos.forEach(pedido=>{
+      if(!pedido.processoId) return;
+      const projeto = state.capexProjetos.find(p=>p.id===pedido.capexProjetoId);
+      if(projeto && !projeto.processoId){
+        projeto.processoId = pedido.processoId;
+        projeto.processoTitulo = pedido.numeroProcesso ? `${pedido.numeroProcesso} — ${projeto.nome}` : projeto.nome;
+        ligados++;
+      }
+    });
+    persist();
+    showToast(ligados>0 ? `${ligados} projeto(s) de CAPEX ligado(s) ao processo criado.` : 'Sincronizado — nenhum processo novo pra ligar ainda.');
+    render();
+  }catch(e){
+    console.error('Erro ao sincronizar CAPEX→Processo:', e);
+    showToast('Falha ao sincronizar');
+  }
+}
+function diffCapexParaAndamento(antigo, novo){
+  const mudancas = [];
+  if(antigo.status !== novo.status) mudancas.push(`Status mudou de "${antigo.status}" para "${novo.status}".`);
+  if(antigo.orcamento !== novo.orcamento) mudancas.push(`Orçamento do projeto atualizado para ${brl(novo.orcamento)} (era ${brl(antigo.orcamento)}).`);
+  if(antigo.comprometido !== novo.comprometido) mudancas.push(`Valor comprometido atualizado para ${brl(novo.comprometido)} (era ${brl(antigo.comprometido)}).`);
+  if(antigo.processoId !== novo.processoId && novo.processoId) mudancas.push(`Projeto de CAPEX vinculado a este processo.`);
+  return mudancas;
+}
+// Escreve andamento(s) de volta no processo do Livro de Processos quando um projeto de CAPEX
+// vinculado tem alguma mudança relevante — mesmo mecanismo e formato confirmado (events[], kind
+// 'livro_caixa') já usado por notificarProcessoTransferencia/ContaVinculada. Uma falha aqui nunca
+// desfaz nem impede o salvamento do projeto — ele já foi salvo no Livro Caixa antes disso rodar.
+async function notificarProcessoCapex(processoId, nomeProjeto, mudancas){
+  const cfg = state.processosConfig;
+  if(!cfg || !cfg.firebaseConfig || !mudancas.length) return;
+  try{
+    if(!processosFirebaseApp) processosFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'livro-processos');
+    const auth = processosFirebaseApp.auth();
+    if(!auth.currentUser) await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
+    const db = processosFirebaseApp.firestore();
+    const docRef = db.collection('processos').doc(processoId);
+    const snap = await docRef.get({ source: 'server' });
+    if(!snap.exists) return;
+    const proc = snap.data();
+    let events = proc.events || [];
+    mudancas.forEach(descricaoMudanca=>{
+      events = [...events, {
+        seq: events.length + 1, kind: 'livro_caixa', sectorAtTime: proc.sectorId || null,
+        description: `[CAPEX — ${nomeProjeto}] ${descricaoMudanca}`,
+        date: new Date().toISOString(), status: 'realizado', replyTo: null, attachments: [],
+      }];
+    });
+    await docRef.update({ events });
+  }catch(e){
+    console.error('Falha ao notificar o processo sobre mudança no CAPEX:', e);
+    showToast('Projeto salvo, mas não consegui avisar o Livro de Processos');
+  }
+}
+
+// Quando um projeto de CAPEX é concluído, cria (ou atualiza, se já criou antes) um equipamento de
+// verdade no cadastro do VK Industrial — reaproveita a coleção "lm_equipamentos" que já existe lá
+// (a mesma usada pela Gestão de O.S.). Guarda o id criado no próprio projeto (equipamentoVkId) pra
+// não duplicar se o projeto for salvo de novo depois de já concluído. Uma falha aqui nunca desfaz
+// nem impede o salvamento do projeto.
+async function criarOuAtualizarEquipamentoVK(projeto){
+  const cfg = state.vkConfig;
+  if(!cfg || !cfg.firebaseConfig || !cfg.email || !cfg.senha) return;
+  try{
+    if(!vkFirebaseApp) vkFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'vk-industrial');
+    const auth = vkFirebaseApp.auth();
+    if(!auth.currentUser) await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
+    const db = vkFirebaseApp.firestore();
+    if(projeto.equipamentoVkId){
+      await db.collection('lm_equipamentos').doc(projeto.equipamentoVkId).update({
+        nome: projeto.nome, patrimonio: projeto.patrimonio||null, setor: projeto.setor||null, local: projeto.local||null,
+        valorAquisicaoCapex: projeto.orcamento||0, atualizadoViaCapexEm: new Date().toISOString(),
+      });
+    } else {
+      const novoId = uid();
+      await db.collection('lm_equipamentos').doc(novoId).set({
+        id: novoId, nome: projeto.nome, patrimonio: projeto.patrimonio||null, setor: projeto.setor||null, local: projeto.local||null,
+        criadoEm: new Date().toISOString(), origemCapexProjetoId: projeto.id, valorAquisicaoCapex: projeto.orcamento||0,
+      });
+      projeto.equipamentoVkId = novoId;
+      persist();
+    }
+  }catch(e){
+    console.error('Falha ao criar/atualizar equipamento no VK Industrial a partir do CAPEX:', e);
+    showToast('Projeto salvo, mas não consegui criar o equipamento no VK Industrial');
+  }
+}
+
 async function notificarProcessoContaVinculada(processoId, nomeContaVinculada, saldoContaVinculada){
   const cfg = state.processosConfig;
   if(!cfg || !cfg.firebaseConfig) return;
