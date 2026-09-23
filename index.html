@@ -1156,6 +1156,8 @@ function aplicarMigracoes(s){
   if(!s.fechamentosCaixaFisico) s.fechamentosCaixaFisico = []; // conferência de gaveta (contado x esperado) pras contas tipo "caixa"
   if(!s.limitesProcesso) s.limitesProcesso = {}; // { processoId: { limite, aprovadoEm } } — teto de compras liberado pro processo inteiro, orçamentos seguintes do mesmo processo não podem passar disso
   if(!s.capexProcessosPedidos) s.capexProcessosPedidos = []; // espelho local (fetch manual) da coleção "capex_processos" compartilhada — pedidos de abertura de processo feitos a partir de um projeto de CAPEX
+  if(!s.metasEmpresa) s.metasEmpresa = []; // Central de Metas da Empresa — sistema novo e genérico, não substitui metasFinanceirasMes nem metas (reservas) que continuam funcionando do jeito que já funcionavam
+  if(!s.metasHistoricoMensal) s.metasHistoricoMensal = []; // fotografia do % de metas atingidas, tirada automaticamente quando um mês fecha — alimenta o gráfico de desempenho, começa a se formar a partir de agora (não inventa passado)
   if(!s.contas) s.contas = [];
   // Migração: garante uma conta padrão e associa lançamentos antigos sem conta
   if(s.contas.length===0){
@@ -1901,6 +1903,10 @@ let orcamentoAnualAno = new Date().getFullYear();
 let descontosBonifPeriodo = 'mes';
 let reinvestimentosPeriodo = 'mes';
 let fechamentoMesSelecionado = null;
+let metasEmpresaVisao = 'mes';
+let metasEmpresaFiltroCategoria = '';
+let metasEmpresaFiltroPrioridade = '';
+let metasEmpresaOrdenacao = 'prazo';
 let dreCentroAtivo = 'todos';
 let mesGlobalRef = todayISO().slice(0,7);
 let categoriaLancamentosAtual = null;
@@ -6377,6 +6383,7 @@ function viewDashboard(){
     ${painelOQueMudouHTML()}
     ${cardCentroComandoCompactoHTML()}
     ${cardCentralDecisaoCompactoHTML()}
+    ${resumoMetasEmpresaHTML()}
     <div style="display:flex;justify-content:flex-end;margin-bottom:6px;">
       <button id="btnToggleModoVisualizacao" class="btn ghost sm">${state.modoVisualizacao==='simples'?'📊 Ver tudo':'⚡ Modo simples'}</button>
     </div>
@@ -24896,6 +24903,7 @@ function viewCentral360(){
     </div>
 
     <div id="central360PossoGastar">${possoGastarHojeHTML()}</div>
+    ${resumoMetasEmpresaHTML()}
     <div id="central360OQueMudou">${painelOQueMudouHTML()}</div>
 
     <div class="dash-section-label">O que precisa de atenção agora</div>
@@ -28518,6 +28526,26 @@ function attachViewHandlers(){
 
   // Metas de Reserva
   document.getElementById('btnNovaMeta')?.addEventListener('click', ()=>openMetaModal());
+  document.getElementById('btnNovaMetaEmpresa')?.addEventListener('click', ()=>openMetaEmpresaModal());
+  document.getElementById('metasEmpresaVisaoSel')?.addEventListener('change', (e)=>{
+    metasEmpresaVisao = e.target.value;
+    render();
+  });
+  document.getElementById('metasEmpresaFiltroCategoriaSel')?.addEventListener('change', (e)=>{
+    metasEmpresaFiltroCategoria = e.target.value;
+    render();
+  });
+  document.getElementById('metasEmpresaFiltroPrioridadeSel')?.addEventListener('change', (e)=>{
+    metasEmpresaFiltroPrioridade = e.target.value;
+    render();
+  });
+  document.getElementById('metasEmpresaOrdenacaoSel')?.addEventListener('change', (e)=>{
+    metasEmpresaOrdenacao = e.target.value;
+    render();
+  });
+  document.querySelectorAll('[data-action="editar-meta-empresa"]').forEach(el=>{
+    el.addEventListener('click', ()=>openMetaEmpresaModal((state.metasEmpresa||[]).find(m=>m.id===el.dataset.id)));
+  });
   document.getElementById('btnEditarMetasFinanceiras')?.addEventListener('click', ()=>openMetasFinanceirasModal());
   document.getElementById('btnEditarMissaoMes')?.addEventListener('click', ()=>openMetasFinanceirasModal());
   document.getElementById('btnNovaDecisaoFinanceira')?.addEventListener('click', ()=>openNovaDecisaoModal());
@@ -33366,6 +33394,147 @@ function contratosVencendoResumo(){
   };
 }
 
+// ---- Central de Metas da Empresa (sistema novo, genérico — não mexe no que já existia acima) ----
+const CATEGORIAS_META_EMPRESA = {
+  faturamento:{icone:'💰',nome:'Faturamento'}, lucro:{icone:'📈',nome:'Lucro'}, margem:{icone:'📊',nome:'Margem'},
+  despesas:{icone:'💸',nome:'Despesas'}, caixa:{icone:'🏦',nome:'Caixa'}, recebimentos:{icone:'📥',nome:'Recebimentos'},
+  pagamentos:{icone:'📤',nome:'Pagamentos'}, cartoes:{icone:'💳',nome:'Cartões'}, inadimplencia:{icone:'🧾',nome:'Inadimplência'},
+  clientes:{icone:'🤝',nome:'Clientes'}, producao:{icone:'🏭',nome:'Produção'}, estoque:{icone:'📦',nome:'Estoque'},
+  patrimonio:{icone:'🏢',nome:'Patrimônio'}, investimentos:{icone:'📈',nome:'Investimentos'}, dividas:{icone:'💳',nome:'Dívidas'},
+  reservas:{icone:'🛟',nome:'Reservas'}, capex:{icone:'🏗️',nome:'CAPEX'}, equipe:{icone:'👥',nome:'Equipe'},
+  manutencao:{icone:'🔧',nome:'Manutenção'}, processos:{icone:'📋',nome:'Processos'}, gestao:{icone:'🧠',nome:'Gestão'},
+  projetos:{icone:'🚀',nome:'Projetos'}, operacao:{icone:'⚙️',nome:'Operação'}, implantacao:{icone:'📝',nome:'Implantação'},
+  personalizada:{icone:'⭐',nome:'Meta personalizada'},
+};
+const TIPOS_MEDICAO_META = { valor:'Valor (R$)', percentual:'Percentual (%)', quantidade:'Quantidade', saldo:'Saldo (R$)', margem:'Margem (%)', indice:'Índice (%)', simnao:'Sim/Não', progresso:'Progresso (%)', etapas:'Etapas', personalizada:'Personalizada' };
+const PRIORIDADE_META_EMPRESA = { critica:{icone:'🔴',nome:'Crítica'}, alta:{icone:'🟠',nome:'Alta'}, media:{icone:'🟡',nome:'Média'}, baixa:{icone:'🔵',nome:'Baixa'} };
+const STATUS_META_EMPRESA = { nao_iniciada:{icone:'⚪',nome:'Não iniciada'}, em_andamento:{icone:'🟡',nome:'Em andamento'}, em_risco:{icone:'🟠',nome:'Em risco'}, atingida:{icone:'🟢',nome:'Atingida'}, superada:{icone:'🏆',nome:'Superada'}, atrasada:{icone:'🔴',nome:'Atrasada'}, pausada:{icone:'⏸️',nome:'Pausada'}, cancelada:{icone:'✕',nome:'Cancelada'} };
+
+// Calcula o status automaticamente a partir do progresso e do prazo — testada isoladamente.
+function calcularStatusMeta(meta, valorAtual, hojeISO){
+  if(meta.status==='pausada' || meta.status==='cancelada') return meta.status;
+  const pct = meta.valorAlvo>0 ? (valorAtual/meta.valorAlvo)*100 : 0;
+  if(pct>=100) return pct>105 ? 'superada' : 'atingida';
+  if(meta.dataFinal && meta.dataFinal<hojeISO) return 'atrasada';
+  if(!meta.dataFinal || !meta.dataInicial) return pct>0 ? 'em_andamento' : 'nao_iniciada';
+  if(meta.dataInicial>hojeISO) return 'nao_iniciada';
+  const diasTotal = (new Date(meta.dataFinal)-new Date(meta.dataInicial))/86400000;
+  const diasPassados = (new Date(hojeISO)-new Date(meta.dataInicial))/86400000;
+  const pctTempoDecorrido = diasTotal>0 ? (diasPassados/diasTotal)*100 : 100;
+  if(pctTempoDecorrido - pct > 20) return 'em_risco';
+  return pct>0 ? 'em_andamento' : 'nao_iniciada';
+}
+// Pra categorias com dado financeiro já existente no sistema, calcula o valor atual sozinho —
+// reaproveitando dados já calculados em outro lugar, nunca duplicando cálculo. Testada isoladamente.
+function calcularValorAtualAutomatico(categoria, dadosFinanceiros){
+  const mapa = {
+    faturamento: dadosFinanceiros.receita, lucro: dadosFinanceiros.lucroLiquido, margem: dadosFinanceiros.margemPct,
+    despesas: dadosFinanceiros.despesaTotal, caixa: dadosFinanceiros.saldoCaixa,
+    dividas: dadosFinanceiros.saldoDividas, investimentos: dadosFinanceiros.totalInvestido,
+    capex: dadosFinanceiros.capexRealizado, patrimonio: dadosFinanceiros.patrimonioTotal,
+    recebimentos: dadosFinanceiros.totalRecebimentos, pagamentos: dadosFinanceiros.totalPagamentos,
+  };
+  return mapa[categoria] !== undefined ? mapa[categoria] : null;
+}
+// Junta os dados financeiros já existentes no sistema num objeto só, pra alimentar as metas
+// automáticas — não recalcula nada que já existia, só reaproveita.
+// Projeção: se o ritmo atual (desde o início da meta) continuar até o fim do prazo, quanto vai
+// dar? Só calcula quando há prazo — sem isso, não inventa projeção. Testada isoladamente.
+function calcularProjecaoMeta(valorAtual, dataInicial, dataFinal, hojeISO){
+  if(!dataFinal || !dataInicial) return null;
+  const diasPassados = Math.max(1,(new Date(hojeISO)-new Date(dataInicial))/86400000);
+  const diasTotal = (new Date(dataFinal)-new Date(dataInicial))/86400000;
+  if(diasTotal<=0) return null;
+  const ritmoDiario = valorAtual/diasPassados;
+  return { projecao: Math.round(ritmoDiario*diasTotal*100)/100, ritmoDiario: Math.round(ritmoDiario*100)/100 };
+}
+// Recorrência: ao vencer, gera o próximo período automaticamente — a meta antiga não é apagada
+// nem alterada, fica como histórico. Testadas isoladamente antes de usar.
+function calcularProximoPeriodo(dataInicial, dataFinal, periodicidade){
+  const duracaoDias = Math.round((new Date(dataFinal)-new Date(dataInicial))/86400000)+1;
+  const proximaInicial = new Date(dataFinal);
+  proximaInicial.setDate(proximaInicial.getDate()+1);
+  const proximaFinal = new Date(proximaInicial);
+  proximaFinal.setDate(proximaFinal.getDate()+duracaoDias-1);
+  return { dataInicial: proximaInicial.toISOString().slice(0,10), dataFinal: proximaFinal.toISOString().slice(0,10) };
+}
+function precisaGerarProximoPeriodo(meta, hojeISO){
+  return meta.recorrente && meta.dataFinal && meta.dataFinal<hojeISO && !meta.proximoPeriodoGeradoId && meta.status!=='cancelada' && meta.status!=='pausada';
+}
+// Meta composta: consolida o progresso das submetas ligadas a uma meta principal — testada isoladamente.
+function progressoConsolidadoMetaPrincipal(metaPrincipalId, todasMetasComStatus){
+  const submetas = todasMetasComStatus.filter(m=>m.metaPrincipalId===metaPrincipalId);
+  if(!submetas.length) return null;
+  const concluidas = submetas.filter(m=>m.statusCalc==='atingida'||m.statusCalc==='superada').length;
+  return { qtd: submetas.length, concluidas, pctConsolidado: Math.round(concluidas/submetas.length*100) };
+}
+// Histórico de desempenho: tira uma "foto" do % de metas atingidas quando um mês fecha — nunca
+// reconstrói o passado (não existe dado pra isso), só começa a se formar a partir de agora.
+// Testadas isoladamente antes de usar.
+function precisaTirarSnapshotMesPassado(historico, hojeISO){
+  const mesAtual = hojeISO.slice(0,7);
+  const [ay,am] = mesAtual.split('-').map(Number);
+  const mesPassadoDate = new Date(ay, am-2, 1);
+  const mesPassado = `${mesPassadoDate.getFullYear()}-${String(mesPassadoDate.getMonth()+1).padStart(2,'0')}`;
+  return { precisa: !historico.some(h=>h.mes===mesPassado), mesPassado };
+}
+function calcularPctAtingidasMes(metasDoMes){
+  if(!metasDoMes.length) return null;
+  const atingidas = metasDoMes.filter(m=>m.statusCalc==='atingida'||m.statusCalc==='superada').length;
+  return { total: metasDoMes.length, atingidas, pct: Math.round(atingidas/metasDoMes.length*100) };
+}
+function tirarSnapshotMesPassadoSeNecessario(){
+  const hoje = todayISO();
+  const { precisa, mesPassado } = precisaTirarSnapshotMesPassado(state.metasHistoricoMensal, hoje);
+  if(!precisa) return;
+  const [ay,am] = mesPassado.split('-').map(Number);
+  const de = `${mesPassado}-01`, ate = new Date(ay,am,0).toISOString().slice(0,10);
+  const dadosFin = obterDadosFinanceirosParaMetas(de, ate);
+  const metasDoMes = (state.metasEmpresa||[]).filter(m=>m.dataInicial<=ate && (m.dataFinal||ate)>=de).map(m=>{
+    const valorAuto = calcularValorAtualAutomatico(m.categoria, dadosFin);
+    const valorAtual = valorAuto!==null ? valorAuto : (m.tipoMedicao==='etapas' ? (m.etapas&&m.etapas.length ? m.etapas.filter(e=>e.feita).length/m.etapas.length*m.valorAlvo : 0) : (m.valorAtualManual||0));
+    return { statusCalc: calcularStatusMeta(m, valorAtual, ate) };
+  });
+  const resultado = calcularPctAtingidasMes(metasDoMes);
+  if(!resultado) return; // sem meta nenhuma naquele mês — não grava ponto vazio
+  state.metasHistoricoMensal.push({ mes: mesPassado, ...resultado });
+  persist();
+}
+function gerarProximosPeriodosRecorrentes(){
+  const hoje = todayISO();
+  let geradas = 0;
+  (state.metasEmpresa||[]).slice().forEach(m=>{
+    if(!precisaGerarProximoPeriodo(m, hoje)) return;
+    const prox = calcularProximoPeriodo(m.dataInicial, m.dataFinal, m.periodicidade);
+    const novaId = uid();
+    state.metasEmpresa.push({
+      ...m, id: novaId, dataInicial: prox.dataInicial, dataFinal: prox.dataFinal,
+      valorAtualManual: 0, etapas: (m.etapas||[]).map(e=>({...e, feita:false})),
+      status: 'nao_iniciada', criadoEm: new Date().toISOString(), historicoAlteracoes: [], proximoPeriodoGeradoId: null, geradaDeId: m.id,
+    });
+    m.proximoPeriodoGeradoId = novaId;
+    geradas++;
+  });
+  if(geradas>0) persist();
+  return geradas;
+}
+function obterDadosFinanceirosParaMetas(de, ate){
+  const lancNoPeriodo = state.lancamentos.filter(l=>l.dataVencimento>=de && l.dataVencimento<=ate);
+  const receita = lancNoPeriodo.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.categoria!=='Investimentos').reduce((s,l)=>s+l.valor,0);
+  const despesaTotal = lancNoPeriodo.filter(l=>l.tipo==='saida' && l.status==='pago' && l.categoria!=='Investimentos').reduce((s,l)=>s+l.valor,0);
+  const lucroLiquido = receita - despesaTotal;
+  const margemPct = receita>0 ? (lucroLiquido/receita*100) : 0;
+  const saldoCaixa = (state.contas||[]).reduce((s,c)=>s+saldoConta(c.id),0);
+  const dividasAtivas = (state.emprestimos||[]).filter(e=>statusDivida(e)!=='quitada' && statusDivida(e)!=='renegociada');
+  const saldoDividas = dividasAtivas.reduce((s,e)=>s+saldoDevedorDivida(e),0);
+  const totalInvestido = (state.ativosInvestimento||[]).filter(a=>!a.resgatado).reduce((s,a)=>s+valorAtivo(a),0);
+  const capexRealizado = (state.capexProjetos||[]).reduce((s,p)=>s+capexRealizadoProjeto(p.id),0);
+  const patrimonioTotal = totalAtivosPatrimoniais();
+  const totalRecebimentos = lancNoPeriodo.filter(l=>l.tipo==='entrada' && l.status==='recebido').reduce((s,l)=>s+l.valor,0);
+  const totalPagamentos = lancNoPeriodo.filter(l=>l.tipo==='saida' && l.status==='pago').reduce((s,l)=>s+l.valor,0);
+  return { receita, despesaTotal, lucroLiquido, margemPct, saldoCaixa, saldoDividas, totalInvestido, capexRealizado, patrimonioTotal, totalRecebimentos, totalPagamentos };
+}
+
 const TIPOS_META = {
   emergencia: { icone:'🆘', nome:'Reserva de Emergência' },
   operacional: { icone:'🏢', nome:'Reserva Operacional' },
@@ -33994,7 +34163,170 @@ function viewCentralPendencias(){
 }
 /* ====================== FIM CENTRAL DE PENDÊNCIAS ====================== */
 
+function openMetaEmpresaModal(existing){
+  const isEdit = !!existing;
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${isEdit?'Editar meta':'+ Nova meta'}</h3>
+    <div class="field"><label>Nome da meta</label><input type="text" id="meNome" value="${existing?escapeHTML(existing.nome):''}" placeholder="Ex: Faturar R$ 100.000 no mês"></div>
+    <div class="field"><label>Descrição (opcional)</label><textarea id="meDescricao" style="min-height:40px;">${existing?escapeHTML(existing.descricao||''):''}</textarea></div>
+    <div class="field-row">
+      <div class="field"><label>Categoria</label><select id="meCategoria">${Object.entries(CATEGORIAS_META_EMPRESA).map(([id,c])=>`<option value="${id}" ${existing?.categoria===id?'selected':''}>${c.icone} ${c.nome}</option>`).join('')}</select></div>
+      <div class="field"><label>Área (opcional)</label><input type="text" id="meArea" value="${existing?escapeHTML(existing.area||''):''}" placeholder="Ex: Financeiro"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Tipo de medição</label><select id="meTipo">${Object.entries(TIPOS_MEDICAO_META).map(([id,nome])=>`<option value="${id}" ${existing?.tipoMedicao===id?'selected':''}>${nome}</option>`).join('')}</select></div>
+      <div class="field"><label>Valor/objetivo</label><input type="text" inputmode="decimal" id="meValorAlvo" value="${existing?existing.valorAlvo:''}" placeholder="0"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Data inicial</label><input type="date" id="meDataInicial" value="${existing?.dataInicial||todayISO()}"></div>
+      <div class="field"><label>Data final (opcional)</label><input type="date" id="meDataFinal" value="${existing?.dataFinal||''}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Responsável (opcional)</label><input type="text" id="meResponsavel" value="${existing?escapeHTML(existing.responsavel||''):''}"></div>
+      <div class="field"><label>Prioridade</label><select id="mePrioridade">${Object.entries(PRIORIDADE_META_EMPRESA).map(([id,p])=>`<option value="${id}" ${(existing?.prioridade||'media')===id?'selected':''}>${p.icone} ${p.nome}</option>`).join('')}</select></div>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin:8px 0;"><input type="checkbox" id="meFocoSemana" ${existing?.focoSemana?'checked':''}> ⭐ Foco da semana</label>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:8px;"><input type="checkbox" id="meFocoMes" ${existing?.focoMes?'checked':''}> 🏆 Foco do mês</label>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:4px;"><input type="checkbox" id="meRecorrente" ${existing?.recorrente?'checked':''}> 🔁 Meta recorrente (gera o próximo período sozinha quando vencer, sem perder o histórico)</label>
+    <div class="field" id="meGrupoPeriodicidade" style="${existing?.recorrente?'':'display:none;'}"><label>Periodicidade</label><select id="mePeriodicidade">
+      ${['Semanal','Quinzenal','Mensal','Bimestral','Trimestral','Semestral','Anual'].map(p=>`<option ${existing?.periodicidade===p?'selected':''}>${p}</option>`).join('')}
+    </select></div>
+    <div class="field"><label>Meta principal (opcional — pra criar submeta de outra meta)</label><select id="meMetaPrincipal">
+      <option value="">— nenhuma —</option>
+      ${(state.metasEmpresa||[]).filter(m=>!existing||m.id!==existing.id).map(m=>`<option value="${m.id}" ${existing?.metaPrincipalId===m.id?'selected':''}>${escapeHTML(m.nome)}</option>`).join('')}
+    </select></div>
+    <div class="field"><label>Observações (opcional)</label><textarea id="meObservacoes" style="min-height:40px;">${existing?escapeHTML(existing.observacoes||''):''}</textarea></div>
+    <div class="note" style="margin-top:0;">Categorias financeiras (faturamento, lucro, despesas, caixa, dívidas, investimentos, CAPEX, patrimônio) calculam o progresso sozinhas. As demais, você atualiza manualmente ou usa etapas.</div>
+    ${isEdit && existing.tipoMedicao!=='etapas' ? `<div class="field"><label>Valor atual (atualize manualmente, se a categoria não calcular sozinha)</label><input type="text" inputmode="decimal" id="meValorAtualManual" value="${existing.valorAtualManual||0}"></div>` : ''}
+    ${isEdit && existing.tipoMedicao==='etapas' ? `
+    <div class="dash-section-label">Etapas</div>
+    <div id="capexMetaEtapasLista">
+      ${(existing.etapas||[]).map((e,i)=>`
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:6px;">
+          <input type="checkbox" data-etapa-idx="${i}" class="chk-etapa-meta" ${e.feita?'checked':''}> <span style="${e.feita?'text-decoration:line-through;color:var(--text-soft);':''}">${escapeHTML(e.nome)}</span>
+          <button type="button" class="icon-btn" data-remover-etapa-meta="${i}" style="margin-left:auto;">✕</button>
+        </label>
+      `).join('') || '<div class="note" style="margin-top:0;">Nenhuma etapa ainda.</div>'}
+    </div>
+    <div class="field-row"><div class="field"><input type="text" id="meNovaEtapa" placeholder="Nome da etapa"></div><button type="button" class="btn ghost sm" id="btnAddEtapaMeta">+ Adicionar</button></div>
+    ` : ''}
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      ${isEdit ? `<button class="btn danger-o" id="btnExcluirMetaEmpresa">Excluir</button>` : ''}
+      <button class="btn" id="btnSalvarMetaEmpresa">Salvar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('meRecorrente').addEventListener('change', (e)=>{
+    document.getElementById('meGrupoPeriodicidade').style.display = e.target.checked ? 'block' : 'none';
+  });
+  document.getElementById('btnAddEtapaMeta')?.addEventListener('click', ()=>{
+    const nome = document.getElementById('meNovaEtapa').value.trim();
+    if(!nome) return;
+    if(!existing.etapas) existing.etapas = [];
+    existing.etapas.push({ nome, feita:false });
+    persist();
+    openMetaEmpresaModal(existing);
+  });
+  document.querySelectorAll('.chk-etapa-meta').forEach(chk=>{
+    chk.addEventListener('change', ()=>{
+      existing.etapas[parseInt(chk.dataset.etapaIdx,10)].feita = chk.checked;
+      persist();
+      openMetaEmpresaModal(existing);
+    });
+  });
+  document.querySelectorAll('[data-remover-etapa-meta]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      existing.etapas.splice(parseInt(btn.dataset.removerEtapaMeta,10),1);
+      persist();
+      openMetaEmpresaModal(existing);
+    });
+  });
+  document.getElementById('btnExcluirMetaEmpresa')?.addEventListener('click', async ()=>{
+    if(!(await avisoModal({mensagem:`Excluir a meta "${existing.nome}"?`, tipo:'perigo', textoConfirmar:'Excluir'}))) return;
+    state.metasEmpresa = state.metasEmpresa.filter(m=>m.id!==existing.id);
+    persist(); closeModal(); render();
+    showToast('Meta excluída.');
+  });
+  document.getElementById('btnSalvarMetaEmpresa').addEventListener('click', ()=>{
+    const btn = document.getElementById('btnSalvarMetaEmpresa');
+    if(btn.disabled) return;
+    btn.disabled = true;
+    try{
+    const nome = document.getElementById('meNome').value.trim();
+    const valorAlvo = numBR(document.getElementById('meValorAlvo').value);
+    if(!nome || isNaN(valorAlvo) || valorAlvo<=0){ showToast('Preencha nome e valor/objetivo válido'); btn.disabled=false; return; }
+    const payload = {
+      nome, descricao: document.getElementById('meDescricao').value.trim(),
+      categoria: document.getElementById('meCategoria').value, area: document.getElementById('meArea').value.trim(),
+      tipoMedicao: document.getElementById('meTipo').value, valorAlvo,
+      dataInicial: document.getElementById('meDataInicial').value || todayISO(), dataFinal: document.getElementById('meDataFinal').value || null,
+      responsavel: document.getElementById('meResponsavel').value.trim(), prioridade: document.getElementById('mePrioridade').value,
+      focoSemana: document.getElementById('meFocoSemana').checked, focoMes: document.getElementById('meFocoMes').checked,
+      recorrente: document.getElementById('meRecorrente').checked, periodicidade: document.getElementById('mePeriodicidade').value,
+      metaPrincipalId: document.getElementById('meMetaPrincipal').value || null,
+      observacoes: document.getElementById('meObservacoes').value.trim(),
+    };
+    const campoValorManual = document.getElementById('meValorAtualManual');
+    if(campoValorManual) payload.valorAtualManual = numBR(campoValorManual.value)||0;
+    if(isEdit){
+      // Guarda histórico da alteração — não apaga o valor anterior, só registra a mudança.
+      if(!existing.historicoAlteracoes) existing.historicoAlteracoes = [];
+      if(existing.valorAlvo !== payload.valorAlvo){
+        existing.historicoAlteracoes.push({ data: new Date().toISOString(), campo:'valorAlvo', valorAnterior: existing.valorAlvo, valorNovo: payload.valorAlvo });
+      }
+      Object.assign(existing, payload);
+    } else {
+      state.metasEmpresa.push({ id: uid(), ...payload, status: 'nao_iniciada', valorAtualManual: 0, etapas: [], criadoEm: new Date().toISOString(), historicoAlteracoes: [] });
+    }
+    persist(); closeModal(); render();
+    showToast(isEdit?'Meta atualizada':'Meta criada');
+    }finally{
+      const btnFim = document.getElementById('btnSalvarMetaEmpresa');
+      if(btnFim) btnFim.disabled = false;
+    }
+  });
+}
+
+function resumoMetasEmpresaHTML(){
+  const metas = state.metasEmpresa||[];
+  if(!metas.length) return '';
+  const hoje = todayISO();
+  const mesAtual = hoje.slice(0,8)+'01';
+  const [ay,am] = hoje.slice(0,7).split('-').map(Number);
+  const fimMes = new Date(ay,am,0).toISOString().slice(0,10);
+  const dadosFin = obterDadosFinanceirosParaMetas(mesAtual, fimMes);
+  const comStatus = metas.filter(m=>!m.dataFinal || (m.dataInicial<=fimMes && m.dataFinal>=mesAtual)).map(m=>{
+    const valorAuto = calcularValorAtualAutomatico(m.categoria, dadosFin);
+    const valorAtual = valorAuto!==null ? valorAuto : (m.tipoMedicao==='etapas' ? (m.etapas&&m.etapas.length ? m.etapas.filter(e=>e.feita).length/m.etapas.length*m.valorAlvo : 0) : (m.valorAtualManual||0));
+    return { ...m, valorAtual, statusCalc: calcularStatusMeta(m, valorAtual, hoje) };
+  });
+  const contagem = { atingida:0, superada:0, em_andamento:0, em_risco:0, atrasada:0 };
+  comStatus.forEach(m=>{ if(contagem[m.statusCalc]!==undefined) contagem[m.statusCalc]++; });
+  const focoMes = comStatus.find(m=>m.focoMes);
+  const focoSemana = comStatus.find(m=>m.focoSemana);
+  return `
+    <div class="panel" style="margin-bottom:16px;cursor:pointer;" data-goto="metas">
+      <div class="panel-head"><h2>🎯 Metas</h2></div>
+      <div class="panel-body" style="padding:14px 18px;">
+        <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;">
+          <span>🟢 ${contagem.atingida+contagem.superada} atingidas</span>
+          <span>🟡 ${contagem.em_andamento} em andamento</span>
+          <span>🟠 ${contagem.em_risco} em risco</span>
+          <span>🔴 ${contagem.atrasada} atrasadas</span>
+        </div>
+        ${focoSemana?`<div style="font-size:11.5px;margin-top:8px;color:var(--text-soft);">⭐ Foco da semana: <strong style="color:var(--ink);">${escapeHTML(focoSemana.nome)}</strong></div>`:''}
+        ${focoMes?`<div style="font-size:11.5px;margin-top:4px;color:var(--text-soft);">🏆 Foco do mês: <strong style="color:var(--ink);">${escapeHTML(focoMes.nome)}</strong></div>`:''}
+        <div style="font-size:11.5px;margin-top:8px;color:var(--blue-accent);">Ver todas as metas →</div>
+      </div>
+    </div>`;
+}
+
 function viewMetasReserva(){
+  gerarProximosPeriodosRecorrentes();
+  tirarSnapshotMesPassadoSeNecessario();
   const lista = [...(state.metasReserva||[])];
   const hoje = todayISO();
   const mesAtual = hoje.slice(0,7);
@@ -34041,8 +34373,172 @@ function viewMetasReserva(){
 
   return `
     <div class="topbar">
-      <div><h1>Central de Metas</h1><p>Metas do mês (faturamento, lucro, despesa) e metas de longo prazo (reservas, investimentos, dívidas)</p></div>
-      <button class="btn" id="btnNovaMeta">+ Nova meta</button>
+      <div><h1>🎯 Metas da Empresa</h1><p>Planeje, acompanhe e alcance os objetivos da empresa — financeiros, operacionais e de projetos, tudo num lugar só.</p></div>
+      <button class="btn" id="btnNovaMetaEmpresa">+ Nova meta</button>
+    </div>
+    ${(()=>{
+      const hoje2 = todayISO();
+      const visao = metasEmpresaVisao;
+      let de, ate;
+      if(visao==='semana'){ const d=new Date(); const dia=d.getDay(); const seg=new Date(d); seg.setDate(d.getDate()-((dia+6)%7)); const dom=new Date(seg); dom.setDate(seg.getDate()+6); de=seg.toISOString().slice(0,10); ate=dom.toISOString().slice(0,10); }
+      else if(visao==='30d'){ de=hoje2; const f=new Date(); f.setDate(f.getDate()+30); ate=f.toISOString().slice(0,10); }
+      else if(visao==='trimestre'){ const m=new Date().getMonth(); const ini=Math.floor(m/3)*3; de=new Date(new Date().getFullYear(),ini,1).toISOString().slice(0,10); ate=new Date(new Date().getFullYear(),ini+3,0).toISOString().slice(0,10); }
+      else if(visao==='ano'){ de=hoje2.slice(0,4)+'-01-01'; ate=hoje2.slice(0,4)+'-12-31'; }
+      else if(visao==='todas'){ de='0000-01-01'; ate='9999-12-31'; }
+      else { de=hoje2.slice(0,8)+'01'; const [ay,am]=hoje2.slice(0,7).split('-').map(Number); ate=new Date(ay,am,0).toISOString().slice(0,10); } // mês
+
+      const dadosFin = obterDadosFinanceirosParaMetas(de, ate);
+      let metasNoPeriodo = (state.metasEmpresa||[]).filter(m=>visao==='todas' || !m.dataFinal || (m.dataInicial<=ate && m.dataFinal>=de));
+      if(metasEmpresaFiltroCategoria) metasNoPeriodo = metasNoPeriodo.filter(m=>m.categoria===metasEmpresaFiltroCategoria);
+      if(metasEmpresaFiltroPrioridade) metasNoPeriodo = metasNoPeriodo.filter(m=>m.prioridade===metasEmpresaFiltroPrioridade);
+      const metasComStatus = metasNoPeriodo.map(m=>{
+        const valorAuto = calcularValorAtualAutomatico(m.categoria, dadosFin);
+        const valorAtual = valorAuto!==null ? valorAuto : (m.tipoMedicao==='etapas' ? (m.etapas&&m.etapas.length ? m.etapas.filter(e=>e.feita).length/m.etapas.length*m.valorAlvo : 0) : (m.valorAtualManual||0));
+        const status = calcularStatusMeta(m, valorAtual, hoje2);
+        return { ...m, valorAtual, statusCalc: status, automatica: valorAuto!==null };
+      }).sort((a,b)=>{
+        if(metasEmpresaOrdenacao==='prazo') return (a.dataFinal||'9999').localeCompare(b.dataFinal||'9999');
+        if(metasEmpresaOrdenacao==='prioridade'){ const ordem={critica:0,alta:1,media:2,baixa:3}; return (ordem[a.prioridade]??9)-(ordem[b.prioridade]??9); }
+        if(metasEmpresaOrdenacao==='progresso'){ const pa=a.valorAlvo>0?a.valorAtual/a.valorAlvo:0, pb=b.valorAlvo>0?b.valorAtual/b.valorAlvo:0; return pb-pa; }
+        if(metasEmpresaOrdenacao==='categoria') return a.categoria.localeCompare(b.categoria);
+        if(metasEmpresaOrdenacao==='criacao') return (b.criadoEm||'').localeCompare(a.criadoEm||'');
+        return 0;
+      });
+
+      const contagem = { atingida:0, superada:0, em_andamento:0, em_risco:0, atrasada:0 };
+      metasComStatus.forEach(m=>{ if(contagem[m.statusCalc]!==undefined) contagem[m.statusCalc]++; });
+      const focoSemana = metasComStatus.find(m=>m.focoSemana);
+      const focoMes = metasComStatus.find(m=>m.focoMes);
+
+      const barraMetaEmpresa = (m)=>{
+        const pct = m.valorAlvo>0 ? Math.min(150, m.valorAtual/m.valorAlvo*100) : 0;
+        const falta = Math.max(0, m.valorAlvo-m.valorAtual);
+        const st = STATUS_META_EMPRESA[m.statusCalc] || STATUS_META_EMPRESA.em_andamento;
+        return `
+        <div class="panel" style="margin-bottom:10px;">
+          <div class="panel-body" style="padding:14px 18px;cursor:pointer;" data-action="editar-meta-empresa" data-id="${m.id}">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px;">
+              <span style="font-weight:600;font-size:13px;">${CATEGORIAS_META_EMPRESA[m.categoria]?.icone||'🎯'} ${escapeHTML(m.nome)}${m.focoSemana?' ⭐':''}${m.focoMes?' 🏆':''}</span>
+              <span style="font-size:11px;font-weight:600;">${st.icone} ${st.nome}</span>
+            </div>
+            <div style="font-size:10.5px;color:var(--text-soft);margin-bottom:6px;">${CATEGORIAS_META_EMPRESA[m.categoria]?.nome||''}${m.area?' · '+escapeHTML(m.area):''}${m.responsavel?' · '+escapeHTML(m.responsavel):''}${m.dataFinal?' · até '+fmtDate(m.dataFinal):''}${PRIORIDADE_META_EMPRESA[m.prioridade]?' · '+PRIORIDADE_META_EMPRESA[m.prioridade].icone+' '+PRIORIDADE_META_EMPRESA[m.prioridade].nome:''}</div>
+            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-soft);margin-bottom:3px;"><span class="mono">${m.tipoMedicao==='percentual'||m.tipoMedicao==='margem'||m.tipoMedicao==='indice'?m.valorAtual.toFixed(1)+'%':brl(m.valorAtual)}</span><span class="mono">de ${m.tipoMedicao==='percentual'||m.tipoMedicao==='margem'||m.tipoMedicao==='indice'?m.valorAlvo+'%':brl(m.valorAlvo)}</span></div>
+            <div style="background:var(--bone);border-radius:6px;height:7px;overflow:hidden;"><div style="width:${Math.min(100,pct)}%;height:100%;background:${pct>=100?'var(--success)':(m.statusCalc==='em_risco'||m.statusCalc==='atrasada'?'var(--danger)':'var(--blue-accent)')};"></div></div>
+            ${falta>0 ? `<div style="font-size:10px;color:var(--text-soft);margin-top:3px;">Falta ${m.tipoMedicao==='percentual'||m.tipoMedicao==='margem'||m.tipoMedicao==='indice'?falta.toFixed(1)+'%':brl(falta)}${m.automatica?' · calculado automaticamente':''}</div>` : ''}
+            ${(()=>{
+              if(!m.dataFinal || m.statusCalc==='atingida' || m.statusCalc==='superada') return '';
+              const proj = calcularProjecaoMeta(m.valorAtual, m.dataInicial, m.dataFinal, hoje2);
+              if(!proj) return '';
+              const diasRestantes = Math.max(0, Math.ceil((new Date(m.dataFinal)-new Date(hoje2))/86400000));
+              const ritmoNecessario = diasRestantes>0 ? falta/diasRestantes : falta;
+              const fmt = v => m.tipoMedicao==='percentual'||m.tipoMedicao==='margem'||m.tipoMedicao==='indice' ? v.toFixed(1)+'%' : brl(v);
+              const bateOuNao = proj>=m.valorAlvo;
+              return `<div style="font-size:10px;color:${bateOuNao?'var(--success)':'var(--danger)'};margin-top:2px;">${bateOuNao?'🟢':'🔴'} Projeção no ritmo atual: ${fmt(proj)}${diasRestantes>0?` · necessário ${fmt(ritmoNecessario)}/dia pra bater`:''}</div>`;
+            })()}
+            ${m.tipoMedicao==='etapas' && m.etapas?.length ? `<div style="font-size:10px;color:var(--text-soft);margin-top:3px;">${m.etapas.filter(e=>e.feita).length}/${m.etapas.length} etapas concluídas</div>` : ''}
+            ${(()=>{
+              const consolidado = progressoConsolidadoMetaPrincipal(m.id, metasComStatus);
+              return consolidado ? `<div style="font-size:10px;color:var(--blue-accent);margin-top:3px;">🧩 ${consolidado.concluidas}/${consolidado.qtd} submetas concluídas (${consolidado.pctConsolidado}%)</div>` : '';
+            })()}
+            ${m.metaPrincipalId ? `<div style="font-size:10px;color:var(--text-soft);margin-top:2px;">🧩 Submeta de: ${escapeHTML((state.metasEmpresa||[]).find(x=>x.id===m.metaPrincipalId)?.nome||'')}</div>` : ''}
+          </div>
+        </div>`;
+      };
+
+      return `
+      <div class="report-controls" style="margin-bottom:14px;flex-wrap:wrap;">
+        <select id="metasEmpresaVisaoSel">
+          <option value="semana" ${visao==='semana'?'selected':''}>Esta semana</option>
+          <option value="mes" ${visao==='mes'?'selected':''}>Este mês</option>
+          <option value="30d" ${visao==='30d'?'selected':''}>Próximos 30 dias</option>
+          <option value="trimestre" ${visao==='trimestre'?'selected':''}>Trimestre</option>
+          <option value="ano" ${visao==='ano'?'selected':''}>Ano</option>
+          <option value="todas" ${visao==='todas'?'selected':''}>Todas</option>
+        </select>
+        <select id="metasEmpresaFiltroCategoriaSel">
+          <option value="">Todas as categorias</option>
+          ${Object.entries(CATEGORIAS_META_EMPRESA).map(([id,c])=>`<option value="${id}" ${metasEmpresaFiltroCategoria===id?'selected':''}>${c.icone} ${c.nome}</option>`).join('')}
+        </select>
+        <select id="metasEmpresaFiltroPrioridadeSel">
+          <option value="">Toda prioridade</option>
+          ${Object.entries(PRIORIDADE_META_EMPRESA).map(([id,p])=>`<option value="${id}" ${metasEmpresaFiltroPrioridade===id?'selected':''}>${p.icone} ${p.nome}</option>`).join('')}
+        </select>
+        <select id="metasEmpresaOrdenacaoSel">
+          <option value="prazo" ${metasEmpresaOrdenacao==='prazo'?'selected':''}>Ordenar por prazo</option>
+          <option value="prioridade" ${metasEmpresaOrdenacao==='prioridade'?'selected':''}>Ordenar por prioridade</option>
+          <option value="progresso" ${metasEmpresaOrdenacao==='progresso'?'selected':''}>Ordenar por progresso</option>
+          <option value="categoria" ${metasEmpresaOrdenacao==='categoria'?'selected':''}>Ordenar por categoria</option>
+          <option value="criacao" ${metasEmpresaOrdenacao==='criacao'?'selected':''}>Mais recentes primeiro</option>
+        </select>
+      </div>
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(110px,1fr));margin-bottom:14px;">
+        <div class="card"><div class="label">🟢 Atingidas</div><div class="value mono">${contagem.atingida+contagem.superada}</div></div>
+        <div class="card"><div class="label">🟡 Em andamento</div><div class="value mono">${contagem.em_andamento}</div></div>
+        <div class="card"><div class="label">🟠 Em risco</div><div class="value mono">${contagem.em_risco}</div></div>
+        <div class="card"><div class="label">🔴 Atrasadas</div><div class="value mono">${contagem.atrasada}</div></div>
+      </div>
+      ${focoSemana || focoMes ? `
+      <div class="field-row" style="margin-bottom:14px;">
+        ${focoSemana ? `<div style="flex:1;"><div class="dash-section-label">⭐ Foco da semana</div>${barraMetaEmpresa(focoSemana)}</div>` : ''}
+        ${focoMes ? `<div style="flex:1;"><div class="dash-section-label">🏆 Foco do mês</div>${barraMetaEmpresa(focoMes)}</div>` : ''}
+      </div>` : ''}
+      ${metasComStatus.length ? `
+      <div class="dash-section-label">Metas — ${visao==='semana'?'esta semana':visao==='mes'?'este mês':visao==='30d'?'próximos 30 dias':visao==='trimestre'?'trimestre':visao==='ano'?'ano':'todas'}</div>
+      ${metasComStatus.map(barraMetaEmpresa).join('')}
+      ` : `<div class="panel"><div class="empty" style="padding:30px 20px;">Nenhuma meta cadastrada nesse período — clique em "+ Nova meta" pra criar.</div></div>`}
+
+      ${state.metasHistoricoMensal.length ? `
+      <div class="dash-section-label" style="margin-top:20px;">📈 % das metas atingidas por mês</div>
+      <div class="panel"><div class="panel-body" style="padding:14px 18px;">
+        ${svgLinhasMultiplas([{ nome:'% atingidas', valores: state.metasHistoricoMensal.map(h=>h.pct), cor:'#1E49E2' }], state.metasHistoricoMensal.map(h=>competenciaLabel(h.mes)))}
+        <div class="note" style="margin-top:8px;">Começa a se formar a partir de agora — sem dado de mês anterior a essa funcionalidade, então não tem como reconstruir o passado.</div>
+      </div></div>` : ''}
+
+      ${(()=>{
+        const comResponsavel = metasComStatus.filter(m=>m.responsavel);
+        if(!comResponsavel.length) return '';
+        const porResponsavel = {};
+        comResponsavel.forEach(m=>{
+          if(!porResponsavel[m.responsavel]) porResponsavel[m.responsavel] = { atingidas:0, andamento:0, atrasadas:0, risco:0 };
+          const r = porResponsavel[m.responsavel];
+          if(m.statusCalc==='atingida'||m.statusCalc==='superada') r.atingidas++;
+          else if(m.statusCalc==='atrasada') r.atrasadas++;
+          else if(m.statusCalc==='em_risco') r.risco++;
+          else r.andamento++;
+        });
+        return `
+        <div class="dash-section-label" style="margin-top:20px;">Ranking por responsável</div>
+        <div class="panel"><div class="panel-body" style="padding:0;">
+          ${Object.entries(porResponsavel).map(([resp,r])=>`
+            <div class="ledger-row compact"><div class="desc-cell"><div>${escapeHTML(resp)}</div><div class="cat">🟢 ${r.atingidas} · 🟡 ${r.andamento} · 🟠 ${r.risco} · 🔴 ${r.atrasadas}</div></div></div>
+          `).join('')}
+        </div></div>`;
+      })()}
+
+      ${(()=>{
+        if(visao!=='mes' && visao!=='trimestre') return '';
+        const semanas = {};
+        metasComStatus.filter(m=>m.dataFinal).forEach(m=>{
+          const d = new Date(m.dataFinal);
+          const seg = new Date(d); seg.setDate(d.getDate()-((d.getDay()+6)%7));
+          const chave = seg.toISOString().slice(0,10);
+          semanas[chave] = (semanas[chave]||0)+1;
+        });
+        const chaves = Object.keys(semanas).sort();
+        if(!chaves.length) return '';
+        return `
+        <div class="dash-section-label" style="margin-top:20px;">📅 Calendário de metas (por semana de vencimento)</div>
+        <div class="panel"><div class="panel-body" style="padding:0;">
+          ${chaves.map(c=>{ const fim=new Date(c); fim.setDate(fim.getDate()+6); return `<div class="ledger-row compact"><div class="desc-cell"><div>${fmtDate(c)} – ${fmtDate(fim.toISOString().slice(0,10))}</div></div><span class="mono">🎯 ${semanas[c]} meta(s)</span></div>`; }).join('')}
+        </div></div>`;
+      })()}
+      `;
+    })()}
+
+    <div class="dash-section-label" style="margin-top:24px;">Metas financeiras do mês e de longo prazo (formato anterior)</div>
+    <div class="topbar">
+      <div><p style="margin:0;">Metas do mês (faturamento, lucro, despesa) e metas de longo prazo (reservas, investimentos, dívidas)</p></div>
+      <button class="btn ghost" id="btnNovaMeta">+ Nova meta de reserva</button>
     </div>
     ${(()=>{
       const conquistas = verificarConquistas();
