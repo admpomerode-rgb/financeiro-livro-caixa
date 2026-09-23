@@ -33491,8 +33491,7 @@ function tirarSnapshotMesPassadoSeNecessario(){
   const de = `${mesPassado}-01`, ate = new Date(ay,am,0).toISOString().slice(0,10);
   const dadosFin = obterDadosFinanceirosParaMetas(de, ate);
   const metasDoMes = (state.metasEmpresa||[]).filter(m=>m.dataInicial<=ate && (m.dataFinal||ate)>=de).map(m=>{
-    const valorAuto = calcularValorAtualAutomatico(m.categoria, dadosFin);
-    const valorAtual = valorAuto!==null ? valorAuto : (m.tipoMedicao==='etapas' ? (m.etapas&&m.etapas.length ? m.etapas.filter(e=>e.feita).length/m.etapas.length*m.valorAlvo : 0) : (m.valorAtualManual||0));
+    const valorAtual = calcularValorAtualMeta(m, dadosFin, de, ate);
     return { statusCalc: calcularStatusMeta(m, valorAtual, ate) };
   });
   const resultado = calcularPctAtingidasMes(metasDoMes);
@@ -33517,6 +33516,22 @@ function gerarProximosPeriodosRecorrentes(){
   });
   if(geradas>0) persist();
   return geradas;
+}
+// Soma lançamentos de uma categoria específica (a mesma lista de categorias já usada em todo o
+// sistema pra despesa/receita) — testada isoladamente.
+function somaCategoriaEspecificaMeta(lancamentos, categoria, tipo, de, ate){
+  return lancamentos
+    .filter(l=>l.categoria===categoria && l.tipo===tipo && l.dataVencimento>=de && l.dataVencimento<=ate && (tipo==='saida'?l.status==='pago':l.status==='recebido'))
+    .reduce((s,l)=>s+l.valor,0);
+}
+// Função única de "qual o valor atual dessa meta" — antes estava duplicada em 3 lugares, agora é
+// só uma, evitando os três ficarem dessincronizados. Testada isoladamente antes de usar.
+function calcularValorAtualMeta(m, dadosFin, de, ate){
+  if(m.categoriaEspecifica && m.categoriaEspecificaTipo) return somaCategoriaEspecificaMeta(state.lancamentos, m.categoriaEspecifica, m.categoriaEspecificaTipo, de, ate);
+  const valorAuto = calcularValorAtualAutomatico(m.categoria, dadosFin);
+  if(valorAuto!==null) return valorAuto;
+  if(m.tipoMedicao==='etapas') return (m.etapas&&m.etapas.length) ? m.etapas.filter(e=>e.feita).length/m.etapas.length*m.valorAlvo : 0;
+  return m.valorAtualManual||0;
 }
 function obterDadosFinanceirosParaMetas(de, ate){
   const lancNoPeriodo = state.lancamentos.filter(l=>l.dataVencimento>=de && l.dataVencimento<=ate);
@@ -34175,6 +34190,17 @@ function openMetaEmpresaModal(existing){
       <div class="field"><label>Área (opcional)</label><input type="text" id="meArea" value="${existing?escapeHTML(existing.area||''):''}" placeholder="Ex: Financeiro"></div>
     </div>
     <div class="field-row">
+      <div class="field"><label>Categoria financeira específica (opcional)</label>
+        <select id="meCategoriaEspecificaTipo">
+          <option value="">— nenhuma, usar só o grupo geral acima —</option>
+          <option value="saida" ${existing?.categoriaEspecificaTipo==='saida'?'selected':''}>Uma despesa específica</option>
+          <option value="entrada" ${existing?.categoriaEspecificaTipo==='entrada'?'selected':''}>Uma receita específica</option>
+        </select>
+      </div>
+      <div class="field" id="meGrupoCategoriaEspecifica" style="${existing?.categoriaEspecificaTipo?'':'display:none;'}"><label>Qual</label><select id="meCategoriaEspecifica">${opcoesCategoriaHTML(existing?.categoriaEspecificaTipo||'saida', existing?.categoriaEspecifica)}</select></div>
+    </div>
+    <div class="note" style="margin-top:0;">Escolhendo uma categoria específica, a meta acompanha só ela (ex: "gastar no máximo R$500 com Combustível") — em vez do total geral de despesas ou receitas.</div>
+    <div class="field-row">
       <div class="field"><label>Tipo de medição</label><select id="meTipo">${Object.entries(TIPOS_MEDICAO_META).map(([id,nome])=>`<option value="${id}" ${existing?.tipoMedicao===id?'selected':''}>${nome}</option>`).join('')}</select></div>
       <div class="field"><label>Valor/objetivo</label><input type="text" inputmode="decimal" id="meValorAlvo" value="${existing?existing.valorAlvo:''}" placeholder="0"></div>
     </div>
@@ -34222,6 +34248,11 @@ function openMetaEmpresaModal(existing){
   document.getElementById('meRecorrente').addEventListener('change', (e)=>{
     document.getElementById('meGrupoPeriodicidade').style.display = e.target.checked ? 'block' : 'none';
   });
+  document.getElementById('meCategoriaEspecificaTipo').addEventListener('change', (e)=>{
+    const grupo = document.getElementById('meGrupoCategoriaEspecifica');
+    grupo.style.display = e.target.value ? 'block' : 'none';
+    if(e.target.value) document.getElementById('meCategoriaEspecifica').innerHTML = opcoesCategoriaHTML(e.target.value);
+  });
   document.getElementById('btnAddEtapaMeta')?.addEventListener('click', ()=>{
     const nome = document.getElementById('meNovaEtapa').value.trim();
     if(!nome) return;
@@ -34267,6 +34298,8 @@ function openMetaEmpresaModal(existing){
       focoSemana: document.getElementById('meFocoSemana').checked, focoMes: document.getElementById('meFocoMes').checked,
       recorrente: document.getElementById('meRecorrente').checked, periodicidade: document.getElementById('mePeriodicidade').value,
       metaPrincipalId: document.getElementById('meMetaPrincipal').value || null,
+      categoriaEspecificaTipo: document.getElementById('meCategoriaEspecificaTipo').value || null,
+      categoriaEspecifica: document.getElementById('meCategoriaEspecificaTipo').value ? document.getElementById('meCategoriaEspecifica').value : null,
       observacoes: document.getElementById('meObservacoes').value.trim(),
     };
     const campoValorManual = document.getElementById('meValorAtualManual');
@@ -34299,8 +34332,7 @@ function resumoMetasEmpresaHTML(){
   const fimMes = new Date(ay,am,0).toISOString().slice(0,10);
   const dadosFin = obterDadosFinanceirosParaMetas(mesAtual, fimMes);
   const comStatus = metas.filter(m=>!m.dataFinal || (m.dataInicial<=fimMes && m.dataFinal>=mesAtual)).map(m=>{
-    const valorAuto = calcularValorAtualAutomatico(m.categoria, dadosFin);
-    const valorAtual = valorAuto!==null ? valorAuto : (m.tipoMedicao==='etapas' ? (m.etapas&&m.etapas.length ? m.etapas.filter(e=>e.feita).length/m.etapas.length*m.valorAlvo : 0) : (m.valorAtualManual||0));
+    const valorAtual = calcularValorAtualMeta(m, dadosFin, mesAtual, fimMes);
     return { ...m, valorAtual, statusCalc: calcularStatusMeta(m, valorAtual, hoje) };
   });
   const contagem = { atingida:0, superada:0, em_andamento:0, em_risco:0, atrasada:0 };
@@ -34392,10 +34424,9 @@ function viewMetasReserva(){
       if(metasEmpresaFiltroCategoria) metasNoPeriodo = metasNoPeriodo.filter(m=>m.categoria===metasEmpresaFiltroCategoria);
       if(metasEmpresaFiltroPrioridade) metasNoPeriodo = metasNoPeriodo.filter(m=>m.prioridade===metasEmpresaFiltroPrioridade);
       const metasComStatus = metasNoPeriodo.map(m=>{
-        const valorAuto = calcularValorAtualAutomatico(m.categoria, dadosFin);
-        const valorAtual = valorAuto!==null ? valorAuto : (m.tipoMedicao==='etapas' ? (m.etapas&&m.etapas.length ? m.etapas.filter(e=>e.feita).length/m.etapas.length*m.valorAlvo : 0) : (m.valorAtualManual||0));
+        const valorAtual = calcularValorAtualMeta(m, dadosFin, de, ate);
         const status = calcularStatusMeta(m, valorAtual, hoje2);
-        return { ...m, valorAtual, statusCalc: status, automatica: valorAuto!==null };
+        return { ...m, valorAtual, statusCalc: status, automatica: !m.categoriaEspecifica && calcularValorAtualAutomatico(m.categoria, dadosFin)!==null };
       }).sort((a,b)=>{
         if(metasEmpresaOrdenacao==='prazo') return (a.dataFinal||'9999').localeCompare(b.dataFinal||'9999');
         if(metasEmpresaOrdenacao==='prioridade'){ const ordem={critica:0,alta:1,media:2,baixa:3}; return (ordem[a.prioridade]??9)-(ordem[b.prioridade]??9); }
