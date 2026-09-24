@@ -3,6 +3,8 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<meta name="googlebot" content="noindex, nofollow, noarchive">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Livro Caixa — Administração Financeira</title>
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
@@ -1454,8 +1456,12 @@ function detectarOrfaos(lancamentos, contasValidas, cartoesValidos){
   return lancamentos.filter(l=>(l.contaId && !idsContas.has(l.contaId)) || (l.cartaoId && !idsCartoes.has(l.cartaoId)));
 }
 // ---- Permissões ----
-// Testada isoladamente antes de usar. Sem ninguém cadastrado, ou e-mail não cadastrado na lista =
-// sem restrição (trata como admin) — pra nunca travar quem já usa o sistema sozinho.
+// CORREÇÃO DE SEGURANÇA (auditoria): antes, e-mail desconhecido virava admin escondido assim que
+// alguém começasse a usar o sistema de permissão — fail-open real. Agora só o caso "ninguém
+// cadastrou nada ainda" continua sem restrição (pra não travar quem usa o sistema sozinho, sem
+// nunca ter mexido em Usuários e Permissões). A partir do momento que existe QUALQUER usuário
+// cadastrado, um e-mail fora da lista cai no nível mais restrito (visualização), não em admin.
+// Testada isoladamente antes de usar.
 const PERMISSAO_REGRAS = {
   admin: ['ver','criar','editar','excluir','fechar_mes','aprovar_qualquer_valor'],
   operador: ['ver','criar','editar'],
@@ -1464,8 +1470,8 @@ const PERMISSAO_REGRAS = {
 function usuarioTemPermissao(usuarios, emailLogado, acao){
   if(!usuarios || !usuarios.length) return true;
   const u = usuarios.find(x=>x.email===emailLogado);
-  if(!u) return true;
-  return (PERMISSAO_REGRAS[u.papel]||[]).includes(acao);
+  const papel = u ? u.papel : 'visualizacao';
+  return (PERMISSAO_REGRAS[papel]||[]).includes(acao);
 }
 function emailLogadoAtual(){ return (typeof auth!=='undefined' && auth.currentUser && auth.currentUser.email) || null; }
 function podeAgora(acao){ return usuarioTemPermissao(state.usuariosPermissao, emailLogadoAtual(), acao); }
@@ -1475,6 +1481,14 @@ function limiteAprovacaoEfetivo(usuarios, emailLogado, limiteGeral){
   const u = (usuarios||[]).find(x=>x.email===emailLogado);
   if(u && u.limiteAprovacao!=null) return u.limiteAprovacao;
   return limiteGeral;
+}
+// CORREÇÃO DE SEGURANÇA (auditoria): antes, quem aprovava sem estar cadastrado em Usuários e
+// Permissões tinha alçada ILIMITADA. Agora só fica sem limite quando ninguém foi cadastrado ainda
+// (uso sozinho); com o sistema de permissão já ativo, quem não está na lista tem alçada zero — não
+// aprova nada. Testada isoladamente.
+function alcadaAprovadorSegura(usuarios, emailLogado){
+  if(!usuarios || !usuarios.length) return Infinity;
+  return limiteAprovacaoEfetivo(usuarios, emailLogado, 0);
 }
 // Avaliação de fornecedor — testada isoladamente antes de usar.
 function mediaAvaliacaoFornecedor(fornecedorId, avaliacoes){
@@ -30985,7 +30999,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     if(btn_btnAprovarDespesa_Click.disabled) return;
     btn_btnAprovarDespesa_Click.disabled = true;
     try{
-    const alcadaAprovador = limiteAprovacaoEfetivo(state.usuariosPermissao, emailLogadoAtual(), Infinity);
+    const alcadaAprovador = alcadaAprovadorSegura(state.usuariosPermissao, emailLogadoAtual());
     if(existing.valor > alcadaAprovador){
       showToast(`Sua alçada é de ${brl(alcadaAprovador)} — esse valor precisa de aprovação de alguém com alçada maior.`);
       btn_btnAprovarDespesa_Click.disabled = false;
