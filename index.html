@@ -33517,17 +33517,18 @@ function gerarProximosPeriodosRecorrentes(){
   if(geradas>0) persist();
   return geradas;
 }
-// Soma lançamentos de uma categoria específica (a mesma lista de categorias já usada em todo o
+// Soma lançamentos de uma ou mais categorias específicas (a mesma lista já usada em todo o
 // sistema pra despesa/receita) — testada isoladamente.
-function somaCategoriaEspecificaMeta(lancamentos, categoria, tipo, de, ate){
+function somaCategoriasEspecificasMeta(lancamentos, categorias, tipo, de, ate){
+  const setCategorias = new Set(categorias||[]);
   return lancamentos
-    .filter(l=>l.categoria===categoria && l.tipo===tipo && l.dataVencimento>=de && l.dataVencimento<=ate && (tipo==='saida'?l.status==='pago':l.status==='recebido'))
+    .filter(l=>setCategorias.has(l.categoria) && l.tipo===tipo && l.dataVencimento>=de && l.dataVencimento<=ate && (tipo==='saida'?l.status==='pago':l.status==='recebido'))
     .reduce((s,l)=>s+l.valor,0);
 }
 // Função única de "qual o valor atual dessa meta" — antes estava duplicada em 3 lugares, agora é
 // só uma, evitando os três ficarem dessincronizados. Testada isoladamente antes de usar.
 function calcularValorAtualMeta(m, dadosFin, de, ate){
-  if(m.categoriaEspecifica && m.categoriaEspecificaTipo) return somaCategoriaEspecificaMeta(state.lancamentos, m.categoriaEspecifica, m.categoriaEspecificaTipo, de, ate);
+  if((m.categoriasEspecificas||[]).length && m.categoriaEspecificaTipo) return somaCategoriasEspecificasMeta(state.lancamentos, m.categoriasEspecificas, m.categoriaEspecificaTipo, de, ate);
   const valorAuto = calcularValorAtualAutomatico(m.categoria, dadosFin);
   if(valorAuto!==null) return valorAuto;
   if(m.tipoMedicao==='etapas') return (m.etapas&&m.etapas.length) ? m.etapas.filter(e=>e.feita).length/m.etapas.length*m.valorAlvo : 0;
@@ -34178,57 +34179,91 @@ function viewCentralPendencias(){
 }
 /* ====================== FIM CENTRAL DE PENDÊNCIAS ====================== */
 
-function openMetaEmpresaModal(existing){
+function abrirSeletorMultiploCategoriasMeta(tipo, jaSelecionadas, existing, rascunho){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Escolher categorias</h3>
+    <div class="note" style="margin-top:0;">Marque uma ou mais — a meta soma todas juntas.</div>
+    <div id="listaCatMultiMeta" style="max-height:50vh;overflow-y:auto;">
+      ${listaCategorias(tipo).map(c=>`
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px;">
+          <input type="checkbox" class="chk-cat-multi-meta" value="${escapeHTML(c.nome)}" ${jaSelecionadas.includes(c.nome)?'checked':''}> <span style="width:10px;height:10px;border-radius:50%;background:${c.cor||'#999'};display:inline-block;"></span> ${escapeHTML(c.nome)}
+        </label>
+        ${(c.subcategorias||[]).map(sub=>{ const full = `${c.nome} / ${sub.nome}`; return `
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0 6px 24px;font-size:12.5px;">
+          <input type="checkbox" class="chk-cat-multi-meta" value="${escapeHTML(full)}" ${jaSelecionadas.includes(full)?'checked':''}> — ${escapeHTML(sub.nome)}
+        </label>`; }).join('')}
+      `).join('')}
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnVoltarSemEscolher">Voltar</button>
+      <button class="btn" id="btnConfirmarCatMultiMeta">Confirmar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnVoltarSemEscolher').addEventListener('click', ()=>openMetaEmpresaModal(existing, rascunho));
+  document.getElementById('btnConfirmarCatMultiMeta').addEventListener('click', ()=>{
+    const escolhidas = Array.from(document.querySelectorAll('.chk-cat-multi-meta:checked')).map(c=>c.value);
+    openMetaEmpresaModal(existing, { ...rascunho, categoriasEspecificas: escolhidas });
+  });
+}
+
+function openMetaEmpresaModal(existing, rascunho){
   const isEdit = !!existing;
+  const v = rascunho || existing || {};
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
     <h3>${isEdit?'Editar meta':'+ Nova meta'}</h3>
-    <div class="field"><label>Nome da meta</label><input type="text" id="meNome" value="${existing?escapeHTML(existing.nome):''}" placeholder="Ex: Faturar R$ 100.000 no mês"></div>
-    <div class="field"><label>Descrição (opcional)</label><textarea id="meDescricao" style="min-height:40px;">${existing?escapeHTML(existing.descricao||''):''}</textarea></div>
+    <div class="field"><label>Nome da meta</label><input type="text" id="meNome" value="${v.nome?escapeHTML(v.nome):''}" placeholder="Ex: Faturar R$ 100.000 no mês"></div>
+    <div class="field"><label>Descrição (opcional)</label><textarea id="meDescricao" style="min-height:40px;">${escapeHTML(v.descricao||'')}</textarea></div>
     <div class="field-row">
-      <div class="field"><label>Categoria</label><select id="meCategoria">${Object.entries(CATEGORIAS_META_EMPRESA).map(([id,c])=>`<option value="${id}" ${existing?.categoria===id?'selected':''}>${c.icone} ${c.nome}</option>`).join('')}</select></div>
-      <div class="field"><label>Área (opcional)</label><input type="text" id="meArea" value="${existing?escapeHTML(existing.area||''):''}" placeholder="Ex: Financeiro"></div>
+      <div class="field"><label>Categoria</label><select id="meCategoria">${Object.entries(CATEGORIAS_META_EMPRESA).map(([id,c])=>`<option value="${id}" ${v.categoria===id?'selected':''}>${c.icone} ${c.nome}</option>`).join('')}</select></div>
+      <div class="field"><label>Área (opcional)</label><input type="text" id="meArea" value="${escapeHTML(v.area||'')}" placeholder="Ex: Financeiro"></div>
     </div>
     <div class="field-row">
       <div class="field"><label>Categoria financeira específica (opcional)</label>
         <select id="meCategoriaEspecificaTipo">
           <option value="">— nenhuma, usar só o grupo geral acima —</option>
-          <option value="saida" ${existing?.categoriaEspecificaTipo==='saida'?'selected':''}>Uma despesa específica</option>
-          <option value="entrada" ${existing?.categoriaEspecificaTipo==='entrada'?'selected':''}>Uma receita específica</option>
+          <option value="saida" ${v.categoriaEspecificaTipo==='saida'?'selected':''}>Uma ou mais despesas específicas</option>
+          <option value="entrada" ${v.categoriaEspecificaTipo==='entrada'?'selected':''}>Uma ou mais receitas específicas</option>
         </select>
       </div>
-      <div class="field" id="meGrupoCategoriaEspecifica" style="${existing?.categoriaEspecificaTipo?'':'display:none;'}"><label>Qual</label><select id="meCategoriaEspecifica">${opcoesCategoriaHTML(existing?.categoriaEspecificaTipo||'saida', existing?.categoriaEspecifica)}</select></div>
+      <div class="field" id="meGrupoCategoriaEspecifica" style="${v.categoriaEspecificaTipo?'':'display:none;'}">
+        <label>Quais</label>
+        <button type="button" class="btn ghost sm" id="btnEscolherCategoriasEspecificas" style="width:100%;text-align:left;">${(v.categoriasEspecificas||[]).length ? escapeHTML(v.categoriasEspecificas.join(', ')) : 'Escolher categorias...'}</button>
+        <input type="hidden" id="meCategoriasEspecificasValor" value="${escapeHTML((v.categoriasEspecificas||[]).join('|'))}">
+      </div>
     </div>
-    <div class="note" style="margin-top:0;">Escolhendo uma categoria específica, a meta acompanha só ela (ex: "gastar no máximo R$500 com Combustível") — em vez do total geral de despesas ou receitas.</div>
+    <div class="note" style="margin-top:0;">Escolhendo categoria(s) específica(s), a meta soma só elas (ex: "gastar no máximo R$500 com Combustível") — em vez do total geral de despesas ou receitas.</div>
     <div class="field-row">
-      <div class="field"><label>Tipo de medição</label><select id="meTipo">${Object.entries(TIPOS_MEDICAO_META).map(([id,nome])=>`<option value="${id}" ${existing?.tipoMedicao===id?'selected':''}>${nome}</option>`).join('')}</select></div>
-      <div class="field"><label>Valor/objetivo</label><input type="text" inputmode="decimal" id="meValorAlvo" value="${existing?existing.valorAlvo:''}" placeholder="0"></div>
+      <div class="field"><label>Tipo de medição</label><select id="meTipo">${Object.entries(TIPOS_MEDICAO_META).map(([id,nome])=>`<option value="${id}" ${v.tipoMedicao===id?'selected':''}>${nome}</option>`).join('')}</select></div>
+      <div class="field"><label>Valor/objetivo</label><input type="text" inputmode="decimal" id="meValorAlvo" value="${v.valorAlvo||''}" placeholder="0"></div>
     </div>
     <div class="field-row">
-      <div class="field"><label>Data inicial</label><input type="date" id="meDataInicial" value="${existing?.dataInicial||todayISO()}"></div>
-      <div class="field"><label>Data final (opcional)</label><input type="date" id="meDataFinal" value="${existing?.dataFinal||''}"></div>
+      <div class="field"><label>Data inicial</label><input type="date" id="meDataInicial" value="${v.dataInicial||todayISO()}"></div>
+      <div class="field"><label>Data final (opcional)</label><input type="date" id="meDataFinal" value="${v.dataFinal||''}"></div>
     </div>
     <div class="field-row">
-      <div class="field"><label>Responsável (opcional)</label><input type="text" id="meResponsavel" value="${existing?escapeHTML(existing.responsavel||''):''}"></div>
-      <div class="field"><label>Prioridade</label><select id="mePrioridade">${Object.entries(PRIORIDADE_META_EMPRESA).map(([id,p])=>`<option value="${id}" ${(existing?.prioridade||'media')===id?'selected':''}>${p.icone} ${p.nome}</option>`).join('')}</select></div>
+      <div class="field"><label>Responsável (opcional)</label><input type="text" id="meResponsavel" value="${escapeHTML(v.responsavel||'')}"></div>
+      <div class="field"><label>Prioridade</label><select id="mePrioridade">${Object.entries(PRIORIDADE_META_EMPRESA).map(([id,p])=>`<option value="${id}" ${(v.prioridade||'media')===id?'selected':''}>${p.icone} ${p.nome}</option>`).join('')}</select></div>
     </div>
-    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin:8px 0;"><input type="checkbox" id="meFocoSemana" ${existing?.focoSemana?'checked':''}> ⭐ Foco da semana</label>
-    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:8px;"><input type="checkbox" id="meFocoMes" ${existing?.focoMes?'checked':''}> 🏆 Foco do mês</label>
-    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:4px;"><input type="checkbox" id="meRecorrente" ${existing?.recorrente?'checked':''}> 🔁 Meta recorrente (gera o próximo período sozinha quando vencer, sem perder o histórico)</label>
-    <div class="field" id="meGrupoPeriodicidade" style="${existing?.recorrente?'':'display:none;'}"><label>Periodicidade</label><select id="mePeriodicidade">
-      ${['Semanal','Quinzenal','Mensal','Bimestral','Trimestral','Semestral','Anual'].map(p=>`<option ${existing?.periodicidade===p?'selected':''}>${p}</option>`).join('')}
+    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin:8px 0;"><input type="checkbox" id="meFocoSemana" ${v.focoSemana?'checked':''}> ⭐ Foco da semana</label>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:8px;"><input type="checkbox" id="meFocoMes" ${v.focoMes?'checked':''}> 🏆 Foco do mês</label>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:4px;"><input type="checkbox" id="meRecorrente" ${v.recorrente?'checked':''}> 🔁 Meta recorrente (gera o próximo período sozinha quando vencer, sem perder o histórico)</label>
+    <div class="field" id="meGrupoPeriodicidade" style="${v.recorrente?'':'display:none;'}"><label>Periodicidade</label><select id="mePeriodicidade">
+      ${['Semanal','Quinzenal','Mensal','Bimestral','Trimestral','Semestral','Anual'].map(p=>`<option ${v.periodicidade===p?'selected':''}>${p}</option>`).join('')}
     </select></div>
     <div class="field"><label>Meta principal (opcional — pra criar submeta de outra meta)</label><select id="meMetaPrincipal">
       <option value="">— nenhuma —</option>
-      ${(state.metasEmpresa||[]).filter(m=>!existing||m.id!==existing.id).map(m=>`<option value="${m.id}" ${existing?.metaPrincipalId===m.id?'selected':''}>${escapeHTML(m.nome)}</option>`).join('')}
+      ${(state.metasEmpresa||[]).filter(m=>!existing||m.id!==existing.id).map(m=>`<option value="${m.id}" ${v.metaPrincipalId===m.id?'selected':''}>${escapeHTML(m.nome)}</option>`).join('')}
     </select></div>
-    <div class="field"><label>Observações (opcional)</label><textarea id="meObservacoes" style="min-height:40px;">${existing?escapeHTML(existing.observacoes||''):''}</textarea></div>
+    <div class="field"><label>Observações (opcional)</label><textarea id="meObservacoes" style="min-height:40px;">${escapeHTML(v.observacoes||'')}</textarea></div>
     <div class="note" style="margin-top:0;">Categorias financeiras (faturamento, lucro, despesas, caixa, dívidas, investimentos, CAPEX, patrimônio) calculam o progresso sozinhas. As demais, você atualiza manualmente ou usa etapas.</div>
-    ${isEdit && existing.tipoMedicao!=='etapas' ? `<div class="field"><label>Valor atual (atualize manualmente, se a categoria não calcular sozinha)</label><input type="text" inputmode="decimal" id="meValorAtualManual" value="${existing.valorAtualManual||0}"></div>` : ''}
-    ${isEdit && existing.tipoMedicao==='etapas' ? `
+    ${isEdit && v.tipoMedicao!=='etapas' ? `<div class="field"><label>Valor atual (atualize manualmente, se a categoria não calcular sozinha)</label><input type="text" inputmode="decimal" id="meValorAtualManual" value="${v.valorAtualManual||0}"></div>` : ''}
+    ${isEdit && v.tipoMedicao==='etapas' ? `
     <div class="dash-section-label">Etapas</div>
     <div id="capexMetaEtapasLista">
-      ${(existing.etapas||[]).map((e,i)=>`
+      ${(v.etapas||[]).map((e,i)=>`
         <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:6px;">
           <input type="checkbox" data-etapa-idx="${i}" class="chk-etapa-meta" ${e.feita?'checked':''}> <span style="${e.feita?'text-decoration:line-through;color:var(--text-soft);':''}">${escapeHTML(e.nome)}</span>
           <button type="button" class="icon-btn" data-remover-etapa-meta="${i}" style="margin-left:auto;">✕</button>
@@ -34248,10 +34283,36 @@ function openMetaEmpresaModal(existing){
   document.getElementById('meRecorrente').addEventListener('change', (e)=>{
     document.getElementById('meGrupoPeriodicidade').style.display = e.target.checked ? 'block' : 'none';
   });
+  const gatherRascunhoMeta = ()=>({
+    nome: document.getElementById('meNome').value.trim(),
+    descricao: document.getElementById('meDescricao').value.trim(),
+    categoria: document.getElementById('meCategoria').value,
+    area: document.getElementById('meArea').value.trim(),
+    categoriaEspecificaTipo: document.getElementById('meCategoriaEspecificaTipo').value || null,
+    categoriasEspecificas: (document.getElementById('meCategoriasEspecificasValor').value||'').split('|').filter(Boolean),
+    tipoMedicao: document.getElementById('meTipo').value,
+    valorAlvo: document.getElementById('meValorAlvo').value,
+    dataInicial: document.getElementById('meDataInicial').value,
+    dataFinal: document.getElementById('meDataFinal').value,
+    responsavel: document.getElementById('meResponsavel').value.trim(),
+    prioridade: document.getElementById('mePrioridade').value,
+    focoSemana: document.getElementById('meFocoSemana').checked,
+    focoMes: document.getElementById('meFocoMes').checked,
+    recorrente: document.getElementById('meRecorrente').checked,
+    periodicidade: document.getElementById('mePeriodicidade').value,
+    metaPrincipalId: document.getElementById('meMetaPrincipal').value || null,
+    observacoes: document.getElementById('meObservacoes').value.trim(),
+    etapas: v.etapas, valorAtualManual: v.valorAtualManual,
+  });
   document.getElementById('meCategoriaEspecificaTipo').addEventListener('change', (e)=>{
     const grupo = document.getElementById('meGrupoCategoriaEspecifica');
     grupo.style.display = e.target.value ? 'block' : 'none';
-    if(e.target.value) document.getElementById('meCategoriaEspecifica').innerHTML = opcoesCategoriaHTML(e.target.value);
+  });
+  document.getElementById('btnEscolherCategoriasEspecificas')?.addEventListener('click', ()=>{
+    const tipo = document.getElementById('meCategoriaEspecificaTipo').value;
+    if(!tipo){ showToast('Escolha primeiro se é despesa ou receita'); return; }
+    const jaSelecionadas = (document.getElementById('meCategoriasEspecificasValor').value||'').split('|').filter(Boolean);
+    abrirSeletorMultiploCategoriasMeta(tipo, jaSelecionadas, existing, gatherRascunhoMeta());
   });
   document.getElementById('btnAddEtapaMeta')?.addEventListener('click', ()=>{
     const nome = document.getElementById('meNovaEtapa').value.trim();
@@ -34299,7 +34360,7 @@ function openMetaEmpresaModal(existing){
       recorrente: document.getElementById('meRecorrente').checked, periodicidade: document.getElementById('mePeriodicidade').value,
       metaPrincipalId: document.getElementById('meMetaPrincipal').value || null,
       categoriaEspecificaTipo: document.getElementById('meCategoriaEspecificaTipo').value || null,
-      categoriaEspecifica: document.getElementById('meCategoriaEspecificaTipo').value ? document.getElementById('meCategoriaEspecifica').value : null,
+      categoriasEspecificas: (document.getElementById('meCategoriasEspecificasValor').value||'').split('|').filter(Boolean),
       observacoes: document.getElementById('meObservacoes').value.trim(),
     };
     const campoValorManual = document.getElementById('meValorAtualManual');
