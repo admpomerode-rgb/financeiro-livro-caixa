@@ -1323,6 +1323,20 @@ async function carregarDados(){
 }
 let state = aplicarMigracoes(null);
 let saveTimeout = null;
+/* Cache de curta duração pra funções pesadas (movimentosRealizados, dadosMesGerencial,
+   calcularHealthScoreEm) que varrem TODOS os lançamentos e são chamadas repetidas vezes com
+   os mesmos parâmetros dentro do mesmo carregamento de tela (ex: o Dashboard chama a mesma
+   consulta de saúde financeira 4 vezes, uma por card). Guarda o resultado só até a próxima
+   mudança de dado real (persist()) ou o próximo render() — nunca mostra algo desatualizado,
+   só evita recalcular a mesma coisa do zero várias vezes seguidas. */
+let __cacheRender = new Map();
+function __limparCacheRender(){ __cacheRender = new Map(); }
+function __memoRender(chave, calcular){
+  if(__cacheRender.has(chave)) return __cacheRender.get(chave);
+  const v = calcular();
+  __cacheRender.set(chave, v);
+  return v;
+}
 let saveTimeoutPendente = false;
 // O Firestore recusa o documento INTEIRO se qualquer campo, em qualquer nível, for undefined
 // (não confundir com null, que é aceito). Isso já causou perda silenciosa de salvamento: o
@@ -1350,6 +1364,7 @@ function salvarStateNoFirestore(){
   return DOC_REF.set(limparUndefined(state)).finally(()=>{ salvamentoEmAndamento = false; });
 }
 function persist(){
+  __limparCacheRender();
   clearTimeout(saveTimeout);
   saveTimeoutPendente = true;
   saveTimeout = setTimeout(()=>{
@@ -2276,6 +2291,7 @@ function atualizarBadgesBottomNav(){
 }
 
 function render(){
+  __limparCacheRender();
   const __viewAnterior = __ultimaViewRenderizada;
   if(!__restaurandoHistoria && typeof history!=='undefined' && history.pushState){
     const snap = __snapshotNav();
@@ -6589,7 +6605,8 @@ function valorEmAberto(l){
 // Lançamento com pagamento em uma parcela só = 1 evento (o próprio lançamento).
 // Lançamento pago em partes (historicoRecebimentos) = 1 evento por parcela, cada um na sua data —
 // pra não "engolir" pagamentos antigos na data do último pagamento.
-function movimentosRealizados(){
+function movimentosRealizados(){ return __memoRender('movimentosRealizados', movimentosRealizadosImpl); }
+function movimentosRealizadosImpl(){
   const eventos = [];
   state.lancamentos.forEach(l=>{
     const finalizado = l.status==='pago' || l.status==='recebido';
@@ -12921,7 +12938,8 @@ function scoreCreditoCliente(nome){
 // Receita, despesa, custo fixo/variável, margem de contribuição e ponto de equilíbrio de um mês —
 // mesma régua usada no relatório de Ponto de Equilíbrio, só que reutilizável mês a mês e com filtro
 // opcional de centro de custo, pra montar o Dashboard Gerencial anual.
-function dadosMesGerencial(mesRef, centroCusto){
+function dadosMesGerencial(mesRef, centroCusto){ return __memoRender('dadosMesGerencial:'+mesRef+':'+centroCusto, ()=>dadosMesGerencialImpl(mesRef, centroCusto)); }
+function dadosMesGerencialImpl(mesRef, centroCusto){
   const [anoM, mesM] = mesRef.split('-').map(Number);
   const deMes = `${mesRef}-01`;
   const ateMes = `${mesRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
@@ -19116,7 +19134,8 @@ function renderOndeDinheiroEsta(){
 // 12. Health Score do Negócio — nota única combinando os principais indicadores
 // Calcula os 4 sub-scores e o total do Health Score numa data de referência qualquer (fim de um
 // mês passado, ou hoje). Reaproveitado tanto pro gráfico histórico quanto pro card do mês atual.
-function calcularHealthScoreEm(dataRefISO, mesRef){
+function calcularHealthScoreEm(dataRefISO, mesRef){ return __memoRender('calcularHealthScoreEm:'+dataRefISO+':'+mesRef, ()=>calcularHealthScoreEmImpl(dataRefISO, mesRef)); }
+function calcularHealthScoreEmImpl(dataRefISO, mesRef){
   const dadosMes = dadosMesGerencial(mesRef, 'todos');
   const margemLiquidaPct = dadosMes.margemLiquidaPct;
   const saldoContas = state.contas.reduce((s,c)=>s+saldoContaEmData(c.id, dataRefISO),0);
