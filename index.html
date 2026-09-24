@@ -28378,8 +28378,9 @@ function attachViewHandlers(){
     });
     paint();
     document.getElementById('btnExportarRelatorioPDF')?.addEventListener('click', ()=>{
-      const titulos = { dre: 'DRE (Demonstrativo de Resultado)', balanco: 'Balanço Patrimonial', mei: `Declaração MEI — Ano ${meiAnoAtual}`, indicadores: 'Indicadores Financeiros', produto: 'Rentabilidade por Produto', mensal: `Super Relatório Mensal — ${mensalMesRef}`, investimentos: `Relatório de Investimentos — ${mesGlobalRef}`, liquidez: 'Índices de Liquidez e Endividamento', aging: 'Aging — Vencidos por Faixa', dfc: `DFC — Fluxo de Caixa — ${mesGlobalRef}`, cartoes: 'Relatório de Cartões de Crédito', abc_clientes: 'Curva ABC de Clientes', abc_despesas: 'Curva ABC de Despesas', abc_fornecedores: 'Auditoria de Fornecedores', inadimplencia_cac: 'Inadimplência e CAC', canal_venda: `Receita por Canal de Venda — ${mesGlobalRef}`, breakeven: `Ponto de Equilíbrio — ${mesGlobalRef}`, valuation: 'Valuation Estimado', previsao: 'Previsão de Saldo Futuro', stress: 'Cenário de Stress (Stress Test)', socios: 'Split entre Sócios', orcamento_anual: `Orçamento Anual — ${orcamentoAnualAno}`, descontos_bonificacoes: 'Descontos e Bonificações' };
-      exportarRelatorioPDF(titulos[relatorioAtivo]);
+      const titulo = RELATORIOS_NOMES[relatorioAtivo];
+      if(!titulo){ showToast('Não consegui identificar esse relatório pra exportar — atualize a página e tente de novo'); return; }
+      exportarRelatorioPDF(titulo);
     });
   }
   document.querySelectorAll('[data-action="abrir-relatorio"]').forEach(card=>{
