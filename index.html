@@ -1188,8 +1188,12 @@ function aplicarMigracoes(s){
   // direta já usado com 'produtos'/'pedidos'/'insumos'), ou ter status manual. Criar um processo
   // vinculado no Livro de Processos é sempre manual (botão), nunca automático.
   if(!s.estrategiaAreas) s.estrategiaAreas = []; // [{ id, nome, cor }]
-  if(!s.estrategiaPilares) s.estrategiaPilares = []; // [{ id, areaId (null = pilar central da empresa), titulo, porque, horizonte }]
-  if(!s.estrategiaIniciativas) s.estrategiaIniciativas = []; // [{ id, pilarId, titulo, tipoAcompanhamento:'manual'|'auto', statusManual, fonteAuto:{sistema,indicador}, processoVinculadoId }]
+  if(!s.estrategiaObjetivos) s.estrategiaObjetivos = []; // [{ id, titulo, descricao, areaId, prioridade, responsavel, inicio, prazo, progresso, status, objetivoPaiId }] — FASE 2 da Central de Estratégia
+  if(!s.estrategiaPilares) s.estrategiaPilares = []; // [{ id, areaId (null = pilar central da empresa), titulo, porque, horizonte, objetivoId }]
+  if(!s.estrategiaIniciativas) s.estrategiaIniciativas = []; // [{ id, pilarId, titulo, statusManual, processoVinculadoId, responsavel, prioridade, inicio, prazo, progresso, tipo, proximaAcao, observacoes, dependeDeId }] — campos novos são opcionais, registros antigos continuam funcionando
+  if(!s.estrategiaRiscos) s.estrategiaRiscos = []; // [{ id, titulo, descricao, objetivoId, pilarId, probabilidade, impacto, responsavel, planoAcao, prazo, status }] — FASE 2
+  if(!s.estrategiaVisao) s.estrategiaVisao = { visao:'', missao:'', proposito:'', periodo:'' }; // FASE 3
+  if(!s.estrategiaHistorico) s.estrategiaHistorico = []; // [{ id, data, alvoTipo:'iniciativa'|'objetivo', alvoId, alvoTitulo, campo, de, para }] — log de mudanças, FASE 4
   if(!s.estrategiaDiario) s.estrategiaDiario = []; // [{ id, pilarId, data, texto }] — diário de bordo por pilar
   if(!s.contas) s.contas = [];
   // Migração: garante uma conta padrão e associa lançamentos antigos sem conta
@@ -1333,6 +1337,7 @@ async function carregarDados(){
 }
 let state = aplicarMigracoes(null);
 let saveTimeout = null;
+let estrategiaFiltro = { area:'', status:'', prioridade:'', responsavel:'', busca:'' }; // filtros da Central de Estratégia — não persiste, só UI
 /* Cache de curta duração pra funções pesadas (movimentosRealizados, dadosMesGerencial,
    calcularHealthScoreEm) que varrem TODOS os lançamentos e são chamadas repetidas vezes com
    os mesmos parâmetros dentro do mesmo carregamento de tela (ex: o Dashboard chama a mesma
@@ -20258,23 +20263,282 @@ function corStatusCapex(status){
 // quando configurado, do VK Industrial; conexão com o Livro de Processos é sempre manual) ----
 const ESTRATEGIA_STATUS_LABEL = { no_caminho:'🟢 No caminho', atencao:'🟡 Atenção', atrasada:'🔴 Atrasada', concluida:'🏆 Concluída' };
 const ESTRATEGIA_STATUS_COR = { no_caminho:'var(--success)', atencao:'var(--warn)', atrasada:'var(--danger)', concluida:'var(--success)' };
+const ESTRATEGIA_OBJETIVO_STATUS_LABEL = { nao_iniciado:'Não iniciado', em_andamento:'Em andamento', em_atencao:'Em atenção', em_risco:'Em risco', atrasado:'Atrasado', concluido:'Concluído', pausado:'Pausado', cancelado:'Cancelado' };
+const ESTRATEGIA_PRIORIDADE_LABEL = { critica:'🔴 Crítica', alta:'🟠 Alta', media:'🟡 Média', baixa:'⚪ Baixa' };
+
+// Dias restantes até o prazo (negativo = atrasado). Iniciativas/objetivos concluídos nunca contam como atrasados (regra do doc).
+function estrategiaDiasRestantes(prazoISO, statusOuConcluido){
+  if(!prazoISO) return null;
+  if(statusOuConcluido==='concluida' || statusOuConcluido==='concluido') return null;
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const prazo = new Date(prazoISO+'T00:00:00');
+  return Math.round((prazo-hoje)/86400000);
+}
+function estrategiaPrazoBadge(prazoISO, statusOuConcluido){
+  const dias = estrategiaDiasRestantes(prazoISO, statusOuConcluido);
+  if(dias===null) return '';
+  if(dias<0) return `<span style="color:var(--danger);font-weight:600;">🔴 ${Math.abs(dias)} dia${Math.abs(dias)>1?'s':''} atrasada</span>`;
+  if(dias<=14) return `<span style="color:var(--warn);font-weight:600;">🟡 ${dias} dia${dias>1?'s':''} restante${dias>1?'s':''}</span>`;
+  return `<span style="color:var(--success);">🟢 ${dias} dias restantes</span>`;
+}
+
+// Funções de cálculo separadas e auditáveis (nunca no meio do HTML) — pedido explícito: nada de
+// IA "opinando", só regra objetiva e documentada, e nunca inventar número quando não há dado.
+function calcularProgressoEstrategico(){
+  const objs = state.estrategiaObjetivos||[];
+  const inis = state.estrategiaIniciativas||[];
+  if(objs.length){
+    const soma = objs.reduce((t,o)=>t+(Number(o.progresso)||0),0);
+    return Math.round(soma/objs.length);
+  }
+  if(inis.length){
+    const soma = inis.reduce((t,i)=>t+(Number(i.progresso)||0),0);
+    return Math.round(soma/inis.length);
+  }
+  return null; // sem dados — a tela deve mostrar "sem dados", nunca 0 como se fosse ruim
+}
+
+function calcularScoreEstrategico(){
+  const objs = state.estrategiaObjetivos||[];
+  const inis = state.estrategiaIniciativas||[];
+  if(!objs.length && !inis.length) return null;
+  let score = 100;
+  inis.forEach(i=>{
+    const status = i.statusManual||'no_caminho';
+    const atrasadaPorPrazo = estrategiaDiasRestantes(i.prazo, status) !== null && estrategiaDiasRestantes(i.prazo, status) < 0;
+    if(status==='atrasada' || atrasadaPorPrazo) score -= 8;
+    else if(status==='atencao') score -= 3;
+    else if(status==='concluida') score += 2;
+  });
+  objs.forEach(o=>{
+    if(o.status==='atrasado') score -= 8;
+    else if(o.status==='em_risco') score -= 5;
+    else if(o.status==='em_atencao') score -= 3;
+    else if(o.status==='concluido') score += 3;
+  });
+  (state.estrategiaRiscos||[]).forEach(r=>{
+    if(r.status!=='ativo') return;
+    const nivel = calcularNivelRisco(r.probabilidade, r.impacto).nivel;
+    if(nivel==='critico') score -= 6;
+    else if(nivel==='atencao') score -= 2;
+  });
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+// Lista os itens que precisam de decisão agora: atrasados, perto do prazo, objetivos sem progresso.
+function calcularAtencoesEstrategicas(){
+  const itens = [];
+  (state.estrategiaIniciativas||[]).forEach(i=>{
+    const status = i.statusManual||'no_caminho';
+    const dias = estrategiaDiasRestantes(i.prazo, status);
+    if(status==='atrasada' || (dias!==null && dias<0)){
+      itens.push({ tipo:'iniciativa', cor:'var(--danger)', titulo: i.titulo, detalhe: dias!==null&&dias<0 ? `Atrasada há ${Math.abs(dias)} dia${Math.abs(dias)>1?'s':''}` : 'Marcada como atrasada', id:i.id });
+    } else if(dias!==null && dias>=0 && dias<=5){
+      itens.push({ tipo:'iniciativa', cor:'var(--warn)', titulo: i.titulo, detalhe: `Prazo em ${dias} dia${dias>1?'s':''}`, id:i.id });
+    } else if(status==='atencao'){
+      itens.push({ tipo:'iniciativa', cor:'var(--warn)', titulo: i.titulo, detalhe: 'Precisa de atenção', id:i.id });
+    }
+  });
+  (state.estrategiaObjetivos||[]).forEach(o=>{
+    if(o.status==='atrasado'){
+      itens.push({ tipo:'objetivo', cor:'var(--danger)', titulo:o.titulo, detalhe:'Objetivo atrasado', id:o.id });
+    } else if(o.status==='em_andamento' && !o.progresso){
+      itens.push({ tipo:'objetivo', cor:'var(--warn)', titulo:o.titulo, detalhe:'Sem progresso registrado ainda', id:o.id });
+    }
+  });
+  (state.estrategiaRiscos||[]).forEach(r=>{
+    if(r.status==='ativo' && calcularNivelRisco(r.probabilidade, r.impacto).nivel==='critico'){
+      itens.push({ tipo:'risco', cor:'var(--danger)', titulo:r.titulo, detalhe:'Risco crítico ativo', id:r.id });
+    }
+  });
+  (state.estrategiaIniciativas||[]).forEach(i=>{
+    if(!i.dependeDeId) return;
+    const dep = (state.estrategiaIniciativas||[]).find(d=>d.id===i.dependeDeId);
+    const depStatus = dep ? (dep.statusManual||'no_caminho') : null;
+    if(dep && depStatus!=='concluida' && (depStatus==='atrasada' || (estrategiaDiasRestantes(dep.prazo,depStatus)||0)<0)){
+      itens.push({ tipo:'iniciativa', cor:'var(--danger)', titulo:i.titulo, detalhe:`Bloqueada por outra iniciativa: "${dep.titulo}"`, id:i.id });
+    }
+  });
+  return itens;
+}
+
+// 3 a 5 itens mais urgentes (atraso primeiro, depois prazo mais próximo, depois prioridade).
+function calcularFocoHoje(){
+  const atencoes = calcularAtencoesEstrategicas();
+  const prioridadeIni = new Map((state.estrategiaIniciativas||[]).map(i=>[i.id, i.prioridade]));
+  const peso = (item)=>{
+    let p = 0;
+    if(item.detalhe.includes('Atrasad')) p += 100;
+    const m = item.detalhe.match(/Prazo em (\d+)/);
+    if(m) p += (100 - Number(m[1]));
+    const prio = prioridadeIni.get(item.id);
+    if(prio==='critica') p += 30; else if(prio==='alta') p += 15;
+    return p;
+  };
+  return atencoes.sort((a,b)=>peso(b)-peso(a)).slice(0,5);
+}
+
+// Indicadores reais — nunca inventa número. Se a fonte não existir, mostra "sem fonte de dados".
+function calcularIndicadoresEstrategicos(){
+  const mesRef = todayISO().slice(0,7);
+  let dadosMes = null;
+  try{ dadosMes = dadosMesGerencial(mesRef, 'todos'); }catch(e){ console.error('Indicadores estratégicos — falha ao ler dadosMesGerencial:', e); }
+  const contasReceberAberto = (state.lancamentos||[]).filter(l=>l.tipo==='entrada' && l.status==='pendente').reduce((s,l)=>s+(Number(l.valor)||0),0);
+  const contasPagarAberto = (state.lancamentos||[]).filter(l=>l.tipo==='saida' && l.status==='pendente').reduce((s,l)=>s+(Number(l.valor)||0),0);
+  return [
+    { label:'Faturamento do mês', valor: dadosMes ? 'R$ '+dadosMes.receita.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}) : null, fonte:'Livro Caixa' },
+    { label:'Lucro do mês', valor: dadosMes ? 'R$ '+dadosMes.lucro.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}) : null, fonte:'Livro Caixa' },
+    { label:'Margem líquida', valor: dadosMes ? dadosMes.margemLiquidaPct.toFixed(1)+'%' : null, fonte:'Livro Caixa' },
+    { label:'Contas a receber em aberto', valor: 'R$ '+contasReceberAberto.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}), fonte:'Livro Caixa' },
+    { label:'Contas a pagar em aberto', valor: 'R$ '+contasPagarAberto.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}), fonte:'Livro Caixa' },
+    { label:'Estoque de insumos (valor)', valor: 'R$ '+totalEstoqueInsumos().toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}), fonte:'VK Industrial' },
+    { label:'Produção / perdas', valor: null, fonte:'Não configurado' },
+  ];
+}
+
+// Prazos (iniciativas + objetivos) dos próximos 30 dias, agrupados — compacto, não é calendário gigante.
+function calcularProximos30Dias(){
+  const itens = [];
+  (state.estrategiaIniciativas||[]).forEach(i=>{ if(i.prazo && i.statusManual!=='concluida') itens.push({ titulo:i.titulo, prazo:i.prazo }); });
+  (state.estrategiaObjetivos||[]).forEach(o=>{ if(o.prazo && o.status!=='concluido') itens.push({ titulo:o.titulo, prazo:o.prazo }); });
+  const grupos = { estaSemana:[], proximaSemana:[], depois:[] };
+  itens.forEach(it=>{
+    const dias = estrategiaDiasRestantes(it.prazo, null);
+    if(dias===null || dias<0 || dias>30) return;
+    if(dias<=7) grupos.estaSemana.push(it);
+    else if(dias<=14) grupos.proximaSemana.push(it);
+    else grupos.depois.push(it);
+  });
+  return grupos;
+}
+
+function montarResumoExecutivoEstrategiaTexto(){
+  const progresso = calcularProgressoEstrategico();
+  const score = calcularScoreEstrategico();
+  const atencoes = calcularAtencoesEstrategicas();
+  const objetivos = state.estrategiaObjetivos||[];
+  const riscos = (state.estrategiaRiscos||[]).filter(r=>r.status==='ativo');
+  let t = `RESUMO EXECUTIVO — CENTRAL DE ESTRATÉGIA\n${todayISO().split('-').reverse().join('/')}\n\n`;
+  t += `Progresso estratégico geral: ${progresso===null?'sem dados':progresso+'%'}\n`;
+  t += `Score estratégico: ${score===null?'indisponível':score+'/100'}\n\n`;
+  t += `OBJETIVOS (${objetivos.length}):\n` + (objetivos.map(o=>`- ${o.titulo} — ${ESTRATEGIA_OBJETIVO_STATUS_LABEL[o.status]||o.status} (${Number.isFinite(o.progresso)?o.progresso:0}%)`).join('\n') || '(nenhum)') + '\n\n';
+  t += `ATENÇÃO ESTRATÉGICA (${atencoes.length}):\n` + (atencoes.map(a=>`- ${a.titulo}: ${a.detalhe}`).join('\n') || '(nada no momento)') + '\n\n';
+  t += `RISCOS ATIVOS (${riscos.length}):\n` + (riscos.map(r=>`- ${r.titulo} — ${calcularNivelRisco(r.probabilidade,r.impacto).label}`).join('\n') || '(nenhum)') + '\n';
+  return t;
+}
+
+function gerarResumoExecutivoEstrategiaPDF(){
+  if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
+  const docPdf = criarPDF();
+  const M = 20, PW = 210, W = PW - M*2;
+  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[196,60,60], WARN=[180,130,20];
+  let y = pdfCabecalho(docPdf, { relatorio: 'RESUMO EXECUTIVO — CENTRAL DE ESTRATÉGIA' });
+
+  const progresso = calcularProgressoEstrategico();
+  const score = calcularScoreEstrategico();
+  const atencoes = calcularAtencoesEstrategicas();
+  const objetivos = state.estrategiaObjetivos||[];
+  const riscos = (state.estrategiaRiscos||[]).filter(r=>r.status==='ativo');
+
+  // Progresso + Score lado a lado
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...SOFT);
+  docPdf.text('PROGRESSO ESTRATÉGICO GERAL', M, y);
+  docPdf.text('SCORE ESTRATÉGICO', M+W/2, y);
+  y += 8;
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(20); docPdf.setTextColor(...INK);
+  docPdf.text(progresso===null?'Sem dados':progresso+'%', M, y);
+  docPdf.text(score===null?'Indisponível':score+'/100', M+W/2, y);
+  y += 12;
+  docPdf.setDrawColor(...LINEC); docPdf.setLineWidth(0.3); docPdf.line(M, y, M+W, y);
+  y += 10;
+
+  const secao = (titulo)=>{
+    y = pdfChecarQuebra(docPdf, y, 12);
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10.5); docPdf.setTextColor(...BLUEDEEP);
+    docPdf.text(titulo, M, y);
+    y += 7;
+  };
+  const linha = (texto, cor)=>{
+    y = pdfChecarQuebra(docPdf, y, 6);
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...(cor||INK));
+    const quebradas = docPdf.splitTextToSize('• '+texto, W);
+    docPdf.text(quebradas, M, y);
+    y += quebradas.length*4.6 + 1.5;
+  };
+  const vazio = (texto)=>{ docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT); docPdf.text(texto, M, y); y += 6; };
+
+  secao(`OBJETIVOS ESTRATÉGICOS (${objetivos.length})`);
+  if(objetivos.length) objetivos.forEach(o=>linha(`${o.titulo} — ${ESTRATEGIA_OBJETIVO_STATUS_LABEL[o.status]||o.status} (${Number.isFinite(o.progresso)?o.progresso:0}%)`));
+  else vazio('Nenhum objetivo cadastrado.');
+  y += 4;
+
+  secao(`ATENÇÃO ESTRATÉGICA (${atencoes.length})`);
+  if(atencoes.length) atencoes.forEach(a=>linha(`${a.titulo}: ${a.detalhe}`, DANGER));
+  else vazio('Nada precisando de atenção no momento.');
+  y += 4;
+
+  secao(`RISCOS ATIVOS (${riscos.length})`);
+  if(riscos.length) riscos.forEach(r=>linha(`${r.titulo} — ${calcularNivelRisco(r.probabilidade,r.impacto).label}`, WARN));
+  else vazio('Nenhum risco ativo cadastrado.');
+
+  pdfNumerarPaginas(docPdf);
+  docPdf.save(`resumo-estrategico-${todayISO()}.pdf`);
+}
 
 function viewCentralEstrategia(){
   const areas = state.estrategiaAreas||[];
+  const objetivos = state.estrategiaObjetivos||[];
   const pilares = state.estrategiaPilares||[];
-  const iniciativas = state.estrategiaIniciativas||[];
+  let iniciativas = state.estrategiaIniciativas||[];
+
+  // Filtros (client-side, não recarrega nada) — aplicados só na lista de iniciativas exibida
+  const f = estrategiaFiltro;
+  if(f.status) iniciativas = iniciativas.filter(i=>(i.statusManual||'no_caminho')===f.status);
+  if(f.prioridade) iniciativas = iniciativas.filter(i=>i.prioridade===f.prioridade);
+  if(f.responsavel) iniciativas = iniciativas.filter(i=>i.responsavel===f.responsavel);
+  if(f.busca){
+    const q = f.busca.toLowerCase();
+    iniciativas = iniciativas.filter(i=>(i.titulo||'').toLowerCase().includes(q) || (i.responsavel||'').toLowerCase().includes(q));
+  }
+  const areasFiltradas = f.area ? areas.filter(a=>a.id===f.area) : areas;
+
+  const progresso = calcularProgressoEstrategico();
+  const score = calcularScoreEstrategico();
+  const atencoes = calcularAtencoesEstrategicas();
+  const focoHoje = calcularFocoHoje();
+  const indicadores = calcularIndicadoresEstrategicos();
+  const proximos30 = calcularProximos30Dias();
+  const visao = state.estrategiaVisao||{};
+  const contagem = {
+    noCaminho: iniciativas.filter(i=>(i.statusManual||'no_caminho')==='no_caminho').length,
+    atencao: iniciativas.filter(i=>i.statusManual==='atencao').length,
+    atrasadas: iniciativas.filter(i=>{ const s=i.statusManual||'no_caminho'; const d=estrategiaDiasRestantes(i.prazo,s); return s==='atrasada'||(d!==null&&d<0); }).length,
+    concluidas: iniciativas.filter(i=>i.statusManual==='concluida').length,
+  };
 
   const renderIniciativa = (ini)=>{
     const status = ini.statusManual || 'no_caminho';
+    const prazoBadge = estrategiaPrazoBadge(ini.prazo, status);
+    const dep = ini.dependeDeId ? iniciativas.find(d=>d.id===ini.dependeDeId) : null;
+    const depStatus = dep ? (dep.statusManual||'no_caminho') : null;
+    const bloqueada = dep && depStatus!=='concluida' && (depStatus==='atrasada' || (estrategiaDiasRestantes(dep.prazo,depStatus)||0)<0);
     return `
-    <div class="ledger-row" style="padding:8px 10px;align-items:center;">
-      <div style="flex:1;min-width:0;">
+    <div class="ledger-row" style="padding:8px 10px;align-items:center;flex-wrap:wrap;">
+      <div style="flex:1;min-width:160px;">
         <div style="font-weight:600;">${escapeHTML(ini.titulo)}</div>
-        ${ini.processoVinculadoId ? `<div style="font-size:11px;color:var(--text-soft);">🔗 Processo vinculado</div>` : ''}
+        <div style="font-size:11px;color:var(--text-soft);display:flex;gap:8px;flex-wrap:wrap;margin-top:2px;">
+          ${ini.responsavel ? `<span>👤 ${escapeHTML(ini.responsavel)}</span>` : ''}
+          ${ini.prioridade ? `<span>${ESTRATEGIA_PRIORIDADE_LABEL[ini.prioridade]||''}</span>` : ''}
+          ${prazoBadge}
+          ${ini.processoVinculadoId ? `<span>🔗 Processo vinculado</span>` : ''}
+          ${dep ? `<span>${bloqueada?'🔴 BLOQUEADA POR OUTRA INICIATIVA':'🔗 depende de: '+escapeHTML(dep.titulo)}</span>` : ''}
+        </div>
+        ${Number.isFinite(ini.progresso) ? `<div style="background:var(--bone);border-radius:4px;height:5px;margin-top:6px;max-width:180px;overflow:hidden;"><div style="background:var(--accent);height:100%;width:${Math.max(0,Math.min(100,ini.progresso))}%;"></div></div>` : ''}
       </div>
       <select class="selEstrategiaIniciativaStatus" data-id="${ini.id}" style="font-size:12px;">
         ${Object.entries(ESTRATEGIA_STATUS_LABEL).map(([v,l])=>`<option value="${v}" ${status===v?'selected':''}>${l}</option>`).join('')}
       </select>
+      <button class="btn ghost sm btnEditarIniciativa" data-id="${ini.id}" title="Editar">✏️</button>
       ${!ini.processoVinculadoId ? `<button class="btn ghost sm btnCriarProcessoIniciativa" data-id="${ini.id}" title="Criar processo vinculado no Livro de Processos">🔗</button>` : ''}
       <button class="btn ghost sm btnExcluirIniciativa" data-id="${ini.id}" title="Excluir">🗑️</button>
     </div>`;
@@ -20282,7 +20546,7 @@ function viewCentralEstrategia(){
 
   const renderPilar = (p)=>{
     const suas = iniciativas.filter(i=>i.pilarId===p.id);
-    const qtdAtrasadas = suas.filter(i=>(i.statusManual||'no_caminho')==='atrasada').length;
+    const qtdAtrasadas = suas.filter(i=>{ const s=i.statusManual||'no_caminho'; const d=estrategiaDiasRestantes(i.prazo,s); return s==='atrasada'||(d!==null&&d<0); }).length;
     return `
     <div class="panel" style="margin-bottom:12px;">
       <div class="panel-body">
@@ -20290,11 +20554,15 @@ function viewCentralEstrategia(){
           <div>
             <div style="font-weight:700;font-size:15px;">${escapeHTML(p.titulo)}</div>
             ${p.porque ? `<div style="font-size:12px;color:var(--text-soft);margin-top:2px;">${escapeHTML(p.porque)}</div>` : ''}
-            ${p.horizonte ? `<div style="font-size:11px;color:var(--text-soft);margin-top:2px;">🕐 ${escapeHTML(p.horizonte)}</div>` : ''}
+            <div style="font-size:11px;color:var(--text-soft);margin-top:2px;display:flex;gap:10px;flex-wrap:wrap;">
+              ${p.horizonte ? `<span>🕐 ${escapeHTML(p.horizonte)}</span>` : ''}
+              <span>${suas.length} iniciativa${suas.length!==1?'s':''}</span>
+            </div>
           </div>
           <div style="display:flex;gap:4px;flex-shrink:0;">
             ${qtdAtrasadas ? `<span class="badge" style="background:var(--danger);color:#fff;">${qtdAtrasadas} atrasada${qtdAtrasadas>1?'s':''}</span>` : ''}
             <button class="btn ghost sm btnDiarioPilar" data-id="${p.id}" title="Diário de bordo">📔</button>
+            <button class="btn ghost sm btnEditarPilar" data-id="${p.id}" title="Editar">✏️</button>
             <button class="btn ghost sm btnExcluirPilar" data-id="${p.id}" title="Excluir pilar">🗑️</button>
           </div>
         </div>
@@ -20308,16 +20576,168 @@ function viewCentralEstrategia(){
 
   const pilaresCentral = pilares.filter(p=>!p.areaId);
 
+  const cardExec = (num, label)=>`<div class="panel" style="flex:1;min-width:110px;"><div class="panel-body" style="text-align:center;padding:12px;"><div style="font-size:22px;font-weight:700;">${num}</div><div style="font-size:11px;color:var(--text-soft);">${label}</div></div></div>`;
+
   return `
     <div class="topbar">
-      <div><h1>♟️ Central de Estratégia</h1><p>Cadastre livremente os pilares da empresa e de cada área, acompanhe se estão indo bem, e registre o andamento ao longo do tempo.</p></div>
-      <button class="btn" id="btnNovaAreaEstrategia">+ Nova área</button>
+      <div><h1>🎯 Central de Estratégia da Empresa</h1><p>Visão executiva dos objetivos, pilares, iniciativas, riscos e evolução estratégica.</p></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn ghost" id="btnModoReuniaoEstrategia">📋 Modo reunião</button>
+        <button class="btn ghost" id="btnNovoObjetivoEstrategia">+ Novo objetivo</button>
+        <button class="btn" id="btnNovaAreaEstrategia">+ Nova área</button>
+      </div>
     </div>
 
-    <div class="panel-head" style="margin-top:8px;"><h2>Estratégia Central da Empresa</h2><button class="btn ghost sm" id="btnNovoPilarCentral">+ Pilar</button></div>
+    <div class="panel" style="margin-top:8px;">
+      <div class="panel-body" style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:220px;">
+          <div style="font-size:11px;color:var(--text-soft);">🔭 VISÃO${visao.periodo?` — ${escapeHTML(visao.periodo)}`:''}</div>
+          <div style="font-size:13px;margin-top:2px;">${visao.visao ? escapeHTML(visao.visao) : '<span style="color:var(--text-soft);">Ainda não definida.</span>'}</div>
+          ${visao.missao ? `<div style="font-size:11px;color:var(--text-soft);margin-top:6px;">Missão: ${escapeHTML(visao.missao)}</div>` : ''}
+          ${visao.proposito ? `<div style="font-size:11px;color:var(--text-soft);margin-top:2px;">Propósito: ${escapeHTML(visao.proposito)}</div>` : ''}
+        </div>
+        <button class="btn ghost sm" id="btnEditarVisaoEstrategia" style="align-self:flex-start;">✏️ Editar</button>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:10px;">
+      <div class="panel-body" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <input type="text" id="estrategiaBusca" placeholder="🔎 Buscar por título ou responsável (Enter)" value="${escapeHTML(f.busca)}" style="flex:1;min-width:180px;">
+        <select id="estrategiaFiltroArea"><option value="">Todas as áreas</option>${areas.map(a=>`<option value="${a.id}" ${f.area===a.id?'selected':''}>${escapeHTML(a.nome)}</option>`).join('')}</select>
+        <select id="estrategiaFiltroStatus"><option value="">Todos os status</option>${Object.entries(ESTRATEGIA_STATUS_LABEL).map(([v,l])=>`<option value="${v}" ${f.status===v?'selected':''}>${l}</option>`).join('')}</select>
+        <select id="estrategiaFiltroPrioridade"><option value="">Todas as prioridades</option>${Object.entries(ESTRATEGIA_PRIORIDADE_LABEL).map(([v,l])=>`<option value="${v}" ${f.prioridade===v?'selected':''}>${l}</option>`).join('')}</select>
+        <select id="estrategiaFiltroResponsavel"><option value="">Todos os responsáveis</option>${[...new Set((state.estrategiaIniciativas||[]).map(i=>i.responsavel).filter(Boolean))].map(r=>`<option value="${escapeHTML(r)}" ${f.responsavel===r?'selected':''}>${escapeHTML(r)}</option>`).join('')}</select>
+        ${(f.area||f.status||f.prioridade||f.responsavel||f.busca) ? `<button class="btn ghost sm" id="btnLimparFiltrosEstrategia">Limpar filtros</button>` : ''}
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+      ${cardExec(objetivos.length,'🎯 Objetivos')}
+      ${cardExec(iniciativas.length,'🚀 Iniciativas')}
+      ${cardExec(contagem.noCaminho,'🟢 No caminho')}
+      ${cardExec(contagem.atencao,'🟡 Em atenção')}
+      ${cardExec(contagem.atrasadas,'🔴 Atrasadas')}
+      ${cardExec(contagem.concluidas,'🏆 Concluídas')}
+    </div>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+      <div class="panel" style="flex:1;min-width:220px;">
+        <div class="panel-body">
+          <div style="font-size:12px;color:var(--text-soft);">📈 Progresso estratégico geral</div>
+          ${progresso===null ? `<div style="font-size:13px;color:var(--text-soft);margin-top:6px;">Sem dados — cadastre objetivos ou iniciativas.</div>` : `
+          <div style="font-size:28px;font-weight:700;margin-top:4px;">${progresso}%</div>
+          <div style="background:var(--bone);border-radius:5px;height:8px;margin-top:6px;overflow:hidden;"><div style="background:var(--accent);height:100%;width:${progresso}%;"></div></div>`}
+        </div>
+      </div>
+      <div class="panel" style="flex:1;min-width:220px;">
+        <div class="panel-body">
+          <div style="font-size:12px;color:var(--text-soft);">🎯 Score estratégico</div>
+          ${score===null ? `<div style="font-size:13px;color:var(--text-soft);margin-top:6px;">Score indisponível — cadastre objetivos e iniciativas.</div>` : `
+          <div style="font-size:28px;font-weight:700;margin-top:4px;">${score}/100</div>
+          <div style="font-size:10.5px;color:var(--text-soft);margin-top:4px;">Calculado com base no andamento e prazos das iniciativas e objetivos — sem opinião, só regra objetiva.</div>`}
+        </div>
+      </div>
+    </div>
+
+    ${atencoes.length ? `
+    <div class="panel-head" style="margin-top:18px;"><h2>⚠️ Atenção estratégica</h2></div>
+    <div class="panel"><div class="panel-body">
+      ${atencoes.map(a=>`<div style="padding:6px 0;border-bottom:1px solid var(--border);"><span style="color:${a.cor};font-weight:600;">${escapeHTML(a.titulo)}</span><div style="font-size:12px;color:var(--text-soft);">${escapeHTML(a.detalhe)}</div></div>`).join('')}
+    </div></div>` : ''}
+
+    ${focoHoje.length ? `
+    <div class="panel-head" style="margin-top:18px;"><h2>🔥 Foco estratégico de hoje</h2></div>
+    <div class="panel"><div class="panel-body">
+      <ol style="margin:0;padding-left:18px;">${focoHoje.map(f=>`<li style="padding:4px 0;">${escapeHTML(f.titulo)} <span style="color:var(--text-soft);font-size:12px;">— ${escapeHTML(f.detalhe)}</span></li>`).join('')}</ol>
+    </div></div>` : ''}
+
+    <div class="panel-head" style="margin-top:18px;"><h2>🎯 Objetivos Estratégicos</h2></div>
+    ${objetivos.length ? objetivos.map(o=>{
+      const pilaresDo = pilares.filter(p=>p.objetivoId===o.id);
+      return `
+      <div class="panel" style="margin-bottom:10px;">
+        <div class="panel-body">
+          <div style="display:flex;justify-content:space-between;gap:8px;">
+            <div>
+              <div style="font-weight:700;">${escapeHTML(o.titulo)}</div>
+              ${o.descricao ? `<div style="font-size:12px;color:var(--text-soft);margin-top:2px;">${escapeHTML(o.descricao)}</div>` : ''}
+              <div style="font-size:11px;color:var(--text-soft);margin-top:4px;display:flex;gap:10px;flex-wrap:wrap;">
+                ${o.responsavel ? `<span>👤 ${escapeHTML(o.responsavel)}</span>` : ''}
+                ${o.prioridade ? `<span>${ESTRATEGIA_PRIORIDADE_LABEL[o.prioridade]||''}</span>` : ''}
+                ${estrategiaPrazoBadge(o.prazo, o.status)}
+                <span>${pilaresDo.length} pilar${pilaresDo.length!==1?'es':''} ligado${pilaresDo.length!==1?'s':''}</span>
+              </div>
+            </div>
+            <div style="text-align:right;flex-shrink:0;">
+              <div style="font-size:11px;color:var(--text-soft);">${ESTRATEGIA_OBJETIVO_STATUS_LABEL[o.status]||''}</div>
+              <div style="font-size:18px;font-weight:700;">${Number.isFinite(o.progresso)?o.progresso:0}%</div>
+              <button class="btn ghost sm btnEditarObjetivo" data-id="${o.id}" title="Editar">✏️</button>
+              <button class="btn ghost sm btnExcluirObjetivo" data-id="${o.id}" title="Excluir">🗑️</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    }).join('') : `<div class="note">Nenhum objetivo estratégico cadastrado ainda — os pilares abaixo continuam funcionando soltos, sem precisar de objetivo.</div>`}
+
+    <div class="panel-head" style="margin-top:18px;"><h2>🗺️ Mapa Estratégico</h2></div>
+    <div class="panel"><div class="panel-body" style="text-align:center;font-size:12.5px;line-height:2.1;">
+      <div>🔭 VISÃO <span style="color:var(--text-soft);">${visao.visao?escapeHTML(visao.visao):'(não definida)'}</span></div>
+      <div style="color:var(--text-soft);">↓</div>
+      <div>🎯 OBJETIVOS <span style="color:var(--text-soft);">(${objetivos.length})</span></div>
+      <div style="color:var(--text-soft);">↓</div>
+      <div>🏛️ PILARES <span style="color:var(--text-soft);">(${pilares.length})</span></div>
+      <div style="color:var(--text-soft);">↓</div>
+      <div>🚀 INICIATIVAS <span style="color:var(--text-soft);">(${iniciativas.length})</span></div>
+    </div></div>
+
+    <div class="panel-head" style="margin-top:18px;"><h2>📊 Indicadores Estratégicos</h2></div>
+    <div class="panel"><div class="panel-body" style="display:flex;flex-wrap:wrap;gap:14px;">
+      ${indicadores.map(ind=>`
+        <div style="min-width:150px;">
+          <div style="font-size:11px;color:var(--text-soft);">${escapeHTML(ind.label)}</div>
+          <div style="font-size:16px;font-weight:700;">${ind.valor!==null ? ind.valor : '<span style="font-size:12px;font-weight:400;color:var(--text-soft);">Sem fonte de dados configurada</span>'}</div>
+          <div style="font-size:10px;color:var(--text-soft);">Fonte: ${escapeHTML(ind.fonte)}</div>
+        </div>`).join('')}
+    </div></div>
+
+    ${(proximos30.estaSemana.length||proximos30.proximaSemana.length||proximos30.depois.length) ? `
+    <div class="panel-head" style="margin-top:18px;"><h2>📅 Próximos 30 dias</h2></div>
+    <div class="panel"><div class="panel-body">
+      ${proximos30.estaSemana.length ? `<div style="font-weight:600;font-size:12px;margin-top:4px;">ESTA SEMANA</div>${proximos30.estaSemana.map(it=>`<div style="font-size:12.5px;padding:2px 0;">• ${escapeHTML(it.titulo)}</div>`).join('')}` : ''}
+      ${proximos30.proximaSemana.length ? `<div style="font-weight:600;font-size:12px;margin-top:8px;">PRÓXIMA SEMANA</div>${proximos30.proximaSemana.map(it=>`<div style="font-size:12.5px;padding:2px 0;">• ${escapeHTML(it.titulo)}</div>`).join('')}` : ''}
+      ${proximos30.depois.length ? `<div style="font-weight:600;font-size:12px;margin-top:8px;">DEPOIS</div>${proximos30.depois.map(it=>`<div style="font-size:12.5px;padding:2px 0;">• ${escapeHTML(it.titulo)}</div>`).join('')}` : ''}
+    </div></div>` : ''}
+
+    <div class="panel-head" style="margin-top:18px;"><h2>⚠️ Riscos Estratégicos</h2><button class="btn ghost sm" id="btnNovoRiscoEstrategia">+ Risco</button></div>
+    ${(state.estrategiaRiscos||[]).length ? (state.estrategiaRiscos||[]).map(r=>{
+      const nivel = calcularNivelRisco(r.probabilidade, r.impacto);
+      return `
+      <div class="panel" style="margin-bottom:10px;">
+        <div class="panel-body" style="display:flex;justify-content:space-between;gap:8px;">
+          <div>
+            <div style="font-weight:700;">${escapeHTML(r.titulo)}</div>
+            ${r.descricao ? `<div style="font-size:12px;color:var(--text-soft);margin-top:2px;">${escapeHTML(r.descricao)}</div>` : ''}
+            <div style="font-size:11px;color:var(--text-soft);margin-top:4px;display:flex;gap:10px;flex-wrap:wrap;">
+              <span>Probabilidade: ${escapeHTML(r.probabilidade||'—')}</span>
+              <span>Status: ${ESTRATEGIA_RISCO_STATUS_LABEL[r.status]||'Ativo'}</span>
+              <span>Impacto: ${escapeHTML(r.impacto||'—')}</span>
+              ${r.responsavel ? `<span>👤 ${escapeHTML(r.responsavel)}</span>` : ''}
+            </div>
+            ${r.planoAcao ? `<div style="font-size:12px;margin-top:4px;">📋 ${escapeHTML(r.planoAcao)}</div>` : ''}
+          </div>
+          <div style="text-align:right;flex-shrink:0;">
+            <div>${nivel.label}</div>
+            <button class="btn ghost sm btnEditarRisco" data-id="${r.id}" title="Editar" style="margin-top:6px;">✏️</button>
+            <button class="btn ghost sm btnExcluirRisco" data-id="${r.id}" title="Excluir" style="margin-top:6px;">🗑️</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('') : `<div class="note">Nenhum risco estratégico cadastrado ainda.</div>`}
+
+    <div class="panel-head" style="margin-top:18px;"><h2>Estratégia Central da Empresa</h2><button class="btn ghost sm" id="btnNovoPilarCentral">+ Pilar</button></div>
     ${pilaresCentral.length ? pilaresCentral.map(renderPilar).join('') : `<div class="note">Nenhum pilar central cadastrado ainda.</div>`}
 
-    ${areas.map(a=>{
+    ${areasFiltradas.map(a=>{
       const pilaresArea = pilares.filter(p=>p.areaId===a.id);
       return `
       <div class="panel-head" style="margin-top:18px;">
@@ -20330,7 +20750,216 @@ function viewCentralEstrategia(){
       ${pilaresArea.length ? pilaresArea.map(renderPilar).join('') : `<div class="note">Nenhum pilar cadastrado pra essa área ainda.</div>`}
       `;
     }).join('')}
+
+    ${(()=>{
+      // Cronograma simplificado: barra proporcional aos dias até o prazo (sem lib externa, funciona no celular)
+      const itensCrono = [
+        ...objetivos.filter(o=>o.prazo).map(o=>({ titulo:'🎯 '+o.titulo, prazo:o.prazo, cor: o.status==='atrasado'?'var(--danger)':o.status==='concluido'?'var(--success)':'var(--accent)' })),
+        ...iniciativas.filter(i=>i.prazo).map(i=>({ titulo:'🚀 '+i.titulo, prazo:i.prazo, cor: ESTRATEGIA_STATUS_COR[i.statusManual||'no_caminho'] })),
+      ].sort((a,b)=>a.prazo.localeCompare(b.prazo));
+      if(!itensCrono.length) return '';
+      const MAX_DIAS = 180;
+      return `
+      <div class="panel-head" style="margin-top:18px;"><h2>📅 Cronograma estratégico</h2></div>
+      <div class="panel"><div class="panel-body">
+        ${itensCrono.map(it=>{
+          const dias = estrategiaDiasRestantes(it.prazo, null);
+          const pct = Math.max(4, Math.min(100, Math.round(((dias===null?0:dias)/MAX_DIAS)*100)));
+          return `<div style="margin-bottom:10px;">
+            <div style="font-size:12px;display:flex;justify-content:space-between;"><span>${escapeHTML(it.titulo)}</span><span style="color:var(--text-soft);">${it.prazo.split('-').reverse().join('/')}</span></div>
+            <div style="background:var(--bone);border-radius:4px;height:7px;margin-top:3px;overflow:hidden;"><div style="background:${it.cor};height:100%;width:${pct}%;"></div></div>
+          </div>`;
+        }).join('')}
+      </div></div>`;
+    })()}
+
+    <div class="panel-head" style="margin-top:18px;"><h2>📝 Histórico de mudanças</h2></div>
+    ${(state.estrategiaHistorico||[]).length ? `
+    <div class="panel"><div class="panel-body">
+      ${[...(state.estrategiaHistorico||[])].sort((a,b)=>b.data.localeCompare(a.data)).slice(0,25).map(h=>`
+        <div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:12px;">
+          <span style="color:var(--text-soft);">${h.data.split('-').reverse().join('/')}</span> —
+          <strong>${escapeHTML(h.alvoTitulo)}</strong>: ${h.campo} <span style="color:var(--text-soft);">${escapeHTML(String(h.de))} → </span><strong>${escapeHTML(String(h.para))}</strong>
+        </div>`).join('')}
+    </div></div>` : `<div class="note">Nenhuma mudança registrada ainda — passa a aparecer aqui conforme você altera status/progresso.</div>`}
+
+    <div style="margin-top:18px;text-align:right;">
+      <button class="btn ghost sm" id="btnExportarResumoEstrategia">📤 Copiar resumo</button>
+      <button class="btn ghost sm" id="btnExportarPdfEstrategia">📄 Exportar PDF</button>
+    </div>
   `;
+}
+
+function abrirNovoObjetivoEstrategiaModal(objId){
+  const obj = objId ? (state.estrategiaObjetivos||[]).find(o=>o.id===objId) : null;
+  const areas = state.estrategiaAreas||[];
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${obj?'Editar objetivo estratégico':'Novo objetivo estratégico'}</h3>
+    <div class="field"><label>Título</label><input type="text" id="objTitulo" placeholder="Ex: Aumentar rentabilidade" value="${obj?escapeHTML(obj.titulo):''}"></div>
+    <div class="field"><label>Descrição (opcional)</label><textarea id="objDescricao" rows="2">${obj?escapeHTML(obj.descricao||''):''}</textarea></div>
+    <div class="field"><label>Área (opcional)</label><select id="objArea"><option value="">— Empresa toda —</option>${areas.map(a=>`<option value="${a.id}" ${obj&&obj.areaId===a.id?'selected':''}>${escapeHTML(a.nome)}</option>`).join('')}</select></div>
+    <div class="field"><label>Prioridade</label><select id="objPrioridade">${Object.entries(ESTRATEGIA_PRIORIDADE_LABEL).map(([v,l])=>`<option value="${v}" ${obj&&obj.prioridade===v?'selected':''}>${l}</option>`).join('')}</select></div>
+    <div class="field"><label>Responsável (opcional)</label><input type="text" id="objResponsavel" value="${obj?escapeHTML(obj.responsavel||''):''}"></div>
+    <div class="field"><label>Prazo (opcional)</label><input type="date" id="objPrazo" value="${obj&&obj.prazo?obj.prazo:''}"></div>
+    <div class="field"><label>Progresso (%)</label><input type="number" id="objProgresso" min="0" max="100" value="${obj&&Number.isFinite(obj.progresso)?obj.progresso:0}"></div>
+    <div class="field"><label>Status</label><select id="objStatus">${Object.entries(ESTRATEGIA_OBJETIVO_STATUS_LABEL).map(([v,l])=>`<option value="${v}" ${obj?(obj.status===v?'selected':''):(v==='em_andamento'?'selected':'')}>${l}</option>`).join('')}</select></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarObjetivoEstrategia">Salvar</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarObjetivoEstrategia').addEventListener('click', (e)=>{
+    if(e.target.disabled) return; e.target.disabled = true; // evita duplo clique criar/editar 2x
+    const titulo = document.getElementById('objTitulo').value.trim();
+    if(!titulo){ showToast('Informe o título do objetivo'); e.target.disabled = false; return; }
+    let progresso = Number(document.getElementById('objProgresso').value);
+    if(!Number.isFinite(progresso)) progresso = 0;
+    progresso = Math.max(0, Math.min(100, progresso));
+    const dados = {
+      titulo,
+      descricao: document.getElementById('objDescricao').value.trim(),
+      areaId: document.getElementById('objArea').value || null,
+      prioridade: document.getElementById('objPrioridade').value,
+      responsavel: document.getElementById('objResponsavel').value.trim(),
+      prazo: document.getElementById('objPrazo').value || null,
+      status: document.getElementById('objStatus').value,
+      progresso
+    };
+    if(obj){
+      registrarHistoricoEstrategia('objetivo', obj.id, dados.titulo, 'status', ESTRATEGIA_OBJETIVO_STATUS_LABEL[obj.status], ESTRATEGIA_OBJETIVO_STATUS_LABEL[dados.status]);
+      registrarHistoricoEstrategia('objetivo', obj.id, dados.titulo, 'progresso', (Number.isFinite(obj.progresso)?obj.progresso:0)+'%', dados.progresso+'%');
+      Object.assign(obj, dados);
+    } else {
+      state.estrategiaObjetivos.push({ id: uid(), ...dados });
+    }
+    persist(); closeModal(); render();
+  });
+}
+
+function abrirEditarVisaoEstrategiaModal(){
+  const v = state.estrategiaVisao||{};
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>🔭 Visão da empresa</h3>
+    <div class="field"><label>Período da estratégia (opcional)</label><input type="text" id="visPeriodo" placeholder="Ex: 2026–2030" value="${escapeHTML(v.periodo||'')}"></div>
+    <div class="field"><label>Visão</label><textarea id="visVisao" rows="2" placeholder="Onde a empresa quer chegar">${escapeHTML(v.visao||'')}</textarea></div>
+    <div class="field"><label>Missão</label><textarea id="visMissao" rows="2">${escapeHTML(v.missao||'')}</textarea></div>
+    <div class="field"><label>Propósito</label><textarea id="visProposito" rows="2">${escapeHTML(v.proposito||'')}</textarea></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarVisaoEstrategia">Salvar</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarVisaoEstrategia').addEventListener('click', (e)=>{
+    if(e.target.disabled) return; e.target.disabled = true;
+    state.estrategiaVisao = {
+      periodo: document.getElementById('visPeriodo').value.trim(),
+      visao: document.getElementById('visVisao').value.trim(),
+      missao: document.getElementById('visMissao').value.trim(),
+      proposito: document.getElementById('visProposito').value.trim(),
+    };
+    persist(); closeModal(); render();
+  });
+}
+
+// Resumo pronto pra reunião — só junta o que já foi calculado em outras funções, não recalcula nada por conta própria.
+function abrirModoReuniaoEstrategicaModal(){
+  const iniciativas = state.estrategiaIniciativas||[];
+  const objetivos = state.estrategiaObjetivos||[];
+  const avancou = iniciativas.filter(i=>i.statusManual==='concluida' || i.statusManual==='no_caminho');
+  const atrasou = iniciativas.filter(i=>{ const s=i.statusManual||'no_caminho'; const d=estrategiaDiasRestantes(i.prazo,s); return s==='atrasada'||(d!==null&&d<0); });
+  const emRisco = (state.estrategiaRiscos||[]).filter(r=>r.status==='ativo' && calcularNivelRisco(r.probabilidade,r.impacto).nivel==='critico');
+  const objConcluidos = objetivos.filter(o=>o.status==='concluido');
+  const objAbaixo = objetivos.filter(o=>o.status==='em_risco'||o.status==='atrasado');
+  const decisoesPendentes = (state.estrategiaRiscos||[]).filter(r=>r.status==='ativo' && !r.planoAcao);
+  const proximos30 = calcularProximos30Dias();
+  const focoHoje = calcularFocoHoje();
+  const decisoesRegistradas = (state.estrategiaDiario||[]).filter(d=>d.tipo==='decisao').sort((a,b)=>b.data.localeCompare(a.data)).slice(0,5);
+
+  const linha = (titulo, lista, vazio)=> `
+    <div style="margin-top:10px;">
+      <div style="font-weight:600;font-size:12.5px;">${titulo}</div>
+      ${lista.length ? lista.map(x=>`<div style="font-size:12.5px;padding:2px 0;">• ${escapeHTML(x)}</div>`).join('') : `<div style="font-size:12px;color:var(--text-soft);">${vazio}</div>`}
+    </div>`;
+
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>📋 Modo reunião estratégica</h3>
+    <div style="max-height:400px;overflow-y:auto;">
+      ${linha('1. O que avançou', avancou.map(i=>i.titulo), 'Nada registrado.')}
+      ${linha('2. O que atrasou', atrasou.map(i=>i.titulo), 'Nenhuma iniciativa atrasada.')}
+      ${linha('3. Em risco', emRisco.map(r=>r.titulo), 'Nenhum risco crítico ativo.')}
+      ${linha('4. Metas/objetivos concluídos', objConcluidos.map(o=>o.titulo), 'Nenhum ainda.')}
+      ${linha('5. Abaixo do esperado', objAbaixo.map(o=>o.titulo), 'Nenhum.')}
+      ${linha('6. Decisões pendentes', decisoesPendentes.map(r=>r.titulo+' (sem plano de ação)'), 'Nenhuma pendência.')}
+      ${linha('7. Próximos prazos', [...proximos30.estaSemana,...proximos30.proximaSemana].map(i=>i.titulo), 'Nada nos próximos 14 dias.')}
+      ${linha('8. Prioridades de hoje/semana', focoHoje.map(f=>f.titulo+' — '+f.detalhe), 'Nada urgente no momento.')}
+      ${linha('9. Últimas decisões registradas', decisoesRegistradas.map(d=>d.data.split('-').reverse().join('/')+': '+d.texto), 'Nenhuma decisão registrada ainda.')}
+    </div>
+    <div class="field" style="margin-top:14px;"><label>Registrar nova decisão</label><textarea id="reuniaoDecisaoTexto" rows="2" placeholder="Ex: decidimos priorizar X e adiar Y"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Fechar</button>
+      <button class="btn" id="btnRegistrarDecisaoReuniao">Registrar decisão</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnRegistrarDecisaoReuniao').addEventListener('click', (e)=>{
+    if(e.target.disabled) return; e.target.disabled = true;
+    const texto = document.getElementById('reuniaoDecisaoTexto').value.trim();
+    if(!texto){ showToast('Escreva a decisão antes de registrar'); e.target.disabled = false; return; }
+    state.estrategiaDiario.push({ id: uid(), pilarId: null, data: todayISO(), texto, tipo:'decisao' });
+    persist();
+    abrirModoReuniaoEstrategicaModal(); // reabre atualizado
+  });
+}
+
+const ESTRATEGIA_RISCO_STATUS_LABEL = { ativo:'Ativo', mitigado:'Mitigado', encerrado:'Encerrado' };
+function abrirNovoRiscoEstrategiaModal(riscoId){
+  const risco = riscoId ? (state.estrategiaRiscos||[]).find(r=>r.id===riscoId) : null;
+  const objetivos = state.estrategiaObjetivos||[];
+  const pilares = state.estrategiaPilares||[];
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${risco?'Editar risco estratégico':'Novo risco estratégico'}</h3>
+    <div class="field"><label>Título</label><input type="text" id="riscoTitulo" placeholder="Ex: Fornecedor único de insumo crítico" value="${risco?escapeHTML(risco.titulo):''}"></div>
+    <div class="field"><label>Descrição (opcional)</label><textarea id="riscoDescricao" rows="2">${risco?escapeHTML(risco.descricao||''):''}</textarea></div>
+    <div class="field"><label>Objetivo relacionado (opcional)</label><select id="riscoObjetivo"><option value="">—</option>${objetivos.map(o=>`<option value="${o.id}" ${risco&&risco.objetivoId===o.id?'selected':''}>${escapeHTML(o.titulo)}</option>`).join('')}</select></div>
+    <div class="field"><label>Pilar relacionado (opcional)</label><select id="riscoPilar"><option value="">—</option>${pilares.map(p=>`<option value="${p.id}" ${risco&&risco.pilarId===p.id?'selected':''}>${escapeHTML(p.titulo)}</option>`).join('')}</select></div>
+    <div class="field"><label>Probabilidade</label><select id="riscoProbabilidade"><option value="baixa" ${risco&&risco.probabilidade==='baixa'?'selected':''}>Baixa</option><option value="media" ${!risco||risco.probabilidade==='media'?'selected':''}>Média</option><option value="alta" ${risco&&risco.probabilidade==='alta'?'selected':''}>Alta</option></select></div>
+    <div class="field"><label>Impacto</label><select id="riscoImpacto"><option value="baixo" ${risco&&risco.impacto==='baixo'?'selected':''}>Baixo</option><option value="medio" ${!risco||risco.impacto==='medio'?'selected':''}>Médio</option><option value="alto" ${risco&&risco.impacto==='alto'?'selected':''}>Alto</option></select></div>
+    <div class="field"><label>Responsável (opcional)</label><input type="text" id="riscoResponsavel" value="${risco?escapeHTML(risco.responsavel||''):''}"></div>
+    <div class="field"><label>Plano de ação (opcional)</label><textarea id="riscoPlanoAcao" rows="2">${risco?escapeHTML(risco.planoAcao||''):''}</textarea></div>
+    <div class="field"><label>Prazo (opcional)</label><input type="date" id="riscoPrazo" value="${risco&&risco.prazo?risco.prazo:''}"></div>
+    <div class="field"><label>Status</label><select id="riscoStatus">${Object.entries(ESTRATEGIA_RISCO_STATUS_LABEL).map(([v,l])=>`<option value="${v}" ${risco?(risco.status===v?'selected':''):(v==='ativo'?'selected':'')}>${l}</option>`).join('')}</select></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarRiscoEstrategia">Salvar</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarRiscoEstrategia').addEventListener('click', (e)=>{
+    if(e.target.disabled) return; e.target.disabled = true;
+    const titulo = document.getElementById('riscoTitulo').value.trim();
+    if(!titulo){ showToast('Informe o título do risco'); e.target.disabled = false; return; }
+    const dados = {
+      titulo,
+      descricao: document.getElementById('riscoDescricao').value.trim(),
+      objetivoId: document.getElementById('riscoObjetivo').value || null,
+      pilarId: document.getElementById('riscoPilar').value || null,
+      probabilidade: document.getElementById('riscoProbabilidade').value,
+      impacto: document.getElementById('riscoImpacto').value,
+      responsavel: document.getElementById('riscoResponsavel').value.trim(),
+      planoAcao: document.getElementById('riscoPlanoAcao').value.trim(),
+      prazo: document.getElementById('riscoPrazo').value || null,
+      status: document.getElementById('riscoStatus').value,
+    };
+    if(risco){ Object.assign(risco, dados); }
+    else { state.estrategiaRiscos.push({ id: uid(), ...dados }); }
+    persist(); closeModal(); render();
+  });
 }
 
 function abrirNovaAreaEstrategiaModal(){
@@ -20345,57 +20974,131 @@ function abrirNovaAreaEstrategiaModal(){
     </div>`;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  document.getElementById('btnSalvarAreaEstrategia').addEventListener('click', ()=>{
+  document.getElementById('btnSalvarAreaEstrategia').addEventListener('click', (e)=>{
+    if(e.target.disabled) return; e.target.disabled = true;
     const nome = document.getElementById('aeNome').value.trim();
-    if(!nome){ showToast('Informe o nome da área'); return; }
+    if(!nome){ showToast('Informe o nome da área'); e.target.disabled = false; return; }
     state.estrategiaAreas.push({ id: uid(), nome, cor: document.getElementById('aeCor').value });
     persist(); closeModal(); render();
   });
 }
 
-function abrirNovoPilarEstrategiaModal(areaId){
+function abrirNovoPilarEstrategiaModal(areaId, pilarId){
+  const pilar = pilarId ? (state.estrategiaPilares||[]).find(p=>p.id===pilarId) : null;
+  const areaEfetiva = pilar ? pilar.areaId : areaId;
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
-    <h3>Novo pilar${areaId ? '' : ' (estratégia central)'}</h3>
-    <div class="field"><label>Título do pilar</label><input type="text" id="pilTitulo" placeholder="Ex: Reduzir dependência de poucos clientes"></div>
-    <div class="field"><label>Por que isso importa? (opcional)</label><textarea id="pilPorque" rows="2"></textarea></div>
-    <div class="field"><label>Horizonte (opcional)</label><input type="text" id="pilHorizonte" placeholder="Ex: até 2027"></div>
+    <h3>${pilar?'Editar pilar':'Novo pilar'}${areaEfetiva ? '' : ' (estratégia central)'}</h3>
+    <div class="field"><label>Título do pilar</label><input type="text" id="pilTitulo" placeholder="Ex: Reduzir dependência de poucos clientes" value="${pilar?escapeHTML(pilar.titulo):''}"></div>
+    <div class="field"><label>Por que isso importa? (opcional)</label><textarea id="pilPorque" rows="2">${pilar?escapeHTML(pilar.porque||''):''}</textarea></div>
+    <div class="field"><label>Horizonte (opcional)</label><input type="text" id="pilHorizonte" placeholder="Ex: até 2027" value="${pilar?escapeHTML(pilar.horizonte||''):''}"></div>
+    <div class="field"><label>Objetivo estratégico ligado (opcional)</label><select id="pilObjetivo"><option value="">— Nenhum —</option>${(state.estrategiaObjetivos||[]).map(o=>`<option value="${o.id}" ${pilar&&pilar.objetivoId===o.id?'selected':''}>${escapeHTML(o.titulo)}</option>`).join('')}</select></div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       <button class="btn" id="btnSalvarPilarEstrategia">Salvar</button>
     </div>`;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  document.getElementById('btnSalvarPilarEstrategia').addEventListener('click', ()=>{
+  document.getElementById('btnSalvarPilarEstrategia').addEventListener('click', (e)=>{
+    if(e.target.disabled) return; e.target.disabled = true;
     const titulo = document.getElementById('pilTitulo').value.trim();
-    if(!titulo){ showToast('Informe o título do pilar'); return; }
-    state.estrategiaPilares.push({
-      id: uid(), areaId: areaId||null, titulo,
+    if(!titulo){ showToast('Informe o título do pilar'); e.target.disabled = false; return; }
+    const dados = {
+      titulo,
       porque: document.getElementById('pilPorque').value.trim(),
-      horizonte: document.getElementById('pilHorizonte').value.trim()
-    });
+      horizonte: document.getElementById('pilHorizonte').value.trim(),
+      objetivoId: document.getElementById('pilObjetivo').value || null
+    };
+    if(pilar){ Object.assign(pilar, dados); }
+    else { state.estrategiaPilares.push({ id: uid(), areaId: areaId||null, ...dados }); }
     persist(); closeModal(); render();
   });
 }
 
-function abrirNovaIniciativaEstrategiaModal(pilarId){
+function registrarHistoricoEstrategia(alvoTipo, alvoId, alvoTitulo, campo, de, para){
+  if(de===para) return; // não loga se não mudou nada de fato
+  state.estrategiaHistorico.push({ id: uid(), data: todayISO(), alvoTipo, alvoId, alvoTitulo, campo, de, para });
+}
+
+const ESTRATEGIA_TIPO_INICIATIVA = ['Projeto','Melhoria','Implantação','Redução de custo','Crescimento','Eficiência','Tecnologia','Comercial','Operacional','Financeiro','Gestão','Outro'];
+
+// ---- Riscos estratégicos (nível calculado por regra, nunca por opinião) ----
+const ESTRATEGIA_PROB_IMPACTO = { baixa:1, baixo:1, media:2, médio:2, medio:2, alta:3, alto:3 };
+function calcularNivelRisco(probabilidade, impacto){
+  const p = ESTRATEGIA_PROB_IMPACTO[probabilidade]||0, i = ESTRATEGIA_PROB_IMPACTO[impacto]||0;
+  const pontos = p*i;
+  if(pontos>=6) return { nivel:'critico', label:'🔴 Crítico' };
+  if(pontos>=3) return { nivel:'atencao', label:'🟡 Atenção' };
+  return { nivel:'controlado', label:'🟢 Controlado' };
+}
+
+// ---- Dependências entre iniciativas — impede A→B→C→A antes de salvar ----
+function estrategiaCriaDependenciaCircular(iniciativaId, novaDependeDeId){
+  if(!novaDependeDeId) return false;
+  let atual = novaDependeDeId;
+  const visitados = new Set();
+  while(atual){
+    if(atual===iniciativaId) return true; // voltou pra própria iniciativa = circular
+    if(visitados.has(atual)) break; // já tem um ciclo em outro lugar, não é problema desta edição
+    visitados.add(atual);
+    const prox = (state.estrategiaIniciativas||[]).find(i=>i.id===atual);
+    atual = prox ? prox.dependeDeId : null;
+  }
+  return false;
+}
+
+function abrirNovaIniciativaEstrategiaModal(pilarId, iniId){
+  const ini = iniId ? (state.estrategiaIniciativas||[]).find(i=>i.id===iniId) : null;
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
-    <h3>Nova iniciativa</h3>
-    <div class="field"><label>Título</label><input type="text" id="iniTitulo" placeholder="Ex: Fechar 3 novos clientes grandes"></div>
-    <div class="field"><label>Status inicial</label>
-      <select id="iniStatus">${Object.entries(ESTRATEGIA_STATUS_LABEL).map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
+    <h3>${ini ? 'Editar iniciativa' : 'Nova iniciativa'}</h3>
+    <div class="field"><label>Título</label><input type="text" id="iniTitulo" placeholder="Ex: Fechar 3 novos clientes grandes" value="${ini?escapeHTML(ini.titulo):''}"></div>
+    <div class="field"><label>Tipo (opcional)</label><select id="iniTipo"><option value="">—</option>${ESTRATEGIA_TIPO_INICIATIVA.map(t=>`<option value="${t}" ${ini&&ini.tipo===t?'selected':''}>${t}</option>`).join('')}</select></div>
+    <div class="field"><label>Responsável (opcional)</label><input type="text" id="iniResponsavel" value="${ini?escapeHTML(ini.responsavel||''):''}"></div>
+    <div class="field"><label>Prioridade</label><select id="iniPrioridade">${Object.entries(ESTRATEGIA_PRIORIDADE_LABEL).map(([v,l])=>`<option value="${v}" ${ini&&ini.prioridade===v?'selected':''}>${l}</option>`).join('')}</select></div>
+    <div class="field"><label>Prazo (opcional)</label><input type="date" id="iniPrazo" value="${ini&&ini.prazo?ini.prazo:''}"></div>
+    <div class="field"><label>Progresso (%)</label><input type="number" id="iniProgresso" min="0" max="100" value="${ini&&Number.isFinite(ini.progresso)?ini.progresso:0}"></div>
+    <div class="field"><label>Status</label>
+      <select id="iniStatus">${Object.entries(ESTRATEGIA_STATUS_LABEL).map(([v,l])=>`<option value="${v}" ${ini?(ini.statusManual===v?'selected':''):''}>${l}</option>`).join('')}</select>
     </div>
+    <div class="field"><label>Depende de outra iniciativa (opcional)</label><select id="iniDependeDe"><option value="">— Nenhuma —</option>${(state.estrategiaIniciativas||[]).filter(i=>!ini||i.id!==ini.id).map(i=>`<option value="${i.id}" ${ini&&ini.dependeDeId===i.id?'selected':''}>${escapeHTML(i.titulo)}</option>`).join('')}</select></div>
+    <div class="field"><label>Observações (opcional)</label><textarea id="iniObs" rows="2">${ini?escapeHTML(ini.observacoes||''):''}</textarea></div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
       <button class="btn" id="btnSalvarIniciativaEstrategia">Salvar</button>
     </div>`;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  document.getElementById('btnSalvarIniciativaEstrategia').addEventListener('click', ()=>{
+  document.getElementById('btnSalvarIniciativaEstrategia').addEventListener('click', (e)=>{
+    if(e.target.disabled) return; e.target.disabled = true; // evita duplo clique criar/editar duas vezes
     const titulo = document.getElementById('iniTitulo').value.trim();
-    if(!titulo){ showToast('Informe o título da iniciativa'); return; }
-    state.estrategiaIniciativas.push({ id: uid(), pilarId, titulo, statusManual: document.getElementById('iniStatus').value, processoVinculadoId: null });
+    if(!titulo){ showToast('Informe o título da iniciativa'); e.target.disabled = false; return; }
+    const dependeDeId = document.getElementById('iniDependeDe').value || null;
+    const idAtual = ini ? ini.id : uid(); // gera o id antes pra checar ciclo mesmo em iniciativa nova
+    if(dependeDeId && estrategiaCriaDependenciaCircular(idAtual, dependeDeId)){
+      showToast('Essa dependência criaria um ciclo (A depende de B que depende de A) — não permitido');
+      e.target.disabled = false; return;
+    }
+    let progresso = Number(document.getElementById('iniProgresso').value);
+    if(!Number.isFinite(progresso)) progresso = 0;
+    progresso = Math.max(0, Math.min(100, progresso));
+    const dados = {
+      titulo,
+      tipo: document.getElementById('iniTipo').value || null,
+      responsavel: document.getElementById('iniResponsavel').value.trim(),
+      prioridade: document.getElementById('iniPrioridade').value,
+      prazo: document.getElementById('iniPrazo').value || null,
+      progresso,
+      statusManual: document.getElementById('iniStatus').value,
+      observacoes: document.getElementById('iniObs').value.trim(),
+      dependeDeId,
+    };
+    if(ini){
+      registrarHistoricoEstrategia('iniciativa', ini.id, dados.titulo, 'status', ESTRATEGIA_STATUS_LABEL[ini.statusManual||'no_caminho'], ESTRATEGIA_STATUS_LABEL[dados.statusManual]);
+      registrarHistoricoEstrategia('iniciativa', ini.id, dados.titulo, 'progresso', (Number.isFinite(ini.progresso)?ini.progresso:0)+'%', dados.progresso+'%');
+      Object.assign(ini, dados);
+    }
+    else { state.estrategiaIniciativas.push({ id: idAtual, pilarId, processoVinculadoId: null, ...dados }); }
     persist(); closeModal(); render();
   });
 }
@@ -20419,9 +21122,10 @@ function abrirDiarioPilarModal(pilarId){
     <div class="modal-actions"><button class="btn ghost" id="btnCancelarModal">Fechar</button></div>`;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  document.getElementById('btnSalvarDiarioPilar').addEventListener('click', ()=>{
+  document.getElementById('btnSalvarDiarioPilar').addEventListener('click', (e)=>{
+    if(e.target.disabled) return; e.target.disabled = true;
     const texto = document.getElementById('diarioTexto').value.trim();
-    if(!texto){ showToast('Escreva algo antes de salvar'); return; }
+    if(!texto){ showToast('Escreva algo antes de salvar'); e.target.disabled = false; return; }
     state.estrategiaDiario.push({ id: uid(), pilarId, data: todayISO(), texto });
     persist();
     abrirDiarioPilarModal(pilarId); // reabre já atualizado
@@ -26892,8 +27596,49 @@ function attachViewHandlers(){
   atualizarSelecaoUI();
   if(currentView==='estrategia'){
     document.getElementById('btnNovaAreaEstrategia')?.addEventListener('click', abrirNovaAreaEstrategiaModal);
+    document.getElementById('btnNovoObjetivoEstrategia')?.addEventListener('click', ()=>abrirNovoObjetivoEstrategiaModal());
+    document.querySelectorAll('.btnEditarObjetivo').forEach(el=>el.addEventListener('click', ()=>abrirNovoObjetivoEstrategiaModal(el.dataset.id)));
+    document.getElementById('btnNovoRiscoEstrategia')?.addEventListener('click', ()=>abrirNovoRiscoEstrategiaModal());
+    document.querySelectorAll('.btnEditarRisco').forEach(el=>el.addEventListener('click', ()=>abrirNovoRiscoEstrategiaModal(el.dataset.id)));
+    document.getElementById('btnEditarVisaoEstrategia')?.addEventListener('click', abrirEditarVisaoEstrategiaModal);
+    document.getElementById('btnModoReuniaoEstrategia')?.addEventListener('click', abrirModoReuniaoEstrategicaModal);
+    document.getElementById('estrategiaBusca')?.addEventListener('change', (e)=>{ estrategiaFiltro.busca = e.target.value; render(); });
+    document.getElementById('estrategiaBusca')?.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ estrategiaFiltro.busca = e.target.value; render(); } });
+    document.getElementById('estrategiaFiltroArea')?.addEventListener('change', (e)=>{ estrategiaFiltro.area = e.target.value; render(); });
+    document.getElementById('estrategiaFiltroStatus')?.addEventListener('change', (e)=>{ estrategiaFiltro.status = e.target.value; render(); });
+    document.getElementById('estrategiaFiltroPrioridade')?.addEventListener('change', (e)=>{ estrategiaFiltro.prioridade = e.target.value; render(); });
+    document.getElementById('estrategiaFiltroResponsavel')?.addEventListener('change', (e)=>{ estrategiaFiltro.responsavel = e.target.value; render(); });
+    document.getElementById('btnExportarResumoEstrategia')?.addEventListener('click', ()=>{
+      const texto = montarResumoExecutivoEstrategiaTexto();
+      if(navigator.clipboard){
+        navigator.clipboard.writeText(texto).then(()=>showToast('Resumo copiado — cole onde quiser')).catch(()=>{
+          const modal = document.getElementById('modalContent');
+          modal.innerHTML = `<h3>Resumo executivo</h3><textarea style="width:100%;min-height:220px;font-size:12.5px;">${escapeHTML(texto)}</textarea><div class="modal-actions"><button class="btn ghost" id="btnCancelarModal">Fechar</button></div>`;
+          document.getElementById('modalOverlay').classList.add('open');
+          document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+        });
+      }
+    });
+    document.getElementById('btnExportarPdfEstrategia')?.addEventListener('click', gerarResumoExecutivoEstrategiaPDF);
+    document.getElementById('btnLimparFiltrosEstrategia')?.addEventListener('click', ()=>{ estrategiaFiltro = { area:'', status:'', prioridade:'', responsavel:'', busca:'' }; render(); });
+    document.querySelectorAll('.btnExcluirRisco').forEach(el=>el.addEventListener('click', ()=>{
+      state.estrategiaRiscos = state.estrategiaRiscos.filter(r=>r.id!==el.dataset.id);
+      persist(); render();
+    }));
+    document.querySelectorAll('.btnExcluirObjetivo').forEach(el=>el.addEventListener('click', ()=>{
+      const id = el.dataset.id;
+      const temPilares = (state.estrategiaPilares||[]).some(p=>p.objetivoId===id);
+      if(temPilares){ showToast('Esse objetivo tem pilares ligados a ele — desvincule antes de excluir'); return; }
+      state.estrategiaObjetivos = state.estrategiaObjetivos.filter(o=>o.id!==id);
+      persist(); render();
+    }));
+    document.querySelectorAll('.btnEditarIniciativa').forEach(el=>el.addEventListener('click', ()=>{
+      const ini = state.estrategiaIniciativas.find(i=>i.id===el.dataset.id);
+      if(ini) abrirNovaIniciativaEstrategiaModal(ini.pilarId, ini.id);
+    }));
     document.getElementById('btnNovoPilarCentral')?.addEventListener('click', ()=>abrirNovoPilarEstrategiaModal(null));
     document.querySelectorAll('.btnNovoPilarArea').forEach(el=>el.addEventListener('click', ()=>abrirNovoPilarEstrategiaModal(el.dataset.areaId)));
+    document.querySelectorAll('.btnEditarPilar').forEach(el=>el.addEventListener('click', ()=>abrirNovoPilarEstrategiaModal(null, el.dataset.id)));
     document.querySelectorAll('.btnExcluirArea').forEach(el=>el.addEventListener('click', ()=>{
       const id = el.dataset.id;
       const temPilares = (state.estrategiaPilares||[]).some(p=>p.areaId===id);
@@ -26917,7 +27662,10 @@ function attachViewHandlers(){
     }));
     document.querySelectorAll('.selEstrategiaIniciativaStatus').forEach(el=>el.addEventListener('change', ()=>{
       const ini = state.estrategiaIniciativas.find(i=>i.id===el.dataset.id);
-      if(ini){ ini.statusManual = el.value; persist(); }
+      if(ini){
+        registrarHistoricoEstrategia('iniciativa', ini.id, ini.titulo, 'status', ESTRATEGIA_STATUS_LABEL[ini.statusManual||'no_caminho'], ESTRATEGIA_STATUS_LABEL[el.value]);
+        ini.statusManual = el.value; persist();
+      }
     }));
     document.querySelectorAll('.btnCriarProcessoIniciativa').forEach(el=>el.addEventListener('click', ()=>{
       showToast('Criar processo vinculado no Livro de Processos ainda está em construção — vem no próximo passo');
