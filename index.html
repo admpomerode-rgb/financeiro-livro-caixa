@@ -850,6 +850,7 @@
         <div class="nav-item" data-view="relatorios" title="Relatórios"><span class="nav-dot"></span><span class="nav-abbr">RL</span><span class="nav-label">Relatórios</span></div>
         <div class="nav-item" data-view="central-decisao" title="Central de Decisão"><span class="nav-dot"></span><span class="nav-abbr">CD</span><span class="nav-label">Central de Decisão</span></div>
         <div class="nav-item" data-view="capex" title="Central de CAPEX"><span class="nav-dot"></span><span class="nav-abbr">CX</span><span class="nav-label">Central de CAPEX</span></div>
+        <div class="nav-item" data-view="estrategia" title="Central de Estratégia"><span class="nav-dot"></span><span class="nav-abbr">ES</span><span class="nav-label">Central de Estratégia</span></div>
         <div class="nav-item" data-view="pendencias" title="Central de Pendências"><span class="nav-dot"></span><span class="nav-abbr">PD</span><span class="nav-label">Central de Pendências</span></div>
         <div class="nav-item" data-view="navegacao-objetivo" title="O Que Você Quer Fazer?"><span class="nav-dot"></span><span class="nav-abbr">OB</span><span class="nav-label">O Que Você Quer Fazer?</span></div>
         <div class="nav-item" data-view="simulacao" title="Simulações"><span class="nav-dot"></span><span class="nav-abbr">SE</span><span class="nav-label">Simulações</span></div>
@@ -1181,6 +1182,15 @@ function aplicarMigracoes(s){
   if(!s.capexProcessosPedidos) s.capexProcessosPedidos = []; // espelho local (fetch manual) da coleção "capex_processos" compartilhada — pedidos de abertura de processo feitos a partir de um projeto de CAPEX
   if(!s.metasEmpresa) s.metasEmpresa = []; // Central de Metas da Empresa — sistema novo e genérico, não substitui metasFinanceirasMes nem metas (reservas) que continuam funcionando do jeito que já funcionavam
   if(!s.metasHistoricoMensal) s.metasHistoricoMensal = []; // fotografia do % de metas atingidas, tirada automaticamente quando um mês fecha — alimenta o gráfico de desempenho, começa a se formar a partir de agora (não inventa passado)
+  // Central de Estratégia — áreas, pilares (centrais ou de uma área) e iniciativas cadastradas
+  // livremente pelo usuário. Iniciativas podem puxar um indicador automático do próprio Livro
+  // Caixa ou do VK Industrial (mesmo `db`, mesmo projeto Firebase — mesmo padrão de leitura
+  // direta já usado com 'produtos'/'pedidos'/'insumos'), ou ter status manual. Criar um processo
+  // vinculado no Livro de Processos é sempre manual (botão), nunca automático.
+  if(!s.estrategiaAreas) s.estrategiaAreas = []; // [{ id, nome, cor }]
+  if(!s.estrategiaPilares) s.estrategiaPilares = []; // [{ id, areaId (null = pilar central da empresa), titulo, porque, horizonte }]
+  if(!s.estrategiaIniciativas) s.estrategiaIniciativas = []; // [{ id, pilarId, titulo, tipoAcompanhamento:'manual'|'auto', statusManual, fonteAuto:{sistema,indicador}, processoVinculadoId }]
+  if(!s.estrategiaDiario) s.estrategiaDiario = []; // [{ id, pilarId, data, texto }] — diário de bordo por pilar
   if(!s.contas) s.contas = [];
   // Migração: garante uma conta padrão e associa lançamentos antigos sem conta
   if(s.contas.length===0){
@@ -2363,6 +2373,7 @@ function render(){
   else if(currentView==='veiculos') main.innerHTML = viewVeiculos();
   else if(currentView==='veiculos-visao-geral') main.innerHTML = viewVeiculosVisaoGeral();
   else if(currentView==='capex') main.innerHTML = viewCapex();
+  else if(currentView==='estrategia') main.innerHTML = viewCentralEstrategia();
   else if(currentView==='relatorios-investimentos') main.innerHTML = viewRelatoriosInvestimentos();
   else if(currentView==='relatorios-capex') main.innerHTML = viewRelatoriosCapex();
   else if(currentView==='retiradas') main.innerHTML = viewRetiradas();
@@ -10053,6 +10064,94 @@ async function extrairLinhasPDF(file){
       const linha = porY[y].sort((a,b)=>a.x-b.x).map(t=>t.str).join(' ').replace(/\s+/g,' ').trim();
       if(linha) linhas.push(linha);
     });
+  }
+  return linhas;
+}
+
+// Algumas faturas (ex: Celesc quando baixada como "imagem achatada" em vez do PDF de texto
+// original — sem aviso nenhum, o site deles às vezes muda o formato) não têm NENHUM texto
+// selecionável dentro do PDF: extrairLinhasPDF() volta vazio porque não tem o que ler. Nesse
+// caso, em vez de já pular pra IA (que custa e depende de chave configurada), tentamos OCR local
+// primeiro: renderiza a página como imagem (via pdf.js, que já está carregado) e reconhece o
+// texto dessa imagem com o Tesseract — gratuito, roda no navegador, sem precisar de chave de API.
+// Só baixa a ferramenta de OCR (alguns MB) na primeira vez que for realmente usada.
+let __tesseractCarregando = null;
+function carregarTesseract(){
+  if(typeof Tesseract !== 'undefined') return Promise.resolve();
+  if(__tesseractCarregando) return __tesseractCarregando;
+  __tesseractCarregando = new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.onload = resolve;
+    s.onerror = ()=>{ __tesseractCarregando = null; reject(new Error('Não consegui carregar o leitor de imagem (OCR) — verifique a internet')); };
+    document.head.appendChild(s);
+  });
+  return __tesseractCarregando;
+}
+async function extrairLinhasPDFviaOCR(file, avisarProgresso){
+  await carregarTesseract();
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const linhas = [];
+  const worker = await Tesseract.createWorker('por');
+
+  // Converte o TSV que o Tesseract devolve (linhas, uma palavra por linha, com posição) em
+  // texto reconstruído por linha visual — mesmo formato que extrairLinhasPDF() já produz,
+  // pra poder reaproveitar o parseFaturaCelesc() sem duplicar lógica de leitura.
+  const tsvParaLinhas = (tsv) => {
+    const linhasTsv = (tsv||'').split('\n').filter(Boolean);
+    const palavras = linhasTsv.slice(1).map(l=>l.split('\t')).filter(r=>r[0]==='5').map(r=>({
+      x: Number(r[6]), y: Number(r[7]), h: Number(r[9]), texto: r[11]
+    })).filter(w=>w.texto && w.texto.trim());
+    const porY = {};
+    palavras.forEach(w=>{
+      // Agrupa em faixas de 10px (em vez de pixel exato) pra tolerar a pequena inclinação/ruído
+      // que o OCR sempre tem, coisa que o texto real de um PDF não tem (esse é o motivo de aqui
+      // usar uma tolerância e a extrairLinhasPDF() original não precisar).
+      const y = Math.round((w.y + w.h/2)/10)*10;
+      if(!porY[y]) porY[y] = [];
+      porY[y].push(w);
+    });
+    return Object.keys(porY).map(Number).sort((a,b)=>a-b).map(y=>
+      porY[y].sort((a,b)=>a.x-b.x).map(w=>w.texto).join(' ').replace(/\s+/g,' ').trim()
+    ).filter(Boolean);
+  };
+
+  try{
+    for(let i=1; i<=pdf.numPages; i++){
+      if(avisarProgresso) avisarProgresso(`Lendo a imagem da página ${i} com OCR (pode levar alguns segundos)...`);
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 2.5 }); // resolução maior = OCR mais preciso
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width; canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d');
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      const { data } = await worker.recognize(canvas, {}, { text: true, tsv: true });
+      linhas.push(...tsvParaLinhas(data.tsv));
+
+      // A caixa "Referência / Vencimento / Total a pagar" (padrão Celesc/DANFE) fica perto de um
+      // QR Code — na leitura da página inteira, o ruído visual do QR Code embolha exatamente os
+      // números mais importantes da fatura. Solução: recorta só essa área (canto superior
+      // esquerdo, sem o QR Code) e roda OCR de novo, ampliado, só nela — testado à mão contra
+      // uma fatura real e sem isso os 3 valores saíam ilegíveis; com isso saem perfeitos.
+      if(i===1){
+        try{
+          const cropCanvas = document.createElement('canvas');
+          const cx = Math.round(viewport.width*0.52), cy0 = Math.round(viewport.height*0.10), cy1 = Math.round(viewport.height*0.34);
+          const ampliar = 3;
+          cropCanvas.width = cx*ampliar; cropCanvas.height = (cy1-cy0)*ampliar;
+          const cctx = cropCanvas.getContext('2d');
+          cctx.imageSmoothingEnabled = false;
+          cctx.drawImage(canvas, 0, cy0, cx, cy1-cy0, 0, 0, cx*ampliar, (cy1-cy0)*ampliar);
+          const { data: dataRef } = await worker.recognize(cropCanvas, {}, { text: true });
+          if(dataRef.text) linhas.push(...dataRef.text.split('\n').map(l=>l.replace(/\s+/g,' ').trim()).filter(Boolean));
+        }catch(e){
+          console.error('Erro na leitura mirada da caixa de referência/valor:', e);
+        }
+      }
+    }
+  } finally {
+    await worker.terminate();
   }
   return linhas;
 }
@@ -20154,6 +20253,180 @@ function corStatusCapex(status){
   return { 'Planejado':'var(--text-soft)', 'Aprovado':'var(--blue-accent)', 'Em execução':'var(--warn)', 'Parcialmente realizado':'var(--warn)', 'Concluído':'var(--success)', 'Cancelado':'var(--danger)' }[status] || 'var(--text-soft)';
 }
 
+// ---- Central de Estratégia (dentro do Livro Caixa — lê indicadores do próprio Financeiro e,
+// quando configurado, do VK Industrial; conexão com o Livro de Processos é sempre manual) ----
+const ESTRATEGIA_STATUS_LABEL = { no_caminho:'🟢 No caminho', atencao:'🟡 Atenção', atrasada:'🔴 Atrasada', concluida:'🏆 Concluída' };
+const ESTRATEGIA_STATUS_COR = { no_caminho:'var(--success)', atencao:'var(--warn)', atrasada:'var(--danger)', concluida:'var(--success)' };
+
+function viewCentralEstrategia(){
+  const areas = state.estrategiaAreas||[];
+  const pilares = state.estrategiaPilares||[];
+  const iniciativas = state.estrategiaIniciativas||[];
+
+  const renderIniciativa = (ini)=>{
+    const status = ini.statusManual || 'no_caminho';
+    return `
+    <div class="ledger-row" style="padding:8px 10px;align-items:center;">
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:600;">${escapeHTML(ini.titulo)}</div>
+        ${ini.processoVinculadoId ? `<div style="font-size:11px;color:var(--text-soft);">🔗 Processo vinculado</div>` : ''}
+      </div>
+      <select class="selEstrategiaIniciativaStatus" data-id="${ini.id}" style="font-size:12px;">
+        ${Object.entries(ESTRATEGIA_STATUS_LABEL).map(([v,l])=>`<option value="${v}" ${status===v?'selected':''}>${l}</option>`).join('')}
+      </select>
+      ${!ini.processoVinculadoId ? `<button class="btn ghost sm btnCriarProcessoIniciativa" data-id="${ini.id}" title="Criar processo vinculado no Livro de Processos">🔗</button>` : ''}
+      <button class="btn ghost sm btnExcluirIniciativa" data-id="${ini.id}" title="Excluir">🗑️</button>
+    </div>`;
+  };
+
+  const renderPilar = (p)=>{
+    const suas = iniciativas.filter(i=>i.pilarId===p.id);
+    const qtdAtrasadas = suas.filter(i=>(i.statusManual||'no_caminho')==='atrasada').length;
+    return `
+    <div class="panel" style="margin-bottom:12px;">
+      <div class="panel-body">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+          <div>
+            <div style="font-weight:700;font-size:15px;">${escapeHTML(p.titulo)}</div>
+            ${p.porque ? `<div style="font-size:12px;color:var(--text-soft);margin-top:2px;">${escapeHTML(p.porque)}</div>` : ''}
+            ${p.horizonte ? `<div style="font-size:11px;color:var(--text-soft);margin-top:2px;">🕐 ${escapeHTML(p.horizonte)}</div>` : ''}
+          </div>
+          <div style="display:flex;gap:4px;flex-shrink:0;">
+            ${qtdAtrasadas ? `<span class="badge" style="background:var(--danger);color:#fff;">${qtdAtrasadas} atrasada${qtdAtrasadas>1?'s':''}</span>` : ''}
+            <button class="btn ghost sm btnDiarioPilar" data-id="${p.id}" title="Diário de bordo">📔</button>
+            <button class="btn ghost sm btnExcluirPilar" data-id="${p.id}" title="Excluir pilar">🗑️</button>
+          </div>
+        </div>
+        <div style="margin-top:10px;">
+          ${suas.length ? suas.map(renderIniciativa).join('') : `<div style="font-size:12px;color:var(--text-soft);padding:6px 0;">Nenhuma iniciativa ainda.</div>`}
+        </div>
+        <button class="btn ghost sm btnNovaIniciativa" data-pilar-id="${p.id}" style="margin-top:6px;">+ Iniciativa</button>
+      </div>
+    </div>`;
+  };
+
+  const pilaresCentral = pilares.filter(p=>!p.areaId);
+
+  return `
+    <div class="topbar">
+      <div><h1>♟️ Central de Estratégia</h1><p>Cadastre livremente os pilares da empresa e de cada área, acompanhe se estão indo bem, e registre o andamento ao longo do tempo.</p></div>
+      <button class="btn" id="btnNovaAreaEstrategia">+ Nova área</button>
+    </div>
+
+    <div class="panel-head" style="margin-top:8px;"><h2>Estratégia Central da Empresa</h2><button class="btn ghost sm" id="btnNovoPilarCentral">+ Pilar</button></div>
+    ${pilaresCentral.length ? pilaresCentral.map(renderPilar).join('') : `<div class="note">Nenhum pilar central cadastrado ainda.</div>`}
+
+    ${areas.map(a=>{
+      const pilaresArea = pilares.filter(p=>p.areaId===a.id);
+      return `
+      <div class="panel-head" style="margin-top:18px;">
+        <h2><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${a.cor||'var(--accent)'};margin-right:6px;"></span>${escapeHTML(a.nome)}</h2>
+        <div style="display:flex;gap:6px;">
+          <button class="btn ghost sm btnNovoPilarArea" data-area-id="${a.id}">+ Pilar</button>
+          <button class="btn ghost sm btnExcluirArea" data-id="${a.id}" title="Excluir área">🗑️</button>
+        </div>
+      </div>
+      ${pilaresArea.length ? pilaresArea.map(renderPilar).join('') : `<div class="note">Nenhum pilar cadastrado pra essa área ainda.</div>`}
+      `;
+    }).join('')}
+  `;
+}
+
+function abrirNovaAreaEstrategiaModal(){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Nova área</h3>
+    <div class="field"><label>Nome da área</label><input type="text" id="aeNome" placeholder="Ex: Produção"></div>
+    <div class="field"><label>Cor (opcional)</label><input type="color" id="aeCor" value="#2563eb"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarAreaEstrategia">Salvar</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarAreaEstrategia').addEventListener('click', ()=>{
+    const nome = document.getElementById('aeNome').value.trim();
+    if(!nome){ showToast('Informe o nome da área'); return; }
+    state.estrategiaAreas.push({ id: uid(), nome, cor: document.getElementById('aeCor').value });
+    persist(); closeModal(); render();
+  });
+}
+
+function abrirNovoPilarEstrategiaModal(areaId){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Novo pilar${areaId ? '' : ' (estratégia central)'}</h3>
+    <div class="field"><label>Título do pilar</label><input type="text" id="pilTitulo" placeholder="Ex: Reduzir dependência de poucos clientes"></div>
+    <div class="field"><label>Por que isso importa? (opcional)</label><textarea id="pilPorque" rows="2"></textarea></div>
+    <div class="field"><label>Horizonte (opcional)</label><input type="text" id="pilHorizonte" placeholder="Ex: até 2027"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarPilarEstrategia">Salvar</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarPilarEstrategia').addEventListener('click', ()=>{
+    const titulo = document.getElementById('pilTitulo').value.trim();
+    if(!titulo){ showToast('Informe o título do pilar'); return; }
+    state.estrategiaPilares.push({
+      id: uid(), areaId: areaId||null, titulo,
+      porque: document.getElementById('pilPorque').value.trim(),
+      horizonte: document.getElementById('pilHorizonte').value.trim()
+    });
+    persist(); closeModal(); render();
+  });
+}
+
+function abrirNovaIniciativaEstrategiaModal(pilarId){
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>Nova iniciativa</h3>
+    <div class="field"><label>Título</label><input type="text" id="iniTitulo" placeholder="Ex: Fechar 3 novos clientes grandes"></div>
+    <div class="field"><label>Status inicial</label>
+      <select id="iniStatus">${Object.entries(ESTRATEGIA_STATUS_LABEL).map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarIniciativaEstrategia">Salvar</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarIniciativaEstrategia').addEventListener('click', ()=>{
+    const titulo = document.getElementById('iniTitulo').value.trim();
+    if(!titulo){ showToast('Informe o título da iniciativa'); return; }
+    state.estrategiaIniciativas.push({ id: uid(), pilarId, titulo, statusManual: document.getElementById('iniStatus').value, processoVinculadoId: null });
+    persist(); closeModal(); render();
+  });
+}
+
+function abrirDiarioPilarModal(pilarId){
+  const pilar = state.estrategiaPilares.find(p=>p.id===pilarId);
+  if(!pilar) return;
+  const entradas = (state.estrategiaDiario||[]).filter(d=>d.pilarId===pilarId).sort((a,b)=>b.data.localeCompare(a.data));
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>📔 Diário de bordo — ${escapeHTML(pilar.titulo)}</h3>
+    <div class="field"><label>Nova anotação</label><textarea id="diarioTexto" rows="3" placeholder="Ex: indo bem porque..., preciso ajustar..."></textarea></div>
+    <button class="btn sm" id="btnSalvarDiarioPilar" style="margin-bottom:12px;">+ Adicionar</button>
+    <div style="max-height:260px;overflow-y:auto;">
+      ${entradas.length ? entradas.map(d=>`
+        <div class="note" style="margin-top:0;margin-bottom:8px;">
+          <div style="font-size:11px;color:var(--text-soft);">${d.data.split('-').reverse().join('/')}</div>
+          <div style="margin-top:2px;">${escapeHTML(d.texto)}</div>
+        </div>`).join('') : `<div style="font-size:12px;color:var(--text-soft);">Nenhuma anotação ainda.</div>`}
+    </div>
+    <div class="modal-actions"><button class="btn ghost" id="btnCancelarModal">Fechar</button></div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarDiarioPilar').addEventListener('click', ()=>{
+    const texto = document.getElementById('diarioTexto').value.trim();
+    if(!texto){ showToast('Escreva algo antes de salvar'); return; }
+    state.estrategiaDiario.push({ id: uid(), pilarId, data: todayISO(), texto });
+    persist();
+    abrirDiarioPilarModal(pilarId); // reabre já atualizado
+  });
+}
+
 function viewCapex(){
   const projetosAtivos = state.capexProjetos.filter(p=>p.status!=='Cancelado');
   const hoje = todayISO();
@@ -26616,6 +26889,39 @@ async function preencherEstatisticasCodigo(){
 function attachViewHandlers(){
   if(currentView!==selecaoViewOrigem){ selecaoLancIds.clear(); selecaoViewOrigem = currentView; }
   atualizarSelecaoUI();
+  if(currentView==='estrategia'){
+    document.getElementById('btnNovaAreaEstrategia')?.addEventListener('click', abrirNovaAreaEstrategiaModal);
+    document.getElementById('btnNovoPilarCentral')?.addEventListener('click', ()=>abrirNovoPilarEstrategiaModal(null));
+    document.querySelectorAll('.btnNovoPilarArea').forEach(el=>el.addEventListener('click', ()=>abrirNovoPilarEstrategiaModal(el.dataset.areaId)));
+    document.querySelectorAll('.btnExcluirArea').forEach(el=>el.addEventListener('click', ()=>{
+      const id = el.dataset.id;
+      const temPilares = (state.estrategiaPilares||[]).some(p=>p.areaId===id);
+      if(temPilares){ showToast('Essa área tem pilares cadastrados — exclua os pilares dela primeiro'); return; }
+      state.estrategiaAreas = state.estrategiaAreas.filter(a=>a.id!==id);
+      persist(); render();
+    }));
+    document.querySelectorAll('.btnNovaIniciativa').forEach(el=>el.addEventListener('click', ()=>abrirNovaIniciativaEstrategiaModal(el.dataset.pilarId)));
+    document.querySelectorAll('.btnDiarioPilar').forEach(el=>el.addEventListener('click', ()=>abrirDiarioPilarModal(el.dataset.id)));
+    document.querySelectorAll('.btnExcluirPilar').forEach(el=>el.addEventListener('click', ()=>{
+      const id = el.dataset.id;
+      const temIniciativas = (state.estrategiaIniciativas||[]).some(i=>i.pilarId===id);
+      if(temIniciativas){ showToast('Esse pilar tem iniciativas cadastradas — exclua as iniciativas dele primeiro'); return; }
+      state.estrategiaPilares = state.estrategiaPilares.filter(p=>p.id!==id);
+      state.estrategiaDiario = (state.estrategiaDiario||[]).filter(d=>d.pilarId!==id);
+      persist(); render();
+    }));
+    document.querySelectorAll('.btnExcluirIniciativa').forEach(el=>el.addEventListener('click', ()=>{
+      state.estrategiaIniciativas = state.estrategiaIniciativas.filter(i=>i.id!==el.dataset.id);
+      persist(); render();
+    }));
+    document.querySelectorAll('.selEstrategiaIniciativaStatus').forEach(el=>el.addEventListener('change', ()=>{
+      const ini = state.estrategiaIniciativas.find(i=>i.id===el.dataset.id);
+      if(ini){ ini.statusManual = el.value; persist(); }
+    }));
+    document.querySelectorAll('.btnCriarProcessoIniciativa').forEach(el=>el.addEventListener('click', ()=>{
+      showToast('Criar processo vinculado no Livro de Processos ainda está em construção — vem no próximo passo');
+    }));
+  }
   document.querySelectorAll('[data-action="ir-demonstracoes-financeiras"]').forEach(el=>{
     el.addEventListener('click', ()=>{ currentView='demonstracoes-financeiras'; render(); });
   });
@@ -38177,6 +38483,23 @@ function openRegistrarFaturaEnergiaModal(){
         dados = parseFaturaCelesc(linhas);
       }catch(e){
         console.error('Erro ao ler PDF localmente:', e);
+      }
+      if((!dados || faltandoDe(dados).length)){
+        // Às vezes o site da Celesc manda o PDF "achatado" como imagem, sem nenhum texto
+        // selecionável dentro (acontece sem aviso — já vimos casos onde funcionava antes e
+        // parou). Nesses casos extrairLinhasPDF() não tem o que ler. Antes de pular pra IA
+        // (que custa e depende de chave configurada), tenta OCR local: lê a imagem da própria
+        // página e reconhece o texto nela — grátis, sem internet depois de baixar a ferramenta
+        // na primeira vez, e reaproveita o mesmo parseFaturaCelesc de sempre.
+        try{
+          const linhasOCR = await extrairLinhasPDFviaOCR(file, (msg)=>{ status.textContent = msg; });
+          const dadosOCR = parseFaturaCelesc(linhasOCR);
+          if(dadosOCR && (!dados || faltandoDe(dadosOCR).length < faltandoDe(dados).length)){
+            dados = dadosOCR;
+          }
+        }catch(e){
+          console.error('Erro ao ler PDF via OCR:', e);
+        }
       }
     }
 
