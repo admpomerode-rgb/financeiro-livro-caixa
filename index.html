@@ -39673,8 +39673,12 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     }
   });
     document.getElementById('btnPublicarNota').addEventListener('click', ()=>{
+      const btnPub = document.getElementById('btnPublicarNota');
+      if(btnPub.disabled) return; // trava contra duplo clique/toque — era isso que causava lançamentos duplicados
+      btnPub.disabled = true;
       Object.assign(notaEmRevisao, coletarNotaFormulario(), { atualizadoEm: new Date().toISOString() });
-      publicarNotaCorretagem(notaEmRevisao);
+      const publicou = publicarNotaCorretagem(notaEmRevisao);
+      if(!publicou){ const btnPubFim = document.getElementById('btnPublicarNota'); if(btnPubFim) btnPubFim.disabled = false; }
     });
     document.getElementById('btnExcluirNota').addEventListener('click', async ()=>{
       if(!(await avisoModal({mensagem: 'Excluir esta nota pendente? Nenhum lançamento foi criado, então nada muda no caixa.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
@@ -39769,6 +39773,12 @@ function garantirCategoriasNotaCorretagem(){
 }
 
 function publicarNotaCorretagem(nota){
+  // Rede de segurança contra duplicação (além da trava no botão): se essa nota já não está mais
+  // na lista de pendentes, é porque já foi publicada antes — não gera tudo de novo.
+  if(nota.id && !(state.notasPendentes||[]).some(n=>n.id===nota.id)){
+    showToast('Essa nota já foi publicada.');
+    return false;
+  }
   const linhas = (nota.operacoes||[]).map(op=>({
     tipo: op.tipo==='V' ? 'V' : 'C',
     tipoAtivo: op.tipoAtivo==='fii' ? 'fii' : 'acao',
