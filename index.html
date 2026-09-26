@@ -1181,8 +1181,25 @@ function aplicarMigracoes(s){
   if(!s.historicoFechamentoMensal) s.historicoFechamentoMensal = []; // log de quando cada mês foi fechado/reaberto, com motivo
   if(!s.integridadeIgnorados) s.integridadeIgnorados = []; // avisos de duplicidade/órfão que o usuário já viu e decidiu ignorar
   if(!s.usuariosPermissao) s.usuariosPermissao = []; // papel de cada e-mail (admin/operador/visualizacao) — vazio = sem restrição nenhuma ainda
+  // CENTRAL DE USUÁRIOS E ACESSOS: campos por usuário além do papel base — status (ativo/
+  // bloqueado/suspenso), exceções individuais de tela e de ação sobre o papel base, e metadados.
+  // Preserva 100% dos usuários já cadastrados, só completa o que estiver faltando.
+  s.usuariosPermissao.forEach(u=>{
+    if(!u.status) u.status = 'ativo';
+    if(!u.telasBloqueadas) u.telasBloqueadas = []; // telas que ESTE usuário não pode ver, além do papel
+    if(!u.telasLiberadas) u.telasLiberadas = []; // telas sensíveis liberadas individualmente pra ele
+    if(!u.acoesExtras) u.acoesExtras = []; // ações liberadas além do que o papel base já dá
+    if(!u.acoesRemovidas) u.acoesRemovidas = []; // ações do papel base retiradas especificamente dele
+    if(u.nome===undefined) u.nome = '';
+    if(u.departamento===undefined) u.departamento = '';
+    if(u.observacao===undefined) u.observacao = '';
+    if(u.suspensoAte===undefined) u.suspensoAte = null;
+    if(u.criadoEm===undefined) u.criadoEm = null;
+    if(u.cadastradoPor===undefined) u.cadastradoPor = null;
+  });
   if(!s.telasProtegidas) s.telasProtegidas = []; // views que exigem senha de admin pra abrir, mesmo pra quem já está logado
   if(!s.acessosHistorico) s.acessosHistorico = []; // [{ usuario, data, duracaoSegundos }] — log de acessos de cada usuário, mais recente primeiro, pra tela de administrador
+  if(!s.historicoPermissoes) s.historicoPermissoes = []; // auditoria: [{ data, alteradoPor, usuarioAlvo, campo, de, para, motivo }]
   if(!s.avaliacoesFornecedor) s.avaliacoesFornecedor = []; // avaliação manual (nota 1-5 + comentário) — não dá pra automatizar prazo de entrega, esse dado não existe no sistema
   if(!s.fechamentosCaixaFisico) s.fechamentosCaixaFisico = []; // conferência de gaveta (contado x esperado) pras contas tipo "caixa"
   if(!s.limitesProcesso) s.limitesProcesso = {}; // { processoId: { limite, aprovadoEm } } — teto de compras liberado pro processo inteiro, orçamentos seguintes do mesmo processo não podem passar disso
@@ -1725,23 +1742,57 @@ const PERMISSAO_REGRAS = {
   operador: ['ver','criar','editar'],
   visualizacao: ['ver'],
 };
+function emailLogadoAtual(){ return (typeof auth!=='undefined' && auth.currentUser && auth.currentUser.email) || null; }
+function usuarioPermissaoAtual(){ return (state.usuariosPermissao||[]).find(x=>x.email===emailLogadoAtual()) || null; }
+// Status efetivo considera a suspensão temporária: depois da data final, volta a valer "ativo"
+// sozinho, sem precisar de nenhuma ação manual do administrador.
+function statusEfetivoUsuario(u){
+  if(!u) return 'ativo';
+  if(u.status==='suspenso' && u.suspensoAte){
+    if(todayISO() > u.suspensoAte) return 'ativo'; // suspensão já venceu
+    return 'suspenso';
+  }
+  return u.status || 'ativo';
+}
+// PERMISSÃO EFETIVA = papel base + exceções individuais - remoções individuais. Todo o sistema
+// (telas, botões, funções sensíveis) deve consultar esta função, nunca o papel puro isolado.
 function usuarioTemPermissao(usuarios, emailLogado, acao){
   if(!usuarios || !usuarios.length) return true;
   const u = usuarios.find(x=>x.email===emailLogado);
+  if(u && statusEfetivoUsuario(u)!=='ativo') return false; // bloqueado/suspenso não pode nada
   const papel = u ? u.papel : 'visualizacao';
-  return (PERMISSAO_REGRAS[papel]||[]).includes(acao);
+  const base = new Set(PERMISSAO_REGRAS[papel]||[]);
+  if(u){
+    (u.acoesExtras||[]).forEach(a=>base.add(a));
+    (u.acoesRemovidas||[]).forEach(a=>base.delete(a));
+  }
+  return base.has(acao);
 }
-function emailLogadoAtual(){ return (typeof auth!=='undefined' && auth.currentUser && auth.currentUser.email) || null; }
 function podeAgora(acao){ return usuarioTemPermissao(state.usuariosPermissao, emailLogadoAtual(), acao); }
 // Igual à regra de permissão acima: sem ninguém cadastrado em Usuários e Permissões, todo mundo
 // tem acesso total (inclusive à própria tela de Usuários e Permissões) — normal pra quem usa
 // sozinho. A partir do momento que existe qualquer usuário cadastrado, só quem tem papel "admin"
-// conta como administrador.
+// E status ativo conta como administrador.
 function ehAdmin(){
   const usuarios = state.usuariosPermissao||[];
   if(!usuarios.length) return true;
   const u = usuarios.find(x=>x.email===emailLogadoAtual());
-  return !!u && u.papel==='admin';
+  return !!u && u.papel==='admin' && statusEfetivoUsuario(u)==='ativo';
+}
+// Quantos admins ativos existem — usado pra nunca deixar o sistema sem nenhum administrador.
+function totalAdminsAtivos(excluindoEmail){
+  return (state.usuariosPermissao||[]).filter(u=>u.papel==='admin' && statusEfetivoUsuario(u)==='ativo' && u.email!==excluindoEmail).length;
+}
+// Uma tela é liberada pro usuário atual quando: ele é admin (vê tudo); OU a tela não está na
+// lista de bloqueios individuais dele. "permissoes" é sempre admin-only, mesmo com liberação
+// individual — decisão de segurança consciente, é a tela que administra todas as outras.
+function usuarioPodeVerTela(view){
+  if(ehAdmin()) return true;
+  if(view==='permissoes') return false;
+  const u = usuarioPermissaoAtual();
+  if(u && statusEfetivoUsuario(u)!=='ativo') return false;
+  if(u && (u.telasBloqueadas||[]).includes(view)) return false;
+  return true;
 }
 // Confere a senha de um administrador SEM deslogar quem está usando o sistema agora: abre uma
 // instância separada e temporária do Firebase só pra essa checagem, tenta autenticar com o
@@ -1765,6 +1816,17 @@ async function verificarSenhaDeAlgumAdmin(senha){
     await authTemp.signOut().catch(()=>{});
     await appTemp.delete().catch(()=>{});
   }
+}
+// Auditoria: toda alteração relevante feita na Central de Usuários e Acessos fica registrada
+// aqui — quem alterou, em quem, o quê, antes/depois e o motivo (quando pedido).
+function registrarHistoricoPermissao({ usuarioAlvo, campo, de, para, motivo }){
+  if(!state.historicoPermissoes) state.historicoPermissoes = [];
+  state.historicoPermissoes.unshift({
+    data: new Date().toISOString(),
+    alteradoPor: emailLogadoAtual() || 'desconhecido',
+    usuarioAlvo, campo, de: de??null, para: para??null, motivo: motivo||''
+  });
+  if(state.historicoPermissoes.length > 500) state.historicoPermissoes.length = 500;
 }
 // Alçada financeira: usa o limite PRÓPRIO da pessoa logada se ela tiver um cadastrado, senão cai
 // no limite geral do sistema — testada isoladamente antes de usar.
@@ -2409,7 +2471,11 @@ const moreDrawer = document.getElementById('moreDrawer');
 // (busca, favoritos, recentes, badge de pendência, agrupamento). Grupos batem com os da barra
 // lateral do desktop, pra ficar consistente.
 function moreItensDef(){
-  const itens = [
+  const itens = moreItensDefBase();
+  return itens.filter(i=> usuarioPodeVerTela(i.view));
+}
+function moreItensDefBase(){
+  return [
     { view:'contas', icone:'🏦', nome:'Contas Bancárias', grupo:'Operacional' },
     { view:'cartoes', icone:'💳', nome:'Cartões de Crédito', grupo:'Operacional' },
     { view:'gestao-dividas', icone:'📉', nome:'Gestão de Dívidas', grupo:'Operacional' },
@@ -2457,7 +2523,6 @@ function moreItensDef(){
     { view:'caixa-fisico', icone:'💵', nome:'Caixa Físico', grupo:'Operacional' },
     { view:'configuracoes', icone:'⚙️', nome:'Configurações', grupo:'Cadastros e Configurações' },
   ];
-  return itens.filter(i=> i.view!=='permissoes' || ehAdmin());
 }
 
 function moreItemHTML(item){
@@ -2567,13 +2632,20 @@ function render(){
     }
   }
   document.querySelectorAll('.nav-item, .bottom-nav-item[data-view]').forEach(n=>n.classList.toggle('active', n.dataset.view===currentView));
-  // Esconde o item "Usuários e Permissões" do menu pra quem não é admin — ele existe na sidebar
-  // como HTML fixo, então isso precisa ser feito toda vez que render() roda, não só uma vez.
-  document.querySelectorAll('[data-view="permissoes"]').forEach(n=>{ n.style.display = ehAdmin() ? '' : 'none'; });
+  // Esconde do menu qualquer tela que o usuário atual não pode ver — "permissoes" (admin-only)
+  // e qualquer tela bloqueada individualmente pra ele. Roda a cada render() porque parte do
+  // menu é HTML fixo na sidebar, não gerado dinamicamente.
+  document.querySelectorAll('.nav-item[data-view], .more-item[data-view]').forEach(n=>{
+    n.style.display = usuarioPodeVerTela(n.dataset.view) ? '' : 'none';
+  });
   const main = document.getElementById('main');
-  // Tela de Usuários e Permissões é admin-only de verdade (não só escondida do menu) — se alguém
-  // chegar nela por link direto, histórico do navegador etc., cai fora igual.
-  if(currentView==='permissoes' && !ehAdmin()){ currentView = 'dashboard'; showToast('Só administradores acessam essa tela.'); }
+  // Acesso restrito de verdade (não só esconder o menu) — cobre tanto a tela admin-only quanto
+  // qualquer bloqueio individual configurado pra este usuário na Central de Usuários e Acessos.
+  if(!usuarioPodeVerTela(currentView)){
+    main.innerHTML = viewAcessoRestrito(currentView);
+    document.getElementById('btnVoltarAcessoRestrito')?.addEventListener('click', ()=>{ currentView='dashboard'; render(); });
+    return;
+  }
   // Telas marcadas como protegidas em Configurações exigem a senha de algum admin pra abrir,
   // mesmo pra quem já está logado — admins nunca são bloqueados pelas próprias telas.
   if((state.telasProtegidas||[]).includes(currentView) && !ehAdmin() && !__telasProtegidasDesbloqueadas.has(currentView)){
@@ -26617,8 +26689,23 @@ function viewIntegridade(){
   `;
 }
 
+function viewAcessoRestrito(view){
+  const item = moreItensDefBase().find(i=>i.view===view);
+  const nome = item ? item.nome : view;
+  return `
+    <div style="display:flex;align-items:center;justify-content:center;min-height:60vh;padding:24px;">
+      <div class="panel" style="max-width:420px;width:100%;text-align:center;padding:32px 28px;">
+        <div style="font-size:48px;margin-bottom:8px;">🔒</div>
+        <h2 style="margin:0 0 8px;">Acesso restrito</h2>
+        <p class="sub" style="margin-bottom:6px;">Seu usuário não possui permissão para acessar esta tela.</p>
+        <p class="sub" style="margin-bottom:20px;font-size:12px;">Tela: <strong>${escapeHTML(nome)}</strong></p>
+        <button class="btn" id="btnVoltarAcessoRestrito" style="width:100%;">Voltar ao Dashboard</button>
+      </div>
+    </div>
+  `;
+}
 function viewTelaProtegida(view){
-  const item = moreItensDef().find(i=>i.view===view) || moreItensDefSemFiltro().find(i=>i.view===view);
+  const item = moreItensDefBase().find(i=>i.view===view);
   const nome = item ? item.nome : 'esta tela';
   return `
     <div style="display:flex;align-items:center;justify-content:center;min-height:60vh;padding:24px;">
@@ -26636,48 +26723,327 @@ function viewTelaProtegida(view){
     </div>
   `;
 }
-// Versão sem o filtro de admin, só pra achar o nome de exibição de "permissoes" quando ela
-// mesma está numa lista de telas protegidas (moreItensDef() a esconde de quem não é admin).
-function moreItensDefSemFiltro(){
-  return [{ view:'permissoes', icone:'🔐', nome:'Usuários e Permissões' }];
+let __permissoesFiltro = { busca:'', status:'todos' };
+const ACOES_CONHECIDAS = [
+  { id:'ver', nome:'Visualizar' },
+  { id:'criar', nome:'Criar' },
+  { id:'editar', nome:'Editar' },
+  { id:'excluir', nome:'Excluir' },
+  { id:'fechar_mes', nome:'Fechar/reabrir mês' },
+  { id:'aprovar_qualquer_valor', nome:'Aprovar qualquer valor' },
+];
+function acoesEfetivasUsuario(u){
+  const base = new Set(PERMISSAO_REGRAS[u.papel]||[]);
+  (u.acoesExtras||[]).forEach(a=>base.add(a));
+  (u.acoesRemovidas||[]).forEach(a=>base.delete(a));
+  return base;
 }
+function badgeStatusUsuario(u){
+  const st = statusEfetivoUsuario(u);
+  if(st==='bloqueado') return `<span style="color:var(--danger);">🔴 Bloqueado</span>`;
+  if(st==='suspenso') return `<span style="color:var(--amber);">🟡 Suspenso${u.suspensoAte?' até '+new Date(u.suspensoAte+'T12:00:00').toLocaleDateString('pt-BR'):''}</span>`;
+  return `<span style="color:var(--success);">🟢 Ativo</span>`;
+}
+function ultimoAcessoDe(email){
+  const a = (state.acessosHistorico||[]).find(x=>x.usuario===email);
+  return a ? new Date(a.data).toLocaleString('pt-BR') : '—';
+}
+// Modal "Gerenciar usuário": Perfil / Telas / Ações / Limites / Histórico — o coração da
+// permissão individual (papel base + exceções). Reaproveita o #modalOverlay/#modalContent
+// já usado no resto do sistema.
+function abrirModalGerenciarUsuario(email){
+  const u = (state.usuariosPermissao||[]).find(x=>x.email===email);
+  if(!u) return;
+  const modal = document.getElementById('modalContent');
+  modal.className = 'modal';
+  const todasTelas = moreItensDefBase();
+  const acoesEfetivas = acoesEfetivasUsuario(u);
+  const historicoUsuario = (state.historicoPermissoes||[]).filter(h=>h.usuarioAlvo===email).slice(0,50);
+  const acessosUsuario = (state.acessosHistorico||[]).filter(a=>a.usuario===email).slice(0,30);
+  const outrosUsuarios = (state.usuariosPermissao||[]).filter(x=>x.email!==email);
+  const st = statusEfetivoUsuario(u);
+
+  modal.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+      <h2 style="margin:0;">👤 ${escapeHTML(u.nome||u.email)}</h2>
+      <button id="btnFecharGerenciar" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-soft);">✕</button>
+    </div>
+    <div class="sub" style="margin-bottom:14px;">${escapeHTML(u.email)} · ${badgeStatusUsuario(u)}</div>
+    <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">
+      <button class="btn ghost sm" data-tab-gerenciar="perfil">👤 Perfil</button>
+      <button class="btn ghost sm" data-tab-gerenciar="telas">🖥️ Telas</button>
+      <button class="btn ghost sm" data-tab-gerenciar="acoes">⚙️ Ações</button>
+      <button class="btn ghost sm" data-tab-gerenciar="limites">💰 Limites</button>
+      <button class="btn ghost sm" data-tab-gerenciar="historico">🕓 Histórico</button>
+    </div>
+
+    <div id="gerenciarTabPerfil" class="gerenciar-tab">
+      <div class="field-row">
+        <div class="field"><label>Nome</label><input type="text" id="gerNome" value="${escapeHTML(u.nome||'')}"></div>
+        <div class="field"><label>Departamento</label><input type="text" id="gerDepartamento" value="${escapeHTML(u.departamento||'')}"></div>
+      </div>
+      <div class="field"><label>Observação</label><input type="text" id="gerObservacao" value="${escapeHTML(u.observacao||'')}"></div>
+      <div class="field"><label>Papel base</label>
+        <select id="gerPapel">
+          <option value="admin" ${u.papel==='admin'?'selected':''}>Admin — acesso total</option>
+          <option value="operador" ${u.papel==='operador'?'selected':''}>Operador — cria e edita, não exclui nem fecha mês</option>
+          <option value="visualizacao" ${u.papel==='visualizacao'?'selected':''}>Visualização — só olha, não mexe em nada</option>
+        </select>
+      </div>
+      <button class="btn" id="btnSalvarPerfilUsuario" style="margin-bottom:16px;">Salvar perfil</button>
+
+      <div class="dash-section-label">Status</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        <button class="btn ${st==='ativo'?'':'ghost'} sm" data-status-usuario="ativo">🟢 Ativo</button>
+        <button class="btn ${st==='bloqueado'?'':'ghost'} sm" data-status-usuario="bloqueado">🔴 Bloquear</button>
+        <button class="btn ${st==='suspenso'?'':'ghost'} sm" data-status-usuario="suspenso">🟡 Suspender</button>
+      </div>
+      <div class="field" id="campoSuspensaoAte" style="display:${st==='suspenso'?'':'none'};max-width:220px;">
+        <label>Suspenso até</label><input type="date" id="gerSuspensoAte" value="${u.suspensoAte||''}">
+      </div>
+
+      <div class="dash-section-label" style="margin-top:16px;">Copiar permissões</div>
+      <div class="field-row">
+        <div class="field">
+          <select id="gerCopiarDe"><option value="">Copiar de...</option>${outrosUsuarios.map(o=>`<option value="${o.email}">${escapeHTML(o.nome||o.email)}</option>`).join('')}</select>
+        </div>
+        <button class="btn ghost" id="btnCopiarPermissoes">Copiar pra este usuário</button>
+      </div>
+      <button class="btn ghost sm" id="btnRestaurarPadrao" style="margin-top:8px;">Restaurar permissões padrão do papel</button>
+    </div>
+
+    <div id="gerenciarTabTelas" class="gerenciar-tab" style="display:none;">
+      <p class="sub" style="margin-bottom:10px;">Desmarque as telas que este usuário NÃO deve ver, além do que o papel já restringe.</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;max-height:360px;overflow-y:auto;">
+        ${todasTelas.filter(i=>i.view!=='permissoes').map(i=>`
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;cursor:pointer;">
+            <input type="checkbox" data-tela-usuario="${i.view}" ${(u.telasBloqueadas||[]).includes(i.view)?'':'checked'}>
+            ${i.icone||''} ${escapeHTML(i.nome)}
+          </label>`).join('')}
+      </div>
+    </div>
+
+    <div id="gerenciarTabAcoes" class="gerenciar-tab" style="display:none;">
+      <p class="sub" style="margin-bottom:10px;">Ações liberadas pra este usuário — o papel base (${{admin:'Admin',operador:'Operador',visualizacao:'Visualização'}[u.papel]}) já dá algumas por padrão; aqui dá pra abrir exceções.</p>
+      ${ACOES_CONHECIDAS.map(a=>`
+        <label style="display:flex;align-items:center;gap:8px;font-size:14px;padding:8px 4px;border-bottom:1px solid var(--line);cursor:pointer;">
+          <input type="checkbox" data-acao-usuario="${a.id}" ${acoesEfetivas.has(a.id)?'checked':''}>
+          ${escapeHTML(a.nome)}
+        </label>`).join('')}
+      <button class="btn" id="btnSalvarAcoesUsuario" style="margin-top:12px;">Salvar ações</button>
+    </div>
+
+    <div id="gerenciarTabLimites" class="gerenciar-tab" style="display:none;">
+      <div class="field"><label>Limite de aprovação de despesa (R$, vazio = sem limite próprio)</label><input type="text" inputmode="decimal" id="gerLimite" value="${u.limiteAprovacao?brl(u.limiteAprovacao).replace('R$','').trim():''}"></div>
+      <button class="btn" id="btnSalvarLimiteUsuario">Salvar limite</button>
+    </div>
+
+    <div id="gerenciarTabHistorico" class="gerenciar-tab" style="display:none;">
+      <div class="dash-section-label">Acessos ao sistema</div>
+      ${!acessosUsuario.length ? `<div class="empty">Nenhum acesso registrado.</div>` : acessosUsuario.map(a=>`
+        <div class="sub" style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--line);">${new Date(a.data).toLocaleString('pt-BR')} — ${a.duracaoSegundos?(a.duracaoSegundos<60?a.duracaoSegundos+'s':Math.round(a.duracaoSegundos/60)+' min'):'—'}</div>
+      `).join('')}
+      <div class="dash-section-label" style="margin-top:14px;">Alterações de permissão</div>
+      ${!historicoUsuario.length ? `<div class="empty">Nenhuma alteração registrada.</div>` : historicoUsuario.map(h=>`
+        <div class="sub" style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--line);">
+          ${new Date(h.data).toLocaleString('pt-BR')} — <strong>${escapeHTML(h.alteradoPor)}</strong>: ${escapeHTML(h.campo)}: ${escapeHTML(String(h.de))} → ${escapeHTML(String(h.para))}${h.motivo?' ('+escapeHTML(h.motivo)+')':''}
+        </div>
+      `).join('')}
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnFecharGerenciar').addEventListener('click', closeModal);
+
+  document.querySelectorAll('[data-tab-gerenciar]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('.gerenciar-tab').forEach(t=>t.style.display='none');
+      const map = { perfil:'gerenciarTabPerfil', telas:'gerenciarTabTelas', acoes:'gerenciarTabAcoes', limites:'gerenciarTabLimites', historico:'gerenciarTabHistorico' };
+      document.getElementById(map[btn.dataset.tabGerenciar]).style.display = '';
+    });
+  });
+
+  document.getElementById('btnSalvarPerfilUsuario').addEventListener('click', ()=>{
+    const novoPapel = document.getElementById('gerPapel').value;
+    if(u.papel==='admin' && novoPapel!=='admin' && totalAdminsAtivos(email)===0){
+      alert('Essa ação deixaria o sistema sem administrador. Cadastre outro admin antes de mudar o papel deste.');
+      return;
+    }
+    if(novoPapel!==u.papel) registrarHistoricoPermissao({ usuarioAlvo:email, campo:'papel', de:u.papel, para:novoPapel });
+    u.nome = document.getElementById('gerNome').value.trim();
+    u.departamento = document.getElementById('gerDepartamento').value.trim();
+    u.observacao = document.getElementById('gerObservacao').value.trim();
+    u.papel = novoPapel;
+    persist(); showToast('Perfil salvo.'); closeModal(); render();
+  });
+
+  document.querySelectorAll('[data-status-usuario]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const novoStatus = btn.dataset.statusUsuario;
+      if(u.papel==='admin' && novoStatus!=='ativo' && totalAdminsAtivos(email)===0){
+        alert('Essa ação deixaria o sistema sem administrador. Cadastre outro admin antes de bloquear/suspender este.');
+        return;
+      }
+      if(novoStatus==='suspenso'){
+        document.getElementById('campoSuspensaoAte').style.display = '';
+        const data = document.getElementById('gerSuspensoAte').value;
+        if(!data){ showToast('Escolha a data final da suspensão.'); return; }
+        const motivo = prompt('Motivo da suspensão (opcional):','') || '';
+        registrarHistoricoPermissao({ usuarioAlvo:email, campo:'status', de:u.status, para:'suspenso', motivo });
+        u.status = 'suspenso'; u.suspensoAte = data;
+      } else {
+        const motivo = novoStatus==='bloqueado' ? (prompt('Motivo do bloqueio (opcional):','') || '') : '';
+        registrarHistoricoPermissao({ usuarioAlvo:email, campo:'status', de:u.status, para:novoStatus, motivo });
+        u.status = novoStatus; u.suspensoAte = null;
+      }
+      persist(); showToast('Status atualizado.'); closeModal(); render();
+    });
+  });
+
+  document.getElementById('btnCopiarPermissoes').addEventListener('click', ()=>{
+    const origemEmail = document.getElementById('gerCopiarDe').value;
+    if(!origemEmail){ showToast('Escolha de quem copiar.'); return; }
+    const origem = (state.usuariosPermissao||[]).find(x=>x.email===origemEmail);
+    if(!origem) return;
+    if(!confirm(`Copiar as permissões de ${origem.nome||origem.email} para ${u.nome||u.email}?`)) return;
+    u.papel = origem.papel;
+    u.telasBloqueadas = [...(origem.telasBloqueadas||[])];
+    u.acoesExtras = [...(origem.acoesExtras||[])];
+    u.acoesRemovidas = [...(origem.acoesRemovidas||[])];
+    u.limiteAprovacao = origem.limiteAprovacao;
+    registrarHistoricoPermissao({ usuarioAlvo:email, campo:'permissões copiadas', de:origemEmail, para:'aplicado' });
+    persist(); showToast('Permissões copiadas.'); closeModal(); render();
+  });
+
+  document.getElementById('btnRestaurarPadrao').addEventListener('click', ()=>{
+    if(!confirm('Restaurar as permissões padrão do papel base, removendo todas as exceções individuais?')) return;
+    u.telasBloqueadas = []; u.acoesExtras = []; u.acoesRemovidas = [];
+    registrarHistoricoPermissao({ usuarioAlvo:email, campo:'permissões restauradas ao padrão', de:'personalizado', para:u.papel });
+    persist(); showToast('Restaurado ao padrão do papel.'); closeModal(); render();
+  });
+
+  document.getElementById('btnSalvarAcoesUsuario').addEventListener('click', ()=>{
+    const base = new Set(PERMISSAO_REGRAS[u.papel]||[]);
+    const extras = [], removidas = [];
+    document.querySelectorAll('[data-acao-usuario]').forEach(chk=>{
+      const acao = chk.dataset.acaoUsuario;
+      if(chk.checked && !base.has(acao)) extras.push(acao);
+      if(!chk.checked && base.has(acao)) removidas.push(acao);
+    });
+    u.acoesExtras = extras; u.acoesRemovidas = removidas;
+    registrarHistoricoPermissao({ usuarioAlvo:email, campo:'ações', de:'papel padrão', para:extras.concat(removidas.map(r=>'-'+r)).join(', ')||'sem exceções' });
+    persist(); showToast('Ações salvas.'); closeModal(); render();
+  });
+
+  document.getElementById('btnSalvarLimiteUsuario').addEventListener('click', ()=>{
+    const limite = numBR(document.getElementById('gerLimite').value);
+    registrarHistoricoPermissao({ usuarioAlvo:email, campo:'limite de aprovação', de:u.limiteAprovacao, para:limite>0?limite:null });
+    u.limiteAprovacao = limite>0?limite:null;
+    persist(); showToast('Limite salvo.'); closeModal(); render();
+  });
+
+  document.querySelectorAll('[data-tela-usuario]').forEach(chk=>{
+    chk.addEventListener('change', ()=>{
+      if(!u.telasBloqueadas) u.telasBloqueadas = [];
+      const view = chk.dataset.telaUsuario;
+      const jaEstava = u.telasBloqueadas.includes(view);
+      if(!chk.checked){ if(!jaEstava) u.telasBloqueadas.push(view); }
+      else u.telasBloqueadas = u.telasBloqueadas.filter(v=>v!==view);
+      registrarHistoricoPermissao({ usuarioAlvo:email, campo:'tela: '+view, de: chk.checked?'bloqueada':'liberada', para: chk.checked?'liberada':'bloqueada' });
+      persist();
+    });
+  });
+
+  document.getElementById('gerenciarTabPerfil').style.display = '';
+}
+
 function viewPermissoes(){
   const usuarios = state.usuariosPermissao||[];
-  const todasTelas = moreItensDef().concat(moreItensDefSemFiltro().filter(i=>!moreItensDef().some(x=>x.view===i.view)));
+  const todasTelas = moreItensDefBase();
   const protegidas = state.telasProtegidas||[];
-  const historico = (state.acessosHistorico||[]).slice(0, 50);
+  const historicoAcessos = (state.acessosHistorico||[]).slice(0, 50);
+  const historicoPerm = (state.historicoPermissoes||[]).slice(0, 50);
+
+  const ativos = usuarios.filter(u=>statusEfetivoUsuario(u)==='ativo').length;
+  const bloqueados = usuarios.filter(u=>statusEfetivoUsuario(u)==='bloqueado').length;
+  const suspensos = usuarios.filter(u=>statusEfetivoUsuario(u)==='suspenso').length;
+
+  const filtro = __permissoesFiltro;
+  let usuariosFiltrados = usuarios;
+  if(filtro.status!=='todos') usuariosFiltrados = usuariosFiltrados.filter(u=>filtro.status==='admin'||filtro.status==='operador'||filtro.status==='visualizacao' ? u.papel===filtro.status : statusEfetivoUsuario(u)===filtro.status);
+  if(filtro.busca.trim()){
+    const b = filtro.busca.trim().toLowerCase();
+    usuariosFiltrados = usuariosFiltrados.filter(u=>(u.email||'').toLowerCase().includes(b) || (u.nome||'').toLowerCase().includes(b) || (u.departamento||'').toLowerCase().includes(b));
+  }
+
   return `
     <div class="topbar">
-      <div><h1>🔐 Usuários e Permissões</h1><p>Sem ninguém cadastrado aqui, todo mundo que loga tem acesso total — normal pra quem usa sozinho. Cadastre só se quiser limitar o acesso de alguém.</p></div>
+      <div><h1>🔐 Central de Usuários e Acessos</h1><p>Controle quem acessa o sistema, o que cada usuário pode visualizar e quais ações pode executar.</p></div>
     </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:18px;">
+      <div class="panel" style="padding:14px;text-align:center;"><div style="font-size:22px;font-weight:700;">${usuarios.length}</div><div class="sub" style="font-size:12px;">👥 Usuários</div></div>
+      <div class="panel" style="padding:14px;text-align:center;"><div style="font-size:22px;font-weight:700;color:var(--success);">${ativos}</div><div class="sub" style="font-size:12px;">🟢 Ativos</div></div>
+      <div class="panel" style="padding:14px;text-align:center;"><div style="font-size:22px;font-weight:700;color:var(--danger);">${bloqueados}</div><div class="sub" style="font-size:12px;">🔴 Bloqueados</div></div>
+      <div class="panel" style="padding:14px;text-align:center;"><div style="font-size:22px;font-weight:700;color:var(--amber);">${suspensos}</div><div class="sub" style="font-size:12px;">🟡 Suspensos</div></div>
+      <div class="panel" style="padding:14px;text-align:center;"><div style="font-size:22px;font-weight:700;">${protegidas.length}</div><div class="sub" style="font-size:12px;">🔒 Telas protegidas</div></div>
+    </div>
+
     <div class="panel" style="margin-bottom:16px;">
       <div class="panel-head"><h2>Adicionar usuário</h2></div>
       <div style="padding:16px 18px;">
         <div class="field-row">
+          <div class="field"><label>Nome (opcional)</label><input type="text" id="permNome" placeholder="Nome da pessoa"></div>
           <div class="field"><label>E-mail (o mesmo do login)</label><input type="email" id="permEmail" placeholder="nome@email.com"></div>
-          <div class="field"><label>Papel</label>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Papel base</label>
             <select id="permPapel">
               <option value="admin">Admin — acesso total</option>
               <option value="operador">Operador — cria e edita, não exclui nem fecha mês</option>
               <option value="visualizacao">Visualização — só olha, não mexe em nada</option>
             </select>
           </div>
+          <div class="field"><label>Departamento (opcional)</label><input type="text" id="permDepartamento" placeholder="Financeiro, Comercial..."></div>
         </div>
         <div class="field"><label>Limite de aprovação de despesa (R$, opcional — deixe vazio pra sem limite)</label><input type="text" inputmode="decimal" id="permLimite" placeholder="0,00"></div>
         <button class="btn" id="btnAddPermissao" style="margin-top:8px;">Adicionar</button>
       </div>
     </div>
+
     <div class="dash-section-label">Usuários cadastrados</div>
-    ${!usuarios.length ? `<div class="empty">Nenhum usuário cadastrado — acesso é livre pra todo mundo que loga.</div>` : usuarios.map(u=>`
+    <div class="field-row" style="margin-bottom:10px;">
+      <div class="field"><input type="text" id="permBusca" placeholder="🔎 Buscar por nome, e-mail ou departamento" value="${escapeHTML(filtro.busca)}"></div>
+      <div class="field">
+        <select id="permFiltroStatus">
+          <option value="todos" ${filtro.status==='todos'?'selected':''}>Todos</option>
+          <option value="ativo" ${filtro.status==='ativo'?'selected':''}>Ativos</option>
+          <option value="bloqueado" ${filtro.status==='bloqueado'?'selected':''}>Bloqueados</option>
+          <option value="suspenso" ${filtro.status==='suspenso'?'selected':''}>Suspensos</option>
+          <option value="admin" ${filtro.status==='admin'?'selected':''}>Admins</option>
+          <option value="operador" ${filtro.status==='operador'?'selected':''}>Operadores</option>
+          <option value="visualizacao" ${filtro.status==='visualizacao'?'selected':''}>Visualização</option>
+        </select>
+      </div>
+    </div>
+    ${!usuarios.length ? `<div class="empty">Nenhum usuário cadastrado — acesso é livre pra todo mundo que loga.</div>` :
+      !usuariosFiltrados.length ? `<div class="empty">Nenhum usuário encontrado com esse filtro.</div>` :
+      usuariosFiltrados.map(u=>{
+        const acoes = acoesEfetivasUsuario(u);
+        const telasBloq = (u.telasBloqueadas||[]).length;
+        return `
       <div class="panel" style="margin-bottom:10px;">
         <div style="padding:14px 18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
           <div>
-            <div style="font-weight:600;">${escapeHTML(u.email)}</div>
-            <div class="sub" style="font-size:12px;">${{admin:'Admin',operador:'Operador',visualizacao:'Visualização'}[u.papel]||u.papel}${u.limiteAprovacao?' · limite de aprovação '+brl(u.limiteAprovacao):''}</div>
+            <div style="font-weight:600;">${escapeHTML(u.nome||u.email)}</div>
+            <div class="sub" style="font-size:12px;">${escapeHTML(u.email)} · ${{admin:'Admin',operador:'Operador',visualizacao:'Visualização'}[u.papel]||u.papel} · ${badgeStatusUsuario(u)}</div>
+            <div class="sub" style="font-size:11px;margin-top:2px;">Último acesso: ${ultimoAcessoDe(u.email)} · ${acoes.size} ações permitidas${telasBloq?' · '+telasBloq+' tela(s) bloqueada(s)':''}${u.limiteAprovacao?' · limite '+brl(u.limiteAprovacao):''}</div>
           </div>
-          <button class="btn ghost sm" data-remover-permissao="${u.email}">Remover</button>
+          <div style="display:flex;gap:6px;">
+            <button class="btn ghost sm" data-gerenciar-usuario="${u.email}">Gerenciar</button>
+            <button class="btn ghost sm" data-remover-permissao="${u.email}">Remover</button>
+          </div>
         </div>
-      </div>`).join('')}
+      </div>`;}).join('')}
 
     <div class="panel" style="margin:24px 0 16px;">
       <div class="panel-head"><h2>🔒 Telas com senha obrigatória</h2></div>
@@ -26699,17 +27065,39 @@ function viewPermissoes(){
     <div class="panel" style="margin-bottom:16px;">
       <div class="panel-head"><h2>📋 Histórico de acessos</h2></div>
       <div style="padding:0 18px 16px;">
-        ${!historico.length ? `<div class="empty">Nenhum acesso registrado ainda.</div>` : `
+        ${!historicoAcessos.length ? `<div class="empty">Nenhum acesso registrado ainda.</div>` : `
           <table style="width:100%;font-size:13px;border-collapse:collapse;">
             <thead><tr style="text-align:left;color:var(--text-soft);">
               <th style="padding:6px 4px;">Usuário</th><th style="padding:6px 4px;">Data/hora</th><th style="padding:6px 4px;">Duração</th>
             </tr></thead>
             <tbody>
-              ${historico.map(a=>`
+              ${historicoAcessos.map(a=>`
                 <tr style="border-top:1px solid var(--line);">
                   <td style="padding:6px 4px;">${escapeHTML(a.usuario||'—')}</td>
                   <td style="padding:6px 4px;">${new Date(a.data).toLocaleString('pt-BR')}</td>
                   <td style="padding:6px 4px;">${a.duracaoSegundos ? (a.duracaoSegundos<60?a.duracaoSegundos+'s':Math.round(a.duracaoSegundos/60)+' min') : '—'}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        `}
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-head"><h2>🕓 Histórico de alterações de permissões</h2></div>
+      <div style="padding:0 18px 16px;">
+        ${!historicoPerm.length ? `<div class="empty">Nenhuma alteração registrada ainda.</div>` : `
+          <table style="width:100%;font-size:13px;border-collapse:collapse;">
+            <thead><tr style="text-align:left;color:var(--text-soft);">
+              <th style="padding:6px 4px;">Quando</th><th style="padding:6px 4px;">Por</th><th style="padding:6px 4px;">Usuário</th><th style="padding:6px 4px;">O que mudou</th>
+            </tr></thead>
+            <tbody>
+              ${historicoPerm.map(h=>`
+                <tr style="border-top:1px solid var(--line);">
+                  <td style="padding:6px 4px;">${new Date(h.data).toLocaleString('pt-BR')}</td>
+                  <td style="padding:6px 4px;">${escapeHTML(h.alteradoPor)}</td>
+                  <td style="padding:6px 4px;">${escapeHTML(h.usuarioAlvo)}</td>
+                  <td style="padding:6px 4px;">${escapeHTML(h.campo)}: ${escapeHTML(String(h.de))} → ${escapeHTML(String(h.para))}${h.motivo?' ('+escapeHTML(h.motivo)+')':''}</td>
                 </tr>`).join('')}
             </tbody>
           </table>
@@ -32283,14 +32671,28 @@ function attachViewHandlers(){
     if((state.usuariosPermissao||[]).some(u=>u.email===email)){ showToast('Esse e-mail já está cadastrado — remova antes de adicionar de novo com outro papel.'); return; }
     const limite = numBR(document.getElementById('permLimite').value);
     const antesSync = [...(state.usuariosPermissao||[])];
-    state.usuariosPermissao.push({ email, papel: document.getElementById('permPapel').value, limiteAprovacao: limite>0?limite:null });
+    state.usuariosPermissao.push({
+      email, papel: document.getElementById('permPapel').value, limiteAprovacao: limite>0?limite:null,
+      nome: document.getElementById('permNome').value.trim(), departamento: document.getElementById('permDepartamento').value.trim(),
+      status:'ativo', telasBloqueadas:[], telasLiberadas:[], acoesExtras:[], acoesRemovidas:[],
+      criadoEm: new Date().toISOString(), cadastradoPor: emailLogadoAtual()
+    });
+    registrarHistoricoPermissao({ usuarioAlvo: email, campo:'cadastro', de:null, para:document.getElementById('permPapel').value });
     persist(); render(); showToast('Usuário cadastrado.');
     sincronizarColecaoPermissoes(antesSync, state.usuariosPermissao);
   });
   document.querySelectorAll('[data-remover-permissao]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
+      const email = btn.dataset.removerPermissao;
+      const alvo = (state.usuariosPermissao||[]).find(u=>u.email===email);
+      if(alvo && alvo.papel==='admin' && totalAdminsAtivos(email)===0){
+        alert('Essa ação deixaria o sistema sem administrador. Cadastre outro admin antes de remover este.');
+        return;
+      }
+      if(!confirm(`Remover o acesso de ${email}?`)) return;
       const antesSync = [...(state.usuariosPermissao||[])];
-      state.usuariosPermissao = state.usuariosPermissao.filter(u=>u.email!==btn.dataset.removerPermissao);
+      state.usuariosPermissao = state.usuariosPermissao.filter(u=>u.email!==email);
+      registrarHistoricoPermissao({ usuarioAlvo: email, campo:'usuário removido', de: alvo?.papel, para:null });
       persist(); render(); showToast('Removido.');
       sincronizarColecaoPermissoes(antesSync, state.usuariosPermissao);
     });
@@ -32303,6 +32705,11 @@ function attachViewHandlers(){
       else state.telasProtegidas = state.telasProtegidas.filter(v=>v!==view);
       persist();
     });
+  });
+  document.getElementById('permBusca')?.addEventListener('input', e=>{ __permissoesFiltro.busca = e.target.value; render(); });
+  document.getElementById('permFiltroStatus')?.addEventListener('change', e=>{ __permissoesFiltro.status = e.target.value; render(); });
+  document.querySelectorAll('[data-gerenciar-usuario]').forEach(btn=>{
+    btn.addEventListener('click', ()=> abrirModalGerenciarUsuario(btn.dataset.gerenciarUsuario));
   });
 
   document.querySelectorAll('[data-ver-lancamento]').forEach(btn=>{
@@ -41933,6 +42340,17 @@ auth.onAuthStateChanged(async user=>{
     try{
       state = await carregarDados();
       dadosCarregados = true;
+      // Bloqueio/suspensão precisa impedir o uso de verdade, não só esconder botão — se o
+      // e-mail logado está cadastrado com status bloqueado (ou suspenso dentro do período), a
+      // sessão é encerrada aqui, antes de qualquer dado aparecer na tela.
+      const uAtual = (state.usuariosPermissao||[]).find(x=>x.email===(auth.currentUser?.email));
+      if(uAtual && statusEfetivoUsuario(uAtual)!=='ativo'){
+        const motivo = statusEfetivoUsuario(uAtual)==='bloqueado' ? 'Seu acesso foi bloqueado pelo administrador.' : 'Seu acesso está suspenso temporariamente.';
+        dadosCarregados = false;
+        await auth.signOut();
+        alert(motivo);
+        return;
+      }
       registrarAcessoSistema();
       aplicarTemaCor(state.temaCor);
       aplicarModoEscuro(state.modoEscuro);
