@@ -1217,6 +1217,7 @@ function aplicarMigracoes(s){
     if(u.cadastradoPor===undefined) u.cadastradoPor = null;
     if(u.supervisor===undefined) u.supervisor = false; // pode liberar telas protegidas sem precisar ser admin
   });
+  if(!s.resultadosInvestimento) s.resultadosInvestimento = []; // [{id, ticker, contaId, subContaId, data, quantidade, precoVenda, valorBruto, custoMedioAplicado, custoAtribuido, resultadoBruto, numeroNota, notaId}] — resultado realizado POR VENDA, nunca por nota inteira
   if(!s.telasProtegidas) s.telasProtegidas = []; // views que exigem senha de admin pra abrir, mesmo pra quem já está logado
   if(!s.telasProtegidasNivel) s.telasProtegidasNivel = {}; // { view: 'qualquer'|'admin'|'supervisor' } — quem pode liberar cada tela; vazio = qualquer admin ou supervisor
   if(!s.desbloqueiosTelaHistorico) s.desbloqueiosTelaHistorico = []; // [{ view, usuarioSolicitante, liberadoPor, data }] — log de cada liberação de tela protegida
@@ -11127,6 +11128,28 @@ function viewInvestimentos(){
         ${piores.length ? piores.map(a=>`<div style="display:flex;justify-content:space-between;padding:5px 0;"><span>${escapeHTML(a.nome)}</span><span class="mono" style="color:${a.pct<0?'var(--danger)':'var(--success)'};font-weight:600;">${a.pct>=0?'+':''}${a.pct.toFixed(1)}%</span></div>`).join('') : '<div class="empty">Sem dados suficientes.</div>'}
       </div></div>
     </div>` : ''}
+
+    ${(() => {
+      const porTicker = {};
+      (state.resultadosInvestimento||[]).forEach(r=>{
+        if(!porTicker[r.ticker]) porTicker[r.ticker] = { qtd:0, resultado:0, vendas:0 };
+        porTicker[r.ticker].qtd += r.quantidade;
+        porTicker[r.ticker].resultado += r.resultadoBruto;
+        porTicker[r.ticker].vendas += r.valorBruto;
+      });
+      const linhas = Object.entries(porTicker).sort((a,b)=>b[1].resultado-a[1].resultado);
+      if(!linhas.length) return '';
+      return `
+    <div class="dash-section-label">📈 Resultado realizado por ativo — vendas já feitas</div>
+    <div class="panel"><div class="panel-body" style="padding:6px 18px;">
+      <p class="sub" style="margin:6px 0 10px;">Calculado por venda (não pela nota inteira) — usa o preço médio de cada ativo no momento da venda. Não inclui rendimentos de FIIs nem valorização da posição que ainda está na carteira.</p>
+      ${linhas.map(([ticker,r])=>`
+        <div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--line);">
+          <span>${escapeHTML(ticker)} <span class="sub" style="font-size:11px;">(${r.qtd} negociadas · ${brl(r.vendas)} em vendas)</span></span>
+          <span class="mono" style="font-weight:600;color:${r.resultado<0?'var(--danger)':'var(--success)'};">${r.resultado>=0?'+':''}${brl(r.resultado)}</span>
+        </div>`).join('')}
+    </div></div>`;
+    })()}
     ${contasComCotacaoAtrasada.length ? `<div class="note" style="border-color:var(--warn);">⚠️ ${contasComCotacaoAtrasada.map(c=>`${escapeHTML(c.nome)} (${c.qtd} ativo(s))`).join(', ')} com posição pendente de atualização há mais de 7 dias — clique em "Atualizar posições".</div>` : ''}
     ${notasAntigas.length ? `<div class="note" style="border-color:var(--warn);">⚠️ ${notasAntigas.length} nota(s) de corretagem parada(s) há mais de 15 dias sem revisar — role a lista abaixo pra dar uma olhada.</div>` : ''}
     ${(()=>{ const orfaos = ativosOrfaosInvestimento(); return orfaos.length ? `
@@ -39804,6 +39827,46 @@ async function publicarNotaCorretagem(nota){
       let ativo = state.ativosInvestimento.find(a=>a.contaId===contaInv.id && a.ticker===l.ticker && !a.manual && a.subContaId===l.subContaId);
       if(!ativo) ativo = state.ativosInvestimento.find(a=>a.ticker===l.ticker && !a.manual);
       if(ativo){
+        // Resultado realizado da VENDA — calculado por OPERAÇÃO, nunca por nota inteira. O custo
+        // médio usado é o que a posição já tinha ANTES desta venda (não muda com o lucro/prejuízo
+        // realizado) — e a posição remanescente continua com o mesmo preço médio de sempre.
+        const custoMedioAplicado = ativo.precoMedio || 0;
+        const custoAtribuido = Math.round(l.quantidade*custoMedioAplicado*100)/100;
+        const valorBruto = Math.round(l.quantidade*l.preco*100)/100;
+        // Taxas atribuídas à venda: só calculamos quando a nota é só de vendas (sem compra junto),
+        // pra não correr o risco de contar a mesma taxa duas vezes — numa nota mista (compra +
+        // venda), a taxa já é toda atribuída do lado da compra pela fórmula existente.
+        const taxaAtribuidaVenda = (totalCompras===0 && totalVendas>0) ? Math.round((l.quantidade*l.preco/totalVendas)*taxasTotal*100)/100 : 0;
+        const resultadoBruto = Math.round((valorBruto - custoAtribuido - taxaAtribuidaVenda)*100)/100;
+        const resultadoId = uid();
+        state.resultadosInvestimento.push({
+          id: resultadoId, ticker: l.ticker, contaId: contaInv.id, subContaId: l.subContaId,
+          data: dataPregao, quantidade: l.quantidade, precoVenda: l.preco,
+          valorBruto, custoMedioAplicado, custoAtribuido, taxaAtribuida: taxaAtribuidaVenda,
+          resultadoBruto, numeroNota: (nota.numeroNota||'').trim()||null, notaId: nota.id||null,
+          criadoEm: new Date().toISOString()
+        });
+        // REGRA 46 — o resultado da venda vira Ganho/Perda de Capital NA HORA, automaticamente,
+        // sem esperar lançamento manual depois. IMPORTANTE: contaId fica NULO de propósito — o
+        // dinheiro que efetivamente entrou na conta já foi lançado à parte (linha "Venda de
+        // ativos", com o valor CHEIO da venda); se este lançamento também tivesse contaId, o banco
+        // contaria a diferença duas vezes. Sem contaId, ele nunca é somado ao saldo de nenhuma
+        // conta (ver saldoConta()), mas continua entrando normalmente no DRE e nos relatórios por
+        // categoria, que não exigem contaId — exatamente o "resultado gerencial, não caixa" pedido.
+        if(Math.abs(resultadoBruto)>0.004){
+          state.lancamentos.push({
+            id: uid(), tipo: resultadoBruto>0?'entrada':'saida',
+            categoria: resultadoBruto>0?'Rendimentos':'Despesas Financeiras',
+            descricao: `${resultadoBruto>0?'Ganho':'Perda'} de capital — venda de ${l.quantidade} ${l.ticker}${(nota.numeroNota||'').trim() ? ' — Nota N° '+(nota.numeroNota||'').trim() : ''}`,
+            valor: Math.round(Math.abs(resultadoBruto)*100)/100, contaId: null,
+            dataVencimento: dataPregao, status: resultadoBruto>0?'recebido':'pago', dataPagamento: dataPregao,
+            origem:'investimento', resultadoInvestimentoId: resultadoId, ticker: l.ticker,
+            quantidade: l.quantidade, numeroNota: (nota.numeroNota||'').trim()||null, notaId: nota.id||null,
+            contaReferenciaId: contaBancariaId,
+            observacao: `Custo da posição vendida: ${brl(custoAtribuido)} · Valor da venda: ${brl(valorBruto)}${taxaAtribuidaVenda?' · Taxas: '+brl(taxaAtribuidaVenda):''}`,
+            criadoEm: new Date().toISOString()
+          });
+        }
         ativo.quantidade = Math.max(0, (ativo.quantidade||0) - l.quantidade);
       }
     }
