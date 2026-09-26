@@ -1103,6 +1103,10 @@ const db = firebase.firestore();
 db.settings({ experimentalAutoDetectLongPolling: true });
 const DOC_REF = db.collection('livro-caixa').doc('dados');
 const COL_PERMISSOES = db.collection('permissoes');
+// FASE 1 da migração "fatiar Firestore": lancamentos deixam de morar dentro do documento único
+// e passam a ser documentos individuais nesta coleção. O documento único (DOC_REF) continua
+// guardando todo o resto do state normalmente — só lancamentos sai de lá.
+const COL_LANCAMENTOS = db.collection('livro-caixa-lancamentos');
 // CORREÇÃO DE SEGURANÇA (auditoria): mantém uma coleção separada e pequena "permissoes/{email}"
 // espelhando quem é admin/operador/visualizacao — é o que dá pra checar de verdade numa Firestore
 // Rule (vasculhar um array de objetos dentro do documento único não é confiável em Rules). Chame
@@ -1340,11 +1344,119 @@ function aplicarMigracoes(s){
   }
   return s;
 }
+// ---- Rastreamento automático de alterações em state.lancamentos (FASE 1 da migração) ----
+// state.lancamentos continua se comportando como um array normal pra TODO o resto do código
+// (os ~489 lugares que fazem .filter/.find/.map/.push/edição direta de propriedade não mudam
+// em nada). O Proxy só observa por baixo: toda vez que um item é criado, editado ou removido,
+// ele anota o id numa lista "suja". No save, em vez de escrever o state inteiro (que é o que
+// causava o documento crescer sem parar), escrevemos só os lançamentos sujos na coleção
+// COL_LANCAMENTOS e apagamos os removidos — o resto do state continua indo pro DOC_REF único.
+let lancamentosSujos = new Set();   // ids criados/alterados desde o último save
+let lancamentosRemovidos = new Set(); // ids apagados desde o último save, precisam de .delete()
+
+function marcarLancamentoSujo(id){
+  if(id===undefined || id===null) return;
+  lancamentosSujos.add(id);
+  lancamentosRemovidos.delete(id);
+}
+function marcarLancamentoRemovido(id){
+  if(id===undefined || id===null) return;
+  lancamentosRemovidos.add(id);
+  lancamentosSujos.delete(id);
+}
+
+function criarProxyLancamento(obj){
+  if(!obj || typeof obj!=='object') return obj;
+  return new Proxy(obj, {
+    set(target, prop, value){
+      target[prop] = value;
+      marcarLancamentoSujo(target.id);
+      return true;
+    },
+    deleteProperty(target, prop){
+      delete target[prop];
+      marcarLancamentoSujo(target.id);
+      return true;
+    }
+  });
+}
+
+function criarProxyArrayLancamentos(arr){
+  const lista = (arr||[]).map(criarProxyLancamento);
+  return new Proxy(lista, {
+    set(target, prop, value){
+      if(prop!=='length' && !isNaN(Number(prop))){
+        // novo item entrando no array (push, atribuição por índice, etc.) — vira Proxy também
+        value = criarProxyLancamento(value);
+        if(value && value.id) marcarLancamentoSujo(value.id);
+      }
+      target[prop] = value;
+      return true;
+    },
+    deleteProperty(target, prop){
+      const item = target[prop];
+      if(item && item.id) marcarLancamentoRemovido(item.id);
+      delete target[prop];
+      return true;
+    }
+  });
+}
+
+// splice precisa de atenção especial: é como a maioria dos "remover lançamento" do sistema
+// funciona (array.splice(index,1)), e o Proxy acima sozinho não pega os itens removidos por
+// splice porque ele reindexa o array inteiro internamente. Interceptamos aqui na origem.
+function instalarInterceptorSplice(arr){
+  const spliceOriginal = Array.prototype.splice;
+  Object.defineProperty(arr, 'splice', {
+    value: function(start, deleteCount, ...items){
+      const removidos = spliceOriginal.call(this, start, deleteCount);
+      removidos.forEach(item=>{ if(item && item.id) marcarLancamentoRemovido(item.id); });
+      const novosProxies = items.map(criarProxyLancamento);
+      if(novosProxies.length){
+        spliceOriginal.call(this, start, 0, ...novosProxies);
+      }
+      novosProxies.forEach(item=>{ if(item && item.id) marcarLancamentoSujo(item.id); });
+      return removidos;
+    },
+    writable: true, configurable: true
+  });
+  return arr;
+}
+
+function instrumentarLancamentos(state){
+  const arrInterno = instalarInterceptorSplice(criarProxyArrayLancamentos(state.lancamentos));
+  state.lancamentos = new Proxy(arrInterno, {
+    set(target, prop, value){
+      if(prop!=='length' && !isNaN(Number(prop))){
+        value = criarProxyLancamento(value);
+        if(value && value.id) marcarLancamentoSujo(value.id);
+      }
+      target[prop] = value;
+      return true;
+    },
+    deleteProperty(target, prop){
+      const item = target[prop];
+      if(item && item.id) marcarLancamentoRemovido(item.id);
+      delete target[prop];
+      return true;
+    }
+  });
+  return state;
+}
+
 async function carregarDados(){
   const doc = await DOC_REF.get();
-  return aplicarMigracoes(doc.exists ? doc.data() : null);
+  const base = aplicarMigracoes(doc.exists ? doc.data() : null);
+  // Carrega lancamentos da coleção nova, se ela já tiver dados migrados; senão usa o que veio
+  // dentro do documento único (compatibilidade durante a transição, antes de rodar a migração).
+  const snapLanc = await COL_LANCAMENTOS.limit(1).get().catch(()=>null);
+  if(snapLanc && !snapLanc.empty){
+    const snapCompleto = await COL_LANCAMENTOS.get();
+    base.lancamentos = snapCompleto.docs.map(d=>({ id: d.id, ...d.data() }));
+  }
+  return instrumentarLancamentos(base);
 }
-let state = aplicarMigracoes(null);
+let state = instrumentarLancamentos(aplicarMigracoes(null));
 let saveTimeout = null;
 let estrategiaFiltro = { area:'', status:'', prioridade:'', responsavel:'', busca:'' }; // filtros da Central de Estratégia — não persiste, só UI
 let chequesAbaAtual = 'visao'; // aba ativa da Central de Cheques — não persiste, só UI
@@ -1384,10 +1496,33 @@ function limparUndefined(obj){
 }
 let salvamentoEmAndamento = false;
 function salvarStateNoFirestore(){
-  const campoRuim = encontrarCampoUndefined(state, '');
+  // state.resto = tudo MENOS lancamentos, que agora vive na coleção COL_LANCAMENTOS.
+  const { lancamentos, ...resto } = state;
+  const campoRuim = encontrarCampoUndefined(resto, '');
   if(campoRuim) console.warn('Campo com valor undefined encontrado em state (removido antes de salvar):', campoRuim);
+
+  const idsSujos = Array.from(lancamentosSujos);
+  const idsRemovidos = Array.from(lancamentosRemovidos);
+  lancamentosSujos = new Set();
+  lancamentosRemovidos = new Set();
+
+  const batch = db.batch();
+  idsSujos.forEach(id=>{
+    const item = (state.lancamentos||[]).find(l=>l.id===id);
+    if(item) batch.set(COL_LANCAMENTOS.doc(id), limparUndefined(item));
+  });
+  idsRemovidos.forEach(id=> batch.delete(COL_LANCAMENTOS.doc(id)));
+
   salvamentoEmAndamento = true;
-  return DOC_REF.set(limparUndefined(state)).finally(()=>{ salvamentoEmAndamento = false; });
+  return Promise.all([
+    DOC_REF.set(limparUndefined(resto)),
+    (idsSujos.length || idsRemovidos.length) ? batch.commit() : Promise.resolve()
+  ]).catch(e=>{
+    // Falhou no meio do caminho — devolve os ids pra fila pra não perder a alteração no próximo save.
+    idsSujos.forEach(id=>lancamentosSujos.add(id));
+    idsRemovidos.forEach(id=>lancamentosRemovidos.add(id));
+    throw e;
+  }).finally(()=>{ salvamentoEmAndamento = false; });
 }
 function persist(){
   __limparCacheRender();
