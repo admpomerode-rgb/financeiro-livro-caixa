@@ -25849,13 +25849,22 @@ function renderComissaoResultado(){
   `;
 }
 
-// Categorias disponíveis pra classificar cada bonificação/incentivo de comissão — usa as mesmas
-// categorias de despesa já cadastradas no sistema, com "Comissões" pré-selecionada quando existir
-// (era o valor fixo usado antes; agora só continua sendo o padrão, não mais obrigatório).
+// Categorias (e subcategorias) disponíveis pra classificar cada bonificação/incentivo de
+// comissão — usa as mesmas categorias de despesa já cadastradas no sistema, com "Comissões"
+// pré-selecionada quando existir (era o valor fixo usado antes; agora só continua sendo o
+// padrão, não mais obrigatório). O value guarda "Categoria" ou "Categoria > Subcategoria".
 function categoriasComissaoOptionsHTML(){
-  const cats = (state.categorias?.saida||[]).map(c=>c.nome);
-  const lista = cats.length ? cats : ['Comissões'];
-  return lista.map(nome=>`<option value="${escapeHTML(nome)}" ${nome==='Comissões'?'selected':''}>${escapeHTML(nome)}</option>`).join('');
+  const cats = state.categorias?.saida||[];
+  if(!cats.length) return `<option value="Comissões" selected>Comissões</option>`;
+  return cats.map(c=>{
+    const subs = c.subcategorias||[];
+    if(!subs.length){
+      return `<option value="${escapeHTML(c.nome)}" ${c.nome==='Comissões'?'selected':''}>${escapeHTML(c.nome)}</option>`;
+    }
+    const opcaoBase = `<option value="${escapeHTML(c.nome)}" ${c.nome==='Comissões'?'selected':''}>${escapeHTML(c.nome)} (geral)</option>`;
+    const opcoesSub = subs.map(s=>`<option value="${escapeHTML(c.nome)} > ${escapeHTML(s.nome)}">↳ ${escapeHTML(s.nome)}</option>`).join('');
+    return `<optgroup label="${escapeHTML(c.nome)}">${opcaoBase}${opcoesSub}</optgroup>`;
+  }).join('');
 }
 function renderComissaoPendenteVendedor(vendedorId, dataDe, dataAte){
   const vendedor = state.vendedores.find(v=>v.id===vendedorId);
