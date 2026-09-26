@@ -1457,6 +1457,35 @@ async function carregarDados(){
   return instrumentarLancamentos(base);
 }
 let state = instrumentarLancamentos(aplicarMigracoes(null));
+
+// ---- Migração única "fatiar lancamentos" — rodar pelo console do navegador (F12 ou menu do
+// celular > "Adicionar ao console"), UMA VEZ, já dentro do app aberto (reaproveita a conexão
+// já estabelecida, sem precisar carregar o Firebase de novo numa página separada). Digite
+// migrarLancamentosParaColecao() e aperte Enter. Seguro de rodar mais de uma vez.
+window.migrarLancamentosParaColecao = async function(){
+  console.log('Lendo documento único...');
+  const doc = await DOC_REF.get();
+  if(!doc.exists){ console.error('Documento não encontrado.'); return; }
+  const lancamentos = doc.data().lancamentos || [];
+  console.log(`Encontrados ${lancamentos.length} lançamentos.`);
+  if(lancamentos.length===0){ console.log('Nada pra migrar.'); return; }
+  let escritos = 0, semId = 0;
+  const LOTE = 400;
+  for(let i=0;i<lancamentos.length;i+=LOTE){
+    const fatia = lancamentos.slice(i, i+LOTE);
+    const batch = db.batch();
+    fatia.forEach(l=>{
+      if(!l.id){ semId++; return; }
+      batch.set(COL_LANCAMENTOS.doc(l.id), limparUndefined(l));
+      escritos++;
+    });
+    await batch.commit();
+    console.log(`Lote ${Math.floor(i/LOTE)+1}: total até agora ${escritos}`);
+  }
+  console.log(`✔ Migração concluída: ${escritos} lançamentos escritos.`);
+  if(semId) console.warn(`⚠ ${semId} lançamento(s) sem "id" foram ignorados.`);
+  console.log('Recarregue a página (F5) pra ver os lançamentos vindo da coleção nova.');
+};
 let saveTimeout = null;
 let estrategiaFiltro = { area:'', status:'', prioridade:'', responsavel:'', busca:'' }; // filtros da Central de Estratégia — não persiste, só UI
 let chequesAbaAtual = 'visao'; // aba ativa da Central de Cheques — não persiste, só UI
