@@ -851,6 +851,7 @@
         <div class="nav-item" data-view="central-decisao" title="Central de Decisão"><span class="nav-dot"></span><span class="nav-abbr">CD</span><span class="nav-label">Central de Decisão</span></div>
         <div class="nav-item" data-view="capex" title="Central de CAPEX"><span class="nav-dot"></span><span class="nav-abbr">CX</span><span class="nav-label">Central de CAPEX</span></div>
         <div class="nav-item" data-view="estrategia" title="Central de Estratégia"><span class="nav-dot"></span><span class="nav-abbr">ES</span><span class="nav-label">Central de Estratégia</span></div>
+        <div class="nav-item" data-view="cheques" title="Central de Cheques"><span class="nav-dot"></span><span class="nav-abbr">CQ</span><span class="nav-label">Central de Cheques</span></div>
         <div class="nav-item" data-view="pendencias" title="Central de Pendências"><span class="nav-dot"></span><span class="nav-abbr">PD</span><span class="nav-label">Central de Pendências</span></div>
         <div class="nav-item" data-view="navegacao-objetivo" title="O Que Você Quer Fazer?"><span class="nav-dot"></span><span class="nav-abbr">OB</span><span class="nav-label">O Que Você Quer Fazer?</span></div>
         <div class="nav-item" data-view="simulacao" title="Simulações"><span class="nav-dot"></span><span class="nav-abbr">SE</span><span class="nav-label">Simulações</span></div>
@@ -1194,6 +1195,14 @@ function aplicarMigracoes(s){
   if(!s.estrategiaRiscos) s.estrategiaRiscos = []; // [{ id, titulo, descricao, objetivoId, pilarId, probabilidade, impacto, responsavel, planoAcao, prazo, status }] — FASE 2
   if(!s.estrategiaVisao) s.estrategiaVisao = { visao:'', missao:'', proposito:'', periodo:'' }; // FASE 3
   if(!s.estrategiaHistorico) s.estrategiaHistorico = []; // [{ id, data, alvoTipo:'iniciativa'|'objetivo', alvoId, alvoTitulo, campo, de, para }] — log de mudanças, FASE 4
+
+  // Central de Administração de Cheques — cheque é instrumento de pagamento, NUNCA cria receita/
+  // despesa nova: só referencia (lancamentoId) um lançamento que já existe. bancoId/contaDepositoId
+  // referenciam state.contas (contas bancárias já cadastradas); fornecedorId referencia
+  // state.fornecedores; cliente fica como texto livre (clienteNome), igual já é feito nos
+  // lançamentos — não existe cadastro formal de clientes dentro do Livro Caixa.
+  if(!s.cheques) s.cheques = []; // [{ id, tipo:'recebido'|'emitido', numero, bancoEmissor(recebido, texto livre)|contaId(emitido, ref state.contas), agencia, contaNumero, valor, dataEmissao, dataBomPara, dataDeposito, dataCompensacao, titular, cpfCnpj, clienteNome, fornecedorId, lancamentoId, contaDepositoId, status, observacao, criadoEm, criadoPor, atualizadoEm, atualizadoPor }]
+  if(!s.chequesMovimentacoes) s.chequesMovimentacoes = []; // [{ id, chequeId, tipo, data, usuario, observacao, statusAnterior, statusNovo, criadoEm }] — histórico, nunca apagado
   if(!s.estrategiaDiario) s.estrategiaDiario = []; // [{ id, pilarId, data, texto }] — diário de bordo por pilar
   if(!s.contas) s.contas = [];
   // Migração: garante uma conta padrão e associa lançamentos antigos sem conta
@@ -1338,6 +1347,8 @@ async function carregarDados(){
 let state = aplicarMigracoes(null);
 let saveTimeout = null;
 let estrategiaFiltro = { area:'', status:'', prioridade:'', responsavel:'', busca:'' }; // filtros da Central de Estratégia — não persiste, só UI
+let chequesAbaAtual = 'visao'; // aba ativa da Central de Cheques — não persiste, só UI
+let chequesFiltro = { busca:'' };
 /* Cache de curta duração pra funções pesadas (movimentosRealizados, dadosMesGerencial,
    calcularHealthScoreEm) que varrem TODOS os lançamentos e são chamadas repetidas vezes com
    os mesmos parâmetros dentro do mesmo carregamento de tela (ex: o Dashboard chama a mesma
@@ -2184,6 +2195,7 @@ function moreItensDef(){
     { view:'busca-global', icone:'🔍', nome:'Busca Global', grupo:'Análise' },
     { view:'central-decisao', icone:'🧭', nome:'Central de Decisão', grupo:'Análise' },
     { view:'estrategia', icone:'♟️', nome:'Central de Estratégia', grupo:'Análise' },
+    { view:'cheques', icone:'🧾', nome:'Central de Cheques', grupo:'Operacional' },
     { view:'veiculos', icone:'🚗', nome:'Carros', grupo:'Operacional' },
     { view:'capex', icone:'🏗️', nome:'Central de CAPEX', grupo:'Operacional' },
     { view:'retiradas', icone:'💸', nome:'Central de Retiradas', grupo:'Operacional' },
@@ -2380,6 +2392,7 @@ function render(){
   else if(currentView==='veiculos-visao-geral') main.innerHTML = viewVeiculosVisaoGeral();
   else if(currentView==='capex') main.innerHTML = viewCapex();
   else if(currentView==='estrategia') main.innerHTML = viewCentralEstrategia();
+  else if(currentView==='cheques') main.innerHTML = viewCentralCheques();
   else if(currentView==='relatorios-investimentos') main.innerHTML = viewRelatoriosInvestimentos();
   else if(currentView==='relatorios-capex') main.innerHTML = viewRelatoriosCapex();
   else if(currentView==='retiradas') main.innerHTML = viewRetiradas();
@@ -21132,6 +21145,493 @@ function abrirDiarioPilarModal(pilarId){
   });
 }
 
+// ---- Central de Administração de Cheques ----
+// Cheque é instrumento de pagamento/controle — NUNCA cria lançamento novo. Só referencia
+// (lancamentoId) um lançamento que já existe, ou fica solto (sem lançamento vinculado ainda).
+const CHEQUE_STATUS_LABEL = {
+  recebido:'🟡 Recebido', carteira:'🔵 Em carteira', depositado:'🏦 Depositado', a_compensar:'⏳ A compensar',
+  compensado:'🟢 Compensado', devolvido:'🔴 Devolvido', reapresentado:'🟠 Reapresentado', cancelado:'⚫ Cancelado',
+  sustado:'⚠️ Sustado', extraviado:'🔴 Extraviado',
+  emitido:'🟡 Emitido', entregue:'📤 Entregue', apresentado:'🏦 Apresentado',
+};
+const CHEQUE_TRANSICOES_VALIDAS = {
+  recebido:['carteira','cancelado','sustado','extraviado'],
+  carteira:['depositado','cancelado','sustado','extraviado'],
+  depositado:['a_compensar','devolvido','cancelado','sustado','extraviado'],
+  a_compensar:['compensado','devolvido','cancelado','sustado','extraviado'],
+  devolvido:['reapresentado','cancelado'],
+  reapresentado:['a_compensar','cancelado'],
+  emitido:['entregue','cancelado','sustado','extraviado'],
+  entregue:['apresentado','cancelado','sustado','extraviado'],
+  apresentado:['a_compensar','devolvido','cancelado','sustado','extraviado'],
+  compensado:[], cancelado:[], extraviado:[],
+  sustado:['carteira','a_compensar','cancelado'],
+};
+function chequeTransicaoEhNormal(de, para){ return de===para || (CHEQUE_TRANSICOES_VALIDAS[de]||[]).includes(para); }
+function chequeEhStatusTerminal(status){ return ['compensado','cancelado','extraviado'].includes(status); }
+
+function registrarMovimentacaoCheque(chequeId, tipo, statusAnterior, statusNovo, observacao){
+  state.chequesMovimentacoes.push({
+    id: uid(), chequeId, tipo, data: todayISO(), usuario: emailLogadoAtual()||'—',
+    observacao: observacao||'', statusAnterior: statusAnterior||null, statusNovo: statusNovo||null, criadoEm: todayISO()
+  });
+}
+
+// Duplicidade robusta: mesmo tipo + número + valor + (banco emissor OU conta emissora) já cadastrado.
+// Nunca bloqueia sozinho — só avisa, quem decide é o usuário (regra explícita do documento).
+function chequeSuspeitaDuplicidade(dados, idIgnorar){
+  return (state.cheques||[]).some(c=>{
+    if(c.id===idIgnorar) return false;
+    if(c.tipo!==dados.tipo) return false;
+    if(String(c.numero||'').trim()!==String(dados.numero||'').trim()) return false;
+    if(Number(c.valor)!==Number(dados.valor)) return false;
+    const bancoC = dados.tipo==='recebido' ? c.bancoEmissor : c.contaId;
+    const bancoN = dados.tipo==='recebido' ? dados.bancoEmissor : dados.contaId;
+    return (bancoC||'')===(bancoN||'');
+  });
+}
+
+function calcularCardsCheques(){
+  const cheques = state.cheques||[];
+  const somaOnde = (fn)=>cheques.filter(fn).reduce((s,c)=>s+(Number(c.valor)||0),0);
+  const mesAtual = todayISO().slice(0,7);
+  return {
+    aReceber: somaOnde(c=>c.tipo==='recebido' && !['compensado','cancelado','extraviado','devolvido'].includes(c.status)),
+    emCarteira: somaOnde(c=>c.tipo==='recebido' && c.status==='carteira'),
+    aCompensar: somaOnde(c=>c.status==='a_compensar'),
+    compensadosPeriodo: somaOnde(c=>c.status==='compensado' && c.dataCompensacao && c.dataCompensacao.slice(0,7)===mesAtual),
+    devolvidos: somaOnde(c=>c.status==='devolvido'),
+    emitidos: somaOnde(c=>c.tipo==='emitido' && !['compensado','cancelado','extraviado'].includes(c.status)),
+    proximos7dias: somaOnde(c=>{ const d=estrategiaDiasRestantes(c.dataBomPara, chequeEhStatusTerminal(c.status)?'concluida':null); return d!==null && d>=0 && d<=7; }),
+    totalFuturo: somaOnde(c=>!chequeEhStatusTerminal(c.status)),
+  };
+}
+
+function calcularAlertasCheques(){
+  const itens = [];
+  (state.cheques||[]).forEach(c=>{
+    if(c.status==='devolvido') itens.push({ cor:'var(--danger)', titulo:`Cheque nº ${c.numero||'—'}`, detalhe:'Devolvido — precisa de ação', id:c.id });
+    if(!chequeEhStatusTerminal(c.status) && c.status!=='devolvido'){
+      const d = estrategiaDiasRestantes(c.dataBomPara, null);
+      if(d!==null && d<0) itens.push({ cor:'var(--danger)', titulo:`Cheque nº ${c.numero||'—'}`, detalhe:`Vencido há ${Math.abs(d)} dia${Math.abs(d)>1?'s':''} sem compensação`, id:c.id });
+      else if(d!==null && d<=3) itens.push({ cor:'var(--warn)', titulo:`Cheque nº ${c.numero||'—'}`, detalhe:`Vence em ${d} dia${d>1?'s':''}`, id:c.id });
+    }
+    if(!c.lancamentoId && !chequeEhStatusTerminal(c.status)) itens.push({ cor:'var(--warn)', titulo:`Cheque nº ${c.numero||'—'}`, detalhe:'Sem lançamento financeiro vinculado', id:c.id });
+  });
+  return itens;
+}
+
+// Indicadores só aparecem quando há dado suficiente pra calcular — nunca finge um número.
+function calcularIndicadoresCheques(){
+  const cheques = state.cheques||[];
+  const recebidos = cheques.filter(c=>c.tipo==='recebido');
+  const devolvidos = cheques.filter(c=>c.status==='devolvido' || (state.chequesMovimentacoes||[]).some(m=>m.chequeId===c.id && m.tipo==='devolver'));
+  const compensados = cheques.filter(c=>c.status==='compensado' && c.dataEmissao && c.dataCompensacao);
+  const prazoMedio = compensados.length ? Math.round(compensados.reduce((s,c)=>{
+    const d1 = new Date(c.dataEmissao+'T00:00:00'), d2 = new Date(c.dataCompensacao+'T00:00:00');
+    return s + Math.round((d2-d1)/86400000);
+  },0)/compensados.length) : null;
+  const valorMedio = cheques.length ? cheques.reduce((s,c)=>s+(Number(c.valor)||0),0)/cheques.length : null;
+  return {
+    taxaDevolucao: recebidos.length ? Math.round((devolvidos.filter(c=>c.tipo==='recebido').length/recebidos.length)*1000)/10 : null,
+    valorDevolvido: devolvidos.reduce((s,c)=>s+(Number(c.valor)||0),0),
+    qtdDevolvidos: devolvidos.length,
+    prazoMedioCompensacao: prazoMedio,
+    valorMedio,
+  };
+}
+
+function calcularConcentracaoCheques(campo){ // 'bancoEmissor' ou 'fornecedorId'/'clienteNome'
+  const cheques = state.cheques||[];
+  const grupos = {};
+  cheques.forEach(c=>{
+    let chave;
+    if(campo==='banco') chave = c.tipo==='recebido' ? (c.bancoEmissor||'—') : (((state.contas||[]).find(x=>x.id===c.contaId)||{}).nome||'—');
+    else chave = c.clienteNome || (((state.fornecedores||[]).find(f=>f.id===c.fornecedorId)||{}).nome) || '—';
+    if(!grupos[chave]) grupos[chave] = { qtd:0, valor:0 };
+    grupos[chave].qtd++; grupos[chave].valor += (Number(c.valor)||0);
+  });
+  return Object.entries(grupos).map(([nome,v])=>({ nome, ...v })).sort((a,b)=>b.valor-a.valor);
+}
+
+function calcularClientesComDevolucao(){
+  const cheques = state.cheques||[];
+  const porCliente = {};
+  cheques.filter(c=>c.tipo==='recebido' && (c.status==='devolvido' || (state.chequesMovimentacoes||[]).some(m=>m.chequeId===c.id && m.tipo==='devolver'))).forEach(c=>{
+    const nome = c.clienteNome || '(sem cliente)';
+    if(!porCliente[nome]) porCliente[nome] = { qtd:0, valor:0, ultima:null, statusAtual:[] };
+    porCliente[nome].qtd++; porCliente[nome].valor += (Number(c.valor)||0);
+    const movDevolucao = (state.chequesMovimentacoes||[]).filter(m=>m.chequeId===c.id && m.tipo==='devolver').sort((a,b)=>b.data.localeCompare(a.data))[0];
+    const dataDev = movDevolucao ? movDevolucao.data : c.atualizadoEm;
+    if(!porCliente[nome].ultima || dataDev>porCliente[nome].ultima) porCliente[nome].ultima = dataDev;
+    porCliente[nome].statusAtual.push(CHEQUE_STATUS_LABEL[c.status]||c.status);
+  });
+  return Object.entries(porCliente).map(([nome,v])=>({ nome, ...v })).sort((a,b)=>b.valor-a.valor);
+}
+
+function gerarResumoChequesPDF(){
+  if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
+  const docPdf = criarPDF();
+  const M = 20, PW = 210, W = PW - M*2;
+  const INK=[11,15,20], SOFT=[91,100,114], BLUEDEEP=[20,49,92], LINEC=[227,231,238], DANGER=[196,60,60];
+  let y = pdfCabecalho(docPdf, { relatorio: 'CENTRAL DE CHEQUES — RESUMO EXECUTIVO' });
+  const cards = calcularCardsCheques();
+  const ind = calcularIndicadoresCheques();
+  const fmtR = (v)=>'R$ '+(Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...SOFT);
+  const cols = [['A RECEBER',cards.aReceber],['EM CARTEIRA',cards.emCarteira],['A COMPENSAR',cards.aCompensar],['EMITIDOS',cards.emitidos]];
+  cols.forEach((c,i)=>docPdf.text(c[0], M+i*(W/4), y));
+  y += 7;
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(13); docPdf.setTextColor(...INK);
+  cols.forEach((c,i)=>docPdf.text(fmtR(c[1]), M+i*(W/4), y));
+  y += 12;
+  docPdf.setDrawColor(...LINEC); docPdf.setLineWidth(0.3); docPdf.line(M, y, M+W, y);
+  y += 9;
+
+  const secao = (titulo)=>{ y = pdfChecarQuebra(docPdf, y, 12); docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10.5); docPdf.setTextColor(...BLUEDEEP); docPdf.text(titulo, M, y); y += 7; };
+  const linha = (texto, cor)=>{ y = pdfChecarQuebra(docPdf, y, 6); docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...(cor||INK)); const q=docPdf.splitTextToSize('• '+texto, W); docPdf.text(q, M, y); y += q.length*4.6+1.5; };
+
+  secao('INDICADORES');
+  linha(`Taxa de devolução: ${ind.taxaDevolucao===null?'sem dados':ind.taxaDevolucao+'%'}`);
+  linha(`Prazo médio até compensação: ${ind.prazoMedioCompensacao===null?'sem dados':ind.prazoMedioCompensacao+' dias'}`);
+  linha(`Valor médio por cheque: ${ind.valorMedio===null?'sem dados':fmtR(ind.valorMedio)}`);
+  y += 4;
+
+  secao('CONCENTRAÇÃO POR BANCO (top 8)');
+  calcularConcentracaoCheques('banco').slice(0,8).forEach(b=>linha(`${b.nome} — ${b.qtd} cheque(s), ${fmtR(b.valor)}`));
+  y += 4;
+
+  const clientesDev = calcularClientesComDevolucao();
+  secao(`CLIENTES COM CHEQUES DEVOLVIDOS (${clientesDev.length})`);
+  if(clientesDev.length) clientesDev.forEach(c=>linha(`${c.nome} — ${c.qtd} cheque(s), ${fmtR(c.valor)}, última devolução ${c.ultima?c.ultima.split('-').reverse().join('/'):'—'}`, DANGER));
+  else linha('Nenhum cliente com cheque devolvido.');
+
+  pdfNumerarPaginas(docPdf);
+  docPdf.save(`resumo-cheques-${todayISO()}.pdf`);
+}
+
+
+function abrirNovoChequeModal(tipo, chequeId){
+  const cheque = chequeId ? (state.cheques||[]).find(c=>c.id===chequeId) : null;
+  tipo = cheque ? cheque.tipo : tipo;
+  const contas = state.contas||[];
+  const fornecedores = state.fornecedores||[];
+  const nomesClientes = [...new Set((state.lancamentos||[]).map(l=>l.clienteNome).filter(Boolean))];
+  const lancamentosDisponiveis = (state.lancamentos||[]).filter(l=>!cheque || l.id===cheque.lancamentoId || !(state.cheques||[]).some(c=>c.id!==cheque.id && c.lancamentoId===l.id));
+
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${cheque?'Editar':'Novo'} cheque ${tipo==='recebido'?'recebido':'emitido'}</h3>
+    <div class="field"><label>Número do cheque</label><input type="text" id="chNumero" value="${cheque?escapeHTML(cheque.numero||''):''}"></div>
+    <div class="field"><label>Valor</label><input type="number" step="0.01" id="chValor" value="${cheque?cheque.valor:''}"></div>
+    ${tipo==='recebido' ? `
+    <div class="field"><label>Banco emissor</label><input type="text" id="chBancoEmissor" placeholder="Banco do cliente" value="${cheque?escapeHTML(cheque.bancoEmissor||''):''}"></div>
+    <div class="field"><label>Agência (opcional)</label><input type="text" id="chAgencia" value="${cheque?escapeHTML(cheque.agencia||''):''}"></div>
+    <div class="field"><label>Conta (opcional)</label><input type="text" id="chContaNumero" value="${cheque?escapeHTML(cheque.contaNumero||''):''}"></div>
+    <div class="field"><label>Cliente (opcional)</label><input type="text" id="chCliente" list="chListaClientes" value="${cheque?escapeHTML(cheque.clienteNome||''):''}"><datalist id="chListaClientes">${nomesClientes.map(n=>`<option value="${escapeHTML(n)}">`).join('')}</datalist></div>
+    ` : `
+    <div class="field"><label>Conta emissora (nossa conta)</label><select id="chConta"><option value="">—</option>${contas.map(c=>`<option value="${c.id}" ${cheque&&cheque.contaId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+    <div class="field"><label>Fornecedor (opcional)</label><select id="chFornecedor"><option value="">—</option>${fornecedores.map(f=>`<option value="${f.id}" ${cheque&&cheque.fornecedorId===f.id?'selected':''}>${escapeHTML(f.nome)}</option>`).join('')}</select></div>
+    <div class="field"><label>Finalidade (opcional)</label><input type="text" id="chFinalidade" value="${cheque?escapeHTML(cheque.finalidade||''):''}"></div>
+    `}
+    <div class="field"><label>Titular (opcional)</label><input type="text" id="chTitular" value="${cheque?escapeHTML(cheque.titular||''):''}"></div>
+    <div class="field"><label>CPF/CNPJ (opcional)</label><input type="text" id="chCpfCnpj" value="${cheque?escapeHTML(cheque.cpfCnpj||''):''}"></div>
+    <div class="field"><label>Data de emissão</label><input type="date" id="chDataEmissao" value="${cheque&&cheque.dataEmissao?cheque.dataEmissao:todayISO()}"></div>
+    <div class="field"><label>Bom para (data de compensação prevista)</label><input type="date" id="chDataBomPara" value="${cheque&&cheque.dataBomPara?cheque.dataBomPara:''}"></div>
+    <div class="field"><label>Lançamento financeiro vinculado (opcional)</label><select id="chLancamento"><option value="">— Nenhum —</option>${lancamentosDisponiveis.map(l=>`<option value="${l.id}" ${cheque&&cheque.lancamentoId===l.id?'selected':''}>${l.dataVencimento||l.data||''} — ${escapeHTML(l.descricao||l.clienteNome||'sem descrição')} — R$ ${(l.valor||0).toLocaleString('pt-BR',{minimumFractionDigits:2})}</option>`).join('')}</select>
+      <div class="note" style="margin-top:4px;">O cheque só referencia o lançamento que já existe — não cria um lançamento novo.</div>
+    </div>
+    <div class="field"><label>Link do documento/comprovante (opcional)</label><input type="text" id="chDocumentoLink" placeholder="Ex: link do Google Drive com a foto do cheque" value="${cheque?escapeHTML(cheque.documentoLink||''):''}">
+      <div class="note" style="margin-top:4px;">Não guardamos o arquivo aqui dentro (o sistema tem um limite de espaço) — só o link de onde ele está guardado.</div>
+    </div>
+    <div class="field"><label>Observação (opcional)</label><textarea id="chObservacao" rows="2">${cheque?escapeHTML(cheque.observacao||''):''}</textarea></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarCheque" data-confirmado="0">Salvar</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnSalvarCheque').addEventListener('click', (e)=>{
+    if(e.target.disabled) return;
+    const numero = document.getElementById('chNumero').value.trim();
+    const valor = Number(document.getElementById('chValor').value);
+    if(!numero){ showToast('Informe o número do cheque'); return; }
+    if(!valor || valor<=0){ showToast('Informe um valor válido'); return; }
+    const dados = {
+      tipo, numero, valor,
+      bancoEmissor: tipo==='recebido' ? document.getElementById('chBancoEmissor').value.trim() : null,
+      agencia: tipo==='recebido' ? document.getElementById('chAgencia').value.trim() : null,
+      contaNumero: tipo==='recebido' ? document.getElementById('chContaNumero').value.trim() : null,
+      clienteNome: tipo==='recebido' ? document.getElementById('chCliente').value.trim() : null,
+      contaId: tipo==='emitido' ? (document.getElementById('chConta').value||null) : null,
+      fornecedorId: tipo==='emitido' ? (document.getElementById('chFornecedor').value||null) : null,
+      finalidade: tipo==='emitido' ? document.getElementById('chFinalidade').value.trim() : null,
+      titular: document.getElementById('chTitular').value.trim(),
+      cpfCnpj: document.getElementById('chCpfCnpj').value.trim(),
+      dataEmissao: document.getElementById('chDataEmissao').value || null,
+      dataBomPara: document.getElementById('chDataBomPara').value || null,
+      lancamentoId: document.getElementById('chLancamento').value || null,
+      observacao: document.getElementById('chObservacao').value.trim(),
+      documentoLink: document.getElementById('chDocumentoLink').value.trim(),
+    };
+    if(!cheque && e.target.dataset.confirmado==='0' && chequeSuspeitaDuplidicidadeSafe(dados)){
+      showToast('Já existe um cheque com características semelhantes — clique em Salvar de novo pra confirmar mesmo assim');
+      e.target.dataset.confirmado = '1';
+      return;
+    }
+    e.target.disabled = true; // evita duplo clique criar 2 cheques
+    if(cheque){
+      Object.assign(cheque, dados);
+      cheque.atualizadoEm = todayISO(); cheque.atualizadoPor = emailLogadoAtual()||'—';
+      registrarMovimentacaoCheque(cheque.id, 'edicao', cheque.status, cheque.status, 'Dados do cheque editados');
+    } else {
+      const novo = { id: uid(), ...dados, status: tipo==='recebido'?'recebido':'emitido', criadoEm: todayISO(), criadoPor: emailLogadoAtual()||'—', atualizadoEm: todayISO(), atualizadoPor: emailLogadoAtual()||'—' };
+      state.cheques.push(novo);
+      registrarMovimentacaoCheque(novo.id, 'criacao', null, novo.status, 'Cheque cadastrado');
+    }
+    persist(); closeModal(); render();
+  });
+}
+function chequeSuspeitaDuplidicidadeSafe(dados){ return chequeSuspeitaDuplicidade(dados, null); }
+
+const CHEQUE_ACAO_LABEL = { depositar:'Depositar', compensar:'Registrar compensação', devolver:'Registrar devolução', reapresentar:'Reapresentar', cancelar:'Cancelar', sustar:'Registrar sustação', extraviar:'Registrar extravio' };
+const CHEQUE_ACAO_STATUS_DESTINO = { depositar:'depositado', compensar:'compensado', devolver:'devolvido', reapresentar:'a_compensar', cancelar:'cancelado', sustar:'sustado', extraviar:'extraviado' };
+
+function abrirAcaoChequeModal(chequeId, acao){
+  const cheque = (state.cheques||[]).find(c=>c.id===chequeId);
+  if(!cheque) return;
+  const contas = state.contas||[];
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>${CHEQUE_ACAO_LABEL[acao]} — cheque nº ${escapeHTML(cheque.numero||'—')}</h3>
+    ${acao==='compensar' ? `<div class="field"><label>Conta onde compensou</label><select id="acaoConta"><option value="">—</option>${contas.map(c=>`<option value="${c.id}" ${cheque.contaDepositoId===c.id?'selected':''}>${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+      <div class="field"><label>Data da compensação</label><input type="date" id="acaoData" value="${todayISO()}"></div>` : ''}
+    ${acao==='depositar' ? `<div class="field"><label>Conta de depósito</label><select id="acaoConta"><option value="">—</option>${contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+      <div class="field"><label>Data do depósito</label><input type="date" id="acaoData" value="${todayISO()}"></div>` : ''}
+    ${acao==='devolver' ? `<div class="field"><label>Motivo</label><input type="text" id="acaoMotivo" placeholder="Ex: sem fundos"></div>
+      <div class="field"><label>Data</label><input type="date" id="acaoData" value="${todayISO()}"></div>` : ''}
+    ${acao==='reapresentar' ? `<div class="field"><label>Nova previsão de compensação</label><input type="date" id="acaoData" value=""></div>` : ''}
+    ${['cancelar','sustar','extraviar'].includes(acao) ? `<div class="field"><label>Motivo / justificativa</label><textarea id="acaoMotivo" rows="2"></textarea></div>` : ''}
+    <div class="field"><label>Observação (opcional)</label><textarea id="acaoObs" rows="2"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnConfirmarAcaoCheque">Confirmar</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnConfirmarAcaoCheque').addEventListener('click', (e)=>{
+    if(e.target.disabled) return; e.target.disabled = true;
+    const novoStatus = CHEQUE_ACAO_STATUS_DESTINO[acao];
+    const motivo = document.getElementById('acaoMotivo')?.value.trim() || '';
+    if(['cancelar','sustar','extraviar','devolver'].includes(acao) && !motivo){
+      showToast('Informe o motivo antes de confirmar'); e.target.disabled = false; return;
+    }
+    const ehNormal = chequeTransicaoEhNormal(cheque.status, novoStatus);
+    const obs = document.getElementById('acaoObs').value.trim();
+    if(!ehNormal && !motivo && !obs){
+      showToast('Essa mudança de status foge do fluxo normal — preencha o motivo/observação pra justificar');
+      e.target.disabled = false; return;
+    }
+    const statusAnterior = cheque.status;
+    cheque.status = novoStatus;
+    cheque.atualizadoEm = todayISO(); cheque.atualizadoPor = emailLogadoAtual()||'—';
+    if(acao==='depositar'){ cheque.dataDeposito = document.getElementById('acaoData').value||todayISO(); cheque.contaDepositoId = document.getElementById('acaoConta').value||null; cheque.status = 'a_compensar'; }
+    if(acao==='compensar'){ cheque.dataCompensacao = document.getElementById('acaoData').value||todayISO(); cheque.contaDepositoId = document.getElementById('acaoConta').value||cheque.contaDepositoId||null; }
+    if(acao==='reapresentar'){ cheque.dataBomPara = document.getElementById('acaoData').value||cheque.dataBomPara; }
+    registrarMovimentacaoCheque(cheque.id, acao, statusAnterior, cheque.status, [motivo, obs].filter(Boolean).join(' — '));
+    persist(); closeModal(); render();
+  });
+}
+
+function abrirDetalheChequeModal(chequeId){
+  const cheque = (state.cheques||[]).find(c=>c.id===chequeId);
+  if(!cheque) return;
+  const conta = cheque.contaId ? (state.contas||[]).find(c=>c.id===cheque.contaId) : null;
+  const contaDeposito = cheque.contaDepositoId ? (state.contas||[]).find(c=>c.id===cheque.contaDepositoId) : null;
+  const fornecedor = cheque.fornecedorId ? (state.fornecedores||[]).find(f=>f.id===cheque.fornecedorId) : null;
+  const lancamento = cheque.lancamentoId ? (state.lancamentos||[]).find(l=>l.id===cheque.lancamentoId) : null;
+  const movs = (state.chequesMovimentacoes||[]).filter(m=>m.chequeId===chequeId).sort((a,b)=>(a.criadoEm||'').localeCompare(b.criadoEm||''));
+  const acoesPossiveis = (CHEQUE_TRANSICOES_VALIDAS[cheque.status]||[]).filter(s=>Object.values(CHEQUE_ACAO_STATUS_DESTINO).includes(s));
+  const acaoPorStatusDestino = Object.fromEntries(Object.entries(CHEQUE_ACAO_STATUS_DESTINO).map(([a,s])=>[s,a]));
+
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>🧾 Cheque nº ${escapeHTML(cheque.numero||'—')}</h3>
+    <div style="font-size:13px;line-height:1.8;">
+      <div>Valor: <strong>R$ ${(cheque.valor||0).toLocaleString('pt-BR',{minimumFractionDigits:2})}</strong></div>
+      <div>Status: <strong>${CHEQUE_STATUS_LABEL[cheque.status]||cheque.status}</strong></div>
+      ${cheque.tipo==='recebido' ? `<div>Banco emissor: ${escapeHTML(cheque.bancoEmissor||'—')}</div><div>Cliente: ${escapeHTML(cheque.clienteNome||'—')}</div>` : `<div>Conta emissora: ${escapeHTML(conta?conta.nome:'—')}</div><div>Fornecedor: ${escapeHTML(fornecedor?fornecedor.nome:'—')}</div>`}
+      <div>Emissão: ${cheque.dataEmissao?cheque.dataEmissao.split('-').reverse().join('/'):'—'}</div>
+      <div>Bom para: ${cheque.dataBomPara?cheque.dataBomPara.split('-').reverse().join('/'):'—'}</div>
+      ${contaDeposito ? `<div>Conta de depósito/compensação: ${escapeHTML(contaDeposito.nome)}</div>` : ''}
+      <div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border);">Lançamento vinculado: ${lancamento ? `#${lancamento.id.slice(-6)} — ${escapeHTML(lancamento.descricao||'')}` : '<span style="color:var(--warn);">nenhum</span>'}</div>
+      ${lancamento ? `<div>Conciliado com o extrato bancário: ${lancamento.conciliado ? '✅ Sim' : '— Ainda não'}</div>` : ''}
+      ${cheque.documentoLink ? `<div>Documento: <a href="${escapeHTML(cheque.documentoLink)}" target="_blank" rel="noopener">abrir link</a></div>` : ''}
+      ${cheque.observacao ? `<div style="margin-top:4px;color:var(--text-soft);">${escapeHTML(cheque.observacao)}</div>` : ''}
+    </div>
+    <div style="margin-top:10px;">
+      <div style="font-weight:600;font-size:12px;">LINHA DO TEMPO</div>
+      ${movs.map(m=>`<div style="font-size:12px;padding:3px 0;">${m.data.split('-').reverse().join('/')} — ${CHEQUE_STATUS_LABEL[m.statusNovo]||m.tipo}${m.observacao?' — '+escapeHTML(m.observacao):''}</div>`).join('')}
+    </div>
+    <div class="modal-actions" style="flex-wrap:wrap;gap:6px;">
+      ${acoesPossiveis.map(s=>`<button class="btn ghost sm btnAcaoChequeDetalhe" data-acao="${acaoPorStatusDestino[s]}">${CHEQUE_ACAO_LABEL[acaoPorStatusDestino[s]]}</button>`).join('')}
+      ${!chequeEhStatusTerminal(cheque.status) ? `<button class="btn ghost sm btnAcaoChequeDetalhe" data-acao="cancelar">Cancelar</button><button class="btn ghost sm btnAcaoChequeDetalhe" data-acao="sustar">Sustar</button><button class="btn ghost sm btnAcaoChequeDetalhe" data-acao="extraviar">Extraviar</button>` : ''}
+      <button class="btn ghost sm" id="btnEditarChequeDetalhe">Editar</button>
+      <button class="btn ghost" id="btnCancelarModal">Fechar</button>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnEditarChequeDetalhe').addEventListener('click', ()=>abrirNovoChequeModal(cheque.tipo, cheque.id));
+  document.querySelectorAll('.btnAcaoChequeDetalhe').forEach(el=>el.addEventListener('click', ()=>abrirAcaoChequeModal(chequeId, el.dataset.acao)));
+}
+
+
+function viewCentralCheques(){
+  let cheques = state.cheques||[];
+  if(chequesFiltro.busca){
+    const q = chequesFiltro.busca.toLowerCase();
+    cheques = cheques.filter(c=>
+      String(c.numero||'').toLowerCase().includes(q) ||
+      (c.clienteNome||'').toLowerCase().includes(q) ||
+      (c.bancoEmissor||'').toLowerCase().includes(q) ||
+      String(c.valor||'').includes(q) ||
+      (state.fornecedores||[]).find(f=>f.id===c.fornecedorId && f.nome.toLowerCase().includes(q))
+    );
+  }
+  const cards = calcularCardsCheques();
+  const alertas = calcularAlertasCheques();
+  const aba = chequesAbaAtual;
+
+  const fmtR = (v)=>'R$ '+(Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const cardExec = (valor, label)=>`<div class="panel" style="flex:1;min-width:130px;"><div class="panel-body" style="text-align:center;padding:12px;"><div style="font-size:16px;font-weight:700;">${fmtR(valor)}</div><div style="font-size:10.5px;color:var(--text-soft);">${label}</div></div></div>`;
+
+  const linhaCheque = (c)=>{
+    const d = estrategiaDiasRestantes(c.dataBomPara, chequeEhStatusTerminal(c.status)?'concluida':null);
+    return `
+    <div class="ledger-row" style="padding:8px 10px;align-items:center;flex-wrap:wrap;cursor:pointer;" data-abrir-cheque="${c.id}">
+      <div style="flex:1;min-width:160px;">
+        <div style="font-weight:600;">Nº ${escapeHTML(c.numero||'—')} — ${fmtR(c.valor)}</div>
+        <div style="font-size:11px;color:var(--text-soft);display:flex;gap:8px;flex-wrap:wrap;margin-top:2px;">
+          ${c.clienteNome ? `<span>👤 ${escapeHTML(c.clienteNome)}</span>` : ''}
+          ${c.dataBomPara ? `<span>${c.dataBomPara.split('-').reverse().join('/')}${d!==null?' ('+(d<0?Math.abs(d)+'d atrasado':d+'d'):''}${d!==null?')':''}</span>` : ''}
+          ${c.lancamentoId ? `<span>🔗 lançamento vinculado</span>` : `<span style="color:var(--warn);">sem lançamento</span>`}
+        </div>
+      </div>
+      <span style="font-size:12px;">${CHEQUE_STATUS_LABEL[c.status]||c.status}</span>
+    </div>`;
+  };
+
+  const tabs = ['visao','recebidos','emitidos','carteira','compensacao','devolvidos','agenda','relatorios'];
+  const tabLabel = { visao:'Visão Geral', recebidos:'Recebidos', emitidos:'Emitidos', carteira:'Carteira', compensacao:'Compensação', devolvidos:'Devolvidos', agenda:'Agenda', relatorios:'Relatórios' };
+
+  let conteudoAba = '';
+  if(aba==='visao'){
+    conteudoAba = `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+        ${cardExec(cards.aReceber,'📥 A RECEBER')}
+        ${cardExec(cards.emCarteira,'🗄️ EM CARTEIRA')}
+        ${cardExec(cards.aCompensar,'🏦 A COMPENSAR')}
+        ${cardExec(cards.compensadosPeriodo,'🟢 COMPENSADOS (MÊS)')}
+        ${cardExec(cards.devolvidos,'🔴 DEVOLVIDOS')}
+        ${cardExec(cards.emitidos,'📤 EMITIDOS')}
+        ${cardExec(cards.proximos7dias,'⚠️ PRÓXIMOS 7 DIAS')}
+        ${cardExec(cards.totalFuturo,'💰 TOTAL FUTURO')}
+      </div>
+      ${alertas.length ? `
+      <div class="panel-head" style="margin-top:18px;"><h2>⚠️ Atenção</h2></div>
+      <div class="panel"><div class="panel-body">
+        ${alertas.map(a=>`<div style="padding:6px 0;border-bottom:1px solid var(--border);"><span style="color:${a.cor};font-weight:600;">${escapeHTML(a.titulo)}</span><div style="font-size:12px;color:var(--text-soft);">${escapeHTML(a.detalhe)}</div></div>`).join('')}
+      </div></div>` : ''}
+      <div class="panel-head" style="margin-top:18px;"><h2>🧾 Últimos cheques</h2></div>
+      <div class="panel"><div class="panel-body">
+        ${cheques.length ? [...cheques].sort((a,b)=>(b.criadoEm||'').localeCompare(a.criadoEm||'')).slice(0,10).map(linhaCheque).join('') : `<div class="note">Nenhum cheque cadastrado ainda.</div>`}
+      </div></div>`;
+  } else if(aba==='recebidos'){
+    const lista = cheques.filter(c=>c.tipo==='recebido');
+    conteudoAba = `<div class="panel"><div class="panel-body">${lista.length?lista.map(linhaCheque).join(''):'<div class="note">Nenhum cheque recebido cadastrado ainda.</div>'}</div></div>`;
+  } else if(aba==='emitidos'){
+    const lista = cheques.filter(c=>c.tipo==='emitido');
+    conteudoAba = `<div class="panel"><div class="panel-body">${lista.length?lista.map(linhaCheque).join(''):'<div class="note">Nenhum cheque emitido cadastrado ainda.</div>'}</div></div>`;
+  } else if(aba==='carteira'){
+    const lista = cheques.filter(c=>c.status==='carteira');
+    conteudoAba = `<div class="panel"><div class="panel-body">${lista.length?lista.map(linhaCheque).join(''):'<div class="note">Nenhum cheque em carteira no momento.</div>'}</div></div>`;
+  } else if(aba==='compensacao'){
+    const lista = cheques.filter(c=>['depositado','a_compensar'].includes(c.status));
+    conteudoAba = `<div class="panel"><div class="panel-body">${lista.length?lista.map(linhaCheque).join(''):'<div class="note">Nenhum cheque aguardando compensação.</div>'}</div></div>`;
+  } else if(aba==='devolvidos'){
+    const lista = cheques.filter(c=>['devolvido','reapresentado'].includes(c.status));
+    conteudoAba = `<div class="panel"><div class="panel-body">${lista.length?lista.map(linhaCheque).join(''):'<div class="note">Nenhum cheque devolvido.</div>'}</div></div>`;
+  } else if(aba==='agenda'){
+    const grupos = { hoje:[], amanha:[], sete:[], trinta:[], sessenta:[], noventa:[], ano:[] };
+    cheques.filter(c=>!chequeEhStatusTerminal(c.status) && c.dataBomPara).forEach(c=>{
+      const d = estrategiaDiasRestantes(c.dataBomPara, null);
+      if(d===null) return;
+      if(d===0) grupos.hoje.push(c); else if(d===1) grupos.amanha.push(c); else if(d<=7) grupos.sete.push(c);
+      else if(d<=30) grupos.trinta.push(c); else if(d<=60) grupos.sessenta.push(c); else if(d<=90) grupos.noventa.push(c); else if(d<=365) grupos.ano.push(c);
+    });
+    const bloco = (titulo, lista)=> lista.length ? `<div class="panel-head" style="margin-top:12px;"><h2 style="font-size:13px;">${titulo}</h2></div><div class="panel"><div class="panel-body">${lista.map(linhaCheque).join('')}</div></div>` : '';
+    conteudoAba = bloco('HOJE', grupos.hoje) + bloco('AMANHÃ', grupos.amanha) + bloco('PRÓXIMOS 7 DIAS', grupos.sete) + bloco('PRÓXIMOS 30 DIAS', grupos.trinta) + bloco('31–60 DIAS', grupos.sessenta) + bloco('61–90 DIAS', grupos.noventa) + bloco('ANO', grupos.ano) || `<div class="note">Nenhum cheque com prazo pendente.</div>`;
+  } else if(aba==='relatorios'){
+    const porStatus = {};
+    cheques.forEach(c=>{ porStatus[c.status] = (porStatus[c.status]||0) + (Number(c.valor)||0); });
+    const ind = calcularIndicadoresCheques();
+    const porBanco = calcularConcentracaoCheques('banco').slice(0,8);
+    const porCliente = calcularConcentracaoCheques('cliente').slice(0,8);
+    const clientesDevolucao = calcularClientesComDevolucao();
+    conteudoAba = `
+    <div class="panel"><div class="panel-body">
+      <div style="font-weight:600;font-size:12.5px;margin-bottom:6px;">POR STATUS</div>
+      ${Object.entries(porStatus).map(([s,v])=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12.5px;"><span>${CHEQUE_STATUS_LABEL[s]||s}</span><strong>${fmtR(v)}</strong></div>`).join('') || '<div class="note">Sem dados ainda.</div>'}
+    </div></div>
+
+    <div class="panel-head" style="margin-top:14px;"><h2 style="font-size:13px;">📊 Indicadores</h2></div>
+    <div class="panel"><div class="panel-body" style="display:flex;flex-wrap:wrap;gap:14px;">
+      <div><div style="font-size:11px;color:var(--text-soft);">Taxa de devolução</div><div style="font-size:16px;font-weight:700;">${ind.taxaDevolucao===null?'Sem dados':ind.taxaDevolucao+'%'}</div></div>
+      <div><div style="font-size:11px;color:var(--text-soft);">Valor devolvido</div><div style="font-size:16px;font-weight:700;">${fmtR(ind.valorDevolvido)}</div></div>
+      <div><div style="font-size:11px;color:var(--text-soft);">Qtd. devolvidos</div><div style="font-size:16px;font-weight:700;">${ind.qtdDevolvidos}</div></div>
+      <div><div style="font-size:11px;color:var(--text-soft);">Prazo médio até compensação</div><div style="font-size:16px;font-weight:700;">${ind.prazoMedioCompensacao===null?'Sem dados':ind.prazoMedioCompensacao+' dias'}</div></div>
+      <div><div style="font-size:11px;color:var(--text-soft);">Valor médio por cheque</div><div style="font-size:16px;font-weight:700;">${ind.valorMedio===null?'Sem dados':fmtR(ind.valorMedio)}</div></div>
+    </div></div>
+
+    <div class="panel-head" style="margin-top:14px;"><h2 style="font-size:13px;">🏦 Concentração por banco</h2></div>
+    <div class="panel"><div class="panel-body">
+      ${porBanco.length?porBanco.map(b=>`<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12.5px;"><span>${escapeHTML(b.nome)} (${b.qtd})</span><strong>${fmtR(b.valor)}</strong></div>`).join(''):'<div class="note">Sem dados ainda.</div>'}
+    </div></div>
+
+    <div class="panel-head" style="margin-top:14px;"><h2 style="font-size:13px;">👥 Concentração por cliente/fornecedor</h2></div>
+    <div class="panel"><div class="panel-body">
+      ${porCliente.length?porCliente.map(b=>`<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12.5px;"><span>${escapeHTML(b.nome)} (${b.qtd})</span><strong>${fmtR(b.valor)}</strong></div>`).join(''):'<div class="note">Sem dados ainda.</div>'}
+    </div></div>
+
+    ${clientesDevolucao.length ? `
+    <div class="panel-head" style="margin-top:14px;"><h2 style="font-size:13px;">⚠️ Clientes com cheques devolvidos</h2></div>
+    <div class="panel"><div class="panel-body">
+      ${clientesDevolucao.map(c=>`<div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:12.5px;"><strong>${escapeHTML(c.nome)}</strong> — ${c.qtd} cheque${c.qtd>1?'s':''}, ${fmtR(c.valor)}, última devolução ${c.ultima?c.ultima.split('-').reverse().join('/'):'—'}</div>`).join('')}
+    </div></div>` : ''}
+
+    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn ghost sm" id="btnExportarChequesTexto">📤 Copiar resumo</button>
+      <button class="btn ghost sm" id="btnExportarChequesPdf">📄 Exportar PDF</button>
+    </div>`;
+  }
+
+  return `
+    <div class="topbar">
+      <div><h1>🧾 Central de Cheques</h1><p>Controle de cheques recebidos, emitidos, em carteira e em compensação.</p></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn ghost" id="btnNovoChequeRecebido">+ Recebido</button>
+        <button class="btn ghost" id="btnNovoChequeEmitido">+ Emitido</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:10px;border-bottom:1px solid var(--border);padding-bottom:6px;">
+      ${tabs.map(t=>`<button class="btn ${aba===t?'':'ghost'} sm btnAbaCheques" data-aba="${t}">${tabLabel[t]}</button>`).join('')}
+    </div>
+    <div class="field" style="margin-top:10px;"><input type="text" id="chequesBusca" placeholder="🔎 Buscar por número, cliente, banco, valor (Enter)" value="${escapeHTML(chequesFiltro.busca||'')}"></div>
+    ${conteudoAba}
+  `;
+}
+
 function viewCapex(){
   const projetosAtivos = state.capexProjetos.filter(p=>p.status!=='Cancelado');
   const hoje = todayISO();
@@ -27670,6 +28170,21 @@ function attachViewHandlers(){
     document.querySelectorAll('.btnCriarProcessoIniciativa').forEach(el=>el.addEventListener('click', ()=>{
       showToast('Criar processo vinculado no Livro de Processos ainda está em construção — vem no próximo passo');
     }));
+  }
+  if(currentView==='cheques'){
+    document.getElementById('btnNovoChequeRecebido')?.addEventListener('click', ()=>abrirNovoChequeModal('recebido'));
+    document.getElementById('btnNovoChequeEmitido')?.addEventListener('click', ()=>abrirNovoChequeModal('emitido'));
+    document.querySelectorAll('.btnAbaCheques').forEach(el=>el.addEventListener('click', ()=>{ chequesAbaAtual = el.dataset.aba; render(); }));
+    document.querySelectorAll('[data-abrir-cheque]').forEach(el=>el.addEventListener('click', ()=>abrirDetalheChequeModal(el.dataset.abrirCheque)));
+    document.getElementById('chequesBusca')?.addEventListener('change', (e)=>{ chequesFiltro.busca = e.target.value; render(); });
+    document.getElementById('chequesBusca')?.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ chequesFiltro.busca = e.target.value; render(); } });
+    document.getElementById('btnExportarChequesTexto')?.addEventListener('click', ()=>{
+      const cards = calcularCardsCheques();
+      const fmtR = (v)=>'R$ '+(Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2});
+      const texto = `RESUMO — CENTRAL DE CHEQUES\n${todayISO().split('-').reverse().join('/')}\n\nA receber: ${fmtR(cards.aReceber)}\nEm carteira: ${fmtR(cards.emCarteira)}\nA compensar: ${fmtR(cards.aCompensar)}\nCompensados (mês): ${fmtR(cards.compensadosPeriodo)}\nDevolvidos: ${fmtR(cards.devolvidos)}\nEmitidos: ${fmtR(cards.emitidos)}\nTotal futuro: ${fmtR(cards.totalFuturo)}\n`;
+      if(navigator.clipboard) navigator.clipboard.writeText(texto).then(()=>showToast('Resumo copiado')).catch(()=>{});
+    });
+    document.getElementById('btnExportarChequesPdf')?.addEventListener('click', gerarResumoChequesPDF);
   }
   document.querySelectorAll('[data-action="ir-demonstracoes-financeiras"]').forEach(el=>{
     el.addEventListener('click', ()=>{ currentView='demonstracoes-financeiras'; render(); });
