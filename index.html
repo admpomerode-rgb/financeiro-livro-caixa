@@ -1524,7 +1524,7 @@ function limparUndefined(obj){
   return JSON.parse(JSON.stringify(obj));
 }
 let salvamentoEmAndamento = false;
-function salvarStateNoFirestore(){
+async function salvarStateNoFirestore(){
   // state.resto = tudo MENOS lancamentos, que agora vive na coleção COL_LANCAMENTOS.
   const { lancamentos, ...resto } = state;
   const campoRuim = encontrarCampoUndefined(resto, '');
@@ -1561,15 +1561,27 @@ function salvarStateNoFirestore(){
   }
 
   salvamentoEmAndamento = true;
-  return Promise.all([
-    DOC_REF.set(limparUndefined(resto)),
-    operacoes.length ? commitarLotes() : Promise.resolve()
-  ]).catch(e=>{
-    // Falhou no meio do caminho — devolve os ids pra fila pra não perder a alteração no próximo save.
+  try{
+    // ORDEM É CRÍTICA (foi exatamente isso que causou a perda de dados anterior): só gravamos o
+    // documento SEM o campo lancamentos depois de confirmar que a coleção nova recebeu tudo com
+    // sucesso. Se a gravação na coleção falhar por QUALQUER motivo (regras de segurança, rede,
+    // etc.), o documento único continua sendo salvo, mas MANTENDO lancamentos dentro dele — nunca
+    // apagamos de um lugar sem ter certeza de que já está salvo no outro.
+    if(operacoes.length){
+      await commitarLotes();
+      await DOC_REF.set(limparUndefined(resto));
+    } else {
+      await DOC_REF.set(limparUndefined(resto));
+    }
+  }catch(e){
     idsSujos.forEach(id=>lancamentosSujos.add(id));
     idsRemovidos.forEach(id=>lancamentosRemovidos.add(id));
+    // Rede de segurança: a gravação na coleção nova falhou, então salvamos o documento único
+    // COM lancamentos incluído (do jeito que sempre funcionou), pra garantir que nada se perde
+    // enquanto o problema não é corrigido.
+    await DOC_REF.set(limparUndefined({ ...resto, lancamentos: state.lancamentos.map(l=>({...l})) })).catch(()=>{});
     throw e;
-  }).finally(()=>{ salvamentoEmAndamento = false; });
+  }finally{ salvamentoEmAndamento = false; }
 }
 function persist(){
   __limparCacheRender();
