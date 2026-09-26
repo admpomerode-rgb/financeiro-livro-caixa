@@ -528,8 +528,8 @@
   }
 
   /* Dashboard — Acesso Rápido */
-  .acesso-rapido-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:20px;justify-items:center;}
-  .acesso-rapido-card{background:var(--white);border:1px solid var(--line);border-radius:10px;padding:10px 11px;cursor:pointer;transition:border-color .15s,box-shadow .15s;aspect-ratio:1/1;width:100%;max-width:150px;display:flex;flex-direction:column;justify-content:center;overflow:hidden;}
+  .acesso-rapido-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:4px;margin-bottom:20px;justify-items:center;}
+  .acesso-rapido-card{background:var(--white);border:1px solid var(--line);border-radius:10px;padding:10px 11px;cursor:pointer;transition:border-color .15s,box-shadow .15s;aspect-ratio:1/1;width:100%;max-width:160px;display:flex;flex-direction:column;justify-content:center;overflow:hidden;}
   .acesso-rapido-card:hover{border-color:var(--blue-accent);box-shadow:0 2px 10px rgba(11,15,20,.06);}
   .acesso-rapido-card .ar-topo{display:flex;align-items:center;gap:6px;margin-bottom:5px;}
   .acesso-rapido-card .ar-icone{font-size:15px;}
@@ -537,11 +537,11 @@
   .acesso-rapido-card .ar-linha1{font-size:11.5px;font-weight:600;overflow-wrap:break-word;}
   .acesso-rapido-card .ar-linha2{font-size:10px;color:var(--text-soft);margin-top:2px;overflow-wrap:break-word;}
   @media (min-width:700px){
-    /* Flexbox em vez de grid auto-fill: com grid, uma última linha incompleta (ex: 1 card sozinho)
-       deixava as colunas seguintes em branco, com espaço vazio do lado. Com flex-wrap, os cards de
-       CADA linha (completa ou não) se esticam pra preencher o espaço disponível daquela linha. */
+    /* Flexbox em vez de grid auto-fill: com grid, uma última linha incompleta deixava as colunas
+       seguintes em branco. Com flex-wrap, os cards da última linha crescem um pouco pra preencher
+       o espaço — mas com max-width, pra não esticar um card sozinho até virar um bloco gigante. */
     .acesso-rapido-grid{display:flex;flex-wrap:wrap;justify-items:normal;}
-    .acesso-rapido-card{aspect-ratio:auto;max-width:none;flex:1 1 170px;width:auto;}
+    .acesso-rapido-card{aspect-ratio:auto;width:auto;flex:1 1 200px;max-width:280px;}
   }
 
   /* Cartões de crédito */
@@ -6836,9 +6836,6 @@ function viewDashboard(){
     ${painelHojeHTML()}
     ${top3PendenciasHTML()}
     ${semaforoAreasHTML()}
-    ${modoSimples ? '' : possoGastarHojeHTML()}
-    ${modoSimples ? '' : preview7DiasHTML()}
-    ${modoSimples ? '' : resumoDiaCopiarHTML()}
     ${cardQualidadeDadosHTML()}
 
     ${modoSimples ? '' : (()=>{
@@ -6936,24 +6933,11 @@ function viewDashboard(){
 
     ${alertasInteligentesHTML()}
 
-    ${modoSimples ? '' : analiseGraficaDashboardHTML()}
-
-    <div class="dash-section-label">Entradas x Saídas — últimos 6 meses</div>
-    <div class="panel">
-      <div class="panel-body" style="padding:18px;">
-        <canvas id="chartMeses" height="180"></canvas>
-      </div>
-    </div>
-
     <div class="dash-section-label">Ranking de categorias — ${nomeMes}</div>
     ${rankingCategoriasHTML(mesGlobalRef)}
 
-    ${resumoCartoesHTML()}
-
     ${orcadoRealizadoHTML(mesGlobalRef)}
     `}
-
-    ${ultimasMovimentacoesHTML()}
   `;
 }
 
