@@ -1535,17 +1535,35 @@ function salvarStateNoFirestore(){
   lancamentosSujos = new Set();
   lancamentosRemovidos = new Set();
 
-  const batch = db.batch();
+  // O Firestore recusa um batch com mais de 500 operações. Restaurar um backup grande de uma vez
+  // (ou qualquer situação que marque muitos lançamentos como sujos ao mesmo tempo) pode facilmente
+  // passar disso — por isso sempre dividimos em lotes de 450 (com folga), nunca um batch só.
+  const operacoes = [];
   idsSujos.forEach(id=>{
     const item = (state.lancamentos||[]).find(l=>l.id===id);
-    if(item) batch.set(COL_LANCAMENTOS.doc(id), limparUndefined(item));
+    if(item) operacoes.push({ tipo:'set', id, dados: limparUndefined(item) });
   });
-  idsRemovidos.forEach(id=> batch.delete(COL_LANCAMENTOS.doc(id)));
+  idsRemovidos.forEach(id=> operacoes.push({ tipo:'delete', id }));
+
+  const TAMANHO_LOTE = 450;
+  const lotes = [];
+  for(let i=0;i<operacoes.length;i+=TAMANHO_LOTE) lotes.push(operacoes.slice(i, i+TAMANHO_LOTE));
+
+  async function commitarLotes(){
+    for(const lote of lotes){
+      const batch = db.batch();
+      lote.forEach(op=>{
+        if(op.tipo==='set') batch.set(COL_LANCAMENTOS.doc(op.id), op.dados);
+        else batch.delete(COL_LANCAMENTOS.doc(op.id));
+      });
+      await batch.commit();
+    }
+  }
 
   salvamentoEmAndamento = true;
   return Promise.all([
     DOC_REF.set(limparUndefined(resto)),
-    (idsSujos.length || idsRemovidos.length) ? batch.commit() : Promise.resolve()
+    operacoes.length ? commitarLotes() : Promise.resolve()
   ]).catch(e=>{
     // Falhou no meio do caminho — devolve os ids pra fila pra não perder a alteração no próximo save.
     idsSujos.forEach(id=>lancamentosSujos.add(id));
@@ -41636,6 +41654,14 @@ document.getElementById('fileImport').addEventListener('change', (e)=>{
           email:'', senha:'', contaId:'', categoria:'Vendas', ultimaSincronizacao:null
         };
       }
+      // IMPORTANTE: lancamentos vieram de um objeto simples (JSON.parse), sem o Proxy de
+      // rastreamento — sem isso, o próximo persist() não saberia que precisa gravar esses itens
+      // na coleção nova e eles sumiriam de novo, do mesmo jeito que já aconteceu uma vez. Aqui
+      // religamos o Proxy E marcamos TODOS os lançamentos restaurados como "sujos" de propósito,
+      // pra garantir que o próximo salvamento escreva cada um deles na coleção, mesmo os que a
+      // pessoa não vai tocar manualmente.
+      state = instrumentarLancamentos(state);
+      state.lancamentos.forEach(l=>{ if(l && l.id) marcarLancamentoSujo(l.id); });
       persist(); closeModal(); render();
       showToast('Backup restaurado com sucesso');
     }catch(err){ showToast('Arquivo inválido'); }
