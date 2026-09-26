@@ -1678,6 +1678,7 @@ const LIXEIRA_TIPO_LISTA = {
   orcamentoProcesso: 'orcamentosProcessos',
 };
 function restaurarDaLixeira(lixeiraId){
+  if(!podeAgora('criar')){ showToast('Seu usuário não tem permissão pra restaurar itens da lixeira.'); return false; }
   const item = state.lixeira.find(x=>x.id===lixeiraId);
   if(!item) return false;
   const listaNome = LIXEIRA_TIPO_LISTA[item.tipo];
@@ -1687,7 +1688,9 @@ function restaurarDaLixeira(lixeiraId){
   return true;
 }
 function excluirDefinitivoDaLixeira(lixeiraId){
+  if(!podeAgora('excluir')){ showToast('Seu usuário não tem permissão pra excluir de vez.'); return false; }
   state.lixeira = state.lixeira.filter(x=>x.id!==lixeiraId);
+  return true;
 }
 function itensAntigosNaLixeira(diasLimite){
   const hoje = new Date();
@@ -28445,6 +28448,12 @@ async function excluirLancamento(id){
 async function executarAcaoSelecaoLote(acao){
   const lancs = [...selecaoLancIds].map(id=>state.lancamentos.find(l=>l.id===id)).filter(Boolean);
   if(!lancs.length){ showToast('Nenhum lançamento selecionado'); return; }
+  // CORREÇÃO DE SEGURANÇA: a exclusão de UM lançamento por vez já checava permissão, mas as ações
+  // em lote (selecionar vários e apagar/editar/duplicar de uma vez) não checavam nada — um usuário
+  // "Visualização" conseguia apagar lançamentos contornando a trava individual por essa via.
+  if(acao==='apagar' && !podeAgora('excluir')){ showToast('Seu usuário não tem permissão pra excluir lançamentos.'); return; }
+  if(['descricao','categoria','marcar-pago'].includes(acao) && !podeAgora('editar')){ showToast('Seu usuário não tem permissão pra editar lançamentos.'); return; }
+  if(acao==='duplicar' && !podeAgora('criar')){ showToast('Seu usuário não tem permissão pra criar lançamentos.'); return; }
   if(acao==='apagar'){
     const temTransf = lancs.some(l=>l.origem==='transferencia');
     if(!(await avisoModal({mensagem: `Apagar ${lancs.length} lançamento(s)?${temTransf?' As transferências terão as duas pontas (saída e entrada) removidas.':''} Essa ação não pode ser desfeita.`, tipo:'perigo', textoConfirmar:'Excluir'}))) return;
@@ -32625,8 +32634,9 @@ function attachViewHandlers(){
   document.querySelectorAll('[data-lixeira-excluir]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       if(!(await avisoModal({mensagem:'Excluir de vez? Não dá mais pra desfazer depois disso.', tipo:'perigo', textoConfirmar:'Excluir de vez'}))) return;
-      excluirDefinitivoDaLixeira(btn.dataset.lixeiraExcluir);
-      persist(); render(); showToast('Excluído de vez.');
+      if(excluirDefinitivoDaLixeira(btn.dataset.lixeiraExcluir)){
+        persist(); render(); showToast('Excluído de vez.');
+      }
     });
   });
   document.querySelectorAll('[data-excluir-orcamento]').forEach(btn=>{
