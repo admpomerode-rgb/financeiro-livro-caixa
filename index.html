@@ -1199,7 +1199,7 @@ function aplicarMigracoes(s){
     if(u.supervisor===undefined) u.supervisor = false; // pode liberar telas protegidas sem precisar ser admin
   });
   if(!s.telasProtegidas) s.telasProtegidas = []; // views que exigem senha de admin pra abrir, mesmo pra quem já está logado
-  if(!s.telasProtegidasLiberadores) s.telasProtegidasLiberadores = {}; // { view: [emails] } — quem pode digitar a senha pra liberar cada tela; vazio = qualquer admin/supervisor
+  if(!s.telasProtegidasNivel) s.telasProtegidasNivel = {}; // { view: 'qualquer'|'admin'|'supervisor' } — quem pode liberar cada tela; vazio = qualquer admin ou supervisor
   if(!s.desbloqueiosTelaHistorico) s.desbloqueiosTelaHistorico = []; // [{ view, usuarioSolicitante, liberadoPor, data }] — log de cada liberação de tela protegida
   if(!s.acessosHistorico) s.acessosHistorico = []; // [{ usuario, data, duracaoSegundos }] — log de acessos de cada usuário, mais recente primeiro, pra tela de administrador
   // Mantém só os últimos 90 dias de acesso no sistema, pra não inchar o documento à toa — o que
@@ -1811,13 +1811,11 @@ function usuarioPodeVerTela(view){
 // instância no final — nunca troca a sessão de quem está logado na tela principal.
 // Retorna o e-mail de quem liberou (pra ficar no registro) ou null se a senha não bateu com ninguém.
 async function verificarSenhaDeLiberador(view, senha){
-  const liberadoresConfig = (state.telasProtegidasLiberadores||{})[view] || [];
-  let candidatos;
-  if(liberadoresConfig.length){
-    candidatos = (state.usuariosPermissao||[]).filter(u=>liberadoresConfig.includes(u.email));
-  } else {
-    candidatos = (state.usuariosPermissao||[]).filter(u=>u.papel==='admin' || u.supervisor);
-  }
+  const nivel = (state.telasProtegidasNivel||{})[view] || 'qualquer';
+  let candidatos = (state.usuariosPermissao||[]);
+  if(nivel==='admin') candidatos = candidatos.filter(u=>u.papel==='admin');
+  else if(nivel==='supervisor') candidatos = candidatos.filter(u=>u.supervisor);
+  else candidatos = candidatos.filter(u=>u.papel==='admin' || u.supervisor);
   if(!candidatos.length) return null; // ninguém autorizado cadastrado — trava por segurança
   const nomeAppTemp = 'verificacao-senha-liberador-'+Date.now();
   const appTemp = firebase.initializeApp(LIVRO_CAIXA_FIREBASE_CONFIG, nomeAppTemp);
@@ -27086,34 +27084,28 @@ function viewPermissoes(){
       <div style="padding:16px 18px;">
         <p class="sub" style="margin-bottom:14px;">
           Marque quais telas só abrem depois que alguém autorizado digitar a senha — vale até pra quem já
-          está logado no sistema. Administradores nunca são bloqueados por essa trava.
+          está logado no sistema. Administradores nunca são bloqueados por essa trava. Pra cada tela marcada,
+          escolha quem pode liberar.
         </p>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;max-height:340px;overflow-y:auto;">
-          ${todasTelas.map(i=>`
-            <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;cursor:pointer;">
-              <input type="checkbox" data-tela-protegida="${i.view}" ${protegidas.includes(i.view)?'checked':''}>
-              ${i.icone||''} ${escapeHTML(i.nome)}
-            </label>`).join('')}
+        <div style="display:flex;flex-direction:column;gap:6px;max-height:420px;overflow-y:auto;">
+          ${todasTelas.map(i=>{
+            const marcada = protegidas.includes(i.view);
+            const nivel = (state.telasProtegidasNivel||{})[i.view] || 'qualquer';
+            return `
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;flex-wrap:wrap;">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;flex:1;min-width:160px;">
+                <input type="checkbox" data-tela-protegida="${i.view}" ${marcada?'checked':''}>
+                ${i.icone||''} ${escapeHTML(i.nome)}
+              </label>
+              ${marcada ? `
+              <select data-nivel-liberador="${i.view}" style="font-size:12px;padding:4px 6px;">
+                <option value="qualquer" ${nivel==='qualquer'?'selected':''}>Admin ou Supervisor</option>
+                <option value="admin" ${nivel==='admin'?'selected':''}>Só Admin</option>
+                <option value="supervisor" ${nivel==='supervisor'?'selected':''}>Só Supervisor</option>
+              </select>` : ''}
+            </div>`;
+          }).join('')}
         </div>
-        ${protegidas.length ? `
-        <div class="dash-section-label" style="margin-top:18px;">Quem pode liberar cada tela</div>
-        <p class="sub" style="margin-bottom:10px;">Sem ninguém marcado, qualquer admin ou supervisor libera. Marque nomes específicos pra restringir só a eles (ex: um supervisor).</p>
-        ${protegidas.map(view=>{
-          const item = todasTelas.find(i=>i.view===view);
-          const liberadores = (state.telasProtegidasLiberadores||{})[view]||[];
-          const candidatos = usuarios.filter(u=>u.papel==='admin' || u.supervisor);
-          return `
-          <div style="margin-bottom:14px;padding:10px;border:1px solid var(--line);border-radius:8px;">
-            <div style="font-weight:600;font-size:13px;margin-bottom:6px;">${item?item.icone:''} ${escapeHTML(item?item.nome:view)}</div>
-            ${!candidatos.length ? `<div class="sub" style="font-size:12px;">Nenhum admin ou supervisor cadastrado ainda.</div>` :
-              candidatos.map(u=>`
-              <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 0;cursor:pointer;">
-                <input type="checkbox" data-liberador-tela="${view}" data-liberador-email="${escapeHTML(u.email)}" ${liberadores.includes(u.email)?'checked':''}>
-                ${escapeHTML(u.nome||u.email)} ${u.papel==='admin'?'(Admin)':'(Supervisor)'}
-              </label>`).join('')}
-          </div>`;
-        }).join('')}
-        ` : ''}
       </div>
     </div>
 
@@ -32782,17 +32774,14 @@ function attachViewHandlers(){
       if(!state.telasProtegidas) state.telasProtegidas = [];
       const view = chk.dataset.telaProtegida;
       if(chk.checked){ if(!state.telasProtegidas.includes(view)) state.telasProtegidas.push(view); }
-      else { state.telasProtegidas = state.telasProtegidas.filter(v=>v!==view); if(state.telasProtegidasLiberadores) delete state.telasProtegidasLiberadores[view]; }
+      else { state.telasProtegidas = state.telasProtegidas.filter(v=>v!==view); if(state.telasProtegidasNivel) delete state.telasProtegidasNivel[view]; }
       persist(); render();
     });
   });
-  document.querySelectorAll('[data-liberador-tela]').forEach(chk=>{
-    chk.addEventListener('change', ()=>{
-      if(!state.telasProtegidasLiberadores) state.telasProtegidasLiberadores = {};
-      const view = chk.dataset.liberadorTela;
-      const email = chk.dataset.liberadorEmail;
-      const lista = state.telasProtegidasLiberadores[view] || [];
-      state.telasProtegidasLiberadores[view] = chk.checked ? [...new Set([...lista, email])] : lista.filter(e=>e!==email);
+  document.querySelectorAll('[data-nivel-liberador]').forEach(sel=>{
+    sel.addEventListener('change', ()=>{
+      if(!state.telasProtegidasNivel) state.telasProtegidasNivel = {};
+      state.telasProtegidasNivel[sel.dataset.nivelLiberador] = sel.value;
       persist();
     });
   });
