@@ -39585,14 +39585,16 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     document.getElementById('notaGanhoPerda').value = notaEmRevisao.ganhoPerdaCapital || 0;
     pintarOperacoes();
 
-    document.getElementById('btnSalvarNota').addEventListener('click', ()=>{
+    document.getElementById('btnSalvarNota').addEventListener('click', async ()=>{
     const btn_btnSalvarNota_Click = document.getElementById('btnSalvarNota');
     if(btn_btnSalvarNota_Click.disabled) return;
     btn_btnSalvarNota_Click.disabled = true;
     try{
       Object.assign(notaEmRevisao, coletarNotaFormulario(), { atualizadoEm: new Date().toISOString() });
       registrarLog('Nota de corretagem editada', `Nota${notaEmRevisao.corretora?' — '+notaEmRevisao.corretora:''} de ${notaEmRevisao.dataPregao} atualizada (segue aguardando aprovação)`);
-      persist(); closeModal(); render();
+      __limparCacheRender();
+      await salvarStateNoFirestore().catch(e=>{ console.error('Erro ao salvar nota:', e); showToast('Não foi possível salvar — verifique a internet'); });
+      closeModal(); render();
       showToast('Alterações salvas — a nota segue aguardando aprovação');
     
     }finally{
@@ -39600,19 +39602,21 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
       if(btn_btnSalvarNota_Fim) btn_btnSalvarNota_Fim.disabled = false;
     }
   });
-    document.getElementById('btnPublicarNota').addEventListener('click', ()=>{
+    document.getElementById('btnPublicarNota').addEventListener('click', async ()=>{
       const btnPub = document.getElementById('btnPublicarNota');
       if(btnPub.disabled) return; // trava contra duplo clique/toque — era isso que causava lançamentos duplicados
       btnPub.disabled = true;
       Object.assign(notaEmRevisao, coletarNotaFormulario(), { atualizadoEm: new Date().toISOString() });
-      const publicou = publicarNotaCorretagem(notaEmRevisao);
+      const publicou = await publicarNotaCorretagem(notaEmRevisao);
       if(!publicou){ const btnPubFim = document.getElementById('btnPublicarNota'); if(btnPubFim) btnPubFim.disabled = false; }
     });
     document.getElementById('btnExcluirNota').addEventListener('click', async ()=>{
       if(!(await avisoModal({mensagem: 'Excluir esta nota pendente? Nenhum lançamento foi criado, então nada muda no caixa.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
       state.notasPendentes = (state.notasPendentes||[]).filter(n=>n.id!==notaEmRevisao.id);
       registrarLog('Nota de corretagem excluída', `Nota pendente${notaEmRevisao.corretora?' — '+notaEmRevisao.corretora:''} de ${notaEmRevisao.dataPregao} descartada sem publicar`);
-      persist(); closeModal(); render();
+      __limparCacheRender();
+      await salvarStateNoFirestore().catch(e=>{ console.error('Erro ao excluir nota:', e); showToast('Não foi possível salvar — verifique a internet'); });
+      closeModal(); render();
       showToast('Nota pendente excluída');
     });
     return;
@@ -39677,7 +39681,18 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
       ['notaTxCorretagem','notaTxLiquidacao','notaTxEmolumentos','notaTxRegistro','notaTxIss','notaTxIrrf','notaTxTransferenciaAtivos','notaTxOutras','notaLiquido'].forEach(idc=>{ const el = document.getElementById(idc); if(el) el.value = 0; });
       pintarOperacoes();
     }
-    persist();
+    // Salva NA HORA aqui, sem o atraso de 500ms do persist() normal — importar um PDF é uma ação
+    // rara e deliberada (diferente de digitar, que dispara persist() a cada tecla), e o aviso de
+    // "sair sem salvar?" do navegador não é confiável em apps instalados no Android. Sem isso, um
+    // F5 rápido logo depois de importar podia fazer a nota sumir (nunca tinha chegado no Firestore).
+    __limparCacheRender();
+    status.textContent = 'Salvando...';
+    try{
+      await salvarStateNoFirestore();
+    }catch(e){
+      console.error('Erro ao salvar nota(s) de corretagem:', e);
+      showToast('Não foi possível salvar — verifique a internet antes de fechar ou recarregar a página');
+    }
     render();
     document.getElementById('notaFileInput').value = '';
     document.getElementById('notaRevisao').style.display = 'none';
@@ -39700,7 +39715,7 @@ function garantirCategoriasNotaCorretagem(){
   });
 }
 
-function publicarNotaCorretagem(nota){
+async function publicarNotaCorretagem(nota){
   // Rede de segurança contra duplicação (além da trava no botão): se essa nota já não está mais
   // na lista de pendentes, é porque já foi publicada antes — não gera tudo de novo.
   if(nota.id && !(state.notasPendentes||[]).some(n=>n.id===nota.id)){
@@ -39900,7 +39915,9 @@ function publicarNotaCorretagem(nota){
 
   state.notasPendentes = (state.notasPendentes||[]).filter(n=>n.id!==nota.id);
   registrarLog('Nota de corretagem publicada', `Nota${corretora?' — '+corretora:''} de ${dataPregao}: ${linhas.length} operação(ões), débito em ${dataDebito}${temCustos?', custos categorizados automaticamente':''}`);
-  persist(); closeModal(); render();
+  __limparCacheRender();
+  await salvarStateNoFirestore().catch(e=>{ console.error('Erro ao publicar nota:', e); showToast('Não foi possível salvar — verifique a internet antes de fechar ou recarregar a página'); });
+  closeModal(); render();
   showToast(jaDebitou ? 'Nota publicada — operações e custos lançados nas categorias certas' : `Nota publicada — lançamentos ficam pendentes até o débito em ${fmtDate ? fmtDate(dataDebito) : dataDebito}`);
   return true;
 }
