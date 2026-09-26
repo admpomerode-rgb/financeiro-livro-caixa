@@ -730,7 +730,8 @@
     .conta-cards-compacto .conta-card-footer{width:100%;margin-top:8px !important;}
     .conta-cards-compacto .conta-card-footer .dropdown-wrap{display:none;}
     .conta-cards-compacto .conta-card-footer button[data-action="ver-extrato"]{flex:1;}
-    .cards{grid-template-columns:repeat(2,1fr);}
+    .cards{display:flex;flex-wrap:wrap;}
+    .cards .card{flex:1 1 calc(50% - 7px);}
     .card{padding:14px;}
     .card .value{font-size:17px;}
     .card.saldo .value{font-size:19px;}
