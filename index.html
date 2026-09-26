@@ -1181,6 +1181,8 @@ function aplicarMigracoes(s){
   if(!s.historicoFechamentoMensal) s.historicoFechamentoMensal = []; // log de quando cada mês foi fechado/reaberto, com motivo
   if(!s.integridadeIgnorados) s.integridadeIgnorados = []; // avisos de duplicidade/órfão que o usuário já viu e decidiu ignorar
   if(!s.usuariosPermissao) s.usuariosPermissao = []; // papel de cada e-mail (admin/operador/visualizacao) — vazio = sem restrição nenhuma ainda
+  if(!s.telasProtegidas) s.telasProtegidas = []; // views que exigem senha de admin pra abrir, mesmo pra quem já está logado
+  if(!s.acessosHistorico) s.acessosHistorico = []; // [{ usuario, data, duracaoSegundos }] — log de acessos de cada usuário, mais recente primeiro, pra tela de administrador
   if(!s.avaliacoesFornecedor) s.avaliacoesFornecedor = []; // avaliação manual (nota 1-5 + comentário) — não dá pra automatizar prazo de entrega, esse dado não existe no sistema
   if(!s.fechamentosCaixaFisico) s.fechamentosCaixaFisico = []; // conferência de gaveta (contado x esperado) pras contas tipo "caixa"
   if(!s.limitesProcesso) s.limitesProcesso = {}; // { processoId: { limite, aprovadoEm } } — teto de compras liberado pro processo inteiro, orçamentos seguintes do mesmo processo não podem passar disso
@@ -1731,6 +1733,39 @@ function usuarioTemPermissao(usuarios, emailLogado, acao){
 }
 function emailLogadoAtual(){ return (typeof auth!=='undefined' && auth.currentUser && auth.currentUser.email) || null; }
 function podeAgora(acao){ return usuarioTemPermissao(state.usuariosPermissao, emailLogadoAtual(), acao); }
+// Igual à regra de permissão acima: sem ninguém cadastrado em Usuários e Permissões, todo mundo
+// tem acesso total (inclusive à própria tela de Usuários e Permissões) — normal pra quem usa
+// sozinho. A partir do momento que existe qualquer usuário cadastrado, só quem tem papel "admin"
+// conta como administrador.
+function ehAdmin(){
+  const usuarios = state.usuariosPermissao||[];
+  if(!usuarios.length) return true;
+  const u = usuarios.find(x=>x.email===emailLogadoAtual());
+  return !!u && u.papel==='admin';
+}
+// Confere a senha de um administrador SEM deslogar quem está usando o sistema agora: abre uma
+// instância separada e temporária do Firebase só pra essa checagem, tenta autenticar com o
+// e-mail de cada admin cadastrado usando a senha digitada, e descarta a instância no final —
+// nunca troca a sessão de quem está logado na tela principal.
+async function verificarSenhaDeAlgumAdmin(senha){
+  const admins = (state.usuariosPermissao||[]).filter(u=>u.papel==='admin');
+  if(!admins.length) return false; // sem admin cadastrado, não tem como validar — trava por segurança
+  const nomeAppTemp = 'verificacao-senha-admin-'+Date.now();
+  const appTemp = firebase.initializeApp(LIVRO_CAIXA_FIREBASE_CONFIG, nomeAppTemp);
+  const authTemp = appTemp.auth();
+  try{
+    for(const admin of admins){
+      try{
+        await authTemp.signInWithEmailAndPassword(admin.email, senha);
+        return true; // achou um admin cuja senha bate
+      }catch(e){ /* essa senha não é desse admin — tenta o próximo */ }
+    }
+    return false;
+  } finally {
+    await authTemp.signOut().catch(()=>{});
+    await appTemp.delete().catch(()=>{});
+  }
+}
 // Alçada financeira: usa o limite PRÓPRIO da pessoa logada se ela tiver um cadastrado, senão cai
 // no limite geral do sistema — testada isoladamente antes de usar.
 function limiteAprovacaoEfetivo(usuarios, emailLogado, limiteGeral){
@@ -2046,6 +2081,9 @@ function executarDesfazer(){
 
 /* ---------------- Navegação ---------------- */
 let currentView = 'dashboard';
+// Views desbloqueadas nesta sessão (sem persistir) depois que um admin digitou a senha dele —
+// zera sozinho ao recarregar a página, cada sessão pede de novo.
+let __telasProtegidasDesbloqueadas = new Set();
 let relatoriosCardsAtivos = [];
 let cartoesFiltroAtivo = '';
 let extratoContaId = null;
@@ -2371,7 +2409,7 @@ const moreDrawer = document.getElementById('moreDrawer');
 // (busca, favoritos, recentes, badge de pendência, agrupamento). Grupos batem com os da barra
 // lateral do desktop, pra ficar consistente.
 function moreItensDef(){
-  return [
+  const itens = [
     { view:'contas', icone:'🏦', nome:'Contas Bancárias', grupo:'Operacional' },
     { view:'cartoes', icone:'💳', nome:'Cartões de Crédito', grupo:'Operacional' },
     { view:'gestao-dividas', icone:'📉', nome:'Gestão de Dívidas', grupo:'Operacional' },
@@ -2419,6 +2457,7 @@ function moreItensDef(){
     { view:'caixa-fisico', icone:'💵', nome:'Caixa Físico', grupo:'Operacional' },
     { view:'configuracoes', icone:'⚙️', nome:'Configurações', grupo:'Cadastros e Configurações' },
   ];
+  return itens.filter(i=> i.view!=='permissoes' || ehAdmin());
 }
 
 function moreItemHTML(item){
@@ -2528,7 +2567,40 @@ function render(){
     }
   }
   document.querySelectorAll('.nav-item, .bottom-nav-item[data-view]').forEach(n=>n.classList.toggle('active', n.dataset.view===currentView));
+  // Esconde o item "Usuários e Permissões" do menu pra quem não é admin — ele existe na sidebar
+  // como HTML fixo, então isso precisa ser feito toda vez que render() roda, não só uma vez.
+  document.querySelectorAll('[data-view="permissoes"]').forEach(n=>{ n.style.display = ehAdmin() ? '' : 'none'; });
   const main = document.getElementById('main');
+  // Tela de Usuários e Permissões é admin-only de verdade (não só escondida do menu) — se alguém
+  // chegar nela por link direto, histórico do navegador etc., cai fora igual.
+  if(currentView==='permissoes' && !ehAdmin()){ currentView = 'dashboard'; showToast('Só administradores acessam essa tela.'); }
+  // Telas marcadas como protegidas em Configurações exigem a senha de algum admin pra abrir,
+  // mesmo pra quem já está logado — admins nunca são bloqueados pelas próprias telas.
+  if((state.telasProtegidas||[]).includes(currentView) && !ehAdmin() && !__telasProtegidasDesbloqueadas.has(currentView)){
+    const viewAlvo = currentView;
+    main.innerHTML = viewTelaProtegida(viewAlvo);
+    document.getElementById('btnDesbloquearTela').addEventListener('click', async ()=>{
+      const senha = document.getElementById('senhaDesbloqueioTela').value;
+      const btn = document.getElementById('btnDesbloquearTela');
+      const erroEl = document.getElementById('erroDesbloqueioTela');
+      erroEl.style.display = 'none';
+      if(!senha){ erroEl.textContent = 'Digite a senha do administrador.'; erroEl.style.display = 'block'; return; }
+      btn.disabled = true; btn.textContent = 'Verificando...';
+      const ok = await verificarSenhaDeAlgumAdmin(senha).catch(()=>false);
+      if(ok){
+        __telasProtegidasDesbloqueadas.add(viewAlvo);
+        showToast('Tela liberada.');
+        render();
+      } else {
+        erroEl.textContent = 'Senha incorreta.'; erroEl.style.display = 'block';
+        btn.disabled = false; btn.textContent = 'Desbloquear';
+      }
+    });
+    document.getElementById('senhaDesbloqueioTela')?.addEventListener('keydown', e=>{
+      if(e.key==='Enter') document.getElementById('btnDesbloquearTela').click();
+    });
+    return;
+  }
   if(currentView==='dashboard') main.innerHTML = viewDashboard();
   else if(currentView==='pagar') main.innerHTML = viewLancamentos('saida');
   else if(currentView==='receber') main.innerHTML = viewLancamentos('entrada');
@@ -26545,8 +26617,35 @@ function viewIntegridade(){
   `;
 }
 
+function viewTelaProtegida(view){
+  const item = moreItensDef().find(i=>i.view===view) || moreItensDefSemFiltro().find(i=>i.view===view);
+  const nome = item ? item.nome : 'esta tela';
+  return `
+    <div style="display:flex;align-items:center;justify-content:center;min-height:60vh;padding:24px;">
+      <div class="panel" style="max-width:420px;width:100%;text-align:center;padding:32px 28px;">
+        <div style="font-size:48px;margin-bottom:8px;">🔒</div>
+        <h2 style="margin:0 0 8px;">Tela protegida</h2>
+        <p class="sub" style="margin-bottom:20px;">
+          "${escapeHTML(nome)}" exige a senha de um administrador pra ser acessada.
+          Peça pra um administrador digitar a senha dele aqui embaixo pra liberar.
+        </p>
+        <div class="field"><label>Senha do administrador</label><input type="password" id="senhaDesbloqueioTela" placeholder="••••••••"></div>
+        <div id="erroDesbloqueioTela" style="display:none;color:var(--danger);font-size:13px;margin-bottom:8px;"></div>
+        <button class="btn" id="btnDesbloquearTela" style="width:100%;margin-top:8px;">Desbloquear</button>
+      </div>
+    </div>
+  `;
+}
+// Versão sem o filtro de admin, só pra achar o nome de exibição de "permissoes" quando ela
+// mesma está numa lista de telas protegidas (moreItensDef() a esconde de quem não é admin).
+function moreItensDefSemFiltro(){
+  return [{ view:'permissoes', icone:'🔐', nome:'Usuários e Permissões' }];
+}
 function viewPermissoes(){
   const usuarios = state.usuariosPermissao||[];
+  const todasTelas = moreItensDef().concat(moreItensDefSemFiltro().filter(i=>!moreItensDef().some(x=>x.view===i.view)));
+  const protegidas = state.telasProtegidas||[];
+  const historico = (state.acessosHistorico||[]).slice(0, 50);
   return `
     <div class="topbar">
       <div><h1>🔐 Usuários e Permissões</h1><p>Sem ninguém cadastrado aqui, todo mundo que loga tem acesso total — normal pra quem usa sozinho. Cadastre só se quiser limitar o acesso de alguém.</p></div>
@@ -26579,6 +26678,44 @@ function viewPermissoes(){
           <button class="btn ghost sm" data-remover-permissao="${u.email}">Remover</button>
         </div>
       </div>`).join('')}
+
+    <div class="panel" style="margin:24px 0 16px;">
+      <div class="panel-head"><h2>🔒 Telas com senha obrigatória</h2></div>
+      <div style="padding:16px 18px;">
+        <p class="sub" style="margin-bottom:14px;">
+          Marque quais telas só abrem depois que um administrador digitar a senha dele — vale até pra quem já
+          está logado no sistema. Administradores nunca são bloqueados por essa trava.
+        </p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;max-height:340px;overflow-y:auto;">
+          ${todasTelas.map(i=>`
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;cursor:pointer;">
+              <input type="checkbox" data-tela-protegida="${i.view}" ${protegidas.includes(i.view)?'checked':''}>
+              ${i.icone||''} ${escapeHTML(i.nome)}
+            </label>`).join('')}
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-head"><h2>📋 Histórico de acessos</h2></div>
+      <div style="padding:0 18px 16px;">
+        ${!historico.length ? `<div class="empty">Nenhum acesso registrado ainda.</div>` : `
+          <table style="width:100%;font-size:13px;border-collapse:collapse;">
+            <thead><tr style="text-align:left;color:var(--text-soft);">
+              <th style="padding:6px 4px;">Usuário</th><th style="padding:6px 4px;">Data/hora</th><th style="padding:6px 4px;">Duração</th>
+            </tr></thead>
+            <tbody>
+              ${historico.map(a=>`
+                <tr style="border-top:1px solid var(--line);">
+                  <td style="padding:6px 4px;">${escapeHTML(a.usuario||'—')}</td>
+                  <td style="padding:6px 4px;">${new Date(a.data).toLocaleString('pt-BR')}</td>
+                  <td style="padding:6px 4px;">${a.duracaoSegundos ? (a.duracaoSegundos<60?a.duracaoSegundos+'s':Math.round(a.duracaoSegundos/60)+' min') : '—'}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        `}
+      </div>
+    </div>
   `;
 }
 
@@ -32156,6 +32293,15 @@ function attachViewHandlers(){
       state.usuariosPermissao = state.usuariosPermissao.filter(u=>u.email!==btn.dataset.removerPermissao);
       persist(); render(); showToast('Removido.');
       sincronizarColecaoPermissoes(antesSync, state.usuariosPermissao);
+    });
+  });
+  document.querySelectorAll('[data-tela-protegida]').forEach(chk=>{
+    chk.addEventListener('change', ()=>{
+      if(!state.telasProtegidas) state.telasProtegidas = [];
+      const view = chk.dataset.telaProtegida;
+      if(chk.checked){ if(!state.telasProtegidas.includes(view)) state.telasProtegidas.push(view); }
+      else state.telasProtegidas = state.telasProtegidas.filter(v=>v!==view);
+      persist();
     });
   });
 
@@ -41630,7 +41776,7 @@ document.getElementById('btnBackup').addEventListener('click', ()=>{
     const blob = new Blob([JSON.stringify(estadoParaExportar, null, 2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `livrocaixa-backup-${todayISO()}.json`;
+    a.href = url; a.download = `LivroCaixaVK-backup-${todayISO()}.json`;
     a.click(); URL.revokeObjectURL(url);
     state.ultimoBackupEm = new Date().toISOString();
     persist();
@@ -41699,12 +41845,16 @@ function registrarAcessoSistema(){
     data: new Date().toISOString(),
     duracaoSegundos: 0
   };
+  if(!state.acessosHistorico) state.acessosHistorico = [];
+  state.acessosHistorico.unshift({ ...state.acessos.ultimo });
+  if(state.acessosHistorico.length > 300) state.acessosHistorico.length = 300; // não deixa crescer pra sempre
   persist();
   atualizarInfoAcessosSistema();
   if(acessoHeartbeatInterval) clearInterval(acessoHeartbeatInterval);
   acessoHeartbeatInterval = setInterval(()=>{
     if(!sessaoIniciadaEm || !state.acessos?.ultimo) return;
     state.acessos.ultimo.duracaoSegundos = Math.round((Date.now()-sessaoIniciadaEm)/1000);
+    if(state.acessosHistorico?.[0]) state.acessosHistorico[0].duracaoSegundos = state.acessos.ultimo.duracaoSegundos;
     persist();
     atualizarInfoAcessosSistema();
   }, 60000);
@@ -41720,13 +41870,20 @@ function precisaLembrarBackupHoje(){
   const ultimoBackupData = state.ultimoBackupEm ? state.ultimoBackupEm.slice(0,10) : null;
   return ultimoBackupData !== hojeISO; // já fez backup hoje? não precisa mostrar de novo
 }
+function nomeUsuarioLogado(){
+  const u = (typeof auth!=='undefined') ? auth.currentUser : null;
+  if(!u) return 'Usuário';
+  if(u.displayName) return u.displayName;
+  if(u.email) return u.email.split('@')[0].replace(/[._]/g,' ').replace(/\b\w/g, c=>c.toUpperCase());
+  return 'Usuário';
+}
 function exportarBackupAgora(){
   const estadoParaExportar = JSON.parse(JSON.stringify(state));
   if(estadoParaExportar.vkConfig) delete estadoParaExportar.vkConfig.senha;
   const blob = new Blob([JSON.stringify(estadoParaExportar, null, 2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = `livrocaixa-backup-${todayISO()}.json`;
+  a.href = url; a.download = `LivroCaixaVK-backup-${todayISO()}.json`;
   a.click(); URL.revokeObjectURL(url);
   state.ultimoBackupEm = new Date().toISOString();
   persist();
@@ -41737,23 +41894,32 @@ function mostrarLembreteBackupSemanal(){
   overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(10,20,40,0.96);display:flex;align-items:center;justify-content:center;padding:24px;';
   overlay.innerHTML = `
     <div style="max-width:480px;width:100%;background:#fff;border-radius:16px;padding:32px 28px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
-      <div style="font-size:56px;margin-bottom:8px;">💾</div>
-      <h2 style="margin:0 0 12px;font-size:22px;">Backup semanal — sexta-feira</h2>
+      <div style="font-size:56px;margin-bottom:8px;">🔒</div>
+      <div style="font-size:12px;font-weight:700;letter-spacing:0.5px;color:#2563eb;text-transform:uppercase;margin-bottom:6px;">Central de Segurança</div>
+      <h2 style="margin:0 0 6px;font-size:22px;">Backup manual programado para hoje</h2>
+      <p style="color:#888;font-size:14px;margin-bottom:18px;">Olá, ${escapeHTML(nomeUsuarioLogado())}</p>
+      <p style="color:#555;font-size:15px;line-height:1.5;margin-bottom:8px;">
+        Antes de utilizar o sistema, faça o backup manual programado para hoje.
+        O sistema só libera depois que o backup for concluído.
+      </p>
       <p style="color:#555;font-size:15px;line-height:1.5;margin-bottom:24px;">
-        Antes de fechar o sistema hoje, gere o backup dos seus dados. É rápido — um clique baixa
-        um arquivo com tudo. Essa tela só fecha depois do backup.
+        Ao clicar no botão abaixo, um arquivo com todos os dados de hoje será baixado
+        (<strong>LivroCaixaVK-backup-${todayISO()}.json</strong>). Depois do download,
+        envie esse arquivo no grupo do WhatsApp da empresa, pra manter uma cópia extra fora do sistema.
       </p>
       <button id="btnFazerBackupAgora" style="width:100%;padding:14px;font-size:16px;font-weight:600;background:#2563eb;color:#fff;border:none;border-radius:10px;cursor:pointer;">
-        📥 Exportar backup agora
+        📥 Fazer backup agora
       </button>
-      <div id="statusBackupSemanal" style="margin-top:14px;font-size:13px;color:#16a34a;display:none;">✔ Backup baixado — pode fechar esta tela.</div>
+      <div id="statusBackupSemanal" style="margin-top:14px;font-size:13px;color:#16a34a;display:none;">
+        ✔ Backup baixado — agora envie o arquivo no grupo do WhatsApp. Liberando o sistema...
+      </div>
     </div>
   `;
   document.body.appendChild(overlay);
   document.getElementById('btnFazerBackupAgora').addEventListener('click', ()=>{
     exportarBackupAgora();
     document.getElementById('statusBackupSemanal').style.display = 'block';
-    setTimeout(()=>{ overlay.remove(); showToast('Backup semanal concluído'); }, 1200);
+    setTimeout(()=>{ overlay.remove(); showToast('Backup concluído — não esqueça de mandar no grupo do WhatsApp'); }, 1800);
   });
 }
 let dadosCarregados = false;
