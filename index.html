@@ -2692,6 +2692,9 @@ function render(){
       if(e.key==='Enter') document.getElementById('btnDesbloquearTela').click();
     });
     document.getElementById('btnVoltarTelaProtegida').addEventListener('click', ()=>{ currentView='dashboard'; render(); });
+    document.getElementById('wrapperTelaProtegida').addEventListener('click', e=>{
+      if(e.target.id==='wrapperTelaProtegida'){ currentView='dashboard'; render(); }
+    });
     return;
   }
   if(currentView==='dashboard') main.innerHTML = viewDashboard();
@@ -26728,23 +26731,26 @@ function viewAcessoRestrito(view){
 function viewTelaProtegida(view){
   const item = moreItensDefBase().find(i=>i.view===view);
   const nome = item ? item.nome : 'esta tela';
+  const nivel = (state.telasProtegidasNivel||{})[view] || 'qualquer';
+  const quem = nivel==='admin' ? 'de um administrador' : nivel==='supervisor' ? 'de um supervisor' : 'de um administrador ou supervisor';
+  const quemCurto = nivel==='admin' ? 'do administrador' : nivel==='supervisor' ? 'do supervisor' : 'do administrador/supervisor';
   return `
-    <div style="position:fixed;inset:0;z-index:500;background:rgba(10,20,40,0.96);display:flex;align-items:center;justify-content:center;padding:24px;">
-      <div style="max-width:420px;width:100%;background:#fff;border-radius:16px;padding:32px 28px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+    <div id="wrapperTelaProtegida" style="display:flex;align-items:center;justify-content:center;min-height:60vh;padding:24px;">
+      <div class="panel" style="max-width:420px;width:100%;padding:32px 28px;text-align:center;">
         <div style="font-size:48px;margin-bottom:8px;">🔒</div>
-        <div style="font-size:12px;font-weight:700;letter-spacing:0.5px;color:#2563eb;text-transform:uppercase;margin-bottom:6px;">Central de Segurança</div>
-        <h2 style="margin:0 0 8px;color:#111;">Tela protegida</h2>
-        <p style="color:#555;font-size:15px;line-height:1.5;margin-bottom:20px;">
-          "${escapeHTML(nome)}" exige a senha de um administrador ou supervisor pra ser acessada.
-          Peça pra alguém autorizado digitar a senha dele aqui embaixo pra liberar.
+        <div style="font-size:12px;font-weight:700;letter-spacing:0.5px;color:var(--primary,#2563eb);text-transform:uppercase;margin-bottom:6px;">Central de Segurança</div>
+        <h2 style="margin:0 0 8px;">Tela protegida</h2>
+        <p class="sub" style="margin-bottom:20px;">
+          "${escapeHTML(nome)}" exige a senha ${quem} pra ser acessada.
+          Peça pra alguém autorizado digitar a senha aqui embaixo pra liberar.
         </p>
-        <div style="text-align:left;margin-bottom:6px;">
-          <label style="font-size:13px;color:#555;">Senha do administrador/supervisor</label>
-          <input type="password" id="senhaDesbloqueioTela" placeholder="••••••••" style="width:100%;padding:12px;margin-top:4px;border:1px solid #ddd;border-radius:8px;font-size:15px;box-sizing:border-box;">
+        <div class="field" style="text-align:left;">
+          <label>Senha ${quemCurto}</label>
+          <input type="password" id="senhaDesbloqueioTela" placeholder="••••••••">
         </div>
-        <div id="erroDesbloqueioTela" style="display:none;color:#dc2626;font-size:13px;margin:6px 0;text-align:left;"></div>
-        <button id="btnDesbloquearTela" style="width:100%;padding:14px;font-size:16px;font-weight:600;background:#2563eb;color:#fff;border:none;border-radius:10px;cursor:pointer;margin-top:10px;">Desbloquear</button>
-        <button id="btnVoltarTelaProtegida" style="width:100%;padding:12px;font-size:14px;background:none;color:#555;border:none;cursor:pointer;margin-top:6px;">Voltar ao Dashboard</button>
+        <div id="erroDesbloqueioTela" style="display:none;color:var(--danger);font-size:13px;margin:6px 0;text-align:left;"></div>
+        <button class="btn" id="btnDesbloquearTela" style="width:100%;margin-top:10px;">Desbloquear</button>
+        <button class="btn ghost" id="btnVoltarTelaProtegida" style="width:100%;margin-top:8px;">← Voltar ao Dashboard</button>
       </div>
     </div>
   `;
