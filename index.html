@@ -2059,23 +2059,33 @@ function showToast(msg){
   setTimeout(()=>t.classList.remove('show'), 2200);
 }
 
-// Alerta de permissão negada: aparece centralizado na tela (não só um toast discreto no rodapé,
-// que passa despercebido) e some sozinho depois de alguns segundos. Usado nos pontos onde a
-// pessoa tenta uma ação que não tem permissão de fazer.
-function mostrarAlertaPermissaoNegada(msg){
-  document.getElementById('alertaPermissaoNegada')?.remove();
+// Alerta grande centralizado na tela (não só um toast discreto no rodapé, que passa
+// despercebido) — some sozinho depois de alguns segundos. Base reaproveitada tanto pelo alerta
+// de "Sem permissão" quanto pelos avisos de campo obrigatório/validação em todo o sistema.
+function mostrarAvisoGrande(msg, { icone='⚠️', titulo='Atenção', cor='var(--warn,#d97706)' } = {}){
+  document.getElementById('avisoGrandeCentralizado')?.remove();
   const el = document.createElement('div');
-  el.id = 'alertaPermissaoNegada';
+  el.id = 'avisoGrandeCentralizado';
   el.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px;pointer-events:none;';
   el.innerHTML = `
-    <div style="pointer-events:auto;max-width:360px;width:100%;background:#fff;border:2px solid var(--danger,#dc2626);border-radius:16px;padding:24px 20px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.35);animation:alertaPermissaoEntra 0.2s ease-out;">
-      <div style="font-size:40px;margin-bottom:8px;">🚫</div>
-      <div style="font-weight:700;color:#111;margin-bottom:4px;">Sem permissão</div>
+    <div style="pointer-events:auto;max-width:360px;width:100%;background:#fff;border:2px solid ${cor};border-radius:16px;padding:24px 20px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.35);animation:alertaPermissaoEntra 0.2s ease-out;">
+      <div style="font-size:40px;margin-bottom:8px;">${icone}</div>
+      <div style="font-weight:700;color:#111;margin-bottom:4px;">${escapeHTML(titulo)}</div>
       <div style="color:#555;font-size:14px;line-height:1.4;">${escapeHTML(msg)}</div>
     </div>
   `;
   document.body.appendChild(el);
   setTimeout(()=>{ el.style.transition='opacity 0.3s'; el.style.opacity='0'; setTimeout(()=>el.remove(), 300); }, 2800);
+}
+// Avisos de campo obrigatório / validação de formulário ("Informe o X", "Preencha Y", "Escolha
+// Z") — usado no lugar do toast discreto em todo o sistema, pra pessoa não deixar passar batido.
+function mostrarAvisoValidacao(msg){
+  mostrarAvisoGrande(msg, { icone:'⚠️', titulo:'Atenção', cor:'var(--warn,#d97706)' });
+}
+// Alerta de permissão negada — usado nos pontos onde a pessoa tenta uma ação que não tem
+// permissão de fazer.
+function mostrarAlertaPermissaoNegada(msg){
+  mostrarAvisoGrande(msg, { icone:'🚫', titulo:'Sem permissão', cor:'var(--danger,#dc2626)' });
 }
 if(!document.getElementById('estiloAlertaPermissao')){
   const styleTag = document.createElement('style');
@@ -3293,7 +3303,7 @@ function openCentralAtualizacaoModal(){
     const dataPosicao = document.getElementById('atlzDataPosicao').value || todayISO();
     const observacao = document.getElementById('atlzObservacao').value.trim();
     const campos = [...document.querySelectorAll('.atlz-novo-valor')].filter(inp=>inp.value.trim()!=='');
-    if(!campos.length){ showToast('Preencha ao menos um novo valor'); return; }
+    if(!campos.length){ mostrarAvisoValidacao('Preencha ao menos um novo valor'); return; }
 
     // Proteção contra erro de digitação (seção 57/99) — só pergunta se alguma variação for grande
     const variacoesGrandes = campos.map(inp=>{
@@ -3612,7 +3622,7 @@ function fmtQtdBR(n){ return (Number(n)||0).toLocaleString('pt-BR', { maximumFra
 async function sincronizarPedidosVK(){
   const cfg = state.vkConfig;
   if(!cfg.firebaseConfig){ showToast('Cole a configuração do Firebase antes de sincronizar'); render(); return; }
-  if(!cfg.email || !cfg.senha){ showToast('Informe o e-mail e a senha de acesso ao VK Industrial'); render(); return; }
+  if(!cfg.email || !cfg.senha){ mostrarAvisoValidacao('Informe o e-mail e a senha de acesso ao VK Industrial'); render(); return; }
   if(typeof firebase === 'undefined'){ showToast('Não foi possível carregar o Firebase — confira a internet'); render(); return; }
 
   try{
@@ -4037,7 +4047,7 @@ function primeiraLeituraComFalha(...snaps){
 async function sincronizarRecomendacoesCompraVK(){
   const cfg = state.vkConfig;
   if(!cfg.firebaseConfig){ showToast('Cole a configuração do Firebase antes de sincronizar'); render(); return; }
-  if(!cfg.email || !cfg.senha){ showToast('Informe o e-mail e a senha de acesso ao VK Industrial'); render(); return; }
+  if(!cfg.email || !cfg.senha){ mostrarAvisoValidacao('Informe o e-mail e a senha de acesso ao VK Industrial'); render(); return; }
   if(typeof firebase === 'undefined'){ showToast('Não foi possível carregar o Firebase — confira a internet'); render(); return; }
 
   try{
@@ -4122,7 +4132,7 @@ async function sincronizarRecomendacoesCompraVK(){
 async function sincronizarCustosProdutosVK(){
   const cfg = state.vkConfig;
   if(!cfg.firebaseConfig){ showToast('Cole a configuração do Firebase antes de sincronizar'); render(); return; }
-  if(!cfg.email || !cfg.senha){ showToast('Informe o e-mail e a senha de acesso ao VK Industrial'); render(); return; }
+  if(!cfg.email || !cfg.senha){ mostrarAvisoValidacao('Informe o e-mail e a senha de acesso ao VK Industrial'); render(); return; }
   if(typeof firebase === 'undefined'){ showToast('Não foi possível carregar o Firebase — confira a internet'); render(); return; }
 
   try{
@@ -4222,7 +4232,7 @@ async function sincronizarCustosProdutosVK(){
 async function sincronizarEstoqueInsumosVK(){
   const cfg = state.vkConfig;
   if(!cfg.firebaseConfig){ showToast('Cole a configuração do Firebase antes de sincronizar'); render(); return; }
-  if(!cfg.email || !cfg.senha){ showToast('Informe o e-mail e a senha de acesso ao VK Industrial'); render(); return; }
+  if(!cfg.email || !cfg.senha){ mostrarAvisoValidacao('Informe o e-mail e a senha de acesso ao VK Industrial'); render(); return; }
   if(typeof firebase === 'undefined'){ showToast('Não foi possível carregar o Firebase — confira a internet'); render(); return; }
 
   try{
@@ -4296,8 +4306,8 @@ async function sincronizarEstoqueInsumosVK(){
 async function sincronizarEntradasEstoqueVK(){
   const cfg = state.vkConfig;
   if(!cfg.firebaseConfig){ showToast('Cole a configuração do Firebase antes de sincronizar'); render(); return; }
-  if(!cfg.contaIdEstoque){ showToast('Escolha a conta bancária de destino das entradas de estoque'); render(); return; }
-  if(!cfg.email || !cfg.senha){ showToast('Informe o e-mail e a senha de acesso ao VK Industrial'); render(); return; }
+  if(!cfg.contaIdEstoque){ mostrarAvisoValidacao('Escolha a conta bancária de destino das entradas de estoque'); render(); return; }
+  if(!cfg.email || !cfg.senha){ mostrarAvisoValidacao('Informe o e-mail e a senha de acesso ao VK Industrial'); render(); return; }
   if(typeof firebase === 'undefined'){ showToast('Não foi possível carregar o Firebase — confira a internet'); render(); return; }
 
   try{
@@ -7526,7 +7536,7 @@ function openPeriodoCustomModal(tipo){
   document.getElementById('btnAplicarPeriodo').addEventListener('click', ()=>{
     const de = document.getElementById('periodoDe').value;
     const ate = document.getElementById('periodoAte').value;
-    if(!de || !ate || de>ate){ showToast('Escolha um período válido'); return; }
+    if(!de || !ate || de>ate){ mostrarAvisoValidacao('Escolha um período válido'); return; }
     lancamentosPeriodoCustom = { de, ate };
     closeModal(); render();
   });
@@ -8360,8 +8370,8 @@ function openAdicionarOrcamentoModal(categoriaExistente){
     const cat = document.getElementById('orcCategoriaSelect').value;
     const valor = numBR(document.getElementById('orcValorInput').value);
     const alerta = parseInt(document.getElementById('orcAlertaInput').value) || 80;
-    if(!cat){ showToast('Escolha uma categoria'); return; }
-    if(!valor || valor<=0){ showToast('Informe um valor de orçamento válido'); return; }
+    if(!cat){ mostrarAvisoValidacao('Escolha uma categoria'); return; }
+    if(!valor || valor<=0){ mostrarAvisoValidacao('Informe um valor de orçamento válido'); return; }
     if(!state.orcamentoCategorias) state.orcamentoCategorias = {};
     if(!state.orcamentoAlertaPct) state.orcamentoAlertaPct = {};
     state.orcamentoCategorias[cat] = valor;
@@ -8521,7 +8531,7 @@ function openCenarioModal(cenario){
       try{
       const salario = numBR(document.getElementById('cenSalario').value);
       const encargos = numBR(document.getElementById('cenEncargos').value) || 0;
-      if(isNaN(salario) || salario<=0){ showToast('Informe o salário'); return; }
+      if(isNaN(salario) || salario<=0){ mostrarAvisoValidacao('Informe o salário'); return; }
       const custoTotal = salario*(1+encargos/100);
       const nome = document.getElementById('cenNome').value.trim() || 'novo funcionário';
       if(!state.simulacaoAtual) state.simulacaoAtual = [];
@@ -8549,7 +8559,7 @@ function openCenarioModal(cenario){
       btnCenFatClick.disabled = true;
       try{
       const variacaoPct = numBR(document.getElementById('cenVariacao').value);
-      if(isNaN(variacaoPct) || variacaoPct===0){ showToast('Informe uma variação diferente de zero'); return; }
+      if(isNaN(variacaoPct) || variacaoPct===0){ mostrarAvisoValidacao('Informe uma variação diferente de zero'); return; }
       if(mediaAtual<=0){ showToast('Não há receita recente suficiente pra calcular essa simulação'); return; }
       const delta = mediaAtual*(variacaoPct/100);
       if(!state.simulacaoAtual) state.simulacaoAtual = [];
@@ -8579,12 +8589,12 @@ function openCenarioModal(cenario){
       btnCenMaqClick.disabled = true;
       try{
       const valor = numBR(document.getElementById('cenValor').value);
-      if(isNaN(valor) || valor<=0){ showToast('Informe o valor'); return; }
+      if(isNaN(valor) || valor<=0){ mostrarAvisoValidacao('Informe o valor'); return; }
       const parcelado = document.getElementById('cenForma').value==='parcelado';
       let valorItem = valor, parcelas = null;
       if(parcelado){
         parcelas = parseInt(document.getElementById('cenParcelas').value,10);
-        if(!parcelas || parcelas<2){ showToast('Informe um número de parcelas válido (mínimo 2)'); return; }
+        if(!parcelas || parcelas<2){ mostrarAvisoValidacao('Informe um número de parcelas válido (mínimo 2)'); return; }
         valorItem = Math.round((valor/parcelas)*100)/100;
       }
       const nome = document.getElementById('cenNome').value.trim() || 'Máquina/equipamento';
@@ -8613,7 +8623,7 @@ function openCenarioModal(cenario){
       try{
       const valor = numBR(document.getElementById('cenValor').value);
       const dias = numBR(document.getElementById('cenDias').value);
-      if(isNaN(valor) || valor<=0 || isNaN(dias) || dias<=0){ showToast('Preencha valor e dias de atraso'); return; }
+      if(isNaN(valor) || valor<=0 || isNaN(dias) || dias<=0){ mostrarAvisoValidacao('Preencha valor e dias de atraso'); return; }
       const mesesDeslocados = Math.max(1, Math.round(dias/30));
       const dataRecuperacao = new Date(todayISO()+'T12:00:00'); dataRecuperacao.setMonth(dataRecuperacao.getMonth()+mesesDeslocados);
       if(!state.simulacaoAtual) state.simulacaoAtual = [];
@@ -8689,11 +8699,11 @@ function openItemSimulacaoModal(){
     try{
     const descricao = document.getElementById('simDescricao').value.trim();
     const valor = numBR(document.getElementById('simValor').value);
-    if(!descricao || isNaN(valor) || valor<=0){ showToast('Preencha descrição e valor válido'); return; }
+    if(!descricao || isNaN(valor) || valor<=0){ mostrarAvisoValidacao('Preencha descrição e valor válido'); return; }
     let parcelas = null;
     if(freqAtual==='parcelado'){
       parcelas = parseInt(document.getElementById('simParcelas').value, 10);
-      if(!parcelas || parcelas<2){ showToast('Informe um número de parcelas válido (mínimo 2)'); return; }
+      if(!parcelas || parcelas<2){ mostrarAvisoValidacao('Informe um número de parcelas válido (mínimo 2)'); return; }
     }
     if(!state.simulacaoAtual) state.simulacaoAtual = [];
     state.simulacaoAtual.push({
@@ -14164,7 +14174,7 @@ function openEmprestimoModal(existing){
     const valorParcela = numBR(document.getElementById('empValorParcela').value);
     const numeroParcelas = numBR(document.getElementById('empNumParcelas').value);
     const parcelasPagas = numBR(document.getElementById('empParcelasPagas').value) || 0;
-    if(!nome || isNaN(valorTotal) || isNaN(valorParcela) || isNaN(numeroParcelas)){ showToast('Preencha nome, valor total, valor da parcela e número de parcelas'); return; }
+    if(!nome || isNaN(valorTotal) || isNaN(valorParcela) || isNaN(numeroParcelas)){ mostrarAvisoValidacao('Preencha nome, valor total, valor da parcela e número de parcelas'); return; }
     const payload = {
       nome, tipo: document.getElementById('empTipo').value, credor: document.getElementById('empCredor').value.trim() || null,
       instituicao: document.getElementById('empInstituicao').value.trim(),
@@ -14229,8 +14239,8 @@ function openRegistrarPagamentoDividaModal(dividaId){
       const multa = numBR(document.getElementById('pgMulta').value) || 0;
       const desconto = numBR(document.getElementById('pgDesconto').value) || 0;
       const observacao = document.getElementById('pgObservacao').value.trim() || null;
-      if(isNaN(valor) || valor<=0){ showToast('Informe o valor pago'); btn.disabled=false; return; }
-      if(!contaId){ showToast('Escolha a conta bancária'); btn.disabled=false; return; }
+      if(isNaN(valor) || valor<=0){ mostrarAvisoValidacao('Informe o valor pago'); btn.disabled=false; return; }
+      if(!contaId){ mostrarAvisoValidacao('Escolha a conta bancária'); btn.disabled=false; return; }
       const lancId = uid();
       state.lancamentos.push({
         id: lancId, tipo:'saida', categoria: divida.tipo==='Fornecedor'?'Fornecedores':'Despesas Financeiras',
@@ -14284,8 +14294,8 @@ function openQuitarDividaModal(dividaId){
       const desconto = numBR(document.getElementById('qtDesconto').value) || 0;
       const contaId = document.getElementById('qtConta').value;
       const data = document.getElementById('qtData').value || todayISO();
-      if(isNaN(valorFinal) || valorFinal<0){ showToast('Informe o valor final'); btn.disabled=false; return; }
-      if(!contaId){ showToast('Escolha a conta bancária'); btn.disabled=false; return; }
+      if(isNaN(valorFinal) || valorFinal<0){ mostrarAvisoValidacao('Informe o valor final'); btn.disabled=false; return; }
+      if(!contaId){ mostrarAvisoValidacao('Escolha a conta bancária'); btn.disabled=false; return; }
       const lancId = uid();
       if(valorFinal>0){
         state.lancamentos.push({
@@ -14371,8 +14381,8 @@ function openAmortizarDividaModal(dividaId){
       const contaId = document.getElementById('amConta').value;
       const data = document.getElementById('amData').value || todayISO();
       const observacao = document.getElementById('amObservacao').value.trim() || null;
-      if(isNaN(valor) || valor<=0){ showToast('Informe o valor da amortização'); btn.disabled=false; return; }
-      if(!contaId){ showToast('Escolha a conta bancária'); btn.disabled=false; return; }
+      if(isNaN(valor) || valor<=0){ mostrarAvisoValidacao('Informe o valor da amortização'); btn.disabled=false; return; }
+      if(!contaId){ mostrarAvisoValidacao('Escolha a conta bancária'); btn.disabled=false; return; }
       const sim = simularAmortizacao(divida, valor, efeito);
       const lancId = uid();
       state.lancamentos.push({
@@ -14455,8 +14465,8 @@ function openAntecipacaoParcelasModal(dividaId){
       const desconto = numBR(document.getElementById('anDesconto').value) || 0;
       const contaId = document.getElementById('anConta').value;
       const data = document.getElementById('anData').value || todayISO();
-      if(isNaN(qtd) || qtd<=0){ showToast('Informe a quantidade de parcelas'); btn.disabled=false; return; }
-      if(!contaId){ showToast('Escolha a conta bancária'); btn.disabled=false; return; }
+      if(isNaN(qtd) || qtd<=0){ mostrarAvisoValidacao('Informe a quantidade de parcelas'); btn.disabled=false; return; }
+      if(!contaId){ mostrarAvisoValidacao('Escolha a conta bancária'); btn.disabled=false; return; }
       const sim = simularAntecipacao(divida, qtd, desconto);
       if(sim.valorAPagar>0){
         const lancId = uid();
@@ -14521,8 +14531,8 @@ function openRenegociarDividaModal(dividaId){
       const dataRenegociacao = document.getElementById('rgData').value || todayISO();
       const primeiroVenc = document.getElementById('rgPrimeiroVenc').value;
       const observacao = document.getElementById('rgObservacao').value.trim() || null;
-      if(isNaN(novoSaldo) || novoSaldo<=0){ showToast('Informe o novo saldo'); btn.disabled=false; return; }
-      if(isNaN(novasParcelas) || novasParcelas<=0){ showToast('Informe o novo número de parcelas'); btn.disabled=false; return; }
+      if(isNaN(novoSaldo) || novoSaldo<=0){ mostrarAvisoValidacao('Informe o novo saldo'); btn.disabled=false; return; }
+      if(isNaN(novasParcelas) || novasParcelas<=0){ mostrarAvisoValidacao('Informe o novo número de parcelas'); btn.disabled=false; return; }
       const saldoFinanciado = Math.max(0, novoSaldo-entrada);
       const novaParcela = Math.round((saldoFinanciado/novasParcelas)*100)/100;
       // Marca a dívida antiga como renegociada — preserva TODO o histórico e cronograma dela
@@ -21144,7 +21154,7 @@ function abrirNovoObjetivoEstrategiaModal(objId){
   document.getElementById('btnSalvarObjetivoEstrategia').addEventListener('click', (e)=>{
     if(e.target.disabled) return; e.target.disabled = true; // evita duplo clique criar/editar 2x
     const titulo = document.getElementById('objTitulo').value.trim();
-    if(!titulo){ showToast('Informe o título do objetivo'); e.target.disabled = false; return; }
+    if(!titulo){ mostrarAvisoValidacao('Informe o título do objetivo'); e.target.disabled = false; return; }
     let progresso = Number(document.getElementById('objProgresso').value);
     if(!Number.isFinite(progresso)) progresso = 0;
     progresso = Math.max(0, Math.min(100, progresso));
@@ -21274,7 +21284,7 @@ function abrirNovoRiscoEstrategiaModal(riscoId){
   document.getElementById('btnSalvarRiscoEstrategia').addEventListener('click', (e)=>{
     if(e.target.disabled) return; e.target.disabled = true;
     const titulo = document.getElementById('riscoTitulo').value.trim();
-    if(!titulo){ showToast('Informe o título do risco'); e.target.disabled = false; return; }
+    if(!titulo){ mostrarAvisoValidacao('Informe o título do risco'); e.target.disabled = false; return; }
     const dados = {
       titulo,
       descricao: document.getElementById('riscoDescricao').value.trim(),
@@ -21308,7 +21318,7 @@ function abrirNovaAreaEstrategiaModal(){
   document.getElementById('btnSalvarAreaEstrategia').addEventListener('click', (e)=>{
     if(e.target.disabled) return; e.target.disabled = true;
     const nome = document.getElementById('aeNome').value.trim();
-    if(!nome){ showToast('Informe o nome da área'); e.target.disabled = false; return; }
+    if(!nome){ mostrarAvisoValidacao('Informe o nome da área'); e.target.disabled = false; return; }
     state.estrategiaAreas.push({ id: uid(), nome, cor: document.getElementById('aeCor').value });
     persist(); closeModal(); render();
   });
@@ -21333,7 +21343,7 @@ function abrirNovoPilarEstrategiaModal(areaId, pilarId){
   document.getElementById('btnSalvarPilarEstrategia').addEventListener('click', (e)=>{
     if(e.target.disabled) return; e.target.disabled = true;
     const titulo = document.getElementById('pilTitulo').value.trim();
-    if(!titulo){ showToast('Informe o título do pilar'); e.target.disabled = false; return; }
+    if(!titulo){ mostrarAvisoValidacao('Informe o título do pilar'); e.target.disabled = false; return; }
     const dados = {
       titulo,
       porque: document.getElementById('pilPorque').value.trim(),
@@ -21403,7 +21413,7 @@ function abrirNovaIniciativaEstrategiaModal(pilarId, iniId){
   document.getElementById('btnSalvarIniciativaEstrategia').addEventListener('click', (e)=>{
     if(e.target.disabled) return; e.target.disabled = true; // evita duplo clique criar/editar duas vezes
     const titulo = document.getElementById('iniTitulo').value.trim();
-    if(!titulo){ showToast('Informe o título da iniciativa'); e.target.disabled = false; return; }
+    if(!titulo){ mostrarAvisoValidacao('Informe o título da iniciativa'); e.target.disabled = false; return; }
     const dependeDeId = document.getElementById('iniDependeDe').value || null;
     const idAtual = ini ? ini.id : uid(); // gera o id antes pra checar ciclo mesmo em iniciativa nova
     if(dependeDeId && estrategiaCriaDependenciaCircular(idAtual, dependeDeId)){
@@ -21674,8 +21684,8 @@ function abrirNovoChequeModal(tipo, chequeId){
     if(e.target.disabled) return;
     const numero = document.getElementById('chNumero').value.trim();
     const valor = Number(document.getElementById('chValor').value);
-    if(!numero){ showToast('Informe o número do cheque'); return; }
-    if(!valor || valor<=0){ showToast('Informe um valor válido'); return; }
+    if(!numero){ mostrarAvisoValidacao('Informe o número do cheque'); return; }
+    if(!valor || valor<=0){ mostrarAvisoValidacao('Informe um valor válido'); return; }
     const dados = {
       tipo, numero, valor,
       bancoEmissor: tipo==='recebido' ? document.getElementById('chBancoEmissor').value.trim() : null,
@@ -21743,7 +21753,7 @@ function abrirAcaoChequeModal(chequeId, acao){
     const novoStatus = CHEQUE_ACAO_STATUS_DESTINO[acao];
     const motivo = document.getElementById('acaoMotivo')?.value.trim() || '';
     if(['cancelar','sustar','extraviar','devolver'].includes(acao) && !motivo){
-      showToast('Informe o motivo antes de confirmar'); e.target.disabled = false; return;
+      mostrarAvisoValidacao('Informe o motivo antes de confirmar'); e.target.disabled = false; return;
     }
     const ehNormal = chequeTransicaoEhNormal(cheque.status, novoStatus);
     const obs = document.getElementById('acaoObs').value.trim();
@@ -22251,7 +22261,7 @@ function openFichaCapexModal(projetoId){
   document.getElementById('btnAdicionarDocCapex').addEventListener('click', ()=>{
     const nome = document.getElementById('capexDocNome').value.trim();
     const link = document.getElementById('capexDocLink').value.trim();
-    if(!nome || !link){ showToast('Preencha nome e link do documento'); return; }
+    if(!nome || !link){ mostrarAvisoValidacao('Preencha nome e link do documento'); return; }
     if(!p.documentos) p.documentos = [];
     p.documentos.push({ tipo: document.getElementById('capexDocTipo').value, nome, link, data: new Date().toISOString() });
     persist();
@@ -24311,7 +24321,7 @@ function openAtivoPatrimonialModal(existing, prefillPendente){
     const seguroPremioRaw = document.getElementById('apSeguroPremio').value.trim();
     const seguroPremio = seguroPremioRaw ? numBR(seguroPremioRaw) : null;
     const capexProjetoId = document.getElementById('apCapexProjeto')?.value || null;
-    if(!nome || isNaN(valorAquisicao) || valorAquisicao<=0 || isNaN(vidaUtilAnos) || vidaUtilAnos<=0){ showToast('Preencha nome, valor de aquisição e vida útil'); return; }
+    if(!nome || isNaN(valorAquisicao) || valorAquisicao<=0 || isNaN(vidaUtilAnos) || vidaUtilAnos<=0){ mostrarAvisoValidacao('Preencha nome, valor de aquisição e vida útil'); return; }
     if(isEdit){
       Object.assign(existing, { nome, categoria, numeroPatrimonio, semAdesivo, fornecedor, notaFiscal, dataAquisicao, valorAquisicao, vidaUtilAnos, valorResidual, garantiaMeses, seguradora, apolice, seguroVigenciaFim, seguroPremio, capexProjetoId });
     } else {
@@ -24622,7 +24632,7 @@ function openReavaliacaoModal(ativo){
     const valorLaudo = numBR(document.getElementById('rvValor').value);
     const data = document.getElementById('rvData').value || todayISO();
     const observacao = document.getElementById('rvObs').value.trim();
-    if(isNaN(valorLaudo) || valorLaudo<0){ showToast('Preencha um valor válido'); return; }
+    if(isNaN(valorLaudo) || valorLaudo<0){ mostrarAvisoValidacao('Preencha um valor válido'); return; }
     if(!ativo.reavaliacoes) ativo.reavaliacoes = [];
     ativo.reavaliacoes.push({ id: uid(), valorLaudo, data, observacao, criadoEm: new Date().toISOString() });
     registrarLog('Reavaliação de ativo registrada', `"${ativo.nome}" — novo valor ${brl(valorLaudo)}`);
@@ -25085,7 +25095,7 @@ function openMoverLancamentosModal(tipo, catNome){
     const destino = document.getElementById('moverDestino').value;
     const idsLancamento = checks().filter(c=>c.checked && c.dataset.tipoRegistro==='lancamento').map(c=>c.dataset.id);
     const idsCartao = checks().filter(c=>c.checked && c.dataset.tipoRegistro==='cartao').map(c=>c.dataset.id);
-    if(!idsLancamento.length && !idsCartao.length){ showToast('Selecione ao menos um lançamento'); return; }
+    if(!idsLancamento.length && !idsCartao.length){ mostrarAvisoValidacao('Selecione ao menos um lançamento'); return; }
     let movidos = 0;
     state.lancamentos.forEach(l=>{
       if(idsLancamento.includes(l.id) && l.categoria!==destino){ l.categoria = destino; movidos++; }
@@ -25891,7 +25901,7 @@ function viewStub(titulo, texto){
 async function sincronizarAtivosVK(){
   const cfg = state.vkConfig;
   if(!cfg.firebaseConfig){ showToast('Cole a configuração do Firebase antes de sincronizar'); render(); return; }
-  if(!cfg.email || !cfg.senha){ showToast('Informe o e-mail e a senha de acesso ao VK Industrial'); render(); return; }
+  if(!cfg.email || !cfg.senha){ mostrarAvisoValidacao('Informe o e-mail e a senha de acesso ao VK Industrial'); render(); return; }
   if(typeof firebase === 'undefined'){ showToast('Não foi possível carregar o Firebase — confira a internet'); render(); return; }
 
   try{
@@ -25976,7 +25986,7 @@ async function sincronizarAtivosVK(){
 async function sincronizarProcessos(){
   const cfg = state.processosConfig;
   if(!cfg.firebaseConfig){ showToast('Cole a configuração do Firebase do Livro de Processos antes de sincronizar'); render(); return; }
-  if(!cfg.email || !cfg.senha){ showToast('Informe o e-mail e a senha de acesso ao Livro de Processos'); render(); return; }
+  if(!cfg.email || !cfg.senha){ mostrarAvisoValidacao('Informe o e-mail e a senha de acesso ao Livro de Processos'); render(); return; }
   if(typeof firebase === 'undefined'){ showToast('Não foi possível carregar o Firebase — confira a internet'); render(); return; }
 
   try{
@@ -26157,7 +26167,7 @@ async function sincronizarProcessos(){
 async function sincronizarOSVkIndustrial(){
   const cfg = state.processosConfig;
   if(!cfg.firebaseConfig){ showToast('Cole a configuração do Firebase do Livro de Processos antes de sincronizar'); render(); return; }
-  if(!cfg.email || !cfg.senha){ showToast('Informe o e-mail e a senha de acesso ao Livro de Processos'); render(); return; }
+  if(!cfg.email || !cfg.senha){ mostrarAvisoValidacao('Informe o e-mail e a senha de acesso ao Livro de Processos'); render(); return; }
   if(typeof firebase === 'undefined'){ showToast('Não foi possível carregar o Firebase — confira a internet'); render(); return; }
   try{
     if(!processosFirebaseApp) processosFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'livro-processos');
@@ -26906,7 +26916,7 @@ function abrirModalGerenciarUsuario(email){
       if(novoStatus==='suspenso'){
         document.getElementById('campoSuspensaoAte').style.display = '';
         const data = document.getElementById('gerSuspensoAte').value;
-        if(!data){ showToast('Escolha a data final da suspensão.'); return; }
+        if(!data){ mostrarAvisoValidacao('Escolha a data final da suspensão.'); return; }
         const motivo = prompt('Motivo da suspensão (opcional):','') || '';
         registrarHistoricoPermissao({ usuarioAlvo:email, campo:'status', de:u.status, para:'suspenso', motivo });
         u.status = 'suspenso'; u.suspensoAte = data;
@@ -26921,7 +26931,7 @@ function abrirModalGerenciarUsuario(email){
 
   document.getElementById('btnCopiarPermissoes').addEventListener('click', ()=>{
     const origemEmail = document.getElementById('gerCopiarDe').value;
-    if(!origemEmail){ showToast('Escolha de quem copiar.'); return; }
+    if(!origemEmail){ mostrarAvisoValidacao('Escolha de quem copiar.'); return; }
     const origem = (state.usuariosPermissao||[]).find(x=>x.email===origemEmail);
     if(!origem) return;
     if(!confirm(`Copiar as permissões de ${origem.nome||origem.email} para ${u.nome||u.email}?`)) return;
@@ -27430,7 +27440,7 @@ function openCriarObrigacaoOSModal(pedidoId){
       // duas abas abertas, etc. — pedido nº 6/17 do documento 3).
       if(jaTemObrigacaoFinanceira(p.id)){ showToast('Essa O.S. já tem uma obrigação financeira criada.'); closeModal(); return; }
       const valor = parseFloat(document.getElementById('obValor').value.replace(',','.'))||0;
-      if(valor<=0){ showToast('Informe um valor maior que zero.'); btn.disabled=false; return; }
+      if(valor<=0){ mostrarAvisoValidacao('Informe um valor maior que zero.'); btn.disabled=false; return; }
       const vencimento = document.getElementById('obVencimento').value || todayISO();
       const novoId = uid();
       state.lancamentos.push({
@@ -28142,7 +28152,7 @@ function aprovarItemVK(id){
     if(ehCartao){
       const cartaoId = document.getElementById('aprovCartaoSelect_'+id)?.value;
       const cartao = state.cartoes.find(c=>c.id===cartaoId);
-      if(!cartao){ showToast('Escolha um cartão pra lançar essa despesa'); return; }
+      if(!cartao){ mostrarAvisoValidacao('Escolha um cartão pra lançar essa despesa'); return; }
       const dataCompra = item.dataVencimento || todayISO();
       const competencia = competenciaFromDate(cartao, dataCompra);
       if(temVariosItens){
@@ -28370,7 +28380,7 @@ function abrirQuitarModal(id){
     const data = document.getElementById('qtData').value || todayISO();
     const contaId = document.getElementById('qtConta').value;
     const formaRecebimento = document.getElementById('qtFormaRecebimento')?.value || null;
-    if(isNaN(valorInformado) || valorInformado<=0){ showToast('Informe um valor válido'); return; }
+    if(isNaN(valorInformado) || valorInformado<=0){ mostrarAvisoValidacao('Informe um valor válido'); return; }
     if(!l.historicoRecebimentos) l.historicoRecebimentos = [];
     l.historicoRecebimentos.push({ valor: valorInformado, data, contaId, formaRecebimento: formaRecebimento||null });
     const novoRecebido = Math.round(((l.valorRecebido||0) + valorInformado)*100)/100;
@@ -28541,7 +28551,7 @@ function openAlterarDescricaoLoteModal(lancs){
     btn_btnConfirmarLoteDesc_Click.disabled = true;
     try{
     const nova = document.getElementById('loteDescricao').value.trim();
-    if(!nova){ showToast('Digite a nova descrição'); return; }
+    if(!nova){ mostrarAvisoValidacao('Digite a nova descrição'); return; }
     lancs.forEach(l=>{ l.descricao = nova; });
     registrarLog('Descrição alterada em lote', `${lancs.length} lançamento(s) renomeado(s) para "${nova}"`);
     limparSelecaoLanc(); persist(); closeModal(); render();
@@ -31268,7 +31278,7 @@ function attachViewHandlers(){
     });
     document.getElementById('btnAplicarSimulacao')?.addEventListener('click', async ()=>{
       const provId = document.getElementById('simAplicarEm').value;
-      if(!provId){ showToast('Escolha um provisionamento pra aplicar a simulação'); return; }
+      if(!provId){ mostrarAvisoValidacao('Escolha um provisionamento pra aplicar a simulação'); return; }
       const p = (state.provisionamentos||[]).find(x=>x.id===provId);
       if(!p) return;
       const confirmar = await avisoModal({
@@ -31350,7 +31360,7 @@ function attachViewHandlers(){
   document.getElementById('btnBaixarPdfTodosLanc')?.addEventListener('click', ()=>{
     const dataDe = document.getElementById('todosLancPdfDe').value;
     const dataAte = document.getElementById('todosLancPdfAte').value;
-    if(!dataDe || !dataAte){ showToast('Preencha as duas datas'); return; }
+    if(!dataDe || !dataAte){ mostrarAvisoValidacao('Preencha as duas datas'); return; }
     if(dataDe > dataAte){ showToast('A data "De" não pode ser depois da data "Até"'); return; }
     gerarTodosLancamentosPDF(dataDe, dataAte);
   });
@@ -31630,7 +31640,7 @@ function attachViewHandlers(){
         const descricao = descInput.value.trim();
         const valor = numBR(valInput.value);
         const categoria = catSelect ? catSelect.value : 'Comissões';
-        if(!descricao || isNaN(valor) || valor<=0){ showToast('Preencha a descrição e um valor válido para a bonificação'); return; }
+        if(!descricao || isNaN(valor) || valor<=0){ mostrarAvisoValidacao('Preencha a descrição e um valor válido para a bonificação'); return; }
         bloco.querySelector('.extras-lista').insertAdjacentHTML('beforeend', extraRowHTML(descricao, valor, categoria));
         descInput.value=''; valInput.value='';
         bindExtrasRemove(bloco);
@@ -31661,7 +31671,7 @@ function attachViewHandlers(){
         bloco.querySelectorAll('.extra-row').forEach(r=>extras.push({ descricao: r.dataset.descricao, valor: parseFloat(r.dataset.valor), categoria: r.dataset.categoria||'Comissões' }));
         const extrasTotal = Math.round(extras.reduce((s,e)=>s+e.valor,0)*100)/100;
         const total = Math.round((comissaoValor+extrasTotal)*100)/100;
-        if(!itensSelecionados.length && !extras.length){ showToast('Selecione ao menos um pedido ou adicione uma bonificação'); return; }
+        if(!itensSelecionados.length && !extras.length){ mostrarAvisoValidacao('Selecione ao menos um pedido ou adicione uma bonificação'); return; }
         if(total<=0){ showToast('O valor total está zerado — confira o percentual e os pedidos selecionados'); return; }
         // Confirmação DETALHADA, item por item — pra conseguir conferir o valor certinho antes de
         // gerar, e não só um total fechado que esconde se alguma bonificação ficou de fora.
@@ -31769,7 +31779,7 @@ function attachViewHandlers(){
       comissaoDataDeSelecionada = document.getElementById('comissaoDataDe').value;
       comissaoDataAteSelecionada = document.getElementById('comissaoDataAte').value;
       comissaoAbaSelecionada = 'pendentes';
-      if(!comissaoVendedorSelecionado){ showToast('Escolha um vendedor'); }
+      if(!comissaoVendedorSelecionado){ mostrarAvisoValidacao('Escolha um vendedor'); }
       pintarResultado();
     });
 
@@ -32742,7 +32752,7 @@ function attachViewHandlers(){
 
   document.getElementById('btnAddPermissao')?.addEventListener('click', ()=>{
     const email = document.getElementById('permEmail').value.trim().toLowerCase();
-    if(!email || !email.includes('@')){ showToast('Preencha um e-mail válido'); return; }
+    if(!email || !email.includes('@')){ mostrarAvisoValidacao('Preencha um e-mail válido'); return; }
     if((state.usuariosPermissao||[]).some(u=>u.email===email)){ showToast('Esse e-mail já está cadastrado — remova antes de adicionar de novo com outro papel.'); return; }
     const limite = numBR(document.getElementById('permLimite').value);
     const antesSync = [...(state.usuariosPermissao||[])];
@@ -33321,7 +33331,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       `;
       document.getElementById('btnUsarReservaProv').addEventListener('click', async ()=>{
         const contaPagamentoId = document.getElementById('fConta')?.value || contaPreSelecionadaId;
-        if(!contaPagamentoId){ showToast('Escolha a conta de pagamento primeiro'); return; }
+        if(!contaPagamentoId){ mostrarAvisoValidacao('Escolha a conta de pagamento primeiro'); return; }
         if(contaPagamentoId===p.contaDestinoId){ showToast('A conta de pagamento já é a própria caixinha — não precisa transferir'); return; }
         const confirmar = await avisoModal({
           titulo: 'Transferir da caixinha?',
@@ -33663,7 +33673,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     const categoria = document.getElementById('fCategoria').value;
     const descricao = document.getElementById('fDescricao').value.trim() || categoria;
     const valor = valorTravado ? existing.valor : numBR(document.getElementById('fValor').value);
-    if(!valor || isNaN(valor) || valor<=0){ showToast('Preencha um valor válido'); return; }
+    if(!valor || isNaN(valor) || valor<=0){ mostrarAvisoValidacao('Preencha um valor válido'); return; }
 
     if(!podeAgora(isEdit?'editar':'criar')){ showToast(`Seu usuário não tem permissão pra ${isEdit?'editar':'criar'} lançamentos.`); return; }
 
@@ -33700,7 +33710,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     if(formaPagtoAtual==='cartao'){
       const cartaoId = document.getElementById('fCartaoSelect').value;
       const cartao = state.cartoes.find(c=>c.id===cartaoId);
-      if(!cartao){ showToast('Escolha um cartão'); return; }
+      if(!cartao){ mostrarAvisoValidacao('Escolha um cartão'); return; }
       const dataCompra = document.getElementById('fVencimento').value || todayISO();
       const parcelas = parseInt(document.getElementById('fParcelasDespesa').value) || 1;
       const grupoId = uid();
@@ -34978,9 +34988,9 @@ function openProvisionamentoModal(existing){
       const nome = document.getElementById('pvNome').value.trim();
       const valorPrevisto = numBR(document.getElementById('pvValor').value);
       const proximoVencimento = document.getElementById('pvVencimento').value;
-      if(!nome){ showToast('Preencha o nome'); return; }
-      if(isNaN(valorPrevisto) || valorPrevisto<=0){ showToast('Preencha um valor previsto válido'); return; }
-      if(!proximoVencimento){ showToast('Preencha a data do próximo vencimento'); return; }
+      if(!nome){ mostrarAvisoValidacao('Preencha o nome'); return; }
+      if(isNaN(valorPrevisto) || valorPrevisto<=0){ mostrarAvisoValidacao('Preencha um valor previsto válido'); return; }
+      if(!proximoVencimento){ mostrarAvisoValidacao('Preencha a data do próximo vencimento'); return; }
       const payload = {
         nome, descricao: document.getElementById('pvDescricao').value.trim(),
         categoria: document.getElementById('pvCategoria').value || null,
@@ -35061,7 +35071,7 @@ function openRegistrarReservaModal(provisionamentoId){
       const valor = numBR(document.getElementById('rsvValor').value);
       const data = document.getElementById('rsvData').value || todayISO();
       const mesReferencia = document.getElementById('rsvMesReferencia').value;
-      if(isNaN(valor) || valor<=0){ showToast('Preencha um valor válido'); return; }
+      if(isNaN(valor) || valor<=0){ mostrarAvisoValidacao('Preencha um valor válido'); return; }
       const contaOrigemId = document.getElementById('rsvContaOrigem')?.value || null;
       const contaDestinoId = document.getElementById('rsvContaDestino')?.value || null;
       const observacao = document.getElementById('rsvObservacao').value.trim();
@@ -35185,8 +35195,8 @@ function openRegistrarPagamentoProvModal(provisionamentoId){
       const valor = numBR(document.getElementById('pgValor').value);
       const data = document.getElementById('pgData').value || todayISO();
       const contaId = document.getElementById('pgConta').value;
-      if(isNaN(valor) || valor<=0){ showToast('Preencha um valor válido'); return; }
-      if(!contaId){ showToast('Escolha a conta'); return; }
+      if(isNaN(valor) || valor<=0){ mostrarAvisoValidacao('Preencha um valor válido'); return; }
+      if(!contaId){ mostrarAvisoValidacao('Escolha a conta'); return; }
       const novoId = uid();
       state.lancamentos.push({
         id: novoId, tipo:'saida', categoria: p.categoria || 'Outros', descricao: `Pagamento — ${p.nome}`,
@@ -35412,7 +35422,7 @@ function openRenomearDescricaoModal(textoAtual){
     btn_btnConfirmarRenomearDescricao_Click.disabled = true;
     try{
     const nova = document.getElementById('novaDescricaoInput').value.trim();
-    if(!nova){ showToast('Digite a nova descrição'); return; }
+    if(!nova){ mostrarAvisoValidacao('Digite a nova descrição'); return; }
     const afetados = renomearDescricaoEmMassa(textoAtual, nova);
     registrarLog('Descrição padronizada', `"${textoAtual}" → "${nova}" (${afetados} lançamento(s))`);
     persist(); closeModal(); render();
@@ -35635,7 +35645,7 @@ function openFornecedorModal(existing){
     btn_btnSalvarFornecedor_Click.disabled = true;
     try{
     const nome = document.getElementById('fnNome').value.trim();
-    if(!nome){ showToast('Digite o nome do fornecedor'); return; }
+    if(!nome){ mostrarAvisoValidacao('Digite o nome do fornecedor'); return; }
     if(!state.fornecedores) state.fornecedores = [];
     if(!isEdit && state.fornecedores.some(f=>f.nome.toLowerCase()===nome.toLowerCase())){ showToast('Já existe um fornecedor com esse nome'); return; }
     const payload = {
@@ -35842,7 +35852,7 @@ function openRecorrenciaModal(existing, contaPreSelecionadaId){
     const descricao = document.getElementById('rcDescricao').value.trim();
     const valor = numBR(document.getElementById('rcValor').value);
     const diaVencimento = parseInt(document.getElementById('rcDia').value);
-    if(!descricao || isNaN(valor) || valor<=0 || isNaN(diaVencimento) || diaVencimento<1 || diaVencimento>31){ showToast('Preencha descrição, valor e um dia válido (1 a 31)'); return; }
+    if(!descricao || isNaN(valor) || valor<=0 || isNaN(diaVencimento) || diaVencimento<1 || diaVencimento>31){ mostrarAvisoValidacao('Preencha descrição, valor e um dia válido (1 a 31)'); return; }
     const payload = {
       tipo: tipoAtual, descricao, categoria: document.getElementById('rcCategoria').value,
       valor, diaVencimento, contaId: document.getElementById('rcConta').value,
@@ -36198,7 +36208,7 @@ function openRetiradaModal(existing){
     const valor = numBR(document.getElementById('rtValor').value);
     const contaId = document.getElementById('rtConta').value;
     const observacao = document.getElementById('rtObservacao').value.trim();
-    if(!data || isNaN(valor) || valor<=0){ showToast('Preencha a data e o valor'); return; }
+    if(!data || isNaN(valor) || valor<=0){ mostrarAvisoValidacao('Preencha a data e o valor'); return; }
     const rotuloTipo = { 'pro-labore':'Pró-labore', 'retirada':'Retirada', 'distribuicao':'Distribuição de lucros', 'antecipacao':'Antecipação' };
     const socio = state.socios.find(s=>s.id===socioId);
     const descricao = `${rotuloTipo[tipo]}${socio?' — '+socio.nome:''}`;
@@ -36792,7 +36802,7 @@ function openMetaEmpresaModal(existing, rascunho){
   });
   document.getElementById('btnEscolherCategoriasEspecificas')?.addEventListener('click', ()=>{
     const tipo = document.getElementById('meCategoriaEspecificaTipo').value;
-    if(!tipo){ showToast('Escolha primeiro se é despesa ou receita'); return; }
+    if(!tipo){ mostrarAvisoValidacao('Escolha primeiro se é despesa ou receita'); return; }
     const jaSelecionadas = (document.getElementById('meCategoriasEspecificasValor').value||'').split('|').filter(Boolean);
     abrirSeletorMultiploCategoriasMeta(tipo, jaSelecionadas, existing, gatherRascunhoMeta());
   });
@@ -36831,7 +36841,7 @@ function openMetaEmpresaModal(existing, rascunho){
     try{
     const nome = document.getElementById('meNome').value.trim();
     const valorAlvo = numBR(document.getElementById('meValorAlvo').value);
-    if(!nome || isNaN(valorAlvo) || valorAlvo<=0){ showToast('Preencha nome e valor/objetivo válido'); btn.disabled=false; return; }
+    if(!nome || isNaN(valorAlvo) || valorAlvo<=0){ mostrarAvisoValidacao('Preencha nome e valor/objetivo válido'); btn.disabled=false; return; }
     const payload = {
       nome, descricao: document.getElementById('meDescricao').value.trim(),
       categoria: document.getElementById('meCategoria').value, area: document.getElementById('meArea').value.trim(),
@@ -37263,7 +37273,7 @@ function openNovoMarcoModal(){
     try{
     const data = document.getElementById('marcoData').value;
     const descricao = document.getElementById('marcoDescricao').value.trim();
-    if(!data || !descricao){ showToast('Preencha a data e a descrição'); return; }
+    if(!data || !descricao){ mostrarAvisoValidacao('Preencha a data e a descrição'); return; }
     if(!state.marcosLinhaTempo) state.marcosLinhaTempo = [];
     state.marcosLinhaTempo.push({ id:uid(), data, descricao });
     persist(); closeModal(); render();
@@ -37337,24 +37347,24 @@ function openNovaAutomacaoModal(){
     if(tipo==='separar_percentual_receita'){
       const pct = numBR(document.getElementById('autoPercentual').value);
       const nome = document.getElementById('autoNomeDestino').value.trim();
-      if(isNaN(pct) || pct<=0 || !nome){ showToast('Preencha o percentual e o nome do destino'); return; }
+      if(isNaN(pct) || pct<=0 || !nome){ mostrarAvisoValidacao('Preencha o percentual e o nome do destino'); return; }
       regra.percentual = pct; regra.nomeSeparacao = nome;
     } else if(tipo==='avisar_caixa_acima' || tipo==='avisar_caixa_abaixo'){
       const valor = numBR(document.getElementById('autoValorLimite').value);
-      if(isNaN(valor) || valor<=0){ showToast('Preencha o valor limite'); return; }
+      if(isNaN(valor) || valor<=0){ mostrarAvisoValidacao('Preencha o valor limite'); return; }
       regra.valorLimite = valor;
     } else if(tipo==='avisar_despesa_aumentou' || tipo==='avisar_receita_caiu'){
       const pctLimite = numBR(document.getElementById('autoPercentualLimite').value);
-      if(isNaN(pctLimite) || pctLimite<=0){ showToast('Preencha o percentual'); return; }
+      if(isNaN(pctLimite) || pctLimite<=0){ mostrarAvisoValidacao('Preencha o percentual'); return; }
       regra.percentualLimite = pctLimite;
       if(tipo==='avisar_despesa_aumentou'){
         const categoria = document.getElementById('autoCategoria').value;
-        if(!categoria){ showToast('Escolha a categoria'); return; }
+        if(!categoria){ mostrarAvisoValidacao('Escolha a categoria'); return; }
         regra.categoria = categoria;
       }
     } else if(tipo==='avisar_cliente_atrasou'){
       const dias = numBR(document.getElementById('autoDiasLimite').value);
-      if(isNaN(dias) || dias<=0){ showToast('Preencha os dias de atraso'); return; }
+      if(isNaN(dias) || dias<=0){ mostrarAvisoValidacao('Preencha os dias de atraso'); return; }
       regra.diasLimite = dias;
     }
     if(!state.automacoes) state.automacoes = [];
@@ -37389,7 +37399,7 @@ function openNovaDecisaoModal(){
     try{
     const titulo = document.getElementById('decTitulo').value.trim();
     const valorPrevisto = numBR(document.getElementById('decValorPrevisto').value);
-    if(!titulo || isNaN(valorPrevisto) || valorPrevisto<=0){ showToast('Preencha título e valor previsto'); return; }
+    if(!titulo || isNaN(valorPrevisto) || valorPrevisto<=0){ mostrarAvisoValidacao('Preencha título e valor previsto'); return; }
     if(!state.decisoesFinanceiras) state.decisoesFinanceiras = [];
     state.decisoesFinanceiras.push({ id:uid(), titulo, descricao:document.getElementById('decDescricao').value.trim(), valorPrevisto, valorRealizado:null, data:todayISO() });
     persist(); closeModal(); render();
@@ -37421,7 +37431,7 @@ function openRegistrarRealizadoDecisaoModal(id){
     btn_btnSalvarRealizado_Click.disabled = true;
     try{
     const valor = numBR(document.getElementById('decValorRealizado').value);
-    if(isNaN(valor) || valor<0){ showToast('Informe um valor válido'); return; }
+    if(isNaN(valor) || valor<0){ mostrarAvisoValidacao('Informe um valor válido'); return; }
     d.valorRealizado = valor;
     persist(); closeModal(); render();
     showToast('Resultado registrado');
@@ -37542,7 +37552,7 @@ function openMetaModal(existing){
     try{
     const nome = document.getElementById('mtNome').value.trim();
     const valorAlvo = numBR(document.getElementById('mtValorAlvo').value);
-    if(!nome || isNaN(valorAlvo) || valorAlvo<=0){ showToast('Preencha nome e valor alvo válido'); return; }
+    if(!nome || isNaN(valorAlvo) || valorAlvo<=0){ mostrarAvisoValidacao('Preencha nome e valor alvo válido'); return; }
     const contaId = mtConta.value || null;
     const valorManualRaw = document.getElementById('mtValorManual').value.trim();
     const payload = {
@@ -37598,7 +37608,7 @@ function openCategoriasContaModal(){
     document.getElementById('btnAddCategoriaConta').addEventListener('click', ()=>{
       const input = document.getElementById('novaCategoriaContaInput');
       const nome = input.value.trim();
-      if(!nome){ showToast('Digite um nome pra categoria'); return; }
+      if(!nome){ mostrarAvisoValidacao('Digite um nome pra categoria'); return; }
       if(!state.categoriasContas) state.categoriasContas = [];
       state.categoriasContas.push({ id: uid(), nome });
       persist(); render();
@@ -37619,7 +37629,7 @@ function openCategoriasContaModal(){
         document.getElementById('btnCancelarRenomearCat').addEventListener('click', render);
         document.getElementById('btnConfirmarRenomearCat').addEventListener('click', ()=>{
           const novoNome = document.getElementById('renomearCatContaInput').value.trim();
-          if(!novoNome){ showToast('Digite um nome'); return; }
+          if(!novoNome){ mostrarAvisoValidacao('Digite um nome'); return; }
           cat.nome = novoNome;
           persist(); render();
         });
@@ -37808,7 +37818,7 @@ function openContaModal(existing){
     try{
     const nome = document.getElementById('cNome').value.trim();
     const saldoInicial = numBR(document.getElementById('cSaldo').value);
-    if(!nome || isNaN(saldoInicial)){ showToast('Preencha nome e saldo inicial'); return; }
+    if(!nome || isNaN(saldoInicial)){ mostrarAvisoValidacao('Preencha nome e saldo inicial'); return; }
     const opt = bancoSelect.options[bancoSelect.selectedIndex];
     const isOutro = opt.value === 'Outro / não listado';
     const banco = isOutro ? bancoOutro.value.trim() : opt.value;
@@ -38191,11 +38201,11 @@ function openTransferenciaModal(contaOrigemId, existingLancamento){
     const valor = numBR(document.getElementById('tValor').value);
     const data = document.getElementById('tData').value;
     const descricaoExtra = document.getElementById('tDescricao').value.trim();
-    if(origemId===destinoId){ showToast('Escolha contas diferentes para origem e destino'); return; }
+    if(origemId===destinoId){ mostrarAvisoValidacao('Escolha contas diferentes para origem e destino'); return; }
     const contaOrigemCheck = state.contas.find(c=>c.id===origemId);
     if(contaOrigemCheck?.contaPaiId && contaOrigemCheck.contaPaiId!==destinoId){ showToast(`Subconta só pode transferir pra própria conta principal ("${nomeConta(contaOrigemCheck.contaPaiId)}")`); return; }
-    if(isNaN(valor) || valor<=0){ showToast('Informe um valor válido'); return; }
-    if(!data){ showToast('Informe a data'); return; }
+    if(isNaN(valor) || valor<=0){ mostrarAvisoValidacao('Informe um valor válido'); return; }
+    if(!data){ mostrarAvisoValidacao('Informe a data'); return; }
     const nomeOrigem = nomeConta(origemId), nomeDestino = nomeConta(destinoId);
     const processoVinculadoId = document.getElementById('tProcessoVinculadoId').value || null;
     const processoVinculadoTitulo = processoVinculadoId ? processoVinculadoTituloAtual : null;
@@ -38405,7 +38415,7 @@ function openAbastecimentoModal(veiculoId, existing){
     const km = numBR(document.getElementById('abKm').value) || 0;
     const litros = numBR(document.getElementById('abLitros').value) || 0;
     const valor = numBR(document.getElementById('abValor').value) || 0;
-    if(!data || valor<=0){ showToast('Preencha a data e o valor'); return; }
+    if(!data || valor<=0){ mostrarAvisoValidacao('Preencha a data e o valor'); return; }
     const tipoCombustivel = document.getElementById('abTipoCombustivel').value.trim();
     const posto = document.getElementById('abPosto').value.trim();
     const tanqueCheio = document.getElementById('abTanqueCheio').checked;
@@ -38478,7 +38488,7 @@ function openVeiculoRegistroModal(veiculoId, tipoRegistro, existing){
     const data = document.getElementById('vrData').value;
     const descricao = document.getElementById('vrDescricao').value.trim();
     const valor = numBR(document.getElementById('vrValor').value) || 0;
-    if(!data || !descricao || valor<=0){ showToast('Preencha data, descrição e valor'); return; }
+    if(!data || !descricao || valor<=0){ mostrarAvisoValidacao('Preencha data, descrição e valor'); return; }
     const km = numBR(document.getElementById('vrKm')?.value) || 0;
     const oficina = config.temOficina ? document.getElementById('vrOficina').value.trim() : null;
     const categoria = config.temCategoria ? document.getElementById('vrCategoria').value : (tipoRegistro==='servico'?'Manutenção de Veículos':null);
@@ -38531,7 +38541,7 @@ function openLeituraModal(veiculoId, existing){
     try{
     const data = document.getElementById('ltData').value;
     const km = numBR(document.getElementById('ltKm').value) || 0;
-    if(!data || km<=0){ showToast('Preencha a data e o km'); return; }
+    if(!data || km<=0){ mostrarAvisoValidacao('Preencha a data e o km'); return; }
     if(isEdit){ Object.assign(existing, { data, km }); }
     else { state.veiculoLeituras.push({ id:uid(), veiculoId, data, km }); }
     persist(); closeModal(); render();
@@ -38590,8 +38600,8 @@ function openLembreteVeiculoModal(veiculoId, existing){
     const valor = numBR(document.getElementById('lbValor').value) || 0;
     const kmAlvo = tipo==='km' ? numBR(document.getElementById('lbKmAlvo').value) : null;
     const dataAlvo = tipo==='data' ? document.getElementById('lbDataAlvo').value : null;
-    if(tipo==='km' && !(kmAlvo>0)){ showToast('Preencha o km alvo'); return; }
-    if(tipo==='data' && !dataAlvo){ showToast('Preencha a data alvo'); return; }
+    if(tipo==='km' && !(kmAlvo>0)){ mostrarAvisoValidacao('Preencha o km alvo'); return; }
+    if(tipo==='data' && !dataAlvo){ mostrarAvisoValidacao('Preencha a data alvo'); return; }
     if(isEdit){ Object.assign(existing, { descricao, categoria, tipo, kmAlvo, dataAlvo, valor }); }
     else { state.veiculoLembretes.push({ id:uid(), veiculoId, descricao, categoria, tipo, kmAlvo, dataAlvo, valor, ativo:true }); }
     persist(); closeModal(); render();
@@ -38714,7 +38724,7 @@ function openCartaoModal(existing){
     const limite = numBR(document.getElementById('ccLimite').value);
     const diaFechamento = parseInt(document.getElementById('ccFechamento').value);
     const diaVencimento = parseInt(document.getElementById('ccVencimento').value);
-    if(!nome || isNaN(limite) || isNaN(diaFechamento) || isNaN(diaVencimento)){ showToast('Preencha todos os campos obrigatórios'); return; }
+    if(!nome || isNaN(limite) || isNaN(diaFechamento) || isNaN(diaVencimento)){ mostrarAvisoValidacao('Preencha todos os campos obrigatórios'); return; }
     const opt = document.getElementById('ccBandeira');
     const optSel = opt.options[opt.selectedIndex];
     const anuidadeValor = numBR(document.getElementById('ccAnuidade').value) || 0;
@@ -38824,7 +38834,7 @@ function openEditarCompraCartaoModal(compraId){
     const valor = numBR(document.getElementById('ecValor').value);
     const data = document.getElementById('ecData').value;
     const categoria = document.getElementById('ecCategoria').value;
-    if(!descricao || isNaN(valor) || valor<=0 || !data){ showToast('Preencha descrição, valor e data'); return; }
+    if(!descricao || isNaN(valor) || valor<=0 || !data){ mostrarAvisoValidacao('Preencha descrição, valor e data'); return; }
     const cartao = state.cartoes.find(c=>c.id===p.cartaoId);
     const competenciaAntiga = p.competencia;
     const novaCompetencia = competenciaFromDate(cartao, data);
@@ -38898,7 +38908,7 @@ function openCompraCartaoModal(cartaoId){
     const categoria = document.getElementById('pcCategoria').value;
     const parcelas = parseInt(document.getElementById('pcParcelas').value);
     const faturaEscolhida = document.getElementById('pcFatura').value;
-    if(!descricao || isNaN(valorTotal) || valorTotal<=0 || !data){ showToast('Preencha descrição, valor e data'); return; }
+    if(!descricao || isNaN(valorTotal) || valorTotal<=0 || !data){ mostrarAvisoValidacao('Preencha descrição, valor e data'); return; }
     const grupoId = uid();
     const valorParcela = Math.round((valorTotal/parcelas)*100)/100;
     let compAtual = faturaEscolhida || competenciaFromDate(cartao, data);
@@ -39042,9 +39052,9 @@ function openRegistrarRendimentoModal(){
     const data = document.getElementById('rdData').value || todayISO();
     const contaId = document.getElementById('rdConta').value;
     const observacao = document.getElementById('rdObservacao').value.trim() || null;
-    if(!ativoNome){ showToast('Informe o ativo'); return; }
-    if(isNaN(valor) || valor<=0){ showToast('Informe o valor recebido'); return; }
-    if(!contaId){ showToast('Escolha a conta onde o valor entrou'); return; }
+    if(!ativoNome){ mostrarAvisoValidacao('Informe o ativo'); return; }
+    if(isNaN(valor) || valor<=0){ mostrarAvisoValidacao('Informe o valor recebido'); return; }
+    if(!contaId){ mostrarAvisoValidacao('Escolha a conta onde o valor entrou'); return; }
     const lancId = uid();
     state.lancamentos.push({
       id: lancId, tipo:'entrada', categoria:'Rendimentos',
@@ -39204,7 +39214,7 @@ function openContaInvestimentoModal(existing){
     btn_btnSalvarContaInv_Click.disabled = true;
     try{
     const nome = document.getElementById('ciNome').value.trim();
-    if(!nome){ showToast('Informe o nome da conta'); return; }
+    if(!nome){ mostrarAvisoValidacao('Informe o nome da conta'); return; }
     const opt = instSelect.options[instSelect.selectedIndex];
     const isOutro = opt.value === 'Outro / não listado';
     const instituicao = isOutro ? instOutro.value.trim() : opt.value;
@@ -40085,7 +40095,7 @@ function openImportarNotaFiscalModal(){
     const numero = document.getElementById('nfNumero').value.trim();
     const categoria = document.getElementById('nfCategoria').value;
     const contaId = document.getElementById('nfConta').value;
-    if(isNaN(valor) || valor<=0){ showToast('Preencha um valor válido'); return; }
+    if(isNaN(valor) || valor<=0){ mostrarAvisoValidacao('Preencha um valor válido'); return; }
 
     if(nomeForn){
       const soDigitos = v => (v||'').toString().replace(/\D/g,'');
@@ -40198,7 +40208,7 @@ function openRegistrarGeracaoSolarModal(){
     const periodo = document.getElementById('gsPeriodo').value;
     const geracaoKwh = numBR(document.getElementById('gsGeracao').value);
     const rendaReais = numBR(document.getElementById('gsRenda').value) || 0;
-    if(isNaN(geracaoKwh) || geracaoKwh<=0){ showToast('Preencha a geração em kWh'); return; }
+    if(isNaN(geracaoKwh) || geracaoKwh<=0){ mostrarAvisoValidacao('Preencha a geração em kWh'); return; }
     if(!state.usinaLeituras) state.usinaLeituras = [];
 
     // Pra leitura tipo "mês", o número que você digita é o acumulado do mês até aquele dia (é o
@@ -40264,9 +40274,9 @@ function openRegistrarCreditoClienteModal(){
     const data = document.getElementById('ccData').value || todayISO();
     const contaId = document.getElementById('ccConta').value;
     const motivo = document.getElementById('ccMotivo').value.trim() || null;
-    if(!clienteNome){ showToast('Informe o nome do cliente'); return; }
-    if(isNaN(valor) || valor<=0){ showToast('Informe o valor do crédito'); return; }
-    if(!contaId){ showToast('Escolha em qual conta esse valor entrou'); return; }
+    if(!clienteNome){ mostrarAvisoValidacao('Informe o nome do cliente'); return; }
+    if(isNaN(valor) || valor<=0){ mostrarAvisoValidacao('Informe o valor do crédito'); return; }
+    if(!contaId){ mostrarAvisoValidacao('Escolha em qual conta esse valor entrou'); return; }
     if(!state.creditosClientes) state.creditosClientes = [];
     const creditoId = uid();
     // Lançamento de verdade — entra no caixa da conta agora, mas fica fora da DRE (é Passivo:
@@ -40308,9 +40318,9 @@ function openUsarCreditoClienteModal(clienteNome){
     let valorUsar = numBR(document.getElementById('ucValor').value);
     const contaId = document.getElementById('ucConta').value;
     const referencia = document.getElementById('ucReferencia').value.trim() || null;
-    if(isNaN(valorUsar) || valorUsar<=0){ showToast('Informe quanto vai usar'); return; }
+    if(isNaN(valorUsar) || valorUsar<=0){ mostrarAvisoValidacao('Informe quanto vai usar'); return; }
     if(valorUsar>saldoTotal+0.004){ showToast(`Esse cliente só tem ${brl(saldoTotal)} de saldo`); return; }
-    if(!contaId){ showToast('Escolha de qual conta vai descontar'); return; }
+    if(!contaId){ mostrarAvisoValidacao('Escolha de qual conta vai descontar'); return; }
     // Lançamento de saída de verdade — baixa o Passivo (Adiantamento de Cliente). Fora da DRE (não
     // é despesa nova, é a quitação de uma dívida que já existia).
     state.lancamentos.push({
@@ -40371,7 +40381,7 @@ function openRegistrarDocumentoSolarModal(){
     const data = document.getElementById('dsData').value || null;
     const periodo = document.getElementById('dsPeriodo').value || null;
     const observacao = document.getElementById('dsObservacao').value.trim() || null;
-    if(!nome){ showToast('Informe o nome do documento'); return; }
+    if(!nome){ mostrarAvisoValidacao('Informe o nome do documento'); return; }
     if(!state.usinaDocumentos) state.usinaDocumentos = [];
     state.usinaDocumentos.push({ id: uid(), nome, tipo, data, periodo, observacao, criadoEm: new Date().toISOString() });
     persist(); closeModal(); render();
@@ -40402,7 +40412,7 @@ function openRegistrarTarifaSolarModal(){
     const dataInicio = document.getElementById('tfDataInicio').value || todayISO();
     const dataFim = document.getElementById('tfDataFim').value || null;
     const observacao = document.getElementById('tfObservacao').value.trim() || null;
-    if(isNaN(tarifaKwh) || tarifaKwh<=0){ showToast('Informe a tarifa em R$/kWh'); return; }
+    if(isNaN(tarifaKwh) || tarifaKwh<=0){ mostrarAvisoValidacao('Informe a tarifa em R$/kWh'); return; }
     if(!state.usinaTarifas) state.usinaTarifas = [];
     state.usinaTarifas.push({ id: uid(), tarifaKwh, dataInicio, dataFim, observacao, criadoEm: new Date().toISOString() });
     persist(); closeModal(); render();
@@ -40679,8 +40689,8 @@ function openRegistrarFaturaEnergiaModal(){
     const multaValor = numBR(document.getElementById('feMulta').value) || null;
     const jurosValor = numBR(document.getElementById('feJuros').value) || null;
     const correcaoValor = numBR(document.getElementById('feCorrecao').value) || null;
-    if(!referencia){ showToast('Preencha a referência (mês)'); return; }
-    if(isNaN(valorTotal) || valorTotal<=0){ showToast('Preencha o valor total'); return; }
+    if(!referencia){ mostrarAvisoValidacao('Preencha a referência (mês)'); return; }
+    if(isNaN(valorTotal) || valorTotal<=0){ mostrarAvisoValidacao('Preencha o valor total'); return; }
     if(!state.usinaFaturas) state.usinaFaturas = [];
     const existente = state.usinaFaturas.find(f=>f.referencia===referencia);
     const registro = {
@@ -41049,7 +41059,7 @@ function openInvestirModal(contaBancariaId){
       const descricao = document.getElementById('invDescricaoRF').value.trim();
       const valor = numBR(document.getElementById('invValorRF').value);
       const data = document.getElementById('invDataRF').value || todayISO();
-      if(!descricao || isNaN(valor) || valor<=0){ showToast('Preencha descrição e valor'); return; }
+      if(!descricao || isNaN(valor) || valor<=0){ mostrarAvisoValidacao('Preencha descrição e valor'); return; }
       valorTotal = valor; nomeAtivo = descricao;
       ativoPayload = { tipoAtivo:'rendafixa', nome: descricao, valorAplicado: valor, taxaAnual: 0, indexador: null, dataAplicacao: data, vencimento: null, valorAtualManual: valor };
     } else if(tipoInv==='rendavariavel'){
@@ -41061,7 +41071,7 @@ function openInvestirModal(contaBancariaId){
       const quantidade = parseFloat(document.getElementById('invQuantidade').value);
       const precoUnit = numBR(document.getElementById('invPrecoUnit').value);
       const taxas = numBR(document.getElementById('invTaxas').value) || 0;
-      if(!ticker || isNaN(quantidade) || quantidade<=0 || isNaN(precoUnit) || precoUnit<=0){ showToast('Preencha ticker, quantidade e preço unitário'); return; }
+      if(!ticker || isNaN(quantidade) || quantidade<=0 || isNaN(precoUnit) || precoUnit<=0){ mostrarAvisoValidacao('Preencha ticker, quantidade e preço unitário'); return; }
       valorTotal = Math.round((quantidade*precoUnit + taxas)*100)/100;
       nomeAtivo = ticker;
       ativoPayload = { tipoAtivo, ticker, nome: ticker, quantidade, precoMedio: Math.round((valorTotal/quantidade)*100)/100, precoAtual: null, dataUltimaCotacao: null, corretora };
@@ -41069,7 +41079,7 @@ function openInvestirModal(contaBancariaId){
       const descricao = document.getElementById('invDescricaoInt').value.trim();
       const valor = numBR(document.getElementById('invValorInt').value);
       const data = document.getElementById('invDataInt').value || todayISO();
-      if(!descricao || isNaN(valor) || valor<=0){ showToast('Preencha descrição e valor'); return; }
+      if(!descricao || isNaN(valor) || valor<=0){ mostrarAvisoValidacao('Preencha descrição e valor'); return; }
       valorTotal = valor; nomeAtivo = descricao;
       ativoPayload = { tipoAtivo:'interno', nome: descricao, valorAplicado: valor, dataAplicacao: data, valorAtualManual: valor };
     }
@@ -41271,7 +41281,7 @@ function openAtivoModal(existing, contaId){
     if(tipoAtivo==='acao' || tipoAtivo==='fii'){
       const nome = document.getElementById('aiNomeAF').value.trim();
       const valor = numBR(document.getElementById('aiValorAF').value);
-      if(!nome || isNaN(valor) || valor<0){ showToast('Preencha nome e valor aplicado'); return; }
+      if(!nome || isNaN(valor) || valor<0){ mostrarAvisoValidacao('Preencha nome e valor aplicado'); return; }
       payload = { ...payload, nome, ticker: null, quantidade: null, precoMedio: null, precoAtual: null, dataUltimaCotacao: null, valorAplicado: valor, valorAtualManual: valor, manual: true };
     } else if(tipoAtivo==='cripto'){
       const isOutro = criptoSelect.value === 'outro';
@@ -41279,15 +41289,15 @@ function openAtivoModal(existing, contaId){
       const simbolo = isOutro ? criptoId.toUpperCase() : criptoSelect.options[criptoSelect.selectedIndex].dataset.simbolo;
       const quantidade = numBR(document.getElementById('aiQtdCripto').value);
       const precoMedio = numBR(document.getElementById('aiPrecoCripto').value);
-      if(!criptoId || isNaN(quantidade) || isNaN(precoMedio)){ showToast('Preencha a criptomoeda, quantidade e preço médio'); return; }
+      if(!criptoId || isNaN(quantidade) || isNaN(precoMedio)){ mostrarAvisoValidacao('Preencha a criptomoeda, quantidade e preço médio'); return; }
       payload = { ...payload, criptoId, ticker: simbolo, nome: simbolo, quantidade, precoMedio, precoAtual: existing?.precoAtual, dataUltimaCotacao: existing?.dataUltimaCotacao };
     } else if(rfModo==='manual'){
       const nome = document.getElementById('aiNomeRF').value.trim();
       const saldoInicial = numBR(document.getElementById('aiSaldoInicial').value);
       const dataAplicacao = document.getElementById('aiDataSaldoInicial').value || todayISO();
       const vencimento = document.getElementById('aiVencimento').value;
-      if(!nome || isNaN(saldoInicial)){ showToast('Preencha descrição e saldo inicial'); return; }
-      if(!vencimento){ showToast('Preencha a data de vencimento'); return; }
+      if(!nome || isNaN(saldoInicial)){ mostrarAvisoValidacao('Preencha descrição e saldo inicial'); return; }
+      if(!vencimento){ mostrarAvisoValidacao('Preencha a data de vencimento'); return; }
       payload = { ...payload, nome, valorAplicado: saldoInicial, valorAtualManual: saldoInicial, taxaAnual: null, indexador: null, dataAplicacao, vencimento };
     } else {
       const nome = document.getElementById('aiNomeRF').value.trim();
@@ -41295,8 +41305,8 @@ function openAtivoModal(existing, contaId){
       const taxaAnual = numBR(document.getElementById('aiTaxaAnual').value);
       const dataAplicacao = document.getElementById('aiDataAplicacao').value || todayISO();
       const vencimento = document.getElementById('aiVencimento').value;
-      if(!nome || isNaN(valorAplicado) || isNaN(taxaAnual)){ showToast('Preencha descrição, valor e taxa'); return; }
-      if(!vencimento){ showToast('Preencha a data de vencimento'); return; }
+      if(!nome || isNaN(valorAplicado) || isNaN(taxaAnual)){ mostrarAvisoValidacao('Preencha descrição, valor e taxa'); return; }
+      if(!vencimento){ mostrarAvisoValidacao('Preencha a data de vencimento'); return; }
       payload = { ...payload, nome, valorAplicado, taxaAnual, indexador: document.getElementById('aiIndexador').value, dataAplicacao, valorAtualManual: null, vencimento };
     }
     if(isEdit){ Object.keys(existing).forEach(k=>{ if(!(k in payload) && k!=='id') delete existing[k]; }); Object.assign(existing, payload); }
@@ -41336,9 +41346,9 @@ function openPrevisaoGastoModal(existing){
     const descricao = document.getElementById('pgDescricao').value.trim();
     const valorEstimado = numBR(document.getElementById('pgValor').value);
     const dataPrevista = document.getElementById('pgData').value;
-    if(!descricao){ showToast('Digite uma descrição'); return; }
-    if(isNaN(valorEstimado) || valorEstimado<=0){ showToast('Digite um valor válido'); return; }
-    if(!dataPrevista){ showToast('Escolha a data prevista'); return; }
+    if(!descricao){ mostrarAvisoValidacao('Digite uma descrição'); return; }
+    if(isNaN(valorEstimado) || valorEstimado<=0){ mostrarAvisoValidacao('Digite um valor válido'); return; }
+    if(!dataPrevista){ mostrarAvisoValidacao('Escolha a data prevista'); return; }
     if(!state.previsoesGastoFuturo) state.previsoesGastoFuturo = [];
     if(existing){
       existing.descricao = descricao; existing.valorEstimado = valorEstimado; existing.dataPrevista = dataPrevista;
@@ -41565,8 +41575,8 @@ function openResgateModal(ativoId){
     const valorRetornado = numBR(rgValorEl.value);
     const contaId = document.getElementById('rgConta').value;
     const dataResgate = document.getElementById('rgData').value || todayISO();
-    if(isNaN(valorRetornado) || valorRetornado<0){ showToast('Preencha um valor válido'); return; }
-    if(!contaId){ showToast('Escolha a conta de destino'); return; }
+    if(isNaN(valorRetornado) || valorRetornado<0){ mostrarAvisoValidacao('Preencha um valor válido'); return; }
+    if(!contaId){ mostrarAvisoValidacao('Escolha a conta de destino'); return; }
     const rendimento = valorRetornado - custo;
 
     if(custo>0){
@@ -41690,10 +41700,10 @@ function openVenderReinvestirModal(ativoId){
       const nomeNovo = document.getElementById('vrNomeNovo').value.trim();
       const contaId = document.getElementById('vrConta').value;
       const data = document.getElementById('vrData').value || todayISO();
-      if(isNaN(valorVenda) || valorVenda<0){ showToast('Preencha o valor de venda'); btnEl.disabled=false; return; }
-      if(isNaN(valorNovo) || valorNovo<=0){ showToast('Preencha o valor do novo ativo'); btnEl.disabled=false; return; }
+      if(isNaN(valorVenda) || valorVenda<0){ mostrarAvisoValidacao('Preencha o valor de venda'); btnEl.disabled=false; return; }
+      if(isNaN(valorNovo) || valorNovo<=0){ mostrarAvisoValidacao('Preencha o valor do novo ativo'); btnEl.disabled=false; return; }
       if(!nomeNovo){ showToast('Dê um nome pro novo ativo'); btnEl.disabled=false; return; }
-      if(!contaId){ showToast('Escolha a conta bancária de referência'); btnEl.disabled=false; return; }
+      if(!contaId){ mostrarAvisoValidacao('Escolha a conta bancária de referência'); btnEl.disabled=false; return; }
 
       const { ganhoPerdaCapital, diferencaCaixa } = calcularVendaReinvestimento(valorVenda, custo, valorNovo);
 
@@ -41840,7 +41850,7 @@ function openCategoriaModal(tipo, existing){
     const tipoCusto = document.getElementById('catTipoCusto')?.value || '';
     const centroCustoDefault = document.getElementById('catCentroCustoDefault')?.value.trim() || '';
     const naoOperacional = document.getElementById('catNaoOperacional')?.checked || false;
-    if(!nome){ showToast('Informe o nome da categoria'); return; }
+    if(!nome){ mostrarAvisoValidacao('Informe o nome da categoria'); return; }
     if(isEdit){
       const oldNome = existing.nome;
       existing.nome = nome;
@@ -41905,7 +41915,7 @@ function openSubcategoriaModal(tipo, categoriaId, existing){
     try{
     const nome = document.getElementById('subNome').value.trim();
     const ehCapital = document.getElementById('subEhCapital').checked;
-    if(!nome){ showToast('Informe o nome da subcategoria'); return; }
+    if(!nome){ mostrarAvisoValidacao('Informe o nome da subcategoria'); return; }
     if(isEdit){
       const oldFull = `${cat.nome} / ${existing.nome}`;
       existing.nome = nome;
@@ -41992,7 +42002,7 @@ function openVendedorModal(existing){
     const comissaoPadrao = numBR(document.getElementById('vComissaoPadrao').value);
     const metaMensalRaw = document.getElementById('vMetaMensal').value.trim();
     const metaMensal = metaMensalRaw ? numBR(metaMensalRaw) : null;
-    if(!nome || isNaN(comissaoPadrao)){ showToast('Preencha nome e comissão padrão'); return; }
+    if(!nome || isNaN(comissaoPadrao)){ mostrarAvisoValidacao('Preencha nome e comissão padrão'); return; }
     if(isEdit){
       if(nome !== existing.nome) existing.nomeEditadoManualmente = true;
       existing.nome = nome; existing.comissaoPadrao = comissaoPadrao; existing.metaMensal = metaMensal;
@@ -42041,7 +42051,7 @@ function openComissaoManualModal(){
     const descricao = document.getElementById('cmDescricao').value.trim();
     const valorBase = numBR(document.getElementById('cmValorBase').value);
     const data = document.getElementById('cmData').value;
-    if(!descricao || isNaN(valorBase) || valorBase<=0 || !data){ showToast('Preencha descrição, valor e data'); return; }
+    if(!descricao || isNaN(valorBase) || valorBase<=0 || !data){ mostrarAvisoValidacao('Preencha descrição, valor e data'); return; }
     state.comissoesManuais.push({ id: uid(), vendedorId, descricao, valorBase, data });
     persist(); closeModal(); render();
     showToast('Comissão manual adicionada — apareça na lista de pendentes do período');
@@ -42082,7 +42092,7 @@ function openAtualizarValorSubcontaModal(subconta){
     btn_btnSalvarValorSubconta_Click.disabled = true;
     try{
     const novoValor = numBR(document.getElementById('avsNovoValor').value);
-    if(isNaN(novoValor) || novoValor<0){ showToast('Informe um valor válido'); return; }
+    if(isNaN(novoValor) || novoValor<0){ mostrarAvisoValidacao('Informe um valor válido'); return; }
     const delta = Math.round((novoValor - valorAtual)*100)/100;
     if(!subconta.historico) subconta.historico = [];
     if(delta!==0){
@@ -42124,7 +42134,7 @@ function openAtualizarValorModal(a){
     btn_btnSalvarValorAtivo_Click.disabled = true;
     try{
     const novoValor = numBR(document.getElementById('avNovoValor').value);
-    if(isNaN(novoValor) || novoValor<0){ showToast('Informe um valor válido'); return; }
+    if(isNaN(novoValor) || novoValor<0){ mostrarAvisoValidacao('Informe um valor válido'); return; }
     a.valorAtualManual = novoValor;
     persist(); closeModal(); render();
     showToast('Valor atualizado');
