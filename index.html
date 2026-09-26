@@ -2674,7 +2674,7 @@ function render(){
       const btn = document.getElementById('btnDesbloquearTela');
       const erroEl = document.getElementById('erroDesbloqueioTela');
       erroEl.style.display = 'none';
-      if(!senha){ erroEl.textContent = 'Digite a senha do administrador.'; erroEl.style.display = 'block'; return; }
+      if(!senha){ erroEl.textContent = 'Digite a senha do administrador/supervisor.'; erroEl.style.display = 'block'; return; }
       btn.disabled = true; btn.textContent = 'Verificando...';
       const liberadoPor = await verificarSenhaDeLiberador(viewAlvo, senha).catch(()=>null);
       if(liberadoPor){
@@ -2693,6 +2693,7 @@ function render(){
     document.getElementById('senhaDesbloqueioTela')?.addEventListener('keydown', e=>{
       if(e.key==='Enter') document.getElementById('btnDesbloquearTela').click();
     });
+    document.getElementById('btnVoltarTelaProtegida').addEventListener('click', ()=>{ currentView='dashboard'; render(); });
     return;
   }
   if(currentView==='dashboard') main.innerHTML = viewDashboard();
@@ -26736,15 +26737,16 @@ function viewTelaProtegida(view){
         <div style="font-size:12px;font-weight:700;letter-spacing:0.5px;color:#2563eb;text-transform:uppercase;margin-bottom:6px;">Central de Segurança</div>
         <h2 style="margin:0 0 8px;color:#111;">Tela protegida</h2>
         <p style="color:#555;font-size:15px;line-height:1.5;margin-bottom:20px;">
-          "${escapeHTML(nome)}" exige a senha de um administrador pra ser acessada.
-          Peça pra um administrador digitar a senha dele aqui embaixo pra liberar.
+          "${escapeHTML(nome)}" exige a senha de um administrador ou supervisor pra ser acessada.
+          Peça pra alguém autorizado digitar a senha dele aqui embaixo pra liberar.
         </p>
         <div style="text-align:left;margin-bottom:6px;">
-          <label style="font-size:13px;color:#555;">Senha do administrador</label>
+          <label style="font-size:13px;color:#555;">Senha do administrador/supervisor</label>
           <input type="password" id="senhaDesbloqueioTela" placeholder="••••••••" style="width:100%;padding:12px;margin-top:4px;border:1px solid #ddd;border-radius:8px;font-size:15px;box-sizing:border-box;">
         </div>
         <div id="erroDesbloqueioTela" style="display:none;color:#dc2626;font-size:13px;margin:6px 0;text-align:left;"></div>
         <button id="btnDesbloquearTela" style="width:100%;padding:14px;font-size:16px;font-weight:600;background:#2563eb;color:#fff;border:none;border-radius:10px;cursor:pointer;margin-top:10px;">Desbloquear</button>
+        <button id="btnVoltarTelaProtegida" style="width:100%;padding:12px;font-size:14px;background:none;color:#555;border:none;cursor:pointer;margin-top:6px;">Voltar ao Dashboard</button>
       </div>
     </div>
   `;
