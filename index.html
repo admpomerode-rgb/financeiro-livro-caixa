@@ -26773,6 +26773,7 @@ function viewTelaProtegida(view){
   `;
 }
 let __permissoesFiltro = { busca:'', status:'todos' };
+let __acessosDiaSelecionado = null; // null = dia mais recente com acesso registrado
 const ACOES_CONHECIDAS = [
   { id:'ver', nome:'Visualizar' },
   { id:'criar', nome:'Criar' },
@@ -27016,7 +27017,7 @@ function viewPermissoes(){
   const usuarios = state.usuariosPermissao||[];
   const todasTelas = moreItensDefBase();
   const protegidas = state.telasProtegidas||[];
-  const historicoAcessos = (state.acessosHistorico||[]).slice(0, 50);
+  const historicoAcessosCompleto = state.acessosHistorico||[];
   const historicoPerm = (state.historicoPermissoes||[]).slice(0, 50);
   const historicoLiberacoes = (state.desbloqueiosTelaHistorico||[]).slice(0, 50);
 
@@ -27136,21 +27137,38 @@ function viewPermissoes(){
       <div class="panel-head"><h2>📋 Histórico de acessos</h2></div>
       <p class="sub" style="padding:0 18px;font-size:12px;">Mantém os últimos 90 dias — acessos mais antigos são limpos automaticamente, mas continuam preservados em qualquer backup exportado antes disso.</p>
       <div style="padding:0 18px 16px;">
-        ${!historicoAcessos.length ? `<div class="empty">Nenhum acesso registrado ainda.</div>` : `
+        ${(() => {
+          if(!historicoAcessosCompleto.length) return `<div class="empty">Nenhum acesso registrado ainda.</div>`;
+          const diasComAcesso = [...new Set(historicoAcessosCompleto.map(a=>a.data.slice(0,10)))].sort().reverse();
+          const diaAtual = __acessosDiaSelecionado && diasComAcesso.includes(__acessosDiaSelecionado) ? __acessosDiaSelecionado : diasComAcesso[0];
+          const idx = diasComAcesso.indexOf(diaAtual);
+          const temAnterior = idx < diasComAcesso.length-1; // anterior = dia mais antigo
+          const temProximo = idx > 0; // próximo = dia mais recente
+          const doDia = historicoAcessosCompleto.filter(a=>a.data.slice(0,10)===diaAtual);
+          const dataFormatada = new Date(diaAtual+'T12:00:00').toLocaleDateString('pt-BR', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
+          return `
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+            <button class="icon-btn" id="btnAcessosDiaAnterior" ${!temAnterior?'disabled':''} title="Dia anterior" style="opacity:${temAnterior?1:0.3};">‹</button>
+            <div style="text-align:center;">
+              <div style="font-weight:600;font-size:13px;text-transform:capitalize;">${escapeHTML(dataFormatada)}</div>
+              <div class="sub" style="font-size:11px;">${doDia.length} acesso(s) · dia ${diasComAcesso.length-idx} de ${diasComAcesso.length}</div>
+            </div>
+            <button class="icon-btn" id="btnAcessosProximoDia" ${!temProximo?'disabled':''} title="Próximo dia" style="opacity:${temProximo?1:0.3};">›</button>
+          </div>
           <table style="width:100%;font-size:13px;border-collapse:collapse;">
             <thead><tr style="text-align:left;color:var(--text-soft);">
-              <th style="padding:6px 4px;">Usuário</th><th style="padding:6px 4px;">Data/hora</th><th style="padding:6px 4px;">Duração</th>
+              <th style="padding:6px 4px;">Usuário</th><th style="padding:6px 4px;">Hora</th><th style="padding:6px 4px;">Duração</th>
             </tr></thead>
             <tbody>
-              ${historicoAcessos.map(a=>`
+              ${doDia.map(a=>`
                 <tr style="border-top:1px solid var(--line);">
                   <td style="padding:6px 4px;">${escapeHTML(a.usuario||'—')}</td>
-                  <td style="padding:6px 4px;">${new Date(a.data).toLocaleString('pt-BR')}</td>
+                  <td style="padding:6px 4px;">${new Date(a.data).toLocaleTimeString('pt-BR')}</td>
                   <td style="padding:6px 4px;">${a.duracaoSegundos ? (a.duracaoSegundos<60?a.duracaoSegundos+'s':Math.round(a.duracaoSegundos/60)+' min') : '—'}</td>
                 </tr>`).join('')}
             </tbody>
-          </table>
-        `}
+          </table>`;
+        })()}
       </div>
     </div>
 
@@ -32826,6 +32844,18 @@ function attachViewHandlers(){
   });
   document.getElementById('permBusca')?.addEventListener('input', e=>{ __permissoesFiltro.busca = e.target.value; render(); });
   document.getElementById('permFiltroStatus')?.addEventListener('change', e=>{ __permissoesFiltro.status = e.target.value; render(); });
+  document.getElementById('btnAcessosDiaAnterior')?.addEventListener('click', ()=>{
+    const dias = [...new Set((state.acessosHistorico||[]).map(a=>a.data.slice(0,10)))].sort().reverse();
+    const atual = __acessosDiaSelecionado && dias.includes(__acessosDiaSelecionado) ? __acessosDiaSelecionado : dias[0];
+    const idx = dias.indexOf(atual);
+    if(idx < dias.length-1){ __acessosDiaSelecionado = dias[idx+1]; render(); }
+  });
+  document.getElementById('btnAcessosProximoDia')?.addEventListener('click', ()=>{
+    const dias = [...new Set((state.acessosHistorico||[]).map(a=>a.data.slice(0,10)))].sort().reverse();
+    const atual = __acessosDiaSelecionado && dias.includes(__acessosDiaSelecionado) ? __acessosDiaSelecionado : dias[0];
+    const idx = dias.indexOf(atual);
+    if(idx > 0){ __acessosDiaSelecionado = dias[idx-1]; render(); }
+  });
   document.querySelectorAll('[data-gerenciar-usuario]').forEach(btn=>{
     btn.addEventListener('click', ()=> abrirModalGerenciarUsuario(btn.dataset.gerenciarUsuario));
   });
