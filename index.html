@@ -26884,6 +26884,11 @@ function openAprovarOrcamentoModal(o, respostaAtual){
       <div class="field"><label>Valor (R$)</label><input type="text" inputmode="decimal" id="apvValor" placeholder="0,00" value="${o.valorTotal?String(o.valorTotal).replace('.',','):''}"></div>
       <div class="field"><label>Link (Drive, site, etc.)</label><input type="text" id="apvLink" placeholder="https://..."></div>
     </div>
+    <div class="field-row">
+      <div class="field"><label>Vencimento</label><input type="date" id="apvVencimento" value="${todayISO()}"></div>
+      <div class="field"><label>Conta que vai pagar</label><select id="apvConta">${state.contas.map(c=>`<option value="${c.id}">${escapeHTML(c.nome)}</option>`).join('')}</select></div>
+    </div>
+    <div class="note" style="margin-top:0;">Ao confirmar, já entra em Contas a Pagar automaticamente, vinculada a este orçamento.</div>
     ${o.processoId && !limiteExistente ? `
     <div class="field"><label>Limite de compras liberado pro processo (R$) — opcional</label><input type="text" inputmode="decimal" id="apvLimiteProcesso" placeholder="Deixe vazio se não quiser travar futuros orçamentos desse processo"></div>
     <div class="note" style="margin-top:0;">Se preencher, orçamentos futuros vinculados a esse mesmo processo não vão poder passar desse total, mesmo somando com esse aqui.</div>
@@ -26903,6 +26908,8 @@ function openAprovarOrcamentoModal(o, respostaAtual){
     const descricao = document.getElementById('apvDescricao').value.trim();
     const valor = parseFloat(document.getElementById('apvValor').value.replace(',','.'))||0;
     const link = document.getElementById('apvLink').value.trim();
+    const vencimento = document.getElementById('apvVencimento').value || todayISO();
+    const contaId = document.getElementById('apvConta').value;
 
     if(o.processoId){
       const { permitido, motivo } = verificarLimiteProcesso(o.processoId, valor, state.limitesProcesso, state.orcamentosProcessos);
@@ -26921,7 +26928,7 @@ function openAprovarOrcamentoModal(o, respostaAtual){
     closeModal();
     decidirOrcamentoProcesso(o.id, 'aprovado', {
       resposta: respostaAtual,
-      detalhesCompra: { loja, descricao, valor, link }
+      detalhesCompra: { loja, descricao, valor, link, vencimento, contaId }
     });
   
     }finally{
@@ -26936,13 +26943,32 @@ async function decidirOrcamentoProcesso(id, decisao, extras){
   extras = extras || {};
   const orc = (state.orcamentosProcessos||[]).find(o=>o.id===id);
   if(!orc) return;
+  if(decisao==='aprovado' && !podeAgora('criar')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra aprovar orçamentos (isso cria uma conta a pagar).'); return; }
   orc.status = decisao;
   orc.decididoEm = new Date().toISOString();
   if(extras.resposta) orc.resposta = extras.resposta;
   if(decisao === 'recusado' && extras.motivoRecusa) orc.motivoRecusa = extras.motivoRecusa;
   if(decisao === 'aprovado' && extras.detalhesCompra) orc.detalhesCompra = extras.detalhesCompra;
+  // Elo que faltava: aprovar aqui só guardava os dados da compra, mas nunca virava uma conta a
+  // pagar de verdade — o Livro de Processos ficava sabendo que foi "aprovado" e nunca mais sabia
+  // se aquilo tinha sido pago. Agora, ao aprovar, já cria o lançamento em Contas a Pagar,
+  // vinculado a este orçamento (processoOrcamentoId), pra dar pra avisar o pagamento depois.
+  if(decisao === 'aprovado' && extras.detalhesCompra && extras.detalhesCompra.valor>0){
+    const dc = extras.detalhesCompra;
+    const lancId = uid();
+    state.lancamentos.push({
+      id: lancId, tipo:'saida', categoria: (state.categorias?.saida||[]).some(c=>c.nome==='Fornecedores') ? 'Fornecedores' : 'Despesas Diversas',
+      descricao: `${dc.descricao||dc.loja||'Compra aprovada'}${dc.loja&&dc.descricao?' — '+dc.loja:''} (Orçamento N° ${orc.numero})`,
+      valor: dc.valor, contaId: dc.contaId||state.contas[0]?.id||null, status:'pendente',
+      dataVencimento: dc.vencimento||todayISO(), dataPagamento: null,
+      origem:'processo', processoOrcamentoId: orc.processoOrcamentoId||null, processoId: orc.processoId||null,
+      orcamentoLocalId: orc.id, criadoEm: new Date().toISOString()
+    });
+    orc.lancamentoId = lancId;
+    registrarLog('Orçamento aprovado — conta a pagar criada', `Orçamento N° ${orc.numero}: ${brl(dc.valor)} vinculado ao lançamento`);
+  }
   persist(); render();
-  showToast(`Orçamento N° ${orc.numero} ${decisao === 'aprovado' ? 'aprovado' : 'recusado'}`);
+  showToast(`Orçamento N° ${orc.numero} ${decisao === 'aprovado' ? 'aprovado — já lançado em Contas a Pagar' : 'recusado'}`);
 
   if(!orc.processoOrcamentoId) return; // orçamento manual, sem vínculo externo — nada pra avisar
 
@@ -26960,11 +26986,39 @@ async function decidirOrcamentoProcesso(id, decisao, extras){
     if(extras.resposta) payload.resposta = extras.resposta;
     if(decisao === 'recusado' && extras.motivoRecusa) payload.motivoRecusa = extras.motivoRecusa;
     if(decisao === 'aprovado' && extras.detalhesCompra) payload.detalhesCompra = extras.detalhesCompra;
+    if(decisao === 'aprovado') { payload.statusFinanceiro = 'obrigacao_gerada'; payload.valorPago = 0; payload.saldoAberto = extras.detalhesCompra?.valor||0; }
     await db.collection('orcamentos').doc(orc.processoOrcamentoId).update(payload);
     showToast('Livro de Processos avisado da decisão');
   }catch(e){
     console.error('Erro ao avisar decisão do orçamento:', e);
     showToast('Decisão salva aqui, mas falhou ao avisar o Livro de Processos — sincronize de novo depois');
+  }
+}
+// Elo Caixa → Processos que faltava (Fase 5 da integração): quando um lançamento vinculado a um
+// orçamento do Livro de Processos é pago (mesmo que parcialmente), avisa lá quanto já foi pago,
+// quanto falta, e o status financeiro — sem nunca criar uma segunda obrigação ou duplicar nada.
+async function avisarPagamentoProcesso(lancamentoPago){
+  if(!lancamentoPago.processoOrcamentoId) return;
+  const cfg = state.processosConfig;
+  if(!cfg || !cfg.firebaseConfig || !cfg.email || !cfg.senha) return; // integração não configurada — segue sem avisar
+  try{
+    // Soma TODOS os lançamentos vinculados a esse mesmo orçamento (normalmente é só um, mas essa
+    // conta funciona igual se um dia existir parcela dividida em mais de um lançamento).
+    const vinculados = state.lancamentos.filter(l=>l.processoOrcamentoId===lancamentoPago.processoOrcamentoId);
+    const valorTotal = vinculados.reduce((s,l)=>s+l.valor,0);
+    const valorPago = vinculados.filter(l=>l.status==='pago'||l.status==='recebido').reduce((s,l)=>s+(l.valorRecebido||l.valor),0);
+    const saldoAberto = Math.max(0, Math.round((valorTotal-valorPago)*100)/100);
+    const statusFinanceiro = saldoAberto<=0.004 ? 'pago' : valorPago>0 ? 'parcialmente_pago' : 'obrigacao_gerada';
+    if(!processosFirebaseApp) processosFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'livro-processos');
+    const auth = processosFirebaseApp.auth();
+    if(!auth.currentUser) await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
+    const db = processosFirebaseApp.firestore();
+    await db.collection('orcamentos').doc(lancamentoPago.processoOrcamentoId).update({
+      valorPago: Math.round(valorPago*100)/100, saldoAberto, statusFinanceiro,
+      dataUltimoPagamento: lancamentoPago.dataPagamento||todayISO()
+    });
+  }catch(e){
+    console.error('Erro ao avisar pagamento pro Livro de Processos:', e); // não bloqueia o pagamento em si
   }
 }
 
@@ -27232,17 +27286,19 @@ function viewOrcamentosProcessos(){
       <summary>Já decididos (${decididos.length}) — continuam aqui, nunca somem</summary>
       <div style="padding:10px 20px 0;"><button class="btn ghost sm" id="btnExcluirOrcamentosAntigos">🗑️ Excluir decididos com mais de 90 dias</button></div>
       <div class="panel-body" style="padding:0;">
-        ${decididos.slice(0,50).map(o=>`
+        ${decididos.slice(0,50).map(o=>{
+          const lancVinculado = o.lancamentoId ? state.lancamentos.find(l=>l.id===o.lancamentoId) : null;
+          const statusPagto = lancVinculado ? (lancVinculado.status==='pago'?'✓ Pago':'⏳ Em aberto') : '';
+          return `
           <div class="ledger-row compact" style="grid-template-columns:1fr auto auto auto;">
             <div class="desc-cell">
               <div>Orçamento N° ${o.numero}${o.processoTitulo?' — '+escapeHTML(o.processoTitulo):''}</div>
-              <div class="cat">${o.decididoEm ? new Date(o.decididoEm).toLocaleString('pt-BR') : ''}${o.motivoRecusa ? ' · Motivo: '+escapeHTML(o.motivoRecusa) : ''}${o.detalhesCompra && o.detalhesCompra.loja ? ' · Loja: '+escapeHTML(o.detalhesCompra.loja) : ''}${o.resposta ? ' · Resposta: '+escapeHTML(o.resposta) : ''}</div>
+              <div class="cat">${o.decididoEm ? new Date(o.decididoEm).toLocaleString('pt-BR') : ''}${o.motivoRecusa ? ' · Motivo: '+escapeHTML(o.motivoRecusa) : ''}${o.detalhesCompra && o.detalhesCompra.loja ? ' · Loja: '+escapeHTML(o.detalhesCompra.loja) : ''}${o.resposta ? ' · Resposta: '+escapeHTML(o.resposta) : ''}${statusPagto?' · '+statusPagto:''}</div>
             </div>
             <span class="mono">${brl(o.valorTotal)}</span>
             <span style="font-size:11.5px;font-weight:600;color:${o.status==='aprovado'?'var(--success)':'var(--danger)'};">${o.status==='aprovado'?'✓ Aprovado':'✕ Recusado'}</span>
             <button class="icon-btn" data-excluir-orcamento="${o.id}" title="Excluir (vai pra Lixeira)">🗑️</button>
-          </div>
-        `).join('')}
+          </div>`;}).join('')}
       </div>
     </details>` : ''}
     <div class="note" style="margin-top:0;">💡 Ao aprovar ou recusar, o Livro de Processos é avisado automaticamente — a decisão aparece de volta no processo lá.</div>
@@ -29191,6 +29247,7 @@ function openMarcarPagoLoteModal(lancs){
     registrarLog('Marcado como pago/recebido em lote', `${lancs.length} lançamento(s)`);
     limparSelecaoLanc(); persist(); closeModal(); render();
     showToast(`${lancs.length} lançamento(s) confirmado(s)`);
+    lancs.filter(l=>l.processoOrcamentoId).forEach(l=>avisarPagamentoProcesso(l));
     }finally{
       const btnLoteFim = document.getElementById('btnConfirmarLotePago');
       if(btnLoteFim) btnLoteFim.disabled = false;
@@ -33827,6 +33884,17 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     ${existing?.origem==='vk' ? `
     <div class="note" style="margin-top:0;">🔒 Esse pedido veio do VK Industrial — o valor não pode ser editado aqui, pra não ficar diferente do que está lá. Pra corrigir o valor, altere o pedido no VK Industrial; a próxima sincronização atualiza aqui sozinha (se o pedido ainda estiver pendente).</div>
     ` : ''}
+    ${existing?.origem==='processo' ? `
+    <div class="panel" style="margin-bottom:14px;background:var(--bone);">
+      <div style="padding:12px 16px;">
+        <div style="font-size:10.5px;font-weight:700;color:var(--text-soft);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:6px;">🔗 Origem e Vínculos</div>
+        <div style="font-size:13px;line-height:1.6;">
+          Veio de um orçamento aprovado no <strong>Livro de Processos</strong>${existing.processoId?` (processo <span class="mono">${escapeHTML(existing.processoId)}</span>)`:''}.
+        </div>
+        <button class="btn ghost sm" id="btnVerOrcamentosDaFicha" style="margin-top:8px;">Ver Aprovação de Orçamentos →</button>
+      </div>
+    </div>
+    ` : ''}
     ${ehFaturaAbertaSombra ? `
     <div class="note" style="margin-top:0;">🔒 Esse valor é a soma das despesas lançadas na fatura ainda aberta — some sozinho conforme você lança mais despesas no cartão. Edite/exclua as despesas dentro da tela da fatura em vez de mudar aqui.</div>
     ` : ''}
@@ -34034,6 +34102,9 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('btnVerOrcamentosDaFicha')?.addEventListener('click', ()=>{
+    closeModal(); currentView='orcamentos-processos'; render();
+  });
   if(tipo==='saida'){
     const atualizarAvisoProvisionamento = ()=>{
       const wrap = document.getElementById('fProvisionamentoAviso');
@@ -35072,7 +35143,7 @@ function wireResultadosBuscaGlobal(container){
 
 function montarResultadosBuscaGlobal(){
   const termo = buscaGlobalTermo.trim().toLowerCase();
-  let resultados = { lancamentos:[], contratos:[], fornecedores:[], comissoes:[], ativos:[], contas:[] };
+  let resultados = { lancamentos:[], contratos:[], fornecedores:[], comissoes:[], ativos:[], contas:[], orcamentosProcessos:[] };
   if(termo.length>=2){
     resultados.lancamentos = state.lancamentos.filter(l=>l.origem!=='transferencia' && ((l.fornecedor||'').toLowerCase().includes(termo) || (l.descricao||'').toLowerCase().includes(termo) || (l.observacao||'').toLowerCase().includes(termo))).sort((a,b)=>(b.dataVencimento||'').localeCompare(a.dataVencimento||'')).slice(0,30);
     resultados.contratos = (state.contratos||[]).filter(c=>(c.nome||'').toLowerCase().includes(termo) || (c.contraparte||'').toLowerCase().includes(termo));
@@ -35080,6 +35151,12 @@ function montarResultadosBuscaGlobal(){
     resultados.comissoes = (state.comissoesPagas||[]).filter(cp=>(nomeVendedor(cp.vendedorId)||'').toLowerCase().includes(termo));
     resultados.ativos = (state.ativosPatrimoniais||[]).filter(a=>(a.nome||'').toLowerCase().includes(termo) || (a.fornecedor||'').toLowerCase().includes(termo));
     resultados.contas = state.contas.filter(c=>(c.nome||'').toLowerCase().includes(termo) || (c.banco||'').toLowerCase().includes(termo));
+    // Acha tanto pelo número ("orçamento 42", "42") quanto pelo título do processo ou id do processo
+    // vindo do Livro de Processos — pra dar pra digitar "PROC-123" e cair direto no orçamento certo.
+    resultados.orcamentosProcessos = (state.orcamentosProcessos||[]).filter(o=>
+      String(o.numero).includes(termo) || (o.processoTitulo||'').toLowerCase().includes(termo) ||
+      (o.processoId||'').toLowerCase().includes(termo) || (o.processoOrcamentoId||'').toLowerCase().includes(termo)
+    );
   }
   const totalResultados = Object.values(resultados).reduce((s,arr)=>s+arr.length,0);
   const secao = (titulo, icone, lista, montarLinha) => !lista.length ? '' : `
@@ -35106,6 +35183,11 @@ function montarResultadosBuscaGlobal(){
     ${secao('Ativos Patrimoniais', '📦', resultados.ativos, a=>`
       <div class="ledger-row compact" data-action="ver-ativo-patrimonial" data-id="${a.id}" style="grid-template-columns:1fr;cursor:pointer;">
         <div class="desc-cell"><div>${escapeHTML(a.nome)}</div><div class="cat">${escapeHTML(a.fornecedor||'')}</div></div>
+      </div>`)}
+    ${secao('Orçamentos de Processos', '📋', resultados.orcamentosProcessos, o=>`
+      <div class="ledger-row compact" data-goto="orcamentos-processos" style="grid-template-columns:1fr auto auto;cursor:pointer;">
+        <div class="desc-cell"><div>Orçamento N° ${o.numero}${o.processoTitulo?' — '+escapeHTML(o.processoTitulo):''}</div><div class="cat">${o.status==='pendente'?'Aguardando decisão':o.status==='aprovado'?'Aprovado':'Recusado'}</div></div>
+        <span class="mono">${brl(o.valorTotal)}</span>
       </div>`)}
     ${secao('Contas Bancárias', '🏦', resultados.contas, c=>`
       <div class="ledger-row compact" data-action="ir-contas" style="grid-template-columns:1fr;cursor:pointer;">
