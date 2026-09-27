@@ -6699,6 +6699,7 @@ function acessoRapidoHTML(t){
       ${item('🏦','Contas', `Saldo total: <strong class="mono ${caixaAtual>=0?'':'neg'}">${vm(brl(caixaAtual))}</strong>`, `${state.contas.filter(c=>!c.arquivada).length} conta(s)`, 'contas')}
       ${item('📜','Lançamentos', `${qtdLancMes} no mês`, 'Ver todos', 'todos-lancamentos')}
       ${item('📑','Relatórios', 'Análises completas', 'DRE, indicadores e mais', 'relatorios')}
+      ${item('📊','Apresentação', 'Resultados mensal/trimestral', 'Pronta pra reunião', 'apresentacao-resultados')}
       ${(()=>{
         const leiturasMesUsina = (state.usinaLeituras||[]).filter(l=>l.periodo==='mes' && l.data.slice(0,7)===mesRef);
         const geracaoMesUsina = leiturasMesUsina[0]?.geracaoKwh || 0;
