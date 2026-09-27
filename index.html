@@ -1225,7 +1225,9 @@ function aplicarMigracoes(s){
     if(u.cadastradoPor===undefined) u.cadastradoPor = null;
     if(u.supervisor===undefined) u.supervisor = false; // pode liberar telas protegidas sem precisar ser admin
   });
-  if(!s.resultadosInvestimento) s.resultadosInvestimento = []; // [{id, ticker, contaId, subContaId, data, quantidade, precoVenda, valorBruto, custoMedioAplicado, custoAtribuido, resultadoBruto, numeroNota, notaId}] — resultado realizado POR VENDA, nunca por nota inteira
+  if(!s.resultadosInvestimento) s.resultadosInvestimento = [];
+  if(!s.apresentacoesResultados) s.apresentacoesResultados = []; // [{id, tipo:'mensal'|'trimestral', periodoRef, comparacao, textos:{comoFoi,acontecimentos,proximosPassos,observacoes}, status, snapshot, criadoEm, atualizadoEm}] // [id] — relatórios marcados com estrela
+  if(!s.relatoriosRecentes) s.relatoriosRecentes = []; // [{id, data}] — últimos relatórios abertos, mais recente primeiro // [{id, ticker, contaId, subContaId, data, quantidade, precoVenda, valorBruto, custoMedioAplicado, custoAtribuido, resultadoBruto, numeroNota, notaId}] — resultado realizado POR VENDA, nunca por nota inteira
   if(!s.telasProtegidas) s.telasProtegidas = []; // views que exigem senha de admin pra abrir, mesmo pra quem já está logado
   if(!s.telasProtegidasNivel) s.telasProtegidasNivel = {}; // { view: 'qualquer'|'admin'|'supervisor' } — quem pode liberar cada tela; vazio = qualquer admin ou supervisor
   if(!s.desbloqueiosTelaHistorico) s.desbloqueiosTelaHistorico = []; // [{ view, usuarioSolicitante, liberadoPor, data }] — log de cada liberação de tela protegida
@@ -1366,6 +1368,15 @@ function aplicarMigracoes(s){
       if(c.ehFinanceira===undefined) c.ehFinanceira = (c.nome==='Rendimentos' || c.nome==='Despesas Financeiras');
     });
   });
+  // 4.3 da auditoria de investimentos: Ganho/Perda de Capital têm categoria PRÓPRIA, separada de
+  // Rendimentos (que é só pra dividendos/rendimentos recebidos) e de Despesas Financeiras (que é
+  // juros, tarifa etc.) — resultado de venda de ativo é outra coisa e não pode ficar misturado.
+  if(!s.categorias.entrada.some(c=>c.nome==='Ganho de Capital')){
+    s.categorias.entrada.push({ id: uid(), nome:'Ganho de Capital', subcategorias: [], ehFinanceira: true });
+  }
+  if(!s.categorias.saida.some(c=>c.nome==='Perda de Capital')){
+    s.categorias.saida.push({ id: uid(), nome:'Perda de Capital', subcategorias: [], ehFinanceira: true });
+  }
   if(!s.vendedores) s.vendedores = [];
   if(!s.comissoesPagas) s.comissoesPagas = [];
   if(!s.comissoesManuais) s.comissoesManuais = [];
@@ -2739,6 +2750,7 @@ function render(){
   else if(currentView==='fechamento-mensal') main.innerHTML = viewFechamentoMensal();
   else if(currentView==='integridade') main.innerHTML = viewIntegridade();
   else if(currentView==='permissoes') main.innerHTML = viewPermissoes();
+  else if(currentView==='apresentacao-resultados') main.innerHTML = viewApresentacaoResultados();
   else if(currentView==='central-360') main.innerHTML = viewCentral360();
   else if(currentView==='caixa-fisico') main.innerHTML = viewCaixaFisico();
   else if(currentView==='configuracoes') main.innerHTML = viewConfiguracoes();
@@ -11004,6 +11016,37 @@ function custoTotalInvestimentos(){
   const somaSubManual = state.subcontasInvestimento.filter(s=>s.valorManual!=null && idsContas.has(s.contaId)).reduce((s,sub)=>s+(sub.custoAcumulado||0),0);
   return somaAtivos + somaSubManual;
 }
+// 4.6 — histórico detalhado de vendas de um ativo, com cada operação individual (não a posição
+// inteira): data, quantidade, custo, valor, resultado e a nota de origem.
+function abrirModalHistoricoAtivo(ticker){
+  const vendas = (state.resultadosInvestimento||[]).filter(r=>r.ticker===ticker).sort((a,b)=>b.data.localeCompare(a.data));
+  const posicaoAtual = state.ativosInvestimento.filter(a=>!a.resgatado && a.ticker===ticker && !a.manual);
+  const qtdAtual = posicaoAtual.reduce((s,a)=>s+(a.quantidade||0),0);
+  const totalResultado = vendas.reduce((s,v)=>s+v.resultadoBruto,0);
+  const modal = document.getElementById('modalContent');
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+      <h2 style="margin:0;">📊 ${escapeHTML(ticker)}</h2>
+      <button id="btnFecharHistoricoAtivo" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-soft);">✕</button>
+    </div>
+    <p class="sub" style="margin-bottom:14px;">Posição atual: <strong>${qtdAtual}</strong> · Resultado realizado acumulado: <strong style="color:${totalResultado<0?'var(--danger)':'var(--success)'};">${totalResultado>=0?'+':''}${brl(totalResultado)}</strong></p>
+    <div class="dash-section-label" style="margin-top:0;">Histórico de vendas</div>
+    ${!vendas.length ? `<div class="empty">Nenhuma venda registrada ainda deste ativo.</div>` : vendas.map(v=>`
+      <div class="panel" style="margin-bottom:8px;">
+        <div class="panel-body" style="padding:10px 14px;font-size:13px;">
+          <div style="display:flex;justify-content:space-between;font-weight:600;">
+            <span>${new Date(v.data+'T12:00:00').toLocaleDateString('pt-BR')} — venda de ${v.quantidade}</span>
+            <span class="mono" style="color:${v.resultadoBruto<0?'var(--danger)':'var(--success)'};">${v.resultadoBruto>=0?'+':''}${brl(v.resultadoBruto)}</span>
+          </div>
+          <div class="sub" style="margin-top:4px;">Preço de venda: ${brl(v.precoVenda)} · Valor: ${brl(v.valorBruto)} · Custo aplicado: ${brl(v.custoAtribuido)}${v.taxaAtribuida?' · Taxas: '+brl(v.taxaAtribuida):''}</div>
+          ${v.numeroNota ? `<div class="sub" style="margin-top:2px;">Nota N° ${escapeHTML(v.numeroNota)}</div>` : ''}
+        </div>
+      </div>`).join('')}
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnFecharHistoricoAtivo').addEventListener('click', closeModal);
+}
 function viewInvestimentos(){
   const total = totalInvestimentos();
   const custo = custoTotalInvestimentos();
@@ -11152,14 +11195,48 @@ function viewInvestimentos(){
     <div class="panel"><div class="panel-body" style="padding:6px 18px;">
       <p class="sub" style="margin:6px 0 10px;">Calculado por venda (não pela nota inteira) — usa o preço médio de cada ativo no momento da venda. Não inclui rendimentos de FIIs nem valorização da posição que ainda está na carteira.</p>
       ${linhas.map(([ticker,r])=>`
-        <div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--line);">
+        <div class="ledger-row-like" data-ver-historico-ativo="${escapeHTML(ticker)}" style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--line);cursor:pointer;">
           <span>${escapeHTML(ticker)} <span class="sub" style="font-size:11px;">(${r.qtd} negociadas · ${brl(r.vendas)} em vendas)</span></span>
-          <span class="mono" style="font-weight:600;color:${r.resultado<0?'var(--danger)':'var(--success)'};">${r.resultado>=0?'+':''}${brl(r.resultado)}</span>
+          <span class="mono" style="font-weight:600;color:${r.resultado<0?'var(--danger)':'var(--success)'};">${r.resultado>=0?'+':''}${brl(r.resultado)} ›</span>
         </div>`).join('')}
     </div></div>`;
     })()}
-    ${contasComCotacaoAtrasada.length ? `<div class="note" style="border-color:var(--warn);">⚠️ ${contasComCotacaoAtrasada.map(c=>`${escapeHTML(c.nome)} (${c.qtd} ativo(s))`).join(', ')} com posição pendente de atualização há mais de 7 dias — clique em "Atualizar posições".</div>` : ''}
-    ${notasAntigas.length ? `<div class="note" style="border-color:var(--warn);">⚠️ ${notasAntigas.length} nota(s) de corretagem parada(s) há mais de 15 dias sem revisar — role a lista abaixo pra dar uma olhada.</div>` : ''}
+    ${(() => {
+      const semPrecoMedio = state.ativosInvestimento.filter(a=>!a.resgatado && idsContasAtivas.has(a.contaId) && !a.manual && (!a.precoMedio || a.precoMedio<=0) && (a.quantidade||0)>0);
+      const itensRadar = [];
+      if(contasComCotacaoAtrasada.length) itensRadar.push(`🟡 Cotação desatualizada há mais de 7 dias: ${contasComCotacaoAtrasada.map(c=>`${escapeHTML(c.nome)} (${c.qtd})`).join(', ')}`);
+      if(notasAntigas.length) itensRadar.push(`🟡 ${notasAntigas.length} nota(s) de corretagem parada(s) há mais de 15 dias sem revisar`);
+      if(semPrecoMedio.length) itensRadar.push(`🔴 Ativo sem preço médio (custo desconhecido): ${semPrecoMedio.map(a=>escapeHTML(a.ticker||a.nome)).join(', ')}`);
+      if(!itensRadar.length) return '';
+      return `
+    <div class="dash-section-label">🔍 Radar de Investimentos</div>
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-body" style="padding:6px 18px;">
+        ${itensRadar.map(t=>`<div style="padding:6px 0;border-top:1px solid var(--line);font-size:13px;">${t}</div>`).join('')}
+      </div>
+    </div>`;
+    })()}
+
+    ${(() => {
+      const mesRef = hoje.slice(0,7);
+      let rendimentos=0, ganhoCapital=0, perdaCapital=0, realocacoes=0;
+      (state.lancamentos||[]).forEach(l=>{
+        if(!l.dataPagamento || !l.dataPagamento.startsWith(mesRef) || l.status==='cancelado') return;
+        if(l.categoria==='Rendimentos') rendimentos += l.valor;
+        else if(l.categoria==='Ganho de Capital'){ if(l.realocacao) realocacoes++; else ganhoCapital += l.valor; }
+        else if(l.categoria==='Perda de Capital'){ if(l.realocacao) realocacoes++; else perdaCapital += l.valor; }
+      });
+      if(!rendimentos && !ganhoCapital && !perdaCapital && !realocacoes) return '';
+      return `
+    <div class="dash-section-label">🧭 Fontes de crescimento do patrimônio — ${new Date(hoje+'T12:00:00').toLocaleDateString('pt-BR',{month:'long',year:'numeric'})}</div>
+    <div class="panel" style="margin-bottom:16px;"><div class="panel-body" style="padding:6px 18px;">
+      <p class="sub" style="margin:6px 0 10px;">Separa o que é dinheiro novo/rendimento do que é só o ativo mudando de lugar (realocação) — pra responder "cresceu porque coloquei dinheiro ou porque rendeu?"</p>
+      <div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--line);"><span>💰 Rendimentos recebidos (FII, dividendos, juros)</span><span class="mono" style="color:var(--success);font-weight:600;">+${brl(rendimentos)}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--line);"><span>📈 Ganho de capital (vendas com lucro)</span><span class="mono" style="color:var(--success);font-weight:600;">+${brl(ganhoCapital)}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--line);"><span>📉 Perda de capital (vendas com prejuízo)</span><span class="mono" style="color:var(--danger);font-weight:600;">-${brl(perdaCapital)}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--line);"><span>🔄 Realocações no mês (não conta como ganho/perda "novo")</span><span class="mono">${realocacoes}</span></div>
+    </div></div>`;
+    })()}
     ${(()=>{ const orfaos = ativosOrfaosInvestimento(); return orfaos.length ? `
     <div class="panel" style="margin-bottom:16px;border-left:3px solid var(--danger);">
       <div class="panel-head"><h2>🚨 Ativos órfãos encontrados (${orfaos.length})</h2></div>
@@ -11460,8 +11537,364 @@ function viewIntegracoes(){
   `;
 }
 
+// ============================================================
+// APRESENTAÇÃO DE RESULTADOS — camada de consolidação sobre os relatórios que já existem.
+// NÃO recalcula nada do zero: reaproveita resultadoOperacionalPeriodo, totalInvestimentos,
+// saldoConta, ehMovimentoDeCapital etc., que já são a fonte oficial de cada número no sistema.
+// ============================================================
+let apresResultTipo = 'mensal';
+let apresResultPeriodo = todayISO().slice(0,7);
+let apresResultComparacao = 'ambos'; // 'anterior' | 'anoAnterior' | 'ambos' | 'nenhuma'
+
+function trimestreDoMes(mes){ return Math.floor((mes-1)/3)+1; }
+function periodoTrimestral(anoTri, tri){
+  const mesIni = (tri-1)*3+1;
+  const de = `${anoTri}-${String(mesIni).padStart(2,'0')}-01`;
+  const ultimoDiaMesFim = new Date(anoTri, mesIni+2, 0).getDate();
+  const ateBase = `${anoTri}-${String(mesIni+2).padStart(2,'0')}-${String(ultimoDiaMesFim).padStart(2,'0')}`;
+  const ate = ateBase>todayISO() ? (todayISO().slice(0,7)===`${anoTri}-${String(mesIni+2).padStart(2,'0')}` || (todayISO()>=de && todayISO()<=ateBase) ? todayISO() : ateBase) : ateBase;
+  return { de, ate: ate>ateBase?ateBase:ate };
+}
+// Patrimônio Líquido numa data — reaproveita exatamente as mesmas fontes do Balanço Patrimonial
+// existente (não é uma segunda fórmula, é a mesma, só isolada numa função pra poder ser chamada
+// também daqui sem duplicar a lógica).
+function patrimonioLiquidoResumo(){
+  const caixaBancos = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+  const aReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
+  const aPagar = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
+  const cartoesNaoFaturados = state.cartoes.reduce((s,c)=>{ const comp=competenciaAtual(c); return s+(faturaStatus(c.id,comp)==='aberta'?totalCompetencia(c.id,comp):0); },0);
+  const investimentos = totalInvestimentos();
+  const ativoImobilizado = totalAtivosPatrimoniais();
+  const estoqueInsumos = totalEstoqueInsumos();
+  const adiantamentoClientes = (state.creditosClientes||[]).reduce((s,c)=>s+Math.max(0,c.valor-(c.valorUsado||0)),0);
+  const emprestimosSaldo = (state.emprestimos||[]).reduce((s,e)=>s+Math.max(0,(e.numeroParcelas-e.parcelasPagas))*e.valorParcela,0);
+  const totalAtivo = caixaBancos+aReceber+investimentos+ativoImobilizado+estoqueInsumos;
+  const totalPassivo = aPagar+cartoesNaoFaturados+adiantamentoClientes+emprestimosSaldo;
+  return { caixaBancos, aReceber, aPagar, investimentos, ativoImobilizado, estoqueInsumos, totalAtivo, totalPassivo, patrimonioLiquido: totalAtivo-totalPassivo };
+}
+function calcularDadosApresentacao(tipo, periodoRef){
+  let de, ate, label;
+  if(tipo==='mensal'){
+    const [a,m] = periodoRef.split('-').map(Number);
+    de = `${periodoRef}-01`;
+    const ultimoDia = new Date(a,m,0).getDate();
+    const ateBase = `${periodoRef}-${String(ultimoDia).padStart(2,'0')}`;
+    ate = ateBase>todayISO() ? todayISO() : ateBase;
+    label = competenciaLabel(periodoRef);
+  } else {
+    const [anoTri, triStr] = periodoRef.split('-Q');
+    const tri = Number(triStr);
+    const p = periodoTrimestral(Number(anoTri), tri);
+    de = p.de; ate = p.ate;
+    label = `${tri}º Trimestre de ${anoTri}`;
+  }
+  const r = resultadoOperacionalPeriodo(de, ate);
+  const margem = r.receitaTotal>0 ? (r.lucroLiquido/r.receitaTotal*100) : null;
+  const pat = patrimonioLiquidoResumo();
+  const movsPeriodo = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
+  const aportes = movsPeriodo.filter(l=>l.tipo==='saida' && ehMovimentoDeCapital(l)).reduce((s,l)=>s+l.valor,0);
+  const resgates = movsPeriodo.filter(l=>l.tipo==='entrada' && ehMovimentoDeCapital(l)).reduce((s,l)=>s+l.valor,0);
+  const ganhoCapital = movsPeriodo.filter(l=>l.categoria==='Ganho de Capital').reduce((s,l)=>s+l.valor,0);
+  const perdaCapital = movsPeriodo.filter(l=>l.categoria==='Perda de Capital').reduce((s,l)=>s+l.valor,0);
+  const rendimentosInv = (state.rendimentosInvestimento||[]).filter(x=>x.data>=de && x.data<=ate).reduce((s,x)=>s+x.valor,0);
+  const porCategoriaDespesa = {};
+  movsPeriodo.filter(l=>l.tipo==='saida' && !ehMovimentoDeCapital(l)).forEach(l=>{ porCategoriaDespesa[l.categoria]=(porCategoriaDespesa[l.categoria]||0)+l.valor; });
+  const topDespesas = Object.entries(porCategoriaDespesa).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const porCategoriaReceita = {};
+  movsPeriodo.filter(l=>l.tipo==='entrada' && !ehMovimentoDeCapital(l)).forEach(l=>{ porCategoriaReceita[l.categoria]=(porCategoriaReceita[l.categoria]||0)+l.valor; });
+  const topReceitas = Object.entries(porCategoriaReceita).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const hoje = todayISO();
+  const atrasadas = state.lancamentos.filter(l=>l.status==='pendente'&&l.dataVencimento<hoje);
+  return { tipo, periodoRef, de, ate, label, ...r, margem, ...pat, aportes, resgates, ganhoCapital, perdaCapital, rendimentosInv, topDespesas, topReceitas, atrasadas: atrasadas.length, atrasadasValor: atrasadas.reduce((s,l)=>s+valorEmAberto(l),0) };
+}
+function periodoAnteriorRef(tipo, periodoRef){
+  if(tipo==='mensal'){
+    const [a,m] = periodoRef.split('-').map(Number);
+    const d = new Date(a, m-2, 1);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  }
+  const [anoTri, triStr] = periodoRef.split('-Q');
+  let tri = Number(triStr), ano = Number(anoTri);
+  tri--; if(tri<1){ tri=4; ano--; }
+  return `${ano}-Q${tri}`;
+}
+function periodoAnoAnteriorRef(tipo, periodoRef){
+  if(tipo==='mensal'){ const [a,m]=periodoRef.split('-'); return `${Number(a)-1}-${m}`; }
+  const [anoTri, triStr] = periodoRef.split('-Q');
+  return `${Number(anoTri)-1}-Q${triStr}`;
+}
+function viewApresentacaoResultados(){
+  const opcoesMes = (()=>{ const arr=[]; const hoje=new Date(); for(let i=0;i<24;i++){ const d=new Date(hoje.getFullYear(),hoje.getMonth()-i,1); arr.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);} return arr; })();
+  const opcoesTri = (()=>{ const arr=[]; const hoje=new Date(); const triAtual=trimestreDoMes(hoje.getMonth()+1); for(let i=0;i<8;i++){ let tri=triAtual-i, ano=hoje.getFullYear(); while(tri<1){tri+=4;ano--;} arr.push(`${ano}-Q${tri}`);} return arr; })();
+  const recentes = (state.apresentacoesResultados||[]).slice().sort((a,b)=>b.criadoEm.localeCompare(a.criadoEm)).slice(0,8);
+  return `
+    <div class="topbar">
+      <div><h1>📊 Apresentação de Resultados</h1><p>Transforma os dados que já existem no sistema numa apresentação gerencial pronta pra reunião.</p></div>
+    </div>
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-head"><h2>Gerar Apresentação de Resultados</h2></div>
+      <div style="padding:16px 18px;">
+        <div class="field"><label>Tipo</label>
+          <select id="apresTipo">
+            <option value="mensal" ${apresResultTipo==='mensal'?'selected':''}>📅 Resultado Mensal</option>
+            <option value="trimestral" ${apresResultTipo==='trimestral'?'selected':''}>📆 Resultado Trimestral</option>
+          </select>
+        </div>
+        <div class="field"><label>Período</label>
+          <select id="apresPeriodo">
+            ${apresResultTipo==='mensal'
+              ? opcoesMes.map(m=>`<option value="${m}" ${m===apresResultPeriodo?'selected':''}>${competenciaLabel(m)}</option>`).join('')
+              : opcoesTri.map(t=>{ const [a,tn]=t.split('-Q'); return `<option value="${t}" ${t===apresResultPeriodo?'selected':''}>${tn}º trimestre de ${a}</option>`; }).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Comparação</label>
+          <select id="apresComparacao">
+            <option value="ambos" ${apresResultComparacao==='ambos'?'selected':''}>Período anterior + mesmo período do ano anterior</option>
+            <option value="anterior" ${apresResultComparacao==='anterior'?'selected':''}>Só período anterior</option>
+            <option value="anoAnterior" ${apresResultComparacao==='anoAnterior'?'selected':''}>Só mesmo período do ano anterior</option>
+            <option value="nenhuma" ${apresResultComparacao==='nenhuma'?'selected':''}>Sem comparação</option>
+          </select>
+        </div>
+        <div class="field"><label>Como foi o período?</label><textarea id="apresComoFoi" rows="3" placeholder="Resumo do mês/trimestre, principais acontecimentos, dificuldades, conquistas e contexto da operação."></textarea></div>
+        <div class="field"><label>Principais acontecimentos</label><textarea id="apresAcontecimentos" rows="2" placeholder="Registre os principais acontecimentos do período."></textarea></div>
+        <div class="field"><label>Próximos passos</label><textarea id="apresProximosPassos" rows="2" placeholder="Prioridades e ações para o próximo período."></textarea></div>
+        <div class="field"><label>Observações da gestão (opcional)</label><textarea id="apresObservacoes" rows="2"></textarea></div>
+        <button class="btn" id="btnVisualizarApresentacao" style="margin-top:8px;">👁 Visualizar apresentação</button>
+      </div>
+    </div>
+    ${recentes.length ? `
+    <div class="dash-section-label">📚 Apresentações recentes</div>
+    ${recentes.map(a=>`
+      <div class="panel" style="margin-bottom:8px;">
+        <div style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+          <div>
+            <div style="font-weight:600;">${escapeHTML(a.snapshot?.label||a.periodoRef)}</div>
+            <div class="sub" style="font-size:11px;">${a.tipo==='mensal'?'Resultado Mensal':'Resultado Trimestral'} · ${a.status==='finalizada'?'✅ Finalizada':'📝 Rascunho'}${a.versao>1?' · v'+a.versao:''} · ${fmtDate((a.criadoEm||'').slice(0,10))}</div>
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button class="btn ghost sm" data-ver-apresentacao="${a.id}">Visualizar</button>
+          </div>
+        </div>
+      </div>`).join('')}` : ''}
+  `;
+}
+function coletarComparacoesApresentacao(tipo, periodoRef, comparacao){
+  const comparacoes = {};
+  if(comparacao==='anterior' || comparacao==='ambos'){
+    const refAnt = periodoAnteriorRef(tipo, periodoRef);
+    comparacoes.anterior = { ref: refAnt, dados: calcularDadosApresentacao(tipo, refAnt) };
+  }
+  if(comparacao==='anoAnterior' || comparacao==='ambos'){
+    const refAnoAnt = periodoAnoAnteriorRef(tipo, periodoRef);
+    comparacoes.anoAnterior = { ref: refAnoAnt, dados: calcularDadosApresentacao(tipo, refAnoAnt) };
+  }
+  return comparacoes;
+}
+function pontosDeAtencaoApresentacao(dados, comparacoes){
+  const pontos = [];
+  const base = comparacoes.anterior?.dados || comparacoes.anoAnterior?.dados;
+  if(base){
+    const vDesp = base.despesaTotal>0 ? ((dados.despesaTotal-base.despesaTotal)/base.despesaTotal*100) : null;
+    const vRec = base.receitaTotal>0 ? ((dados.receitaTotal-base.receitaTotal)/base.receitaTotal*100) : null;
+    if(vDesp!==null && vDesp>=15) pontos.push(`Despesas aumentaram ${vDesp.toFixed(1)}% em relação ao período de comparação.`);
+    if(vRec!==null && vRec<=-10) pontos.push(`Receita caiu ${Math.abs(vRec).toFixed(1)}% em relação ao período de comparação.`);
+    if(base.margem!==null && dados.margem!==null && (dados.margem-base.margem)<=-5) pontos.push(`Margem caiu ${(base.margem-dados.margem).toFixed(1)} p.p. em relação ao período de comparação.`);
+    if(dados.aReceber>base.aReceber*1.2 && base.aReceber>0) pontos.push(`Contas a receber aumentaram — de ${brl(base.aReceber)} para ${brl(dados.aReceber)}.`);
+    if(dados.aPagar>base.aPagar*1.2 && base.aPagar>0) pontos.push(`Contas a pagar aumentaram — de ${brl(base.aPagar)} para ${brl(dados.aPagar)}.`);
+  }
+  if(dados.atrasadas>0) pontos.push(`${dados.atrasadas} conta(s) em atraso, somando ${brl(dados.atrasadasValor)}.`);
+  return pontos;
+}
+function htmlComparacaoLinha(rotulo, atual, comp){
+  if(!comp) return '';
+  const v = comp.dados; if(v===undefined || v===null) return '';
+  const delta = atual - v;
+  const pct = v!==0 ? (delta/Math.abs(v)*100) : null;
+  return `<div class="sub" style="font-size:11px;">${rotulo}: ${brl(v)} ${pct!==null?`(${delta>=0?'+':''}${brl(delta)} · ${pct>=0?'+':''}${pct.toFixed(1)}%)`:''}</div>`;
+}
+function htmlPreviaApresentacao(dados, comparacoes, textos){
+  const pontos = pontosDeAtencaoApresentacao(dados, comparacoes);
+  // Permissão real, não só esconder na interface por estética: se o usuário que está gerando a
+  // apresentação não pode ver a tela de Investimentos, essa seção não entra na apresentação dele.
+  const podeVerInvestimentos = usuarioPodeVerTela('investimentos');
+  return `
+    <div style="text-align:center;padding:24px 0;border-bottom:2px solid var(--blue-deep);margin-bottom:20px;">
+      <div style="font-size:12px;letter-spacing:.1em;color:var(--text-soft);text-transform:uppercase;">Resultados</div>
+      <div style="font-size:26px;font-weight:700;margin:4px 0;">${escapeHTML(dados.label)}</div>
+      <div class="sub">Apresentação Gerencial · gerada em ${fmtDate(todayISO())}</div>
+    </div>
+
+    <div class="dash-section-label">Resumo Executivo</div>
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
+      <div class="card"><div class="label">Receita</div><div class="value mono">${brl(dados.receitaTotal)}</div>${htmlComparacaoLinha('Anterior', dados.receitaTotal, comparacoes.anterior && {dados:comparacoes.anterior.dados.receitaTotal})}</div>
+      <div class="card"><div class="label">Despesas</div><div class="value mono">${brl(dados.despesaTotal)}</div>${htmlComparacaoLinha('Anterior', dados.despesaTotal, comparacoes.anterior && {dados:comparacoes.anterior.dados.despesaTotal})}</div>
+      <div class="card" data-drilldown-apres="dre" style="cursor:pointer;"><div class="label">Resultado</div><div class="value mono" style="color:${dados.lucroLiquido>=0?'var(--success)':'var(--danger)'};">${brl(dados.lucroLiquido)}</div><div class="sub" style="font-size:10px;">Ver DRE ›</div></div>
+      <div class="card"><div class="label">Margem</div><div class="value mono">${dados.margem!==null?dados.margem.toFixed(1)+'%':'—'}</div></div>
+      <div class="card" data-drilldown-apres="fluxo" style="cursor:pointer;"><div class="label">Caixa</div><div class="value mono">${brl(dados.caixaBancos)}</div><div class="sub" style="font-size:10px;">Ver Fluxo de Caixa ›</div></div>
+      <div class="card"><div class="label">A Receber</div><div class="value mono">${brl(dados.aReceber)}</div></div>
+      <div class="card"><div class="label">A Pagar</div><div class="value mono">${brl(dados.aPagar)}</div></div>
+      <div class="card" data-drilldown-apres="balanco" style="cursor:pointer;"><div class="label">Patrimônio Líquido</div><div class="value mono">${brl(dados.patrimonioLiquido)}</div><div class="sub" style="font-size:10px;">Ver Balanço ›</div></div>
+    </div>
+
+    <div class="dash-section-label">Resultado Financeiro <span data-drilldown-apres="dre" style="font-size:11px;font-weight:400;color:var(--blue-accent);cursor:pointer;">Ver DRE completa ›</span></div>
+    <div class="report-block">
+      <div class="report-line"><span>Receita</span><span class="v">${brl(dados.receitaTotal)}</span></div>
+      <div class="report-line"><span>(-) Despesas</span><span class="v">(${brl(dados.despesaTotal)})</span></div>
+      <div class="report-line total"><span>(=) Resultado</span><span class="v" style="color:${dados.lucroLiquido>=0?'var(--success)':'var(--danger)'};">${brl(dados.lucroLiquido)}</span></div>
+    </div>
+    ${dados.topReceitas.length ? `<div class="dash-section-label">Principais receitas</div><div class="report-block">${dados.topReceitas.map(([c,v])=>`<div class="report-line sub"><span>${escapeHTML(c)}</span><span class="v">${brl(v)}</span></div>`).join('')}</div>` : ''}
+    ${dados.topDespesas.length ? `<div class="dash-section-label">Principais despesas</div><div class="report-block">${dados.topDespesas.map(([c,v])=>`<div class="report-line sub"><span>${escapeHTML(c)}</span><span class="v">${brl(v)}</span></div>`).join('')}</div>` : ''}
+
+    ${podeVerInvestimentos ? `
+    <div class="dash-section-label">Patrimônio e Investimentos <span data-drilldown-apres="investimentos" style="font-size:11px;font-weight:400;color:var(--blue-accent);cursor:pointer;">Ver Investimentos ›</span></div>
+    <div class="report-block">
+      <div class="report-line"><span>Patrimônio Líquido</span><span class="v">${brl(dados.patrimonioLiquido)}</span></div>
+      <div class="report-line sub"><span>Investimentos (posição atual)</span><span class="v">${brl(dados.investimentos)}</span></div>
+      ${dados.aportes>0?`<div class="report-line sub"><span>Aportes no período</span><span class="v">${brl(dados.aportes)}</span></div>`:''}
+      ${dados.resgates>0?`<div class="report-line sub"><span>Resgates no período</span><span class="v">${brl(dados.resgates)}</span></div>`:''}
+      ${dados.ganhoCapital>0?`<div class="report-line sub"><span>Ganho de capital</span><span class="v" style="color:var(--success);">+${brl(dados.ganhoCapital)}</span></div>`:''}
+      ${dados.perdaCapital>0?`<div class="report-line sub"><span>Perda de capital</span><span class="v" style="color:var(--danger);">-${brl(dados.perdaCapital)}</span></div>`:''}
+      ${dados.rendimentosInv>0?`<div class="report-line sub"><span>Rendimentos de investimentos</span><span class="v">${brl(dados.rendimentosInv)}</span></div>`:''}
+    </div>` : `<div class="note" style="margin-top:16px;">🔒 A seção de Patrimônio e Investimentos não aparece porque seu usuário não tem acesso a essa tela.</div>`}
+
+    ${pontos.length ? `
+    <div class="dash-section-label">⚠️ Pontos de Atenção</div>
+    <div class="panel"><div class="panel-body" style="padding:6px 18px;">
+      ${pontos.map(p=>`<div style="padding:6px 0;border-top:1px solid var(--line);font-size:13px;">${escapeHTML(p)}</div>`).join('')}
+    </div></div>` : ''}
+
+    ${textos.comoFoi ? `<div class="dash-section-label">Como foi o período</div><div class="panel"><div class="panel-body" style="padding:14px 18px;white-space:pre-wrap;">${escapeHTML(textos.comoFoi)}</div></div>` : ''}
+    ${textos.acontecimentos ? `<div class="dash-section-label">Principais acontecimentos</div><div class="panel"><div class="panel-body" style="padding:14px 18px;white-space:pre-wrap;">${escapeHTML(textos.acontecimentos)}</div></div>` : ''}
+    ${textos.proximosPassos ? `<div class="dash-section-label">Próximos passos</div><div class="panel"><div class="panel-body" style="padding:14px 18px;white-space:pre-wrap;">${escapeHTML(textos.proximosPassos)}</div></div>` : ''}
+    ${textos.observacoes ? `<div class="dash-section-label">Observações da gestão</div><div class="panel"><div class="panel-body" style="padding:14px 18px;white-space:pre-wrap;">${escapeHTML(textos.observacoes)}</div></div>` : ''}
+  `;
+}
+function bindDrilldownApresentacao(){
+  document.querySelectorAll('[data-drilldown-apres]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const alvo = el.dataset.drilldownApres;
+      closeModal();
+      if(alvo==='dre'){ relatorioAtivo='dre'; currentView='relatorio-detalhe'; }
+      else if(alvo==='balanco'){ relatorioAtivo='balanco'; currentView='relatorio-detalhe'; }
+      else if(alvo==='investimentos'){ currentView='investimentos'; }
+      else if(alvo==='fluxo'){ currentView='fluxo'; }
+      render();
+    });
+  });
+}
+function abrirPreviaApresentacao(tipo, periodoRef, comparacao, textos){
+  const dados = calcularDadosApresentacao(tipo, periodoRef);
+  const comparacoes = coletarComparacoesApresentacao(tipo, periodoRef, comparacao);
+  const modal = document.getElementById('modalContent');
+  modal.className = 'modal';
+  modal.style.maxWidth = '720px';
+  modal.innerHTML = `
+    <div style="display:flex;justify-content:flex-end;margin-bottom:8px;gap:8px;">
+      <button class="btn ghost sm" id="btnFecharPreviaApres">✕ Fechar</button>
+    </div>
+    <div id="conteudoPreviaApres">${htmlPreviaApresentacao(dados, comparacoes, textos)}</div>
+    <div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap;">
+      <button class="btn" id="btnGerarPDFApres">📄 Gerar PDF</button>
+      <button class="btn ghost" id="btnSalvarApres">💾 Salvar rascunho</button>
+      <button class="btn ghost" id="btnFinalizarApres">✅ Finalizar</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  bindDrilldownApresentacao();
+  document.getElementById('btnFecharPreviaApres').addEventListener('click', closeModal);
+  document.getElementById('btnGerarPDFApres').addEventListener('click', ()=> gerarPDFApresentacao(dados, comparacoes, textos));
+  const salvarApresentacao = (status)=>{
+    const antigas = (state.apresentacoesResultados||[]).filter(a=>a.tipo===tipo && a.periodoRef===periodoRef);
+    const ultimaFinalizada = antigas.find(a=>a.status==='finalizada');
+    // Regra de versão: só cria uma versão NOVA se já existe uma FINALIZADA pra esse período —
+    // rascunho pode ser sobrescrito à vontade, mas uma apresentação finalizada não muda
+    // silenciosamente por baixo (o histórico gerencial fica preservado).
+    if(ultimaFinalizada && status==='finalizada'){
+      const versao = (Math.max(...antigas.map(a=>a.versao||1)))+1;
+      state.apresentacoesResultados.push({ id: uid(), tipo, periodoRef, comparacao, textos, status, versao, snapshot: dados, criadoEm: new Date().toISOString(), atualizadoEm: new Date().toISOString() });
+    } else {
+      const rascunho = antigas.find(a=>a.status!=='finalizada');
+      if(rascunho){ Object.assign(rascunho, { comparacao, textos, status, snapshot: dados, atualizadoEm: new Date().toISOString() }); }
+      else { if(!state.apresentacoesResultados) state.apresentacoesResultados=[]; state.apresentacoesResultados.push({ id: uid(), tipo, periodoRef, comparacao, textos, status, versao:1, snapshot: dados, criadoEm: new Date().toISOString(), atualizadoEm: new Date().toISOString() }); }
+    }
+    persist();
+    showToast(status==='finalizada' ? 'Apresentação finalizada e salva.' : 'Rascunho salvo.');
+    closeModal(); render();
+  };
+  document.getElementById('btnSalvarApres').addEventListener('click', ()=> salvarApresentacao('gerada'));
+  document.getElementById('btnFinalizarApres').addEventListener('click', ()=>{
+    if(!confirm('Finalizar essa apresentação? Depois de finalizada, uma nova geração pro mesmo período cria uma versão separada, sem sobrescrever esta.')) return;
+    salvarApresentacao('finalizada');
+  });
+}
+function gerarPDFApresentacao(dados, comparacoes, textos){
+  const docPdf = criarPDF();
+  const M=18, LARGURA=210, ALTURA=297;
+  // Capa
+  docPdf.setFillColor(20,49,92); docPdf.rect(0,0,LARGURA,ALTURA,'F');
+  docPdf.setTextColor(255,255,255);
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(14); docPdf.text('RESULTADOS', LARGURA/2, 110, {align:'center'});
+  docPdf.setFontSize(26); docPdf.text(dados.label.toUpperCase(), LARGURA/2, 128, {align:'center'});
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(11); docPdf.text('Livro Caixa Financeiro VK', LARGURA/2, 145, {align:'center'});
+  docPdf.setFontSize(9); docPdf.setTextColor(200,210,225);
+  docPdf.text(`Apresentação Gerencial · gerada em ${fmtDate(todayISO())} · uso interno`, LARGURA/2, 155, {align:'center'});
+
+  docPdf.addPage();
+  let y = pdfCabecalho(docPdf, { relatorio:'Apresentação de Resultados', subtitulo: dados.label });
+  const linha = (rotulo, valor, cor)=>{
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(10); docPdf.setTextColor(91,100,114);
+    docPdf.text(rotulo, M, y);
+    docPdf.setFont('helvetica','bold'); docPdf.setTextColor(...(cor||[11,15,20]));
+    docPdf.text(brl(valor), LARGURA-M, y, {align:'right'});
+    y += 7;
+  };
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(12); docPdf.setTextColor(11,15,20);
+  docPdf.text('Resumo Executivo', M, y); y+=8;
+  linha('Receita', dados.receitaTotal);
+  linha('Despesas', dados.despesaTotal);
+  linha(dados.lucroLiquido>=0?'Resultado':'Prejuízo', dados.lucroLiquido, dados.lucroLiquido>=0?[26,140,90]:[190,40,40]);
+  linha('Margem', dados.margem!==null?dados.margem.toFixed(1)+'%':'—');
+  linha('Caixa e Bancos', dados.caixaBancos);
+  linha('Contas a Receber', dados.aReceber);
+  linha('Contas a Pagar', dados.aPagar);
+  linha('Patrimônio Líquido', dados.patrimonioLiquido);
+  y+=4;
+
+  if(comparacoes.anterior || comparacoes.anoAnterior){
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(12); docPdf.text('Comparação', M, y); y+=8;
+    if(comparacoes.anterior) { linha(`Receita — ${comparacoes.anterior.ref}`, comparacoes.anterior.dados.receitaTotal); linha(`Despesa — ${comparacoes.anterior.ref}`, comparacoes.anterior.dados.despesaTotal); }
+    if(comparacoes.anoAnterior) { linha(`Receita — ${comparacoes.anoAnterior.ref}`, comparacoes.anoAnterior.dados.receitaTotal); linha(`Despesa — ${comparacoes.anoAnterior.ref}`, comparacoes.anoAnterior.dados.despesaTotal); }
+    y+=4;
+  }
+
+  const pontos = pontosDeAtencaoApresentacao(dados, comparacoes);
+  if(pontos.length){
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(12); docPdf.text('Pontos de Atenção', M, y); y+=8;
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(10); docPdf.setTextColor(11,15,20);
+    pontos.forEach(p=>{ const linhas = docPdf.splitTextToSize('• '+p, LARGURA-M*2); docPdf.text(linhas, M, y); y+=linhas.length*5+2; });
+    y+=4;
+  }
+
+  const blocoTexto = (titulo, texto)=>{
+    if(!texto) return;
+    if(y>250){ docPdf.addPage(); y = pdfCabecalho(docPdf, { relatorio:'Apresentação de Resultados', subtitulo: dados.label }); }
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(12); docPdf.setTextColor(11,15,20); docPdf.text(titulo, M, y); y+=8;
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(10);
+    const linhasTxt = docPdf.splitTextToSize(texto, LARGURA-M*2);
+    docPdf.text(linhasTxt, M, y); y += linhasTxt.length*5+8;
+  };
+  blocoTexto('Como foi o período', textos.comoFoi);
+  blocoTexto('Principais acontecimentos', textos.acontecimentos);
+  blocoTexto('Próximos passos', textos.proximosPassos);
+  blocoTexto('Observações da gestão', textos.observacoes);
+
+  pdfNumerarPaginas(docPdf);
+  const nomeArquivo = dados.tipo==='mensal' ? `Resultados_Mensal_${dados.periodoRef}.pdf` : `Resultados_${dados.periodoRef.replace('-Q','T')}.pdf`;
+  docPdf.save(nomeArquivo);
+}
 function viewRelatorios(){
   const cards = [
+    { id:'apresentacao_resultados', icone:'📊', nome:'Apresentação de Resultados', desc:'Monta uma apresentação gerencial mensal ou trimestral, pronta pra reunião, a partir dos dados que já existem no sistema' , cat:'Visão Geral e Diagnóstico', viewDireta:'apresentacao-resultados' },
     { id:'gerencial', icone:'📊', nome:'Dashboard Gerencial', desc:'Visão anual completa — receita/despesa por mês, saídas e entradas por categoria, margem de contribuição, lucro e ponto de equilíbrio' , cat:'Visão Geral e Diagnóstico' },
     { id:'executivo', icone:'🧭', nome:'Dashboard Executivo', desc:'Resumo visual com semáforos — receita, lucro, EBITDA, margem, evolução mensal e top clientes/categorias' , cat:'Visão Geral e Diagnóstico' },
     { id:'mensal', icone:'📅', nome:'Super Relatório Mensal', desc:'Tudo sobre o mês — DRE, indicadores, orçamento, alertas — num relatório só' , cat:'Visão Geral e Diagnóstico' },
@@ -11670,23 +12103,37 @@ function viewRelatorios(){
   const categoriasOrdem = ['Visão Geral e Diagnóstico','Caixa e Liquidez','Vendas, Clientes e Comercial','Custos, Despesas e Fornecedores','Produtos e Margem','Cartões e Dívidas','Investimentos e Patrimônio','Crescimento e Projeções','Planejamento, Metas e Decisões','Impostos e Calendários','Ferramentas, Simuladores e Automações'];
   const iconeCategoria = { 'Visão Geral e Diagnóstico':'🧭','Caixa e Liquidez':'💰','Vendas, Clientes e Comercial':'🤝','Custos, Despesas e Fornecedores':'📉','Produtos e Margem':'🍪','Cartões e Dívidas':'💳','Investimentos e Patrimônio':'📈','Crescimento e Projeções':'🚀','Planejamento, Metas e Decisões':'🎯','Impostos e Calendários':'🧾','Ferramentas, Simuladores e Automações':'🧮' };
   relatoriosCardsAtivos = cards;
+  const favoritosCards = (state.relatoriosFavoritos||[]).map(id=>cards.find(c=>c.id===id)).filter(Boolean);
+  const recentesCards = (state.relatoriosRecentes||[]).slice(0,8).map(r=>cards.find(c=>c.id===r.id)).filter(Boolean);
   return `
     <div class="topbar">
       <div><h1>Central de Relatórios</h1><p>${cards.length} relatórios, organizados por categoria</p></div>
     </div>
+    ${favoritosCards.length ? `
+    <div class="dash-section-label">⭐ Favoritos</div>
+    <div class="panel" style="margin-bottom:16px;"><div class="panel-body" style="padding:6px 10px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:6px;">${favoritosCards.map(relatorioItemHTML).join('')}</div>
+    </div></div>` : ''}
+    ${recentesCards.length ? `
+    <div class="dash-section-label">🕘 Recentes</div>
+    <div class="panel" style="margin-bottom:16px;"><div class="panel-body" style="padding:6px 10px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:6px;">${recentesCards.map(relatorioItemHTML).join('')}</div>
+    </div></div>` : ''}
     <div class="field"><input type="text" id="relatoriosBusca" placeholder="Buscar por nome ou número..."></div>
     <div id="relatoriosGrid">${renderRelatoriosGridHTML(cards, categoriasOrdem, iconeCategoria, '')}</div>
   `;
 }
 
 function relatorioItemHTML(c){
+  const favoritado = (state.relatoriosFavoritos||[]).includes(c.id);
   return `
-    <div class="more-item" ${c.viewDireta ? `data-goto="${c.viewDireta}"` : `data-action="abrir-relatorio" data-relatorio="${c.id}"`} style="flex-direction:row;text-align:left;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;">
+    <div class="more-item" ${c.viewDireta ? `data-goto="${c.viewDireta}"` : `data-action="abrir-relatorio" data-relatorio="${c.id}"`} style="flex-direction:row;text-align:left;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;position:relative;">
       <span style="font-size:22px;flex-shrink:0;">${c.icone}</span>
-      <div style="min-width:0;">
+      <div style="min-width:0;flex:1;">
         <div style="font-weight:600;font-size:13px;"><span class="mono" style="color:var(--text-soft);font-weight:400;">#${c.numero}</span> ${c.nome}</div>
         <div style="font-size:11px;color:var(--text-soft);margin-top:2px;line-height:1.35;">${c.desc}</div>
       </div>
+      <button class="icon-btn" data-favoritar-relatorio="${c.id}" title="${favoritado?'Remover dos favoritos':'Marcar como favorito'}" style="flex-shrink:0;font-size:16px;color:${favoritado?'var(--warn,#d97706)':'var(--text-soft)'};">${favoritado?'⭐':'☆'}</button>
     </div>`;
 }
 
@@ -11712,6 +12159,26 @@ function renderRelatoriosGridHTML(cards, categoriasOrdem, iconeCategoria, filtro
   }).join('');
 }
 
+// Favoritos/Recentes — usado nos dois pontos que abrem um relatório (busca local e render geral)
+function registrarRelatorioRecente(id){
+  if(!state.relatoriosRecentes) state.relatoriosRecentes = [];
+  state.relatoriosRecentes = state.relatoriosRecentes.filter(r=>r.id!==id);
+  state.relatoriosRecentes.unshift({ id, data: new Date().toISOString() });
+  if(state.relatoriosRecentes.length>8) state.relatoriosRecentes.length = 8;
+  persist();
+}
+function bindFavoritarRelatorioWiring(escopo){
+  (escopo||document).querySelectorAll('[data-favoritar-relatorio]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      if(!state.relatoriosFavoritos) state.relatoriosFavoritos = [];
+      const id = btn.dataset.favoritarRelatorio;
+      if(state.relatoriosFavoritos.includes(id)) state.relatoriosFavoritos = state.relatoriosFavoritos.filter(x=>x!==id);
+      else state.relatoriosFavoritos.push(id);
+      persist(); render();
+    });
+  });
+}
 // Re-liga só os cliques DENTRO do #relatoriosGrid — usado depois de uma busca, que só substitui o
 // innerHTML desse container (sem re-renderizar a página inteira, senão o campo de busca perde o
 // foco a cada letra digitada). Isolado com querySelector no container pra não duplicar wiring de
@@ -11722,6 +12189,7 @@ function bindRelatoriosGridWiring(){
   grid.querySelectorAll('[data-action="abrir-relatorio"]').forEach(card=>{
     card.addEventListener('click', ()=>{
       const id = card.dataset.relatorio;
+      registrarRelatorioRecente(id);
       if(id==='comissoes' || id==='orcamento'){
         currentView = id;
         render();
@@ -11732,6 +12200,7 @@ function bindRelatoriosGridWiring(){
       render();
     });
   });
+  bindFavoritarRelatorioWiring(grid);
   grid.querySelectorAll('[data-goto]').forEach(el=>{
     el.addEventListener('click', ()=>{
       currentView = el.dataset.goto;
@@ -12047,6 +12516,29 @@ function renderRelatorioInvestimentos(){
   `;
 }
 
+// Drilldown da DRE — clicar numa categoria mostra os lançamentos que formaram aquele total,
+// no mesmo período que estava sendo visto (não reconstrói o período, usa o que já foi calculado).
+function abrirDrilldownDRE(categoria, tipo){
+  const periodo = window._dreDrilldownPeriodo || {};
+  const itens = state.lancamentos.filter(l=>l.categoria===categoria && l.tipo===tipo && (l.status==='pago'||l.status==='recebido') && l.dataPagamento>=periodo.de && l.dataPagamento<=periodo.ate).sort((a,b)=>b.dataPagamento.localeCompare(a.dataPagamento));
+  const total = itens.reduce((s,l)=>s+l.valor,0);
+  const modal = document.getElementById('modalContent');
+  modal.className = 'modal';
+  modal.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+      <h2 style="margin:0;">${escapeHTML(categoria)}</h2>
+      <button id="btnFecharDrilldownDRE" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-soft);">✕</button>
+    </div>
+    <p class="sub" style="margin-bottom:14px;">${itens.length} lançamento(s) · total ${brl(total)} · ${fmtDate(periodo.de)} até ${fmtDate(periodo.ate)}</p>
+    ${!itens.length ? `<div class="empty">Nenhum lançamento encontrado.</div>` : itens.map(l=>`
+      <div class="ledger-row compact" style="grid-template-columns:1fr auto;padding:8px 0;border-top:1px solid var(--line);">
+        <div class="desc-cell"><div>${escapeHTML(l.descricao||'(sem descrição)')}</div><div class="cat">${fmtDate(l.dataPagamento)}</div></div>
+        <span class="mono" style="font-weight:600;">${brl(l.valor)}</span>
+      </div>`).join('')}
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnFecharDrilldownDRE').addEventListener('click', closeModal);
+}
 function renderDRE(periodo){
   let de, ate, label;
   const hoje = new Date();
@@ -12136,6 +12628,7 @@ function renderDRE(periodo){
     return ` <span style="font-size:11px;color:${cor};">(${pct>=0?'+':''}${pct.toFixed(1)}% vs ${rotulo})</span>`;
   };
   const variacaoHTML = (atual, anterior, atualYoy)=> mostraVertical ? pctVerticalBase(atual) : mostraYoy ? variacaoHTMLBase(atual, atualYoy, 'mesmo período ano passado') : variacaoHTMLBase(atual, anterior, 'período anterior');
+  window._dreDrilldownPeriodo = { de, ate };
 
   return `
     <div class="dash-section-label">De onde saiu o resultado (visão em cascata)</div>
@@ -12181,7 +12674,7 @@ function renderDRE(periodo){
       : `Análise horizontal: variação de cada total comparada ao período anterior de mesma duração (${fmtDate(deAnterior)} a ${fmtDate(ateAnterior)}).`}</div>
     <div class="report-block">
       <div class="report-title">Receita Operacional</div>
-      ${(()=>{ const op = Object.entries(receitas).filter(([k])=>!ehCategoriaFinanceira(nomesFinanceirosReceita,k)); return op.length ? op.map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">${brl(v)}${pctVertical(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma receita operacional no período</span><span class="v">${brl(0)}</span></div>`; })()}
+      ${(()=>{ const op = Object.entries(receitas).filter(([k])=>!ehCategoriaFinanceira(nomesFinanceirosReceita,k)); return op.length ? op.map(([k,v])=>`<div class="report-line sub" data-dre-categoria="${escapeHTML(k)}" data-dre-tipo="entrada" style="cursor:pointer;"><span>${k}</span><span class="v">${brl(v)}${pctVertical(v)} ›</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma receita operacional no período</span><span class="v">${brl(0)}</span></div>`; })()}
       ${totalDescontos>0.004 ? (()=>{ const totalReceitaOp = totalReceitas - somaCategoriasFinanceiras(receitas,nomesFinanceirosReceita); const bruta = totalReceitaOp + totalDescontos; return `
       <div class="report-line sub"><span>Receita Bruta de Vendas</span><span class="v">${brl(bruta)}</span></div>
       <div class="report-line sub"><span>(-) Descontos Concedidos</span><span class="v">(${brl(totalDescontos)})</span></div>`; })() : ''}
@@ -12192,7 +12685,7 @@ function renderDRE(periodo){
       <div class="report-line sub"><span>(-) Pedidos Cancelados${canceladosVK.length?' ('+canceladosVK.length+')':''}</span><span class="v">(${brl(totalCancelados)})</span></div>
 
       <div class="report-title">Despesas Operacionais</div>
-      ${(()=>{ const op = Object.entries(despesas).filter(([k])=>!ehCategoriaFinanceira(nomesFinanceirosDespesa,k)); return op.length ? op.map(([k,v])=>`<div class="report-line sub"><span>${k}</span><span class="v">(${brl(v)})${pctVertical(v)}</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma despesa operacional no período</span><span class="v">${brl(0)}</span></div>`; })()}
+      ${(()=>{ const op = Object.entries(despesas).filter(([k])=>!ehCategoriaFinanceira(nomesFinanceirosDespesa,k)); return op.length ? op.map(([k,v])=>`<div class="report-line sub" data-dre-categoria="${escapeHTML(k)}" data-dre-tipo="saida" style="cursor:pointer;"><span>${k}</span><span class="v">(${brl(v)})${pctVertical(v)} ›</span></div>`).join('') : `<div class="report-line sub"><span>Nenhuma despesa operacional no período</span><span class="v">${brl(0)}</span></div>`; })()}
       ${(()=>{ const totalDespesaOp = totalDespesas - somaCategoriasFinanceiras(despesas,nomesFinanceirosDespesa); return `<div class="report-line total"><span>(=) Total de Despesas Operacionais</span><span class="v">(${brl(totalDespesaOp)})</span></div>`; })()}
 
       ${(()=>{
@@ -12213,6 +12706,16 @@ function renderDRE(periodo){
       ${pendentesFinanceiros.length ? `<div class="note" style="border-color:var(--warn);">⚠️ Tem ${brl(totalPendenteFinanceiro)} em ${pendentesFinanceiros.length} lançamento(s) de Rendimentos/Despesas Financeiras <strong>ainda pendente(s)</strong> nesse período (${pendentesFinanceiros.map(l=>l.descricao).slice(0,3).join(', ')}${pendentesFinanceiros.length>3?'…':''}) — só entram aqui quando forem confirmados como recebido/pago em Contas a Receber/Pagar. É provavelmente por isso que o Resultado Financeiro está menor do que você esperava.</div>` : ''}`;
       })()}
 
+      ${(()=>{
+        if(mostraVertical || Math.abs(resultado-resultadoAnt)<0.01) return '';
+        const varReceita = totalReceitas - totalReceitasAnt;
+        const varDespesa = totalDespesasAnt - totalDespesas; // despesa menor = contribuição positiva
+        return `
+      <div class="note" style="margin-top:8px;">
+        <strong>${resultado>=resultadoAnt?'Por que o lucro subiu':'Por que o lucro caiu'}: ${brl(Math.abs(resultado-resultadoAnt))}</strong><br>
+        Receita: ${varReceita>=0?'+':''}${brl(varReceita)} · Despesas: ${varDespesa>=0?'menos ':'mais '}${brl(Math.abs(varDespesa))} que o período anterior
+      </div>`;
+      })()}
       <div class="report-line result"><span>${resultado>=0?'Lucro':'Prejuízo'} do Período</span><span class="v" style="color:${resultado>=0?'var(--success)':'var(--danger)'}">${brl(resultado)}${variacaoHTML(resultado, resultadoAnt, resultadoAnoAnt)}</span></div>
     </div>
   `;
@@ -12484,6 +12987,26 @@ function renderIndicadores(periodo){
       <div class="report-line"><span>Giro de Estoque</span><span class="v">${giroEstoque===null?'—':giroEstoque.toFixed(2)+'x'}</span></div>
       <div class="note" style="margin:6px 0 0;">Quantas vezes o estoque de insumos "virou" (foi consumido e reposto) no período — CMV do período ÷ estoque médio. Quanto maior, mais rápido o insumo sai da prateleira e vira produto vendido. CMV aqui é uma aproximação: soma das despesas na categoria "${escapeHTML(categoriaEstoque)}" pagas no período.</div>
     </div>`;
+    })()}
+
+    ${(()=>{
+      // Principais Fatos do Mês — gerado só a partir dos números já calculados acima neste mesmo
+      // relatório, nada inventado. Cada fato só entra na lista se passar de um limiar relevante.
+      const fatos = [];
+      if(varReceita!==null && Math.abs(varReceita)>=10) fatos.push(`${varReceita>=0?'📈':'📉'} Receita ${varReceita>=0?'subiu':'caiu'} ${Math.abs(varReceita).toFixed(1)}% vs ${competenciaLabel(mesAnteriorRef)}`);
+      if(varDespesa!==null && Math.abs(varDespesa)>=10) fatos.push(`${varDespesa<=0?'📉':'📈'} Despesas ${varDespesa>=0?'subiram':'caíram'} ${Math.abs(varDespesa).toFixed(1)}% vs ${competenciaLabel(mesAnteriorRef)}`);
+      fatos.push(`${lucro>=0?'✅':'⚠️'} ${lucro>=0?'Lucro':'Prejuízo'} do mês: ${brl(Math.abs(lucro))} (margem ${margem.toFixed(1)}%)`);
+      if(topDespesas.length) fatos.push(`💸 Maior categoria de despesa: "${topDespesas[0][0]}" com ${brl(topDespesas[0][1])}`);
+      if(atrasadas.length) fatos.push(`⏰ ${atrasadas.length} conta(s) em atraso, somando ${brl(atrasadas.reduce((s,l)=>s+valorEmAberto(l),0))}`);
+      if(dividasAtrasadas>0) fatos.push(`🏦 ${brl(dividasAtrasadas)} em parcela(s) de dívida atrasada(s)`);
+      if(dividendosDoMes>0) fatos.push(`💰 ${brl(dividendosDoMes)} recebidos em rendimentos de investimentos`);
+      if(contratosVenc && (contratosVenc.vencidos.length+contratosVenc.vencendo.length)) fatos.push(`📄 ${contratosVenc.vencidos.length+contratosVenc.vencendo.length} contrato(s) vencido(s) ou vencendo em breve`);
+      if(!fatos.length) return '';
+      return `
+    <div class="dash-section-label">📌 Principais Fatos do Mês</div>
+    <div class="panel"><div class="panel-body" style="padding:6px 18px;">
+      ${fatos.map(f=>`<div style="padding:7px 0;border-top:1px solid var(--line);font-size:13px;">${f}</div>`).join('')}
+    </div></div>`;
     })()}
   `;
 }
@@ -19925,6 +20448,36 @@ function renderDashboardGerencial(ano, centroCusto){
   const maxLucro = Math.max(1, ...dadosMeses.map(d=>Math.abs(d.lucro)));
   const maxReceitaPE = Math.max(1, ...dadosMeses.map(d=>Math.max(d.receita, d.pontoEquilibrio||0)));
 
+  // Comparação com o ano anterior + causa da variação — mesmo padrão já usado no Dashboard
+  // Executivo, adaptado pra visão anual (compara ano completo com ano completo).
+  const anoAnterior = ano-1;
+  const mesesAnt = Array.from({length:12},(_,i)=>`${anoAnterior}-${String(i+1).padStart(2,'0')}`);
+  const dadosMesesAnt = mesesAnt.map(m=>dadosMesGerencial(m, centroCusto));
+  const receitaAnoAnt = dadosMesesAnt.reduce((s,d)=>s+d.receita,0);
+  const despesaAnoAnt = dadosMesesAnt.reduce((s,d)=>s+d.despesaTotal,0);
+  const saldoAnoAnt = receitaAnoAnt - despesaAnoAnt;
+  const varPct = (atual, ant)=> ant!==0 ? ((atual-ant)/Math.abs(ant)*100) : null;
+  const varReceitaAno = varPct(receitaAno, receitaAnoAnt);
+  const varDespesaAno = varPct(despesaAno, despesaAnoAnt);
+  const varSaldoTxt = (v,positivoBom)=>{
+    if(v===null) return '';
+    const bom = positivoBom ? v>=0 : v<=0;
+    return ` <span style="font-size:11px;color:${bom?'var(--success)':'var(--danger)'};">(${v>=0?'+':''}${v.toFixed(1)}% vs ${anoAnterior})</span>`;
+  };
+  const causaVariacaoAno = (()=>{
+    if(!receitaAnoAnt && !despesaAnoAnt) return null;
+    if(Math.abs(saldoAno-saldoAnoAnt)<0.01) return null;
+    const saidasAnoAntPorCat = {};
+    dadosMesesAnt.forEach(d=>Object.entries(d.despesasPorCategoria).forEach(([c,v])=>{ saidasAnoAntPorCat[c]=(saidasAnoAntPorCat[c]||0)+v; }));
+    const deltas = Object.keys({...saidasAnoPorCat, ...saidasAnoAntPorCat}).map(cat=>({ cat, delta:(saidasAnoPorCat[cat]||0)-(saidasAnoAntPorCat[cat]||0) })).sort((a,b)=>b.delta-a.delta);
+    const maior = deltas[0];
+    const deltaReceita = receitaAno - receitaAnoAnt;
+    if(maior && maior.delta>0 && maior.delta >= Math.abs(deltaReceita)*0.8) return `Principalmente pelo aumento em "${maior.cat}" (+${brl(maior.delta)} vs ${anoAnterior}).`;
+    if(deltaReceita<0) return `Principalmente pela queda na receita (${brl(deltaReceita)} vs ${anoAnterior}).`;
+    if(deltaReceita>0) return `Puxada pelo aumento na receita (+${brl(deltaReceita)} vs ${anoAnterior}).`;
+    return null;
+  })();
+
   const mesAbrev = m => competenciaLabel(m).split('/')[0].slice(0,3);
   const barrasDuplas = (dados, chaveA, chaveB, corA, corB, max)=>`
     <div style="display:flex;align-items:flex-end;gap:6px;height:120px;overflow-x:auto;">
@@ -19951,12 +20504,13 @@ function renderDashboardGerencial(ano, centroCusto){
     <div class="note" style="margin-top:0;">Regime de caixa (o que já entrou/saiu de verdade da conta) — pra ver por competência (o mês em que a venda/despesa foi gerada, independente de quando pagou), use o DRE. Ponto de equilíbrio usa a mesma classificação fixo/variável configurada no relatório "Ponto de Equilíbrio".</div>
 
     <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
-      <div class="card saldo"><div class="label">Receitas Totais</div><div class="value mono">${brl(receitaAno)}</div></div>
-      <div class="card"><div class="label">Custos/Despesas Totais</div><div class="value mono">${brl(despesaAno)}</div></div>
-      <div class="card"><div class="label">Saldo do ano</div><div class="value mono" style="color:${saldoAno>=0?'var(--success)':'var(--danger)'};">${brl(saldoAno)}</div></div>
+      <div class="card saldo"><div class="label">Receitas Totais</div><div class="value mono">${brl(receitaAno)}</div>${varReceitaAno!==null?`<div style="font-size:10.5px;color:${varReceitaAno>=0?'var(--success)':'var(--danger)'};margin-top:2px;">${varReceitaAno>=0?'+':''}${varReceitaAno.toFixed(1)}% vs ${anoAnterior}</div>`:''}</div>
+      <div class="card"><div class="label">Custos/Despesas Totais</div><div class="value mono">${brl(despesaAno)}</div>${varDespesaAno!==null?`<div style="font-size:10.5px;color:${varDespesaAno<=0?'var(--success)':'var(--danger)'};margin-top:2px;">${varDespesaAno>=0?'+':''}${varDespesaAno.toFixed(1)}% vs ${anoAnterior}</div>`:''}</div>
+      <div class="card"><div class="label">Saldo do ano</div><div class="value mono" style="color:${saldoAno>=0?'var(--success)':'var(--danger)'};">${brl(saldoAno)}</div>${saldoAnoAnt?`<div style="font-size:10.5px;color:var(--text-soft);margin-top:2px;">${saldoAno>=saldoAnoAnt?'+':''}${brl(saldoAno-saldoAnoAnt)} vs ${anoAnterior}</div>`:''}</div>
       <div class="card"><div class="label">Margem de Contribuição</div><div class="value mono">${margemContribAno!==null?(margemContribAno*100).toFixed(1)+'%':'—'}</div></div>
       <div class="card"><div class="label">Ponto de Equilíbrio (méd/mês)</div><div class="value mono">${pontoEquilibrioAno!==null?brl(pontoEquilibrioAno/12):'—'}</div></div>
     </div>
+    ${causaVariacaoAno ? `<div class="note" style="margin-top:0;">📌 <strong>Saldo ${saldoAno>=saldoAnoAnt?'melhorou':'piorou'} ${brl(Math.abs(saldoAno-saldoAnoAnt))} vs ${anoAnterior}:</strong> ${causaVariacaoAno}</div>` : ''}
 
     <div class="dash-section-label">Receitas x Custos/Despesas — mês a mês</div>
     <div class="panel"><div class="panel-body" style="padding:16px 18px;">
@@ -20092,6 +20646,26 @@ function renderDashboardExecutivo(){
   const maxTopCliente = topClientes.length ? topClientes[0][1] : 1;
   const maxTopDespesa = topDespesas.length ? topDespesas[0][1] : 1;
 
+  // "Causa da variação" — compara categoria por categoria com o mês anterior e aponta o maior
+  // responsável pela mudança no lucro (seja aumento de despesa numa categoria, seja queda de receita).
+  const causaVariacao = (()=>{
+    if(Math.abs(lucroLiquido-lucroAnt)<0.01) return null;
+    const eventosMesAnt = movimentosRealizados().filter(ev=>ev.data>=tAnt.de && ev.data<=(tAnt.ateMes<hoje?tAnt.ateMes:hoje) && ev.origem!=='transferencia');
+    const despesaAntPorCat = {};
+    eventosMesAnt.filter(ev=>ev.tipo==='saida' && !ehMovimentoDeCapital(ev)).forEach(ev=>{ despesaAntPorCat[ev.categoria]=(despesaAntPorCat[ev.categoria]||0)+ev.valor; });
+    const deltasDespesa = Object.keys({...porCategoriaDespesa, ...despesaAntPorCat}).map(cat=>({
+      cat, delta: (porCategoriaDespesa[cat]||0) - (despesaAntPorCat[cat]||0)
+    })).sort((a,b)=>b.delta-a.delta);
+    const maiorAumentoDespesa = deltasDespesa[0];
+    const deltaReceita = receitaTotal - receitaAnt;
+    if(maiorAumentoDespesa && maiorAumentoDespesa.delta>0 && maiorAumentoDespesa.delta >= Math.abs(deltaReceita)*0.8){
+      return `Principalmente relacionada ao aumento em "${maiorAumentoDespesa.cat}" (+${brl(maiorAumentoDespesa.delta)} vs mês anterior).`;
+    }
+    if(deltaReceita<0) return `Principalmente relacionada à queda na receita (${brl(deltaReceita)} vs mês anterior).`;
+    if(deltaReceita>0) return `Puxada pelo aumento na receita (+${brl(deltaReceita)} vs mês anterior).`;
+    return null;
+  })();
+
   const kpiCard = (label, valor, sem, sub)=>`
     <div class="card">
       <div class="label">${sem} ${label}</div>
@@ -20105,6 +20679,9 @@ function renderDashboardExecutivo(){
       ${kpiCard('Receita Total', brl(receitaTotal), semaforo(receitaTotal, receitaAnt, receitaAnt*0.85), receitaAnt>0?`${receitaTotal>=receitaAnt?'+':''}${(((receitaTotal/receitaAnt)-1)*100).toFixed(1)}% vs mês anterior`:'')}
       ${kpiCard('Despesas Totais', brl(despesaTotal), '', '')}
       ${kpiCard('Lucro Líquido', brl(lucroLiquido), semaforo(margemLiquida, margemLiquidaAnt, margemLiquidaAnt*0.7), `margem ${margemLiquida.toFixed(1)}%`)}
+    </div>
+    ${causaVariacao ? `<div class="note" style="margin-top:0;">📌 <strong>${lucroLiquido>=lucroAnt?'Lucro subiu':'Lucro caiu'} ${brl(Math.abs(lucroLiquido-lucroAnt))} vs mês anterior:</strong> ${causaVariacao}</div>` : ''}
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:${causaVariacao?'0':'-14px'};">
       ${kpiCard('EBITDA', brl(ebitda), semaforo(margemEbitda, 15, 5), `margem EBITDA ${margemEbitda.toFixed(1)}%`)}
       ${kpiCard('Margem Operacional', margemOp.toFixed(1)+'%', semaforo(margemOp, 15, 5), '')}
       ${kpiCard('Margem Líquida', margemLiquida.toFixed(1)+'%', semaforo(margemLiquida, 10, 3), '')}
@@ -20572,10 +21149,35 @@ function renderBalanco(){
   const pctPassivo = (v) => totalPassivo>0 ? ` <span style="color:var(--text-soft);font-size:11px;">(${(v/totalPassivo*100).toFixed(1)}%)</span>` : '';
   const liquidezGeral = totalPassivo>0 ? (totalAtivo/totalPassivo) : null;
 
+  // "O que fez o Patrimônio Líquido mudar?" — usa fluxos que já são calculados com precisão a
+  // partir dos lançamentos (resultado do período + aportes/retiradas de investimento), em vez de
+  // tentar reconstruir um balanço histórico completo (o sistema não guarda posição diária de
+  // estoque/investimentos no passado, então isso seria inventar precisão que não existe).
+  const balancoPeriodoSel = window._balancoPeriodo || 'mes';
+  const inicioPeriodo = balancoPeriodoSel==='mes' ? dataRef.slice(0,7)+'-01' : addDiasISO(dataRef, balancoPeriodoSel==='30d'?-30:balancoPeriodoSel==='90d'?-90:-365);
+  const movsPeriodo = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=inicioPeriodo && l.dataPagamento<=dataRef && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
+  const resultadoPeriodo = movsPeriodo.filter(l=>!ehMovimentoDeCapital(l)).reduce((s,l)=>s+(l.tipo==='entrada'?l.valor:-l.valor),0);
+  const aportesPeriodo = movsPeriodo.filter(l=>l.tipo==='saida' && ehMovimentoDeCapital(l)).reduce((s,l)=>s+l.valor,0);
+  const retiradasPeriodo = movsPeriodo.filter(l=>l.tipo==='entrada' && ehMovimentoDeCapital(l)).reduce((s,l)=>s+l.valor,0);
+  const patrimonioAnterior = patrimonioLiquido - resultadoPeriodo - aportesPeriodo + retiradasPeriodo;
+  const variacaoPL = patrimonioLiquido - patrimonioAnterior;
+  const variacaoPLPct = patrimonioAnterior!==0 ? (variacaoPL/Math.abs(patrimonioAnterior)*100) : null;
+  // Caixa comparado com o início do período — esse item o sistema SABE reconstruir com exatidão
+  // (guarda todo o histórico de lançamentos), diferente do restante do Ativo/Passivo.
+  const diaAnteriorInicioPeriodo = addDiasISO(inicioPeriodo, -1);
+  const caixaBancosAnt = state.contas.reduce((s,c)=>s+saldoContaEmData(c.id, diaAnteriorInicioPeriodo),0);
+  const variacaoCaixa = caixaBancos - caixaBancosAnt;
+
   return `
     <div class="report-controls">
       <span style="font-size:12.5px;color:var(--text-soft);">Data de referência</span>
       <input type="date" id="balancoData" value="${dataRef}">
+      <select id="balancoPeriodoSel">
+        <option value="mes" ${balancoPeriodoSel==='mes'?'selected':''}>Comparar com início do mês</option>
+        <option value="30d" ${balancoPeriodoSel==='30d'?'selected':''}>Comparar com 30 dias atrás</option>
+        <option value="90d" ${balancoPeriodoSel==='90d'?'selected':''}>Comparar com 90 dias atrás</option>
+        <option value="365d" ${balancoPeriodoSel==='365d'?'selected':''}>Comparar com 1 ano atrás</option>
+      </select>
     </div>
     <div class="report-block">
       <div class="report-title">Ativo</div>
@@ -20595,10 +21197,21 @@ function renderBalanco(){
       ${emprestimosSaldo>0 ? `<div class="report-line sub"><span>Empréstimos e Financiamentos (saldo devedor)</span><span class="v">${brl(emprestimosSaldo)}${pctPassivo(emprestimosSaldo)}</span></div>` : ''}
       <div class="report-line total"><span>Total do Passivo</span><span class="v">${brl(totalPassivo)}</span></div>
 
-      <div class="report-line result"><span>Patrimônio Líquido</span><span class="v" style="color:${patrimonioLiquido>=0?'var(--success)':'var(--danger)'}">${brl(patrimonioLiquido)}</span></div>
+      <div class="report-line result"><span>Patrimônio Líquido</span><span class="v" style="color:${patrimonioLiquido>=0?'var(--success)':'var(--danger)'}">${brl(patrimonioLiquido)}${variacaoPLPct!==null?` <span style="font-size:11px;color:${variacaoPL>=0?'var(--success)':'var(--danger)'};">(${variacaoPL>=0?'+':''}${brl(variacaoPL)} · ${variacaoPLPct>=0?'+':''}${variacaoPLPct.toFixed(1)}%)</span>`:''}</span></div>
       <div class="report-line sub"><span>Liquidez Geral (Ativo / Passivo)</span><span class="v">${liquidezGeral===null?'—':liquidezGeral.toFixed(2)}</span></div>
     </div>
     <div class="note" style="border-color:var(--success);color:var(--success);">✓ Balanço fechado — Ativo (${brl(totalAtivo)}) = Passivo + Patrimônio Líquido (${brl(totalPassivo+patrimonioLiquido)})</div>
+
+    <div class="dash-section-label">O que fez o Patrimônio Líquido mudar</div>
+    <div class="panel"><div class="panel-body" style="padding:6px 18px;">
+      <p class="sub" style="margin:6px 0 10px;">Calculado a partir dos lançamentos do período (${fmtDate(inicioPeriodo)} até ${fmtDate(dataRef)}) — não é uma foto histórica reconstruída, é a soma exata dos fluxos que aconteceram.</p>
+      <div class="report-line sub"><span>Patrimônio no início do período</span><span class="v">${brl(patrimonioAnterior)}</span></div>
+      <div class="report-line sub"><span>(+) Resultado do período (receitas − despesas)</span><span class="v" style="color:${resultadoPeriodo>=0?'var(--success)':'var(--danger)'}">${resultadoPeriodo>=0?'+':''}${brl(resultadoPeriodo)}</span></div>
+      <div class="report-line sub"><span>(+) Aportes/investimentos novos</span><span class="v">+${brl(aportesPeriodo)}</span></div>
+      <div class="report-line sub"><span>(-) Retiradas/resgates</span><span class="v">-${brl(retiradasPeriodo)}</span></div>
+      <div class="report-line total"><span>(=) Patrimônio Líquido hoje</span><span class="v">${brl(patrimonioLiquido)}</span></div>
+      <div class="note" style="margin-top:10px;">💰 Caixa e Bancos: ${brl(caixaBancosAnt)} → ${brl(caixaBancos)} (${variacaoCaixa>=0?'+':''}${brl(variacaoCaixa)}) — esse item é comparado com precisão total, pois o sistema guarda o histórico completo de lançamentos por conta.</div>
+    </div></div>
   `;
 }
 
@@ -30267,6 +30880,9 @@ function attachViewHandlers(){
       bindReportInner();
     };
     const bindReportInner = ()=>{
+      document.querySelectorAll('[data-dre-categoria]').forEach(el=>{
+        el.addEventListener('click', ()=> abrirDrilldownDRE(el.dataset.dreCategoria, el.dataset.dreTipo));
+      });
       document.querySelectorAll('.be-cat-fixa').forEach(chk=>{
         chk.addEventListener('change', ()=>{
           const cat = chk.dataset.cat;
@@ -30822,6 +31438,12 @@ function attachViewHandlers(){
       });
       const balancoData = document.getElementById('balancoData');
       if(balancoData) balancoData.addEventListener('change', ()=>{ document.getElementById('reportPanel').innerHTML = renderBalanco(); bindReportInner(); });
+      const balancoPeriodoSelEl = document.getElementById('balancoPeriodoSel');
+      if(balancoPeriodoSelEl) balancoPeriodoSelEl.addEventListener('change', ()=>{
+        window._balancoPeriodo = balancoPeriodoSelEl.value;
+        document.getElementById('reportPanel').innerHTML = renderBalanco();
+        bindReportInner();
+      });
       const meiAno = document.getElementById('meiAno');
       if(meiAno) meiAno.addEventListener('change', ()=>{
         meiAnoAtual = meiAno.value;
@@ -30892,6 +31514,7 @@ function attachViewHandlers(){
   document.querySelectorAll('[data-action="abrir-relatorio"]').forEach(card=>{
     card.addEventListener('click', ()=>{
       const id = card.dataset.relatorio;
+      registrarRelatorioRecente(id);
       if(id==='comissoes' || id==='orcamento'){
         currentView = id;
         document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view===id));
@@ -30903,6 +31526,7 @@ function attachViewHandlers(){
       render();
     });
   });
+  bindFavoritarRelatorioWiring(document);
   document.querySelectorAll('[data-action="abrir-integracao"]').forEach(card=>{
     card.addEventListener('click', ()=>{
       currentView = card.dataset.integracao;
@@ -32595,6 +33219,45 @@ function attachViewHandlers(){
   document.getElementById('btnImportarNota')?.addEventListener('click', ()=>openImportarNotaModal());
   document.getElementById('btnAtualizarPosicoes')?.addEventListener('click', ()=>openCentralAtualizacaoModal());
   document.getElementById('btnRelatoriosInvestimentos')?.addEventListener('click', ()=>{ currentView='relatorios-investimentos'; render(); });
+  document.getElementById('apresTipo')?.addEventListener('change', (e)=>{
+    apresResultTipo = e.target.value;
+    apresResultPeriodo = apresResultTipo==='mensal' ? todayISO().slice(0,7) : `${new Date().getFullYear()}-Q${trimestreDoMes(new Date().getMonth()+1)}`;
+    render();
+  });
+  document.getElementById('apresPeriodo')?.addEventListener('change', (e)=>{ apresResultPeriodo = e.target.value; });
+  document.getElementById('apresComparacao')?.addEventListener('change', (e)=>{ apresResultComparacao = e.target.value; });
+  document.getElementById('btnVisualizarApresentacao')?.addEventListener('click', ()=>{
+    const textos = {
+      comoFoi: document.getElementById('apresComoFoi').value.trim(),
+      acontecimentos: document.getElementById('apresAcontecimentos').value.trim(),
+      proximosPassos: document.getElementById('apresProximosPassos').value.trim(),
+      observacoes: document.getElementById('apresObservacoes').value.trim(),
+    };
+    abrirPreviaApresentacao(apresResultTipo, apresResultPeriodo, apresResultComparacao, textos);
+  });
+  document.querySelectorAll('[data-ver-apresentacao]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const a = (state.apresentacoesResultados||[]).find(x=>x.id===btn.dataset.verApresentacao);
+      if(!a) return;
+      const modal = document.getElementById('modalContent');
+      modal.className = 'modal'; modal.style.maxWidth = '720px';
+      modal.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">
+          <span class="sub">${a.status==='finalizada'?'✅ Finalizada':'📝 Rascunho'}${a.versao>1?' · versão '+a.versao:''}</span>
+          <button class="btn ghost sm" id="btnFecharPreviaApres">✕ Fechar</button>
+        </div>
+        ${htmlPreviaApresentacao(a.snapshot, {}, a.textos)}
+        <div style="display:flex;gap:8px;margin-top:20px;"><button class="btn" id="btnGerarPDFApres">📄 Gerar PDF</button></div>
+      `;
+      document.getElementById('modalOverlay').classList.add('open');
+      bindDrilldownApresentacao();
+      document.getElementById('btnFecharPreviaApres').addEventListener('click', closeModal);
+      document.getElementById('btnGerarPDFApres').addEventListener('click', ()=> gerarPDFApresentacao(a.snapshot, {}, a.textos));
+    });
+  });
+  document.querySelectorAll('[data-ver-historico-ativo]').forEach(el=>{
+    el.addEventListener('click', ()=> abrirModalHistoricoAtivo(el.dataset.verHistoricoAtivo));
+  });
   document.querySelectorAll('[data-action="revisar-nota"]').forEach(row=>{
     row.addEventListener('click', ()=>openImportarNotaModal(null, row.dataset.id));
   });
@@ -39891,17 +40554,24 @@ async function publicarNotaCorretagem(nota){
         // contaria a diferença duas vezes. Sem contaId, ele nunca é somado ao saldo de nenhuma
         // conta (ver saldoConta()), mas continua entrando normalmente no DRE e nos relatórios por
         // categoria, que não exigem contaId — exatamente o "resultado gerencial, não caixa" pedido.
+        // 4.7/4.8 — quando a MESMA nota tem compra e venda juntas, dá pra saber com certeza que é
+        // uma realocação (ativo A → dinheiro → ativo B), sem precisar adivinhar nada: é o mesmo
+        // documento. Fora desse caso (venda numa nota, aplicação em outra data), o sistema NÃO
+        // inventa vínculo — fica "origem não informada", como pedido.
+        const compraJunto = totalCompras>0;
+        const destinoResumo = compraJunto ? linhas.filter(x=>x.tipo==='C').map(x=>`${x.quantidade} ${x.ticker}`).join(', ') : null;
         if(Math.abs(resultadoBruto)>0.004){
           state.lancamentos.push({
             id: uid(), tipo: resultadoBruto>0?'entrada':'saida',
-            categoria: resultadoBruto>0?'Rendimentos':'Despesas Financeiras',
+            categoria: resultadoBruto>0?'Ganho de Capital':'Perda de Capital',
             descricao: `${resultadoBruto>0?'Ganho':'Perda'} de capital — venda de ${l.quantidade} ${l.ticker}${(nota.numeroNota||'').trim() ? ' — Nota N° '+(nota.numeroNota||'').trim() : ''}`,
             valor: Math.round(Math.abs(resultadoBruto)*100)/100, contaId: null,
             dataVencimento: dataPregao, status: resultadoBruto>0?'recebido':'pago', dataPagamento: dataPregao,
             origem:'investimento', resultadoInvestimentoId: resultadoId, ticker: l.ticker,
             quantidade: l.quantidade, numeroNota: (nota.numeroNota||'').trim()||null, notaId: nota.id||null,
-            contaReferenciaId: contaBancariaId,
-            observacao: `Custo da posição vendida: ${brl(custoAtribuido)} · Valor da venda: ${brl(valorBruto)}${taxaAtribuidaVenda?' · Taxas: '+brl(taxaAtribuidaVenda):''}`,
+            contaReferenciaId: contaBancariaId, realocacao: compraJunto,
+            destinoResumo: destinoResumo,
+            observacao: `Custo da posição vendida: ${brl(custoAtribuido)} · Valor da venda: ${brl(valorBruto)}${taxaAtribuidaVenda?' · Taxas: '+brl(taxaAtribuidaVenda):''}${destinoResumo?' · Destino (mesma nota): '+destinoResumo:''}`,
             criadoEm: new Date().toISOString()
           });
         }
