@@ -226,6 +226,14 @@
   .panel-head{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--line);}
   .panel-head h2{font-size:15.5px;}
   .panel-body{padding:14px 20px;}
+  /* REGRA PERMANENTE (pedido explícito): texto secundário (.sub) em bloco — <p> ou <div> — sempre
+     tem respiro embaixo por padrão, em todo o sistema. Isso evita que qualquer parágrafo de
+     explicação/legenda fique colado no elemento seguinte, sem depender de lembrar de adicionar
+     margem manualmente toda vez que uma tela nova usa .sub. Não afeta <span class="sub"> (uso
+     inline, ao lado de outro texto na mesma linha) nem sobrescreve um margin-bottom já definido
+     inline em algum lugar específico (estilo inline sempre vence sobre esta regra de classe).
+  */
+  p.sub, div.sub{margin:4px 0 12px;}
 
   .btn{
     background:var(--blue-accent);color:var(--white);border:none;padding:9px 16px;
