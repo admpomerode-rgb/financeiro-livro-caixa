@@ -2751,6 +2751,7 @@ function render(){
   else if(currentView==='integridade') main.innerHTML = viewIntegridade();
   else if(currentView==='permissoes') main.innerHTML = viewPermissoes();
   else if(currentView==='apresentacao-resultados') main.innerHTML = viewApresentacaoResultados();
+  else if(currentView==='graficos') main.innerHTML = viewGraficos();
   else if(currentView==='central-360') main.innerHTML = viewCentral360();
   else if(currentView==='caixa-fisico') main.innerHTML = viewCaixaFisico();
   else if(currentView==='configuracoes') main.innerHTML = viewConfiguracoes();
@@ -5646,6 +5647,427 @@ function classificarConciliacaoEvento(ev){
 // Gráfico de barras duplas (entradas em verde, saídas em vermelho) por dia — mesmo estilo visual e
 // mesmas cores do gráfico de "Entradas x Saídas" já usado no Dashboard (desenharGraficoMeses),
 // só que parametrizado por uma lista arbitrária de {label, entradas, saidas} em vez de fixo em meses.
+// ==== CENTRAL DE GRÁFICOS — conjunto de desenhos genéricos em canvas puro (mesmo padrão dos
+// gráficos que já existem no sistema, sem biblioteca externa) — reutilizáveis por qualquer tela. ====
+function _prepararCanvas(canvasId, cssHeight){
+  const canvas = document.getElementById(canvasId);
+  if(!canvas) return null;
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = canvas.clientWidth || canvas.parentElement.clientWidth || 600;
+  canvas.width = cssWidth * dpr; canvas.height = cssHeight * dpr;
+  canvas.style.width = cssWidth+'px'; canvas.style.height = cssHeight+'px';
+  const ctx = canvas.getContext('2d');
+  if(!ctx) return null;
+  ctx.scale(dpr, dpr); ctx.clearRect(0,0,cssWidth,cssHeight);
+  return { ctx, w: cssWidth, h: cssHeight };
+}
+const PALETA_GRAFICOS = ['#2E6BE0','#2E7D5B','#C24A3D','#D9A441','#6B5CF6','#17A6B8','#B85C9E','#8A8F98'];
+
+function desenharGraficoLinha(canvasId, dados, cor){
+  const p = _prepararCanvas(canvasId, 160); if(!p || !dados.length) return;
+  const { ctx, w, h } = p;
+  const padL=32, padR=10, padT=14, padB=22;
+  const chartW=w-padL-padR, chartH=h-padT-padB;
+  const max = Math.max(1, ...dados.map(d=>d.valor)), min = Math.min(0, ...dados.map(d=>d.valor));
+  const range = (max-min)||1;
+  const pts = dados.map((d,i)=>({ x: padL+(chartW/(dados.length-1||1))*i, y: padT+chartH-((d.valor-min)/range)*chartH, ...d }));
+  ctx.strokeStyle = 'var(--line)'; ctx.strokeStyle='#E3E6EA'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(padL,padT+chartH); ctx.lineTo(padL+chartW,padT+chartH); ctx.stroke();
+  ctx.strokeStyle = cor||'#2E6BE0'; ctx.lineWidth=2.2; ctx.beginPath();
+  pts.forEach((pt,i)=> i===0?ctx.moveTo(pt.x,pt.y):ctx.lineTo(pt.x,pt.y)); ctx.stroke();
+  ctx.fillStyle = cor||'#2E6BE0';
+  pts.forEach(pt=>{ ctx.beginPath(); ctx.arc(pt.x,pt.y,2.6,0,7); ctx.fill(); });
+  ctx.font='9.5px Inter, sans-serif'; ctx.fillStyle='#8A8F98'; ctx.textAlign='center';
+  pts.forEach((pt,i)=>{ if(dados.length<=14 || i%Math.ceil(dados.length/12)===0) ctx.fillText(pt.label, pt.x, h-6); });
+  ctx.textAlign='right'; ctx.fillText(brlCompacto?brlCompacto(max):String(Math.round(max)), padL-4, padT+8);
+}
+function desenharGraficoArea(canvasId, dados, cor){
+  const p = _prepararCanvas(canvasId, 160); if(!p || !dados.length) return;
+  const { ctx, w, h } = p;
+  const padL=32, padR=10, padT=14, padB=22;
+  const chartW=w-padL-padR, chartH=h-padT-padB;
+  const max = Math.max(1, ...dados.map(d=>d.valor)), min = Math.min(0, ...dados.map(d=>d.valor));
+  const range=(max-min)||1;
+  const pts = dados.map((d,i)=>({ x: padL+(chartW/(dados.length-1||1))*i, y: padT+chartH-((d.valor-min)/range)*chartH, ...d }));
+  const corBase = cor||'#2E6BE0';
+  ctx.beginPath(); ctx.moveTo(pts[0].x, padT+chartH);
+  pts.forEach(pt=>ctx.lineTo(pt.x,pt.y));
+  ctx.lineTo(pts[pts.length-1].x, padT+chartH); ctx.closePath();
+  const grad = ctx.createLinearGradient(0,padT,0,padT+chartH);
+  grad.addColorStop(0, corBase+'55'); grad.addColorStop(1, corBase+'05');
+  ctx.fillStyle = grad; ctx.fill();
+  ctx.strokeStyle = corBase; ctx.lineWidth=2; ctx.beginPath();
+  pts.forEach((pt,i)=> i===0?ctx.moveTo(pt.x,pt.y):ctx.lineTo(pt.x,pt.y)); ctx.stroke();
+  ctx.font='9.5px Inter, sans-serif'; ctx.fillStyle='#8A8F98'; ctx.textAlign='center';
+  pts.forEach((pt,i)=>{ if(dados.length<=14 || i%Math.ceil(dados.length/12)===0) ctx.fillText(pt.label, pt.x, h-6); });
+}
+function desenharGraficoBarrasSimples(canvasId, dados, cor){
+  const p = _prepararCanvas(canvasId, 160); if(!p || !dados.length) return;
+  const { ctx, w, h } = p;
+  const padL=10, padR=10, padT=14, padB=22;
+  const chartW=w-padL-padR, chartH=h-padT-padB;
+  const max = Math.max(1, ...dados.map(d=>d.valor));
+  const grupoW = chartW/dados.length, barW = Math.min(28, grupoW*0.55);
+  ctx.font='9.5px Inter, sans-serif';
+  dados.forEach((d,i)=>{
+    const cx = padL+grupoW*i+grupoW/2;
+    const hb = (d.valor/max)*chartH;
+    ctx.fillStyle = d.cor || cor || '#2E6BE0';
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(cx-barW/2, padT+chartH-hb, barW, hb, 3) : ctx.rect(cx-barW/2, padT+chartH-hb, barW, hb);
+    ctx.fill();
+    if(dados.length<=10){ ctx.fillStyle='#8A8F98'; ctx.textAlign='center'; ctx.fillText(d.label, cx, h-6); }
+  });
+}
+function desenharGraficoBarrasHorizontais(canvasId, dados){
+  const canvas = document.getElementById(canvasId); if(!canvas || !dados.length) return;
+  const alturaLinha = 26, padT=6;
+  const p = _prepararCanvas(canvasId, dados.length*alturaLinha+padT); if(!p) return;
+  const { ctx, w } = p;
+  const max = Math.max(1, ...dados.map(d=>d.valor));
+  const padLabel = 110;
+  ctx.font='11px Inter, sans-serif';
+  dados.forEach((d,i)=>{
+    const y = padT + i*alturaLinha;
+    ctx.fillStyle = '#5B6472'; ctx.textAlign='left';
+    const label = d.label.length>16 ? d.label.slice(0,15)+'…' : d.label;
+    ctx.fillText(label, 0, y+16);
+    const larguraBarra = ((w-padLabel-50)*(d.valor/max));
+    ctx.fillStyle = d.cor || PALETA_GRAFICOS[i%PALETA_GRAFICOS.length];
+    ctx.beginPath();
+    const bx=padLabel, by=y+3, bw=Math.max(2,larguraBarra), bh=16;
+    ctx.roundRect ? ctx.roundRect(bx,by,bw,bh,3) : ctx.rect(bx,by,bw,bh);
+    ctx.fill();
+    ctx.fillStyle='#111'; ctx.textAlign='left'; ctx.font='10px Inter, sans-serif';
+    ctx.fillText(brl(d.valor), padLabel+bw+6, y+16);
+    ctx.font='11px Inter, sans-serif';
+  });
+}
+function desenharGraficoPizza(canvasId, dados, rosca){
+  const p = _prepararCanvas(canvasId, 200); if(!p || !dados.length) return;
+  const { ctx, w, h } = p;
+  const total = dados.reduce((s,d)=>s+d.valor,0) || 1;
+  const cx = 70, cy = h/2, raio = 62;
+  let anguloIni = -Math.PI/2;
+  dados.forEach((d,i)=>{
+    const fatia = (d.valor/total)*Math.PI*2;
+    ctx.beginPath(); ctx.moveTo(cx,cy);
+    ctx.arc(cx,cy,raio,anguloIni,anguloIni+fatia);
+    ctx.closePath();
+    ctx.fillStyle = d.cor || PALETA_GRAFICOS[i%PALETA_GRAFICOS.length];
+    ctx.fill();
+    anguloIni += fatia;
+  });
+  if(rosca){ ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(cx,cy,raio*0.55,0,7); ctx.fill(); }
+  // Legenda
+  const legX = 150; let legY = 18;
+  ctx.font='11px Inter, sans-serif'; ctx.textAlign='left';
+  dados.slice(0,8).forEach((d,i)=>{
+    ctx.fillStyle = d.cor || PALETA_GRAFICOS[i%PALETA_GRAFICOS.length];
+    ctx.fillRect(legX, legY-9, 10, 10);
+    ctx.fillStyle='#333';
+    const pct = ((d.valor/total)*100).toFixed(1);
+    ctx.fillText(`${d.label} — ${pct}%`, legX+15, legY);
+    legY += 18;
+  });
+}
+function desenharGraficoRadar(canvasId, dados){
+  // dados: [{label, valor}] com valor de 0 a 100
+  const p = _prepararCanvas(canvasId, 220); if(!p || !dados.length) return;
+  const { ctx, w, h } = p;
+  const cx=w/2, cy=h/2-6, raio=80, n=dados.length;
+  ctx.strokeStyle='#E3E6EA'; ctx.lineWidth=1;
+  [0.25,0.5,0.75,1].forEach(f=>{
+    ctx.beginPath();
+    for(let i=0;i<=n;i++){ const ang=-Math.PI/2+(Math.PI*2/n)*i; const r=raio*f; const x=cx+Math.cos(ang)*r, y=cy+Math.sin(ang)*r; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); }
+    ctx.stroke();
+  });
+  ctx.beginPath();
+  dados.forEach((d,i)=>{
+    const ang=-Math.PI/2+(Math.PI*2/n)*i; const r=raio*(Math.max(0,Math.min(100,d.valor))/100);
+    const x=cx+Math.cos(ang)*r, y=cy+Math.sin(ang)*r;
+    i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+  });
+  ctx.closePath();
+  ctx.fillStyle='rgba(46,107,224,0.18)'; ctx.fill();
+  ctx.strokeStyle='#2E6BE0'; ctx.lineWidth=2; ctx.stroke();
+  ctx.font='10.5px Inter, sans-serif'; ctx.fillStyle='#5B6472';
+  dados.forEach((d,i)=>{
+    const ang=-Math.PI/2+(Math.PI*2/n)*i; const x=cx+Math.cos(ang)*(raio+16), y=cy+Math.sin(ang)*(raio+16);
+    ctx.textAlign = Math.cos(ang)>0.3?'left':Math.cos(ang)<-0.3?'right':'center';
+    ctx.fillText(`${d.label} (${Math.round(d.valor)})`, x, y+3);
+  });
+}
+// Barras empilhadas: dados = [{label, partes:[{valor,cor,nome}]}]
+function desenharGraficoBarrasEmpilhadas(canvasId, dados){
+  const p = _prepararCanvas(canvasId, 180); if(!p || !dados.length) return;
+  const { ctx, w, h } = p;
+  const padL=10, padR=10, padT=14, padB=22;
+  const chartW=w-padL-padR, chartH=h-padT-padB;
+  const totalMax = Math.max(1, ...dados.map(d=>d.partes.reduce((s,pt)=>s+pt.valor,0)));
+  const grupoW = chartW/dados.length, barW = Math.min(34, grupoW*0.55);
+  ctx.font='9.5px Inter, sans-serif';
+  dados.forEach((d,i)=>{
+    const cx = padL+grupoW*i+grupoW/2;
+    let yAtual = padT+chartH;
+    d.partes.forEach(pt=>{
+      const hb = (pt.valor/totalMax)*chartH;
+      ctx.fillStyle = pt.cor;
+      ctx.fillRect(cx-barW/2, yAtual-hb, barW, hb);
+      yAtual -= hb;
+    });
+    ctx.fillStyle='#8A8F98'; ctx.textAlign='center'; ctx.fillText(d.label, cx, h-6);
+  });
+}
+// Combo barra+linha: barras = valores absolutos (eixo esquerdo implícito), linha = percentual 0-100
+// (eixo direito implícito) — ex: despesa em barra, margem % em linha, no mesmo gráfico.
+function desenharGraficoCombo(canvasId, dados, corBarra, corLinha){
+  const p = _prepararCanvas(canvasId, 170); if(!p || !dados.length) return;
+  const { ctx, w, h } = p;
+  const padL=10, padR=32, padT=14, padB=22;
+  const chartW=w-padL-padR, chartH=h-padT-padB;
+  const maxBarra = Math.max(1, ...dados.map(d=>d.barra));
+  const grupoW = chartW/dados.length, barW = Math.min(26, grupoW*0.4);
+  ctx.font='9.5px Inter, sans-serif';
+  dados.forEach((d,i)=>{
+    const cx = padL+grupoW*i+grupoW/2;
+    const hb = (d.barra/maxBarra)*chartH;
+    ctx.fillStyle = corBarra||'#2E6BE0';
+    ctx.fillRect(cx-barW/2, padT+chartH-hb, barW, hb);
+    ctx.fillStyle='#8A8F98'; ctx.textAlign='center'; ctx.fillText(d.label, cx, h-6);
+  });
+  ctx.strokeStyle = corLinha||'#D9A441'; ctx.lineWidth=2.2; ctx.beginPath();
+  dados.forEach((d,i)=>{
+    const cx = padL+grupoW*i+grupoW/2;
+    const y = padT+chartH-(Math.max(0,Math.min(100,d.linha))/100)*chartH;
+    i===0?ctx.moveTo(cx,y):ctx.lineTo(cx,y);
+  });
+  ctx.stroke();
+  ctx.fillStyle = corLinha||'#D9A441';
+  dados.forEach((d,i)=>{
+    const cx = padL+grupoW*i+grupoW/2;
+    const y = padT+chartH-(Math.max(0,Math.min(100,d.linha))/100)*chartH;
+    ctx.beginPath(); ctx.arc(cx,y,2.8,0,7); ctx.fill();
+  });
+  ctx.textAlign='left'; ctx.fillStyle='#8A8F98'; ctx.font='9px Inter, sans-serif';
+  ctx.fillText('% (linha)', w-padR+2, padT+8);
+}
+// Cascata/Waterfall: dados = [{label, valor, tipo:'inicio'|'soma'|'subtrai'|'total'}]
+function desenharGraficoCascata(canvasId, dados){
+  const p = _prepararCanvas(canvasId, 190); if(!p || !dados.length) return;
+  const { ctx, w, h } = p;
+  const padL=10, padR=10, padT=16, padB=28;
+  const chartW=w-padL-padR, chartH=h-padT-padB;
+  let acumulado = 0;
+  const barras = dados.map(d=>{
+    let base, valorBarra, cor;
+    if(d.tipo==='inicio' || d.tipo==='total'){ base=0; valorBarra=d.valor; acumulado=d.valor; cor='#2E6BE0'; }
+    else if(d.tipo==='soma'){ base=acumulado; valorBarra=d.valor; acumulado+=d.valor; cor='#2E7D5B'; }
+    else { acumulado-=d.valor; base=acumulado; valorBarra=d.valor; cor='#C24A3D'; }
+    return { ...d, base, valorBarra, cor };
+  });
+  const maxVal = Math.max(...barras.map(b=>b.base+b.valorBarra), ...barras.map(b=>b.base));
+  const grupoW = chartW/dados.length, barW = Math.min(40, grupoW*0.6);
+  ctx.font='9.5px Inter, sans-serif';
+  barras.forEach((b,i)=>{
+    const cx = padL+grupoW*i+grupoW/2;
+    const yBase = padT+chartH-(b.base/maxVal)*chartH;
+    const hb = (b.valorBarra/maxVal)*chartH;
+    ctx.fillStyle = b.cor;
+    ctx.fillRect(cx-barW/2, yBase-hb, barW, hb);
+    ctx.fillStyle='#333'; ctx.textAlign='center'; ctx.font='9px Inter, sans-serif';
+    ctx.fillText(brl(b.valorBarra*(b.tipo==='subtrai'?-1:1)), cx, yBase-hb-4);
+    ctx.fillStyle='#8A8F98'; ctx.font='9.5px Inter, sans-serif'; ctx.fillText(b.label, cx, h-8);
+  });
+}
+// Velocímetro (gauge): valor de 0 a 100, com faixas de cor
+function desenharGraficoVelocimetro(canvasId, valor, rotulo){
+  const p = _prepararCanvas(canvasId, 150); if(!p) return;
+  const { ctx, w, h } = p;
+  const cx=w/2, cy=h-20, raio=Math.min(w/2-20, 90);
+  const faixas = [ {de:0,ate:40,cor:'#C24A3D'}, {de:40,ate:70,cor:'#D9A441'}, {de:70,ate:100,cor:'#2E7D5B'} ];
+  faixas.forEach(f=>{
+    ctx.beginPath();
+    ctx.arc(cx,cy,raio, Math.PI+(f.de/100)*Math.PI, Math.PI+(f.ate/100)*Math.PI);
+    ctx.lineWidth=18; ctx.strokeStyle=f.cor; ctx.stroke();
+  });
+  const ang = Math.PI+(Math.max(0,Math.min(100,valor))/100)*Math.PI;
+  const px = cx+Math.cos(ang)*(raio-14), py = cy+Math.sin(ang)*(raio-14);
+  ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(px,py); ctx.strokeStyle='#111'; ctx.lineWidth=3; ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx,cy,5,0,7); ctx.fillStyle='#111'; ctx.fill();
+  ctx.font='700 22px Inter, sans-serif'; ctx.fillStyle='#111'; ctx.textAlign='center';
+  ctx.fillText(Math.round(valor), cx, cy-16);
+  ctx.font='10.5px Inter, sans-serif'; ctx.fillStyle='#8A8F98';
+  ctx.fillText(rotulo||'', cx, cy+16);
+}
+// Funil: dados = [{label, valor}] em ordem decrescente (topo pro fundo do funil)
+function desenharGraficoFunil(canvasId, dados){
+  const alturaEtapa = 40;
+  const p = _prepararCanvas(canvasId, dados.length*alturaEtapa+10); if(!p || !dados.length) return;
+  const { ctx, w } = p;
+  const max = Math.max(1, ...dados.map(d=>d.valor));
+  const larguraMax = w*0.8;
+  dados.forEach((d,i)=>{
+    const larguraAtual = (d.valor/max)*larguraMax;
+    const larguraProxima = i<dados.length-1 ? (dados[i+1].valor/max)*larguraMax : larguraAtual*0.85;
+    const y = i*alturaEtapa+5;
+    const cx = w/2;
+    ctx.beginPath();
+    ctx.moveTo(cx-larguraAtual/2, y);
+    ctx.lineTo(cx+larguraAtual/2, y);
+    ctx.lineTo(cx+larguraProxima/2, y+alturaEtapa-6);
+    ctx.lineTo(cx-larguraProxima/2, y+alturaEtapa-6);
+    ctx.closePath();
+    ctx.fillStyle = PALETA_GRAFICOS[i%PALETA_GRAFICOS.length];
+    ctx.fill();
+    ctx.fillStyle='#fff'; ctx.textAlign='center'; ctx.font='11px Inter, sans-serif';
+    ctx.fillText(`${d.label} — ${brl(d.valor)}`, cx, y+alturaEtapa/2-2);
+  });
+}
+// Dispersão (scatter): dados = [{x, y, label, cor}] — x e y numéricos quaisquer
+function desenharGraficoDispersao(canvasId, dados, rotuloX, rotuloY){
+  const p = _prepararCanvas(canvasId, 200); if(!p || !dados.length) return;
+  const { ctx, w, h } = p;
+  const padL=36, padR=12, padT=14, padB=26;
+  const chartW=w-padL-padR, chartH=h-padT-padB;
+  const maxX = Math.max(1, ...dados.map(d=>d.x)), minX = Math.min(0, ...dados.map(d=>d.x));
+  const maxY = Math.max(1, ...dados.map(d=>d.y)), minY = Math.min(0, ...dados.map(d=>d.y));
+  const rangeX=(maxX-minX)||1, rangeY=(maxY-minY)||1;
+  ctx.strokeStyle='#E3E6EA'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(padL,padT); ctx.lineTo(padL,padT+chartH); ctx.lineTo(padL+chartW,padT+chartH); ctx.stroke();
+  dados.forEach(d=>{
+    const x = padL+((d.x-minX)/rangeX)*chartW;
+    const y = padT+chartH-((d.y-minY)/rangeY)*chartH;
+    ctx.beginPath(); ctx.arc(x,y,4,0,7);
+    ctx.fillStyle = d.cor || 'rgba(46,107,224,0.65)'; ctx.fill();
+  });
+  ctx.font='9px Inter, sans-serif'; ctx.fillStyle='#8A8F98'; ctx.textAlign='center';
+  ctx.fillText(rotuloX||'', padL+chartW/2, h-4);
+  ctx.save(); ctx.translate(10, padT+chartH/2); ctx.rotate(-Math.PI/2); ctx.fillText(rotuloY||'', 0, 0); ctx.restore();
+}
+// Histograma: agrupa `valores` (array de números) em `nFaixas` faixas de tamanho igual
+function desenharGraficoHistograma(canvasId, valores, nFaixas){
+  const p = _prepararCanvas(canvasId, 170); if(!p || !valores.length) return;
+  const { ctx, w, h } = p;
+  const padL=10, padR=10, padT=14, padB=26;
+  const chartW=w-padL-padR, chartH=h-padT-padB;
+  const max = Math.max(...valores), min = Math.min(...valores);
+  const faixas = nFaixas||8;
+  const tamanhoFaixa = ((max-min)||1)/faixas;
+  const contagens = new Array(faixas).fill(0);
+  valores.forEach(v=>{ const idx = Math.min(faixas-1, Math.floor((v-min)/tamanhoFaixa)); contagens[idx]++; });
+  const maxContagem = Math.max(1, ...contagens);
+  const barW = chartW/faixas;
+  ctx.font='8.5px Inter, sans-serif';
+  contagens.forEach((c,i)=>{
+    const hb = (c/maxContagem)*chartH;
+    ctx.fillStyle = '#2E6BE0';
+    ctx.fillRect(padL+barW*i+1, padT+chartH-hb, barW-2, hb);
+    ctx.fillStyle='#8A8F98'; ctx.textAlign='center';
+    ctx.fillText(String(c), padL+barW*i+barW/2, padT+chartH-hb-4);
+    if(i%2===0) ctx.fillText(brlCompacto?brlCompacto(min+tamanhoFaixa*i):Math.round(min+tamanhoFaixa*i), padL+barW*i+barW/2, h-8);
+  });
+}
+// Pareto (regra 80/20): barras em ordem decrescente + linha de percentual acumulado
+function desenharGraficoPareto(canvasId, dados){
+  const p = _prepararCanvas(canvasId, 190); if(!p || !dados.length) return;
+  const { ctx, w, h } = p;
+  const padL=10, padR=34, padT=14, padB=40;
+  const chartW=w-padL-padR, chartH=h-padT-padB;
+  const ordenados = [...dados].sort((a,b)=>b.valor-a.valor);
+  const total = ordenados.reduce((s,d)=>s+d.valor,0) || 1;
+  let acumulado = 0;
+  const comAcumulado = ordenados.map(d=>{ acumulado+=d.valor; return { ...d, pctAcumulado: acumulado/total*100 }; });
+  const max = Math.max(1, ...ordenados.map(d=>d.valor));
+  const grupoW = chartW/comAcumulado.length, barW = Math.min(30, grupoW*0.55);
+  ctx.font='8.5px Inter, sans-serif';
+  comAcumulado.forEach((d,i)=>{
+    const cx = padL+grupoW*i+grupoW/2;
+    const hb = (d.valor/max)*chartH;
+    ctx.fillStyle = '#2E6BE0';
+    ctx.fillRect(cx-barW/2, padT+chartH-hb, barW, hb);
+    ctx.fillStyle='#8A8F98'; ctx.textAlign='center';
+    ctx.save(); ctx.translate(cx, h-6); ctx.rotate(comAcumulado.length>6?-0.5:0);
+    ctx.fillText(d.label.length>10?d.label.slice(0,9)+'…':d.label, 0, 0); ctx.restore();
+  });
+  ctx.strokeStyle='#D9A441'; ctx.lineWidth=2; ctx.beginPath();
+  comAcumulado.forEach((d,i)=>{
+    const cx = padL+grupoW*i+grupoW/2;
+    const y = padT+chartH-(d.pctAcumulado/100)*chartH;
+    i===0?ctx.moveTo(cx,y):ctx.lineTo(cx,y);
+  });
+  ctx.stroke();
+  ctx.fillStyle='#D9A441';
+  comAcumulado.forEach((d,i)=>{
+    const cx = padL+grupoW*i+grupoW/2;
+    const y = padT+chartH-(d.pctAcumulado/100)*chartH;
+    ctx.beginPath(); ctx.arc(cx,y,2.6,0,7); ctx.fill();
+  });
+  // linha dos 80%
+  const y80 = padT+chartH-0.8*chartH;
+  ctx.strokeStyle='#C24A3D'; ctx.setLineDash([4,3]); ctx.beginPath(); ctx.moveTo(padL,y80); ctx.lineTo(padL+chartW,y80); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle='#C24A3D'; ctx.textAlign='left'; ctx.font='9px Inter, sans-serif'; ctx.fillText('80%', padL+chartW+2, y80+3);
+}
+// Mapa de calor tipo calendário: dados = [{data:'YYYY-MM-DD', valor}] — últimos ~90 dias, uma
+// célula por dia, mais escuro = valor maior, organizado em semanas (colunas) x dias da semana (linhas)
+function desenharMapaCalor(canvasId, dados){
+  if(!dados.length) return;
+  const porData = {}; dados.forEach(d=>{ porData[d.data]=(porData[d.data]||0)+d.valor; });
+  const datas = Object.keys(porData).sort();
+  const dataIni = new Date(datas[0]+'T12:00:00'), dataFim = new Date(datas[datas.length-1]+'T12:00:00');
+  const diaIniSemana = dataIni.getDay();
+  const totalDias = Math.round((dataFim-dataIni)/86400000)+1+diaIniSemana;
+  const nSemanas = Math.ceil(totalDias/7);
+  const cel = 14, gap=2, padL=24, padT=14;
+  const p = _prepararCanvas(canvasId, padT+7*(cel+gap)+16); if(!p) return;
+  const { ctx } = p;
+  const max = Math.max(1, ...Object.values(porData));
+  const diasLabel = ['D','S','T','Q','Q','S','S'];
+  ctx.font='8px Inter, sans-serif'; ctx.fillStyle='#8A8F98'; ctx.textAlign='left';
+  diasLabel.forEach((l,i)=> ctx.fillText(l, 2, padT+i*(cel+gap)+cel-3));
+  for(let i=0;i<totalDias;i++){
+    const d = new Date(dataIni); d.setDate(d.getDate()+(i-diaIniSemana));
+    const iso = d.toISOString().slice(0,10);
+    if(d<dataIni || d>dataFim) continue;
+    const valor = porData[iso]||0;
+    const semana = Math.floor(i/7), diaSemana = i%7;
+    const intensidade = valor>0 ? 0.15+Math.min(0.85, (valor/max)*0.85) : 0.06;
+    ctx.fillStyle = valor>0 ? `rgba(46,107,224,${intensidade})` : '#F0F1F3';
+    ctx.fillRect(padL+semana*(cel+gap), padT+diaSemana*(cel+gap), cel, cel);
+  }
+}
+// Treemap simples: dados = [{label, valor}] — divide em blocos proporcionais ao valor
+function desenharTreemap(canvasId, dados){
+  const p = _prepararCanvas(canvasId, 220); if(!p || !dados.length) return;
+  const { ctx, w, h } = p;
+  const ordenados = [...dados].sort((a,b)=>b.valor-a.valor);
+  const total = ordenados.reduce((s,d)=>s+d.valor,0) || 1;
+  let x=0, y=0, larguraRestante=w, alturaRestante=h;
+  let horizontal = true;
+  ordenados.forEach((d,i)=>{
+    const fracao = d.valor/total;
+    let bw, bh, bx, by;
+    if(horizontal){
+      bw = larguraRestante * (fracao*ordenados.length/(ordenados.length-i));
+      bw = Math.min(bw, larguraRestante);
+      bh = alturaRestante;
+      bx = x; by = y;
+      x += bw; larguraRestante -= bw;
+    } else {
+      bh = alturaRestante * (fracao*ordenados.length/(ordenados.length-i));
+      bh = Math.min(bh, alturaRestante);
+      bw = larguraRestante;
+      bx = x; by = y;
+      y += bh; alturaRestante -= bh;
+    }
+    ctx.fillStyle = PALETA_GRAFICOS[i%PALETA_GRAFICOS.length];
+    ctx.fillRect(bx,by,Math.max(0,bw-2),Math.max(0,bh-2));
+    if(bw>50 && bh>18){
+      ctx.fillStyle='#fff'; ctx.font='10.5px Inter, sans-serif'; ctx.textAlign='left';
+      ctx.fillText(d.label.length>18?d.label.slice(0,17)+'…':d.label, bx+5, by+15);
+      if(bh>32) ctx.fillText(brl(d.valor), bx+5, by+30);
+    }
+  });
+}
 function desenharGraficoBarrasDuasCores(canvasId, dados){
   const canvas = document.getElementById(canvasId);
   if(!canvas || !dados.length) return;
@@ -11893,8 +12315,337 @@ function gerarPDFApresentacao(dados, comparacoes, textos){
   const nomeArquivo = dados.tipo==='mensal' ? `Resultados_Mensal_${dados.periodoRef}.pdf` : `Resultados_${dados.periodoRef.replace('-Q','T')}.pdf`;
   docPdf.save(nomeArquivo);
 }
+function viewGraficos(){
+  const meses6 = ultimos6Meses();
+  const saldoAcumulado = (()=>{ let s=0; return meses6.map(m=>{ s += m.entradas-m.saidas; return { label:m.label, valor:s }; }); })();
+  const receitaMeses = meses6.map(m=>({ label:m.label, valor:m.entradas }));
+  const despesaMeses = meses6.map(m=>({ label:m.label, valor:m.saidas }));
+
+  const hoje = todayISO();
+  const de30 = addDiasISO(hoje,-30);
+  const movs30 = state.lancamentos.filter(l=>l.dataPagamento>=de30 && l.dataPagamento<=hoje && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
+  const porCatDespesa = {};
+  movs30.filter(l=>l.tipo==='saida' && !ehMovimentoDeCapital(l)).forEach(l=>{ porCatDespesa[l.categoria]=(porCatDespesa[l.categoria]||0)+l.valor; });
+  const pizzaDespesas = Object.entries(porCatDespesa).sort((a,b)=>b[1]-a[1]).slice(0,7).map(([label,valor])=>({label,valor}));
+
+  const porFornecedor = {};
+  movs30.filter(l=>l.tipo==='saida' && l.fornecedor).forEach(l=>{ porFornecedor[l.fornecedor]=(porFornecedor[l.fornecedor]||0)+l.valor; });
+  const rankingFornecedores = Object.entries(porFornecedor).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([label,valor])=>({label,valor}));
+
+  const porConta = state.contas.filter(c=>!c.arquivada).map(c=>({ label:c.nome, valor: Math.max(0,saldoConta(c.id)) })).filter(c=>c.valor>0);
+
+  const saude = state.__ultimoHealthScoreDetalhe || null; // se existir detalhamento calculado em outro lugar
+  const radarSaude = [
+    { label:'Rentabilidade', valor: Math.max(0,Math.min(100, (movs30.reduce((s,l)=>s+(l.tipo==='entrada'&&!ehMovimentoDeCapital(l)?l.valor:0),0) - movs30.reduce((s,l)=>s+(l.tipo==='saida'&&!ehMovimentoDeCapital(l)?l.valor:0),0)) / (movs30.reduce((s,l)=>s+(l.tipo==='entrada'&&!ehMovimentoDeCapital(l)?l.valor:0),0)||1) * 100 + 50)) },
+    { label:'Pontualidade', valor: (()=>{ const total=state.lancamentos.filter(l=>l.status==='pago'||l.status==='pendente').length; const atrasadas=state.lancamentos.filter(l=>l.status==='pendente'&&l.dataVencimento<hoje).length; return total?Math.max(0,100-(atrasadas/total*100)):100; })() },
+    { label:'Fôlego de caixa', valor: (()=>{ const caixa=state.contas.reduce((s,c)=>s+saldoConta(c.id),0); const mediaDiaria=(despesaMeses.reduce((s,d)=>s+d.valor,0)/despesaMeses.length)/30||1; return Math.max(0,Math.min(100,(caixa/mediaDiaria)/60*100)); })() },
+    { label:'Baixo endividamento', valor: (()=>{ const pass=state.lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0); const caixa=state.contas.reduce((s,c)=>s+saldoConta(c.id),0)||1; return Math.max(0,100-(pass/caixa*100)); })() },
+  ];
+
+  return `
+    <div class="topbar">
+      <div><h1>📊 Central de Gráficos</h1><p>Vários jeitos de olhar pros mesmos dados — linha, barra, pizza, área, ranking e radar.</p></div>
+    </div>
+
+    <div class="dash-section-label">📈 Linha — Receita, últimos 6 meses</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafLinha1" height="160"></canvas></div></div>
+
+    <div class="dash-section-label">🏔️ Área — Saldo acumulado, últimos 6 meses</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafArea1" height="160"></canvas></div></div>
+
+    <div class="dash-section-label">📊 Barras — Entradas x Saídas, últimos 6 meses</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafBarrasDuasCores1" height="160"></canvas></div></div>
+
+    <div class="dash-section-label">🟦 Barras simples — Despesas, últimos 6 meses</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafBarras1" height="160"></canvas></div></div>
+
+    <div class="dash-section-label">🥧 Pizza — Despesas por categoria, últimos 30 dias</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;">${pizzaDespesas.length?'<canvas id="grafPizza1" height="200"></canvas>':'<div class="empty">Sem despesas nos últimos 30 dias.</div>'}</div></div>
+
+    <div class="dash-section-label">🍩 Rosca — Saldo por conta bancária</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;">${porConta.length?'<canvas id="grafRosca1" height="200"></canvas>':'<div class="empty">Sem saldo positivo em nenhuma conta.</div>'}</div></div>
+
+    <div class="dash-section-label">📏 Barras horizontais — Ranking de fornecedores, últimos 30 dias</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;">${rankingFornecedores.length?'<canvas id="grafBarrasHoriz1"></canvas>':'<div class="empty">Sem compras com fornecedor identificado nos últimos 30 dias.</div>'}</div></div>
+
+    <div class="dash-section-label">🕸️ Radar — Saúde da empresa (0 a 100)</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafRadar1" height="220"></canvas></div></div>
+
+    <div class="dash-section-label">🧱 Barras empilhadas — Top 3 categorias de despesa, últimos 6 meses</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafEmpilhadas1" height="180"></canvas></div></div>
+
+    <div class="dash-section-label">🔀 Combo (barra + linha) — Despesa e margem %, últimos 6 meses</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafCombo1" height="170"></canvas></div></div>
+
+    <div class="dash-section-label">🌊 Cascata — Como o resultado do mês se formou</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafCascata1" height="190"></canvas></div></div>
+
+    <div class="dash-section-label">⏱️ Velocímetro — Health Score</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;text-align:center;"><canvas id="grafVelocimetro1" height="150" style="max-width:280px;"></canvas></div></div>
+
+    <div class="dash-section-label">🔻 Funil — Contas a receber, do total ao recebido</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;">${(()=>{ return '<canvas id="grafFunil1"></canvas>'; })()}</div></div>
+
+    <div class="dash-section-label">🔵 Dispersão — Valor x dias até o vencimento, contas em aberto</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafDispersao1" height="200"></canvas></div></div>
+
+    <div class="dash-section-label">📶 Histograma — Distribuição dos valores de lançamento, últimos 90 dias</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafHistograma1" height="170"></canvas></div></div>
+
+    <div class="dash-section-label">📐 Pareto (regra 80/20) — Categorias de despesa, últimos 90 dias</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafPareto1" height="190"></canvas></div></div>
+
+    <div class="dash-section-label">🗓️ Mapa de calor — Movimentação diária, últimos ~90 dias</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;overflow-x:auto;"><canvas id="grafMapaCalor1"></canvas></div></div>
+
+    <div class="dash-section-label">🧩 Treemap — Despesas por categoria, últimos 90 dias</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafTreemap1" height="220"></canvas></div></div>
+
+    <div class="dash-section-label" style="margin-top:30px;">💵 FATURAMENTO</div>
+
+    <div class="dash-section-label">📈 Linha — Faturamento (receita operacional), últimos 6 meses</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafFatLinha" height="160"></canvas></div></div>
+
+    <div class="dash-section-label">🏔️ Área — Faturamento acumulado no ano</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafFatArea" height="160"></canvas></div></div>
+
+    <div class="dash-section-label">🥧 Pizza — Faturamento por categoria de receita, últimos 90 dias</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafFatPizza" height="200"></canvas></div></div>
+
+    <div class="dash-section-label">📊 Barras — Faturamento por categoria de receita, últimos 90 dias</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafFatBarras" height="160"></canvas></div></div>
+
+    <div class="dash-section-label">🔀 Combo — Faturamento (barra) x Despesa operacional em % dele (linha), últimos 6 meses</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafFatCombo" height="170"></canvas></div></div>
+
+    <div class="dash-section-label" style="margin-top:30px;">📈 INVESTIMENTOS</div>
+
+    <div class="dash-section-label">📈 Linha — Evolução do capital investido (acumulado), últimos 6 meses</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafInvLinha" height="160"></canvas></div></div>
+
+    <div class="dash-section-label">📊 Barras (duas cores) — Aportes x Resgates, últimos 6 meses</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafInvAportesResgates" height="160"></canvas></div></div>
+
+    <div class="dash-section-label">🥧 Pizza — Distribuição da carteira por ativo</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;">${state.ativosInvestimento.filter(a=>!a.resgatado&&!a.manual&&(a.quantidade||0)>0).length?'<canvas id="grafInvPizza" height="200"></canvas>':'<div class="empty">Sem posição em investimentos.</div>'}</div></div>
+
+    <div class="dash-section-label">📏 Barras horizontais — Ranking de ativos por resultado realizado</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;">${(state.resultadosInvestimento||[]).length?'<canvas id="grafInvRanking"></canvas>':'<div class="empty">Nenhuma venda de investimento registrada ainda.</div>'}</div></div>
+
+    <div class="dash-section-label">🏔️ Área — Resultado acumulado de investimentos (ganho − perda)</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;">${(state.resultadosInvestimento||[]).length?'<canvas id="grafInvResultadoAcumulado" height="160"></canvas>':'<div class="empty">Nenhuma venda de investimento registrada ainda.</div>'}</div></div>
+
+    <div class="dash-section-label">📈 Linha — Rendimentos recebidos, últimos 6 meses</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafInvRendimentos" height="160"></canvas></div></div>
+
+    <div class="dash-section-label">📊 Barras (duas cores) — Ganho x Perda de capital, últimos 6 meses</div>
+    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafInvGanhoPerda" height="160"></canvas></div></div>
+  `;
+}
+function desenharTodosOsGraficosDaCentral(){
+  const meses6 = ultimos6Meses();
+  if(!document.getElementById('grafLinha1')) return; // tela não está aberta, não desenha nada à toa
+  const saldoAcumulado = (()=>{ let s=0; return meses6.map(m=>{ s += m.entradas-m.saidas; return { label:m.label, valor:s }; }); })();
+  desenharGraficoLinha('grafLinha1', meses6.map(m=>({label:m.label, valor:m.entradas})), '#2E7D5B');
+  desenharGraficoArea('grafArea1', saldoAcumulado, '#2E6BE0');
+  desenharGraficoBarrasDuasCores('grafBarrasDuasCores1', meses6);
+  desenharGraficoBarrasSimples('grafBarras1', meses6.map(m=>({label:m.label, valor:m.saidas})), '#C24A3D');
+  if(document.getElementById('grafPizza1')){
+    const hoje = todayISO(); const de30 = addDiasISO(hoje,-30);
+    const movs30 = state.lancamentos.filter(l=>l.dataPagamento>=de30 && l.dataPagamento<=hoje && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
+    const porCat = {}; movs30.filter(l=>l.tipo==='saida' && !ehMovimentoDeCapital(l)).forEach(l=>{ porCat[l.categoria]=(porCat[l.categoria]||0)+l.valor; });
+    desenharGraficoPizza('grafPizza1', Object.entries(porCat).sort((a,b)=>b[1]-a[1]).slice(0,7).map(([label,valor])=>({label,valor})));
+  }
+  if(document.getElementById('grafRosca1')){
+    const porConta = state.contas.filter(c=>!c.arquivada).map(c=>({ label:c.nome, valor: Math.max(0,saldoConta(c.id)) })).filter(c=>c.valor>0);
+    desenharGraficoPizza('grafRosca1', porConta, true);
+  }
+  if(document.getElementById('grafBarrasHoriz1')){
+    const hoje = todayISO(); const de30 = addDiasISO(hoje,-30);
+    const movs30 = state.lancamentos.filter(l=>l.dataPagamento>=de30 && l.dataPagamento<=hoje && (l.status==='pago') && l.fornecedor);
+    const porForn = {}; movs30.forEach(l=>{ porForn[l.fornecedor]=(porForn[l.fornecedor]||0)+l.valor; });
+    desenharGraficoBarrasHorizontais('grafBarrasHoriz1', Object.entries(porForn).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([label,valor])=>({label,valor})));
+  }
+  if(document.getElementById('grafRadar1')){
+    const hoje = todayISO();
+    const total = state.lancamentos.filter(l=>l.status==='pago'||l.status==='pendente').length;
+    const atrasadas = state.lancamentos.filter(l=>l.status==='pendente'&&l.dataVencimento<hoje).length;
+    const caixa = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+    const despesaMediaDiaria = (meses6.reduce((s,m)=>s+m.saidas,0)/meses6.length)/30 || 1;
+    const passivo = state.lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
+    const receitaTot = meses6.reduce((s,m)=>s+m.entradas,0), despesaTot = meses6.reduce((s,m)=>s+m.saidas,0);
+    desenharGraficoRadar('grafRadar1', [
+      { label:'Rentabilidade', valor: Math.max(0,Math.min(100, ((receitaTot-despesaTot)/(receitaTot||1))*100+50)) },
+      { label:'Pontualidade', valor: total?Math.max(0,100-(atrasadas/total*100)):100 },
+      { label:'Fôlego de caixa', valor: Math.max(0,Math.min(100,(caixa/despesaMediaDiaria)/60*100)) },
+      { label:'Baixo endividamento', valor: Math.max(0,100-(passivo/(caixa||1)*100)) },
+    ]);
+  }
+  if(document.getElementById('grafEmpilhadas1')){
+    // Top 3 categorias de despesa (olhando os últimos 6 meses inteiros) e como cada uma se
+    // comportou mês a mês — cada barra empilhada é um mês, cada cor é uma categoria.
+    const porCatTotal = {};
+    meses6.forEach(m=>{
+      state.lancamentos.filter(l=>l.tipo==='saida' && (l.dataPagamento||'').slice(0,7)===m.ym && l.status==='pago' && !ehMovimentoDeCapital(l)).forEach(l=>{
+        porCatTotal[l.categoria] = (porCatTotal[l.categoria]||0)+l.valor;
+      });
+    });
+    const top3 = Object.entries(porCatTotal).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([nome])=>nome);
+    const cores = ['#2E6BE0','#D9A441','#C24A3D'];
+    const dadosEmpilhado = meses6.map(m=>{
+      const partes = top3.map((cat,i)=>({
+        nome: cat, cor: cores[i],
+        valor: state.lancamentos.filter(l=>l.tipo==='saida' && l.categoria===cat && (l.dataPagamento||'').slice(0,7)===m.ym && l.status==='pago').reduce((s,l)=>s+l.valor,0)
+      }));
+      return { label: m.label, partes };
+    });
+    desenharGraficoBarrasEmpilhadas('grafEmpilhadas1', dadosEmpilhado);
+  }
+  if(document.getElementById('grafCombo1')){
+    const dadosCombo = meses6.map(m=>({
+      label: m.label, barra: m.saidas,
+      linha: m.entradas>0 ? Math.max(0,Math.min(100, ((m.entradas-m.saidas)/m.entradas)*100 )) : 0
+    }));
+    desenharGraficoCombo('grafCombo1', dadosCombo, '#C24A3D', '#2E7D5B');
+  }
+  if(document.getElementById('grafCascata1')){
+    const mesAtual = meses6[meses6.length-1];
+    desenharGraficoCascata('grafCascata1', [
+      { label:'Receita', valor: mesAtual.entradas, tipo:'inicio' },
+      { label:'Despesas', valor: mesAtual.saidas, tipo:'subtrai' },
+      { label:'Resultado', valor: mesAtual.entradas-mesAtual.saidas, tipo:'total' },
+    ]);
+  }
+  if(document.getElementById('grafVelocimetro1')){
+    const hoje = todayISO();
+    const scoreHoje = calcularHealthScoreEm(hoje, hoje.slice(0,7)).scoreTotal;
+    desenharGraficoVelocimetro('grafVelocimetro1', scoreHoje, 'Health Score');
+  }
+  if(document.getElementById('grafFunil1')){
+    const totalReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.origem!=='transferencia').reduce((s,l)=>s+l.valor,0);
+    const naoAtrasado = state.lancamentos.filter(l=>l.tipo==='entrada' && l.origem!=='transferencia' && !(l.status==='pendente' && l.dataVencimento<todayISO())).reduce((s,l)=>s+l.valor,0);
+    const recebido = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido').reduce((s,l)=>s+l.valor,0);
+    desenharGraficoFunil('grafFunil1', [
+      { label:'Total de contas a receber (histórico)', valor: totalReceber },
+      { label:'Sem atraso', valor: naoAtrasado },
+      { label:'Já recebido', valor: recebido },
+    ]);
+  }
+  if(document.getElementById('grafDispersao1')){
+    const hoje = todayISO();
+    const abertas = state.lancamentos.filter(l=>l.status==='pendente' && l.tipo==='saida');
+    const pontos = abertas.map(l=>{
+      const dias = Math.round((new Date(l.dataVencimento+'T12:00:00')-new Date(hoje+'T12:00:00'))/86400000);
+      return { x: dias, y: valorEmAberto(l), cor: dias<0?'rgba(194,74,61,0.65)':'rgba(46,107,224,0.65)' };
+    });
+    desenharGraficoDispersao('grafDispersao1', pontos, 'Dias até o vencimento (negativo = atrasado)', 'Valor em aberto (R$)');
+  }
+  if(document.getElementById('grafHistograma1')){
+    const de90 = addDiasISO(todayISO(),-90);
+    const valores = state.lancamentos.filter(l=>(l.status==='pago'||l.status==='recebido') && l.dataPagamento>=de90 && l.origem!=='transferencia').map(l=>l.valor);
+    desenharGraficoHistograma('grafHistograma1', valores, 8);
+  }
+  if(document.getElementById('grafPareto1')){
+    const de90 = addDiasISO(todayISO(),-90);
+    const porCat90 = {};
+    state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de90 && !ehMovimentoDeCapital(l)).forEach(l=>{ porCat90[l.categoria]=(porCat90[l.categoria]||0)+l.valor; });
+    desenharGraficoPareto('grafPareto1', Object.entries(porCat90).map(([label,valor])=>({label,valor})));
+  }
+  if(document.getElementById('grafMapaCalor1')){
+    const de90 = addDiasISO(todayISO(),-90);
+    const movs90 = state.lancamentos.filter(l=>(l.status==='pago'||l.status==='recebido') && l.dataPagamento>=de90 && l.origem!=='transferencia').map(l=>({ data:l.dataPagamento, valor: l.tipo==='saida'?l.valor:l.valor*0.3 }));
+    desenharMapaCalor('grafMapaCalor1', movs90);
+  }
+  if(document.getElementById('grafTreemap1')){
+    const de90 = addDiasISO(todayISO(),-90);
+    const porCatTree = {};
+    state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de90 && !ehMovimentoDeCapital(l)).forEach(l=>{ porCatTree[l.categoria]=(porCatTree[l.categoria]||0)+l.valor; });
+    desenharTreemap('grafTreemap1', Object.entries(porCatTree).map(([label,valor])=>({label,valor})));
+  }
+
+  // ---- FATURAMENTO ----
+  const faturamentoMeses = meses6.map(m=>{
+    const receitaOperacional = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && (l.dataPagamento||'').slice(0,7)===m.ym && !ehMovimentoDeCapital(l)).reduce((s,l)=>s+l.valor,0);
+    return { label:m.label, valor: receitaOperacional, ym:m.ym };
+  });
+  if(document.getElementById('grafFatLinha')) desenharGraficoLinha('grafFatLinha', faturamentoMeses, '#2E7D5B');
+  if(document.getElementById('grafFatArea')){
+    const anoAtual = todayISO().slice(0,4);
+    let acumulado=0;
+    const porMesAno = [];
+    for(let m=1;m<=12;m++){
+      const ym = `${anoAtual}-${String(m).padStart(2,'0')}`;
+      if(ym>todayISO().slice(0,7)) break;
+      const v = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && (l.dataPagamento||'').slice(0,7)===ym && !ehMovimentoDeCapital(l)).reduce((s,l)=>s+l.valor,0);
+      acumulado += v;
+      porMesAno.push({ label: new Date(anoAtual,m-1,1).toLocaleDateString('pt-BR',{month:'short'}).replace('.',''), valor: acumulado });
+    }
+    desenharGraficoArea('grafFatArea', porMesAno, '#2E7D5B');
+  }
+  if(document.getElementById('grafFatPizza') || document.getElementById('grafFatBarras')){
+    const de90 = addDiasISO(todayISO(),-90);
+    const porCatReceita = {};
+    state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento>=de90 && !ehMovimentoDeCapital(l)).forEach(l=>{ porCatReceita[l.categoria]=(porCatReceita[l.categoria]||0)+l.valor; });
+    const topReceitaCat = Object.entries(porCatReceita).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([label,valor])=>({label,valor}));
+    if(document.getElementById('grafFatPizza')) desenharGraficoPizza('grafFatPizza', topReceitaCat);
+    if(document.getElementById('grafFatBarras')) desenharGraficoBarrasSimples('grafFatBarras', topReceitaCat, '#2E7D5B');
+  }
+  if(document.getElementById('grafFatCombo')){
+    const dadosComboFat = meses6.map((m,i)=>({
+      label: m.label, barra: faturamentoMeses[i].valor,
+      linha: faturamentoMeses[i].valor>0 ? Math.min(100, (m.saidas/faturamentoMeses[i].valor)*100) : 0
+    }));
+    desenharGraficoCombo('grafFatCombo', dadosComboFat, '#2E7D5B', '#C24A3D');
+  }
+
+  // ---- INVESTIMENTOS ----
+  if(document.getElementById('grafInvLinha')){
+    let acumInv=0;
+    const invLinha = meses6.map(m=>{
+      const aportesM = state.lancamentos.filter(l=>l.tipo==='saida' && ehMovimentoDeCapital(l) && (l.dataPagamento||'').slice(0,7)===m.ym).reduce((s,l)=>s+l.valor,0);
+      const resgatesM = state.lancamentos.filter(l=>l.tipo==='entrada' && ehMovimentoDeCapital(l) && (l.dataPagamento||'').slice(0,7)===m.ym).reduce((s,l)=>s+l.valor,0);
+      acumInv += aportesM-resgatesM;
+      return { label:m.label, valor: acumInv };
+    });
+    desenharGraficoLinha('grafInvLinha', invLinha, '#6B5CF6');
+  }
+  if(document.getElementById('grafInvAportesResgates')){
+    desenharGraficoBarrasDuasCores('grafInvAportesResgates', meses6.map(m=>({
+      label:m.label,
+      entradas: state.lancamentos.filter(l=>l.tipo==='saida' && ehMovimentoDeCapital(l) && (l.dataPagamento||'').slice(0,7)===m.ym).reduce((s,l)=>s+l.valor,0),
+      saidas: state.lancamentos.filter(l=>l.tipo==='entrada' && ehMovimentoDeCapital(l) && (l.dataPagamento||'').slice(0,7)===m.ym).reduce((s,l)=>s+l.valor,0)
+    })));
+  }
+  if(document.getElementById('grafInvPizza')){
+    const posicoes = state.ativosInvestimento.filter(a=>!a.resgatado&&!a.manual&&(a.quantidade||0)>0);
+    desenharGraficoPizza('grafInvPizza', posicoes.map(a=>({ label:a.ticker||a.nome, valor: valorAtivo(a) })).sort((a,b)=>b.valor-a.valor).slice(0,8));
+  }
+  if(document.getElementById('grafInvRanking')){
+    const porAtivo = {};
+    (state.resultadosInvestimento||[]).forEach(r=>{ porAtivo[r.ticker]=(porAtivo[r.ticker]||0)+r.resultadoBruto; });
+    desenharGraficoBarrasHorizontais('grafInvRanking', Object.entries(porAtivo).sort((a,b)=>b[1]-a[1]).map(([label,valor])=>({label,valor,cor:valor>=0?'#2E7D5B':'#C24A3D'})));
+  }
+  if(document.getElementById('grafInvResultadoAcumulado')){
+    const ordenados = [...(state.resultadosInvestimento||[])].sort((a,b)=>a.data.localeCompare(b.data));
+    let acumResult=0;
+    desenharGraficoArea('grafInvResultadoAcumulado', ordenados.map(r=>{ acumResult+=r.resultadoBruto; return { label:fmtDate(r.data).slice(0,5), valor:acumResult }; }), acumResult>=0?'#2E7D5B':'#C24A3D');
+  }
+  if(document.getElementById('grafInvRendimentos')){
+    desenharGraficoLinha('grafInvRendimentos', meses6.map(m=>({
+      label:m.label, valor: (state.rendimentosInvestimento||[]).filter(r=>r.data.slice(0,7)===m.ym).reduce((s,r)=>s+r.valor,0)
+    })), '#17A6B8');
+  }
+  if(document.getElementById('grafInvGanhoPerda')){
+    desenharGraficoBarrasDuasCores('grafInvGanhoPerda', meses6.map(m=>({
+      label:m.label,
+      entradas: state.lancamentos.filter(l=>l.categoria==='Ganho de Capital' && (l.dataPagamento||'').slice(0,7)===m.ym).reduce((s,l)=>s+l.valor,0),
+      saidas: state.lancamentos.filter(l=>l.categoria==='Perda de Capital' && (l.dataPagamento||'').slice(0,7)===m.ym).reduce((s,l)=>s+l.valor,0)
+    })));
+  }
+}
 function viewRelatorios(){
   const cards = [
+    { id:'graficos', icone:'📊', nome:'Central de Gráficos', desc:'Vários tipos de gráfico com os dados do sistema — linha, área, barras, pizza, rosca, ranking e radar' , cat:'Visão Geral e Diagnóstico', viewDireta:'graficos' },
     { id:'apresentacao_resultados', icone:'📊', nome:'Apresentação de Resultados', desc:'Monta uma apresentação gerencial mensal ou trimestral, pronta pra reunião, a partir dos dados que já existem no sistema' , cat:'Visão Geral e Diagnóstico', viewDireta:'apresentacao-resultados' },
     { id:'gerencial', icone:'📊', nome:'Dashboard Gerencial', desc:'Visão anual completa — receita/despesa por mês, saídas e entradas por categoria, margem de contribuição, lucro e ponto de equilíbrio' , cat:'Visão Geral e Diagnóstico' },
     { id:'executivo', icone:'🧭', nome:'Dashboard Executivo', desc:'Resumo visual com semáforos — receita, lucro, EBITDA, margem, evolução mensal e top clientes/categorias' , cat:'Visão Geral e Diagnóstico' },
@@ -30490,6 +31241,7 @@ function attachViewHandlers(){
   }
   const chartMeses = document.getElementById('chartMeses');
   if(chartMeses) desenharGraficoMeses('chartMeses');
+  desenharTodosOsGraficosDaCentral();
   const chartExtratoDiario = document.getElementById('chartExtratoDiario');
   if(chartExtratoDiario) desenharGraficoBarrasDuasCores('chartExtratoDiario', extratoGraficoDadosAtual);
   const chartSimulacao = document.getElementById('chartSimulacao');
