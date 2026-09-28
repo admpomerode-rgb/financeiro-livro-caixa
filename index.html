@@ -5662,6 +5662,13 @@ function _prepararCanvas(canvasId, cssHeight){
   return { ctx, w: cssWidth, h: cssHeight };
 }
 const PALETA_GRAFICOS = ['#2E6BE0','#2E7D5B','#C24A3D','#D9A441','#6B5CF6','#17A6B8','#B85C9E','#8A8F98'];
+// Formato compacto de valor pra caber nos eixos dos gráficos: 1.234 -> "1,2k", 2.500.000 -> "2,5M"
+function brlCompacto(v){
+  const abs = Math.abs(v);
+  if(abs>=1e6) return (v/1e6).toFixed(1).replace('.',',')+'M';
+  if(abs>=1e3) return (v/1e3).toFixed(1).replace('.',',')+'k';
+  return String(Math.round(v));
+}
 
 function desenharGraficoLinha(canvasId, dados, cor){
   const p = _prepararCanvas(canvasId, 160); if(!p || !dados.length) return;
