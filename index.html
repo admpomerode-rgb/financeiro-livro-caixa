@@ -12336,68 +12336,295 @@ function abrirPreviaApresentacao(tipo, periodoRef, comparacao, textos){
     salvarApresentacao('finalizada');
   });
 }
+// ============================================================
+// MOTOR EDITORIAL DA APRESENTAÇÃO DE RESULTADOS — PDF em paisagem, cada página como um "slide".
+// Não recalcula NADA: só organiza visualmente o que calcularDadosApresentacao/coletarComparacoesApresentacao/
+// pontosDeAtencaoApresentacao já entregam. Paleta própria dessa apresentação (não usa pdfCabecalho/
+// pdfNumerarPaginas, que são o "relatório de sistema" — aqui a identidade é editorial, de propósito).
+// ============================================================
+const PDF_APRES_COR = { azul:[20,49,92], azulClaro:[46,107,224], grafite:[30,33,38], cinza:[110,118,130], cinzaClaro:[225,228,233], branco:[255,255,255], verde:[26,140,90], vermelho:[190,50,45], ambar:[196,132,20] };
+function pdfApresFmtGrande(v){
+  const abs = Math.abs(v), sinal = v<0?'-':'';
+  if(abs>=1e6) return `${sinal}R$ ${(abs/1e6).toFixed(1).replace('.',',')} mi`;
+  if(abs>=1e3) return `${sinal}R$ ${(abs/1e3).toFixed(0)} mil`;
+  return brl(v);
+}
+function pdfApresNovaPagina(docPdf){ docPdf.addPage(); }
+// Cabeçalho discreto de cada slide (fora a capa) — título grande à esquerda, período à direita.
+function pdfApresTitulo(docPdf, titulo, dados){
+  const C = PDF_APRES_COR, LARG = docPdf.internal.pageSize.getWidth();
+  docPdf.setDrawColor(...C.azulClaro); docPdf.setLineWidth(1.2); docPdf.line(14, 16, 14, 24);
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(17); docPdf.setTextColor(...C.grafite);
+  docPdf.text(titulo, 20, 22);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...C.cinza);
+  docPdf.text(dados.label, LARG-14, 22, { align:'right' });
+  return 36;
+}
+// Rodapé mínimo — nada de "emitido pelo sistema" em destaque (item 26 do documento).
+function pdfApresRodape(docPdf, dados){
+  const total = docPdf.internal.getNumberOfPages(), LARG = docPdf.internal.pageSize.getWidth(), ALT = docPdf.internal.pageSize.getHeight();
+  for(let i=2;i<=total;i++){
+    docPdf.setPage(i);
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(7.5); docPdf.setTextColor(...PDF_APRES_COR.cinza);
+    docPdf.text(`Resultados ${dados.label}`, 14, ALT-9);
+    docPdf.text(`${i-1} / ${total-1}`, LARG-14, ALT-9, { align:'right' });
+  }
+}
+// Card de indicador grande (item 6/23): rótulo pequeno, número gigante, variação colorida embaixo.
+function pdfApresKPI(docPdf, x, y, w, rotulo, valor, variacaoTxt, corVariacao){
+  const C = PDF_APRES_COR;
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...C.cinza);
+  docPdf.text(rotulo.toUpperCase(), x, y);
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(22); docPdf.setTextColor(...C.grafite);
+  docPdf.text(valor, x, y+11);
+  if(variacaoTxt){
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10); docPdf.setTextColor(...(corVariacao||C.cinza));
+    docPdf.text(variacaoTxt, x, y+18);
+  }
+}
+// Variação em texto + cor — nunca assume que "subiu" é sempre bom (item 25): quem chama decide bomSeSobe.
+function pdfApresVariacao(atual, anterior, bomSeSobe){
+  if(anterior==null || anterior===0) return { txt:null, cor:null };
+  const delta = atual-anterior, pct = (delta/Math.abs(anterior))*100;
+  const bom = bomSeSobe==null ? null : (bomSeSobe ? pct>=0 : pct<=0);
+  const cor = bom===null ? PDF_APRES_COR.cinza : bom ? PDF_APRES_COR.verde : PDF_APRES_COR.vermelho;
+  return { txt: `${pct>=0?'+':'-'}${Math.abs(pct).toFixed(1)}%`, cor };
+}
+// Bloco numerado (usado em "O período em resumo", "Pontos de Atenção", "Próximos Passos") — item 15/16/17.
+function pdfApresBlocoNumerado(docPdf, x, y, w, numero, titulo, texto){
+  const C = PDF_APRES_COR;
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(20); docPdf.setTextColor(...C.cinzaClaro);
+  docPdf.text(numero, x, y);
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(11); docPdf.setTextColor(...C.azul);
+  docPdf.text(titulo, x+16, y-3);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9.5); docPdf.setTextColor(...C.grafite);
+  const linhas = docPdf.splitTextToSize(texto, w-16);
+  docPdf.text(linhas, x+16, y+3);
+  return 8 + linhas.length*4.6 + 8;
+}
+// Gráfico como imagem — desenha num canvas OFFSCREEN (não precisa estar na tela) usando as MESMAS
+// funções de desenho da Central de Gráficos, e insere o PNG resultante no PDF (item 19/36).
+function pdfApresGrafico(docPdf, x, y, w, h, funcaoDesenho, dadosGrafico){
+  try{
+    const id = '_pdfApresCanvasTemp';
+    let cv = document.getElementById(id);
+    if(!cv){ cv = document.createElement('canvas'); cv.id = id; cv.style.position='fixed'; cv.style.left='-9999px'; cv.style.top='0'; document.body.appendChild(cv); }
+    cv.style.width = Math.round(w*3.78)+'px'; // mm -> px aproximado, resolução boa pro PDF
+    funcaoDesenho(id, dadosGrafico);
+    docPdf.addImage(cv.toDataURL('image/png'), 'PNG', x, y, w, h);
+    return true;
+  }catch(e){ console.error('PDF apresentação: gráfico não pôde ser desenhado', e); return false; }
+}
 function gerarPDFApresentacao(dados, comparacoes, textos){
-  const docPdf = criarPDF();
-  const M=18, LARGURA=210, ALTURA=297;
-  // Capa
-  docPdf.setFillColor(20,49,92); docPdf.rect(0,0,LARGURA,ALTURA,'F');
-  docPdf.setTextColor(255,255,255);
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(14); docPdf.text('RESULTADOS', LARGURA/2, 110, {align:'center'});
-  docPdf.setFontSize(26); docPdf.text(dados.label.toUpperCase(), LARGURA/2, 128, {align:'center'});
-  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(11); docPdf.text('Livro Caixa Financeiro VK', LARGURA/2, 145, {align:'center'});
-  docPdf.setFontSize(9); docPdf.setTextColor(200,210,225);
-  docPdf.text(`Apresentação Gerencial · gerada em ${fmtDate(todayISO())} · uso interno`, LARGURA/2, 155, {align:'center'});
+  const C = PDF_APRES_COR;
+  const docPdf = criarPDF({ orientation:'landscape' });
+  const LARG = 297, ALT = 210, M = 14;
 
-  docPdf.addPage();
-  let y = pdfCabecalho(docPdf, { relatorio:'Apresentação de Resultados', subtitulo: dados.label });
-  const linha = (rotulo, valor, cor)=>{
-    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(10); docPdf.setTextColor(91,100,114);
-    docPdf.text(rotulo, M, y);
-    docPdf.setFont('helvetica','bold'); docPdf.setTextColor(...(cor||[11,15,20]));
-    docPdf.text(brl(valor), LARGURA-M, y, {align:'right'});
-    y += 7;
-  };
-  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(12); docPdf.setTextColor(11,15,20);
-  docPdf.text('Resumo Executivo', M, y); y+=8;
-  linha('Receita', dados.receitaTotal);
-  linha('Despesas', dados.despesaTotal);
-  linha(dados.lucroLiquido>=0?'Resultado':'Prejuízo', dados.lucroLiquido, dados.lucroLiquido>=0?[26,140,90]:[190,40,40]);
-  linha('Margem', dados.margem!==null?dados.margem.toFixed(1)+'%':'—');
-  linha('Caixa e Bancos', dados.caixaBancos);
-  linha('Contas a Receber', dados.aReceber);
-  linha('Contas a Pagar', dados.aPagar);
-  linha('Patrimônio Líquido', dados.patrimonioLiquido);
-  y+=4;
+  // ---------- CAPA (item 5) — composição editorial, faixa lateral + números da empresa, não é só
+  // texto centralizado numa página azul. ----------
+  docPdf.setFillColor(...C.branco); docPdf.rect(0,0,LARG,ALT,'F');
+  docPdf.setFillColor(...C.azul); docPdf.rect(0,0,LARG*0.36,ALT,'F');
+  docPdf.setFillColor(...C.azulClaro); docPdf.rect(LARG*0.36-2,0,2,ALT,'F');
+  docPdf.setDrawColor(255,255,255,); docPdf.setLineWidth(0.4);
+  for(let i=0;i<5;i++){ docPdf.setDrawColor(255,255,255); docPdf.line(10, ALT-30-i*8, LARG*0.30, ALT-30-i*8-i*3); }
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(11); docPdf.setTextColor(255,255,255);
+  docPdf.text('LIVRO CAIXA', 16, 26);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(200,210,225);
+  docPdf.text('Administração Financeira', 16, 32);
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(30); docPdf.setTextColor(255,255,255);
+  const linhasLabel = docPdf.splitTextToSize(dados.label.toUpperCase(), LARG*0.30);
+  docPdf.text(linhasLabel, 16, 100);
 
-  if(comparacoes.anterior || comparacoes.anoAnterior){
-    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(12); docPdf.text('Comparação', M, y); y+=8;
-    if(comparacoes.anterior) { linha(`Receita — ${comparacoes.anterior.ref}`, comparacoes.anterior.dados.receitaTotal); linha(`Despesa — ${comparacoes.anterior.ref}`, comparacoes.anterior.dados.despesaTotal); }
-    if(comparacoes.anoAnterior) { linha(`Receita — ${comparacoes.anoAnterior.ref}`, comparacoes.anoAnterior.dados.receitaTotal); linha(`Despesa — ${comparacoes.anoAnterior.ref}`, comparacoes.anoAnterior.dados.despesaTotal); }
-    y+=4;
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(12); docPdf.setTextColor(...C.cinza);
+  docPdf.text('RESULTADOS', LARG*0.36+22, 60);
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(40); docPdf.setTextColor(...C.grafite);
+  docPdf.text(dados.tipo==='mensal' ? competenciaLabel(dados.periodoRef).toUpperCase() : dados.label.toUpperCase(), LARG*0.36+22, 82);
+  docPdf.setFont('helvetica','normal'); docPdf.setFontSize(12); docPdf.setTextColor(...C.cinza);
+  docPdf.text('Desempenho financeiro, operacional e patrimonial', LARG*0.36+22, 96);
+  docPdf.setFontSize(9); docPdf.text(`${fmtDate(dados.de)} a ${fmtDate(dados.ate)} · gerado em ${fmtDate(todayISO())}`, LARG*0.36+22, ALT-16);
+
+  // ---------- DESTAQUES DO PERÍODO (item 6/23/24) ----------
+  pdfApresNovaPagina(docPdf);
+  let y = pdfApresTitulo(docPdf, `Destaques do ${dados.label}`, dados);
+  const base = comparacoes.anterior?.dados;
+  const kpis = [
+    { rot:'Receita', v: dados.receitaTotal, comp: base?.receitaTotal, bomSeSobe:true },
+    { rot: dados.lucroLiquido>=0?'Resultado':'Prejuízo', v: dados.lucroLiquido, comp: base?.lucroLiquido, bomSeSobe:true },
+    { rot:'Margem', v: dados.margem, comp: base?.margem, unidadePP:true },
+    { rot:'Caixa e Bancos', v: dados.caixaBancos, comp: null },
+    { rot:'Patrimônio Líquido', v: dados.patrimonioLiquido, comp: null },
+  ].filter(k=>k.v!=null);
+  const colW = (LARG-M*2)/Math.min(kpis.length,4);
+  kpis.slice(0,4).forEach((k,i)=>{
+    const varia = k.unidadePP ? (k.comp!=null ? { txt:`${(k.v-k.comp)>=0?'+':'-'}${Math.abs(k.v-k.comp).toFixed(1)} p.p.`, cor: (k.v-k.comp)>=0?C.verde:C.vermelho } : {txt:null} ) : pdfApresVariacao(k.v, k.comp, k.bomSeSobe);
+    pdfApresKPI(docPdf, M+colW*i, y+10, colW-6, k.rot, k.unidadePP ? k.v.toFixed(1)+'%' : pdfApresFmtGrande(k.v), varia.txt, varia.cor);
+  });
+  if(kpis.length>4){
+    const k = kpis[4]; const varia = pdfApresVariacao(k.v, k.comp, k.bomSeSobe);
+    pdfApresKPI(docPdf, M, y+50, colW-6, k.rot, pdfApresFmtGrande(k.v), varia.txt, varia.cor);
   }
 
+  // ---------- O PERÍODO EM RESUMO (item 7) — só os fatos que a apresentação já sabe de verdade ----------
+  const fatos = [];
+  if(base){
+    const vr = base.receitaTotal>0 ? ((dados.receitaTotal-base.receitaTotal)/base.receitaTotal*100) : null;
+    if(vr!=null) fatos.push({ t:'Receita', d:`${vr>=0?'Crescimento':'Retração'} de ${Math.abs(vr).toFixed(1)}% em relação a ${comparacoes.anterior.ref}.` });
+    const vl = base.lucroLiquido;
+    fatos.push({ t: dados.lucroLiquido>=0?'Resultado':'Prejuízo', d:`Passou de ${brl(vl)} para ${brl(dados.lucroLiquido)}.` });
+  }
+  fatos.push({ t:'Caixa', d:`Encerrou o período em ${brl(dados.caixaBancos)}.` });
+  if(dados.investimentos>0) fatos.push({ t:'Investimentos', d:`Patrimônio investido de ${brl(dados.investimentos)}.` });
+  if(dados.ganhoCapital>0 || dados.perdaCapital>0) fatos.push({ t:'Investimentos', d:`${dados.ganhoCapital>=dados.perdaCapital?'Ganho':'Perda'} de capital líquido de ${brl(Math.abs(dados.ganhoCapital-dados.perdaCapital))} no período.` });
+  if(fatos.length){
+    pdfApresNovaPagina(docPdf);
+    y = pdfApresTitulo(docPdf, 'O Período em Resumo', dados);
+    const meioW = (LARG-M*2-16)/2;
+    fatos.slice(0,6).forEach((f,i)=>{
+      const col = i%2, linha = Math.floor(i/2);
+      pdfApresBlocoNumerado(docPdf, M+col*(meioW+16), y+18+linha*36, meioW, String(i+1).padStart(2,'0'), f.t.toUpperCase(), f.d);
+    });
+  }
+
+  // ---------- RESULTADO FINANCEIRO — DRE visual em cascata (item 9), não a tabela tradicional ----------
+  pdfApresNovaPagina(docPdf);
+  y = pdfApresTitulo(docPdf, 'Resultado Financeiro', dados);
+  const barraY = y+20, barraAlt = 46, maxV = Math.max(dados.receitaTotal, dados.despesaTotal, Math.abs(dados.lucroLiquido), 1);
+  const passos = [ ['Receita', dados.receitaTotal, C.azulClaro], ['Despesas', -dados.despesaTotal, C.vermelho], [dados.lucroLiquido>=0?'Resultado':'Prejuízo', dados.lucroLiquido, dados.lucroLiquido>=0?C.verde:C.vermelho] ];
+  const passoW = (LARG-M*2-32)/3;
+  passos.forEach((p,i)=>{
+    const [rot, v, cor] = p;
+    const x = M + i*(passoW+16);
+    const altBarra = Math.max(6, Math.abs(v)/maxV*barraAlt);
+    docPdf.setFillColor(...cor); docPdf.rect(x, barraY+barraAlt-altBarra, passoW, altBarra, 'F');
+    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(9); docPdf.setTextColor(...C.cinza);
+    docPdf.text(rot.toUpperCase(), x, barraY-4);
+    docPdf.setFontSize(16); docPdf.setTextColor(...C.grafite);
+    docPdf.text(pdfApresFmtGrande(v), x, barraY+barraAlt+10);
+    if(i<passos.length-1){ docPdf.setFont('helvetica','normal'); docPdf.setFontSize(14); docPdf.setTextColor(...C.cinza); docPdf.text(i===0?'−':'=', x+passoW+5, barraY+barraAlt/2); }
+  });
+  if(dados.margem!=null){ docPdf.setFont('helvetica','bold'); docPdf.setFontSize(11); docPdf.setTextColor(...C.azul); docPdf.text(`Margem: ${dados.margem.toFixed(1)}%`, M, barraY+barraAlt+26); }
+
+  // ---------- O QUE MUDOU (item 14) — só se houver comparação ----------
+  if(comparacoes.anterior || comparacoes.anoAnterior){
+    pdfApresNovaPagina(docPdf);
+    const comp = comparacoes.anterior || comparacoes.anoAnterior;
+    y = pdfApresTitulo(docPdf, `O Que Mudou? — vs. ${comp.ref}`, dados);
+    const itensComp = [
+      { rot:'Receita', a:dados.receitaTotal, b:comp.dados.receitaTotal, bomSeSobe:true },
+      { rot:'Despesas', a:dados.despesaTotal, b:comp.dados.despesaTotal, bomSeSobe:false },
+      { rot:dados.lucroLiquido>=0?'Resultado':'Prejuízo', a:dados.lucroLiquido, b:comp.dados.lucroLiquido, bomSeSobe:true },
+      { rot:'Caixa', a:dados.caixaBancos, b:comp.dados.caixaBancos, bomSeSobe:null },
+    ];
+    const cw = (LARG-M*2)/itensComp.length;
+    itensComp.forEach((it,i)=>{
+      const varia = pdfApresVariacao(it.a, it.b, it.bomSeSobe);
+      pdfApresKPI(docPdf, M+cw*i, y+14, cw-6, it.rot, pdfApresFmtGrande(it.a), varia.txt, varia.cor);
+      docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...C.cinza);
+      docPdf.text(`era ${pdfApresFmtGrande(it.b)}`, M+cw*i, y+28);
+    });
+  }
+
+
+  // ---------- EVOLUÇÃO FINANCEIRA (item 8) — reaproveita calcularDadosApresentacao período a
+  // período (a mesma função oficial, chamada várias vezes — não é um cálculo novo) e o mesmo
+  // desenho de barras já usado na Central de Gráficos, agora em tamanho grande. ----------
+  const nPeriodos = dados.tipo==='mensal' ? 6 : 4;
+  const serieEvolucao = [];
+  let refEvo = dados.periodoRef;
+  for(let i=0;i<nPeriodos;i++){
+    const d = i===0 ? dados : calcularDadosApresentacao(dados.tipo, refEvo);
+    const rot = dados.tipo==='mensal' ? competenciaLabel(refEvo).split('/')[0].slice(0,3) : refEvo.replace('-Q','T');
+    serieEvolucao.unshift({ label: rot, entradas: d.receitaTotal, saidas: d.despesaTotal });
+    refEvo = periodoAnteriorRef(dados.tipo, refEvo);
+  }
+  if(serieEvolucao.some(p=>p.entradas>0 || p.saidas>0)){
+    pdfApresNovaPagina(docPdf);
+    y = pdfApresTitulo(docPdf, 'Evolução Financeira', dados);
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...C.cinza);
+    docPdf.text(`Receita × Despesas — últimos ${nPeriodos} ${dados.tipo==='mensal'?'meses':'trimestres'}`, M, y-2);
+    pdfApresGrafico(docPdf, M, y+6, LARG-M*2, 90, desenharGraficoBarrasDuasCores, serieEvolucao);
+  }
+
+  // ---------- RECEITAS E DESPESAS POR CATEGORIA (item 11, adaptado — o sistema não tem cálculo
+  // oficial por cliente, então usa o que já existe de verdade: categoria) ----------
+  if(dados.topReceitas.length || dados.topDespesas.length){
+    pdfApresNovaPagina(docPdf);
+    y = pdfApresTitulo(docPdf, 'Receitas e Despesas por Categoria', dados);
+    const metadeW = (LARG-M*2-16)/2;
+    const colunaRanking = (x, titulo, lista, cor)=>{
+      docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10); docPdf.setTextColor(...cor);
+      docPdf.text(titulo.toUpperCase(), x, y+8);
+      let yy = y+18;
+      const max = Math.max(...lista.map(([,v])=>v), 1);
+      lista.slice(0,6).forEach(([nome,valor])=>{
+        docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...C.grafite);
+        const nomeC = nome.length>26 ? nome.slice(0,25)+'…' : nome;
+        docPdf.text(nomeC, x, yy);
+        docPdf.setFont('helvetica','bold'); docPdf.text(pdfApresFmtGrande(valor), x+metadeW-2, yy, { align:'right' });
+        yy += 4;
+        docPdf.setFillColor(...C.cinzaClaro); docPdf.rect(x, yy, metadeW, 2.2, 'F');
+        docPdf.setFillColor(...cor); docPdf.rect(x, yy, metadeW*(valor/max), 2.2, 'F');
+        yy += 7;
+      });
+    };
+    if(dados.topReceitas.length) colunaRanking(M, 'Principais receitas', dados.topReceitas, C.azulClaro);
+    if(dados.topDespesas.length) colunaRanking(M+metadeW+16, 'Principais despesas', dados.topDespesas, C.vermelho);
+  }
+
+  // ---------- PATRIMÔNIO E INVESTIMENTOS (item 13) — só se houver posição investida ou movimento
+  // de investimento no período; tudo vindo de calcularDadosApresentacao, nada recalculado. ----------
+  const temInvestimentos = dados.investimentos>0 || dados.aportes>0 || dados.resgates>0 || dados.ganhoCapital>0 || dados.perdaCapital>0 || dados.rendimentosInv>0;
+  if(dados.patrimonioLiquido!=null || temInvestimentos){
+    pdfApresNovaPagina(docPdf);
+    y = pdfApresTitulo(docPdf, 'Patrimônio e Investimentos', dados);
+    const blocosPI = [
+      { rot:'Patrimônio Líquido', v: dados.patrimonioLiquido },
+      { rot:'Investimentos', v: dados.investimentos },
+      { rot:'Ativo Imobilizado', v: dados.ativoImobilizado },
+    ].filter(b=>b.v!=null);
+    const cw2 = (LARG-M*2)/Math.max(blocosPI.length,1);
+    blocosPI.forEach((b,i)=> pdfApresKPI(docPdf, M+cw2*i, y+10, cw2-6, b.rot, pdfApresFmtGrande(b.v), null, null));
+    if(temInvestimentos){
+      let yy = y+42;
+      docPdf.setDrawColor(...C.cinzaClaro); docPdf.setLineWidth(0.3); docPdf.line(M, yy, LARG-M, yy); yy += 10;
+      docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10); docPdf.setTextColor(...C.azul);
+      docPdf.text('MOVIMENTO DO PERÍODO', M, yy); yy += 10;
+      const movs = [
+        dados.aportes>0 && { rot:'Aportes', v: dados.aportes, cor: C.grafite },
+        dados.resgates>0 && { rot:'Resgates', v: dados.resgates, cor: C.grafite },
+        dados.ganhoCapital>0 && { rot:'Ganho de Capital', v: dados.ganhoCapital, cor: C.verde },
+        dados.perdaCapital>0 && { rot:'Perda de Capital', v: -dados.perdaCapital, cor: C.vermelho },
+        dados.rendimentosInv>0 && { rot:'Rendimentos', v: dados.rendimentosInv, cor: C.verde },
+      ].filter(Boolean);
+      const cw3 = (LARG-M*2)/Math.max(movs.length,1);
+      movs.forEach((m,i)=> pdfApresKPI(docPdf, M+cw3*i, yy+8, cw3-6, m.rot, pdfApresFmtGrande(m.v), null, null));
+    }
+  }
+
+  // ---------- PONTOS DE ATENÇÃO (item 15) — blocos numerados, nunca lista com bullet ----------
   const pontos = pontosDeAtencaoApresentacao(dados, comparacoes);
   if(pontos.length){
-    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(12); docPdf.text('Pontos de Atenção', M, y); y+=8;
-    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(10); docPdf.setTextColor(11,15,20);
-    pontos.forEach(p=>{ const linhas = docPdf.splitTextToSize('• '+p, LARGURA-M*2); docPdf.text(linhas, M, y); y+=linhas.length*5+2; });
-    y+=4;
+    pdfApresNovaPagina(docPdf);
+    y = pdfApresTitulo(docPdf, 'Pontos de Atenção', dados);
+    let yy = y+16;
+    pontos.slice(0,6).forEach((p,i)=>{ yy += pdfApresBlocoNumerado(docPdf, M, yy, LARG-M*2, String(i+1).padStart(2,'0'), '', p); });
   }
 
-  const blocoTexto = (titulo, texto)=>{
+  // ---------- TEXTOS DA GESTÃO (itens 16-18) — página editorial, não o textarea cru ----------
+  const paginaTexto = (titulo, texto)=>{
     if(!texto) return;
-    if(y>250){ docPdf.addPage(); y = pdfCabecalho(docPdf, { relatorio:'Apresentação de Resultados', subtitulo: dados.label }); }
-    docPdf.setFont('helvetica','bold'); docPdf.setFontSize(12); docPdf.setTextColor(11,15,20); docPdf.text(titulo, M, y); y+=8;
-    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(10);
-    const linhasTxt = docPdf.splitTextToSize(texto, LARGURA-M*2);
-    docPdf.text(linhasTxt, M, y); y += linhasTxt.length*5+8;
+    pdfApresNovaPagina(docPdf);
+    y = pdfApresTitulo(docPdf, titulo, dados);
+    docPdf.setFont('helvetica','normal'); docPdf.setFontSize(13); docPdf.setTextColor(...C.grafite);
+    const linhasTxt = docPdf.splitTextToSize(texto, LARG-M*2-20);
+    docPdf.text(linhasTxt, M, y+20, { lineHeightFactor:1.5 });
   };
-  blocoTexto('Como foi o período', textos.comoFoi);
-  blocoTexto('Principais acontecimentos', textos.acontecimentos);
-  blocoTexto('Próximos passos', textos.proximosPassos);
-  blocoTexto('Observações da gestão', textos.observacoes);
+  paginaTexto('Como Foi o Período', textos.comoFoi);
+  paginaTexto('Principais Acontecimentos', textos.acontecimentos);
+  paginaTexto('Próximos Passos', textos.proximosPassos);
+  paginaTexto('Mensagem da Administração', textos.observacoes);
 
-  pdfNumerarPaginas(docPdf);
+  pdfApresRodape(docPdf, dados);
   const nomeArquivo = dados.tipo==='mensal' ? `Resultados_Mensal_${dados.periodoRef}.pdf` : `Resultados_${dados.periodoRef.replace('-Q','T')}.pdf`;
   docPdf.save(nomeArquivo);
 }
