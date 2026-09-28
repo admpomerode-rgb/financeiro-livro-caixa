@@ -876,6 +876,7 @@
       <div class="nav-group" style="--group-accent:var(--success);">
         <div class="nav-section-label">Análise</div>
         <div class="nav-item" data-view="relatorios" title="Relatórios"><span class="nav-dot"></span><span class="nav-abbr">RL</span><span class="nav-label">Relatórios</span></div>
+        <div class="nav-item" data-view="graficos" title="Central de Gráficos"><span class="nav-dot"></span><span class="nav-abbr">GR</span><span class="nav-label">Central de Gráficos</span></div>
         <div class="nav-item" data-view="central-decisao" title="Central de Decisão"><span class="nav-dot"></span><span class="nav-abbr">CD</span><span class="nav-label">Central de Decisão</span></div>
         <div class="nav-item" data-view="capex" title="Central de CAPEX"><span class="nav-dot"></span><span class="nav-abbr">CX</span><span class="nav-label">Central de CAPEX</span></div>
         <div class="nav-item" data-view="estrategia" title="Central de Estratégia"><span class="nav-dot"></span><span class="nav-abbr">ES</span><span class="nav-label">Central de Estratégia</span></div>
@@ -2511,6 +2512,7 @@ function moreItensDefBase(){
     { view:'centros-custo', icone:'🧮', nome:'Centro de Custos', grupo:'Análise' },
     { view:'a-receber-representante', icone:'🤲', nome:'A Receber do Representante', grupo:'Operacional', badge:()=>todasFilasRecebimentoRep().filter(r=>!r.conferido).length },
     { view:'relatorios', icone:'📊', nome:'Relatórios', grupo:'Análise' },
+    { view:'graficos', icone:'📈', nome:'Central de Gráficos', grupo:'Análise' },
     { view:'busca-global', icone:'🔍', nome:'Busca Global', grupo:'Análise' },
     { view:'central-decisao', icone:'🧭', nome:'Central de Decisão', grupo:'Análise' },
     { view:'estrategia', icone:'♟️', nome:'Central de Estratégia', grupo:'Análise' },
@@ -12870,6 +12872,11 @@ function viewRelatorios(){
     <div class="topbar">
       <div><h1>Central de Relatórios</h1><p>${cards.length} relatórios, organizados por categoria</p></div>
     </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+      <button class="btn" data-goto="graficos" style="flex:1 1 160px;">📊 Central de Gráficos</button>
+      <button class="btn ghost" data-goto="apresentacao-resultados" style="flex:1 1 160px;">📑 Apresentação de Resultados</button>
+      <button class="btn ghost" data-action="abrir-relatorio" data-relatorio="executivo" style="flex:1 1 160px;">🧭 Dashboard Executivo</button>
+    </div>
     ${favoritosCards.length ? `
     <div class="dash-section-label">⭐ Favoritos</div>
     <div class="panel" style="margin-bottom:16px;"><div class="panel-body" style="padding:6px 10px;">
@@ -13071,6 +13078,151 @@ function renderMEI(ano){
   `;
 }
 
+// ============================================================
+// Leitor genérico de tela -> PDF. O exportador antigo só copiava .report-title e .report-line,
+// então qualquer relatório feito de cards, tabelas, notas, blocos ou gráficos (a maioria: 184 de
+// 198) saía só com cabeçalho e rodapé — PDF "em branco". Agora percorre a tela na ordem em que
+// aparece e desenha cada tipo de elemento. Relatórios que já funcionavam (DRE, Balanço etc.,
+// feitos de .report-line) continuam saindo exatamente igual. Reaproveita os helpers existentes
+// (criarPDF já remove emoji, pdfChecarQuebra quebra página, pdfCabecalho redesenha o topo).
+// ============================================================
+function pdfDesenharPainel(docPdf, raiz, yInicial){
+  const M = 20, PW = 210, W = PW - M*2;
+  const INK=[11,15,20], SOFT=[91,100,114], LINEC=[227,231,238], SUCCESS=[30,158,107], DANGER=[194,74,61], BLUE=[20,49,92];
+  let y = yInicial, desenhados = 0;
+  const IGNORAR = new Set(['SCRIPT','STYLE','BUTTON','SELECT','INPUT','TEXTAREA','OPTION','NOSCRIPT']);
+  const norm = t => pdfSafe(limparTextoPDF(String(t||'').replace(/\s+/g,' ').trim()));
+  const oculto = el => { const cs = getComputedStyle(el); return cs.display==='none' || cs.visibility==='hidden'; };
+  const ehBloco = el => { const d = getComputedStyle(el).display; return d!=='inline' && d!=='inline-block' && d!=='contents'; };
+  const visiveis = el => [...el.children].filter(c=>!IGNORAR.has(c.tagName) && !oculto(c));
+  // Texto visível do elemento, sem <option>/botões/scripts e sem o que está oculto
+  const texto = el => {
+    let out = '';
+    el.childNodes.forEach(n=>{
+      if(n.nodeType===3) out += n.nodeValue;
+      else if(n.nodeType===1 && !IGNORAR.has(n.tagName) && n.tagName!=='CANVAS' && !oculto(n)) out += (ehBloco(n)?' ':'') + texto(n) + (ehBloco(n)?' ':'');
+    });
+    return norm(out);
+  };
+  const espaco = h => { y = pdfChecarQuebra(docPdf, y, h); };
+  const paragrafo = (t, { bold=false, size=9.5, cor=SOFT, recuo=0, depois=1.6 } = {}) => {
+    t = norm(t); if(!t) return;
+    docPdf.setFont('helvetica', bold?'bold':'normal'); docPdf.setFontSize(size); docPdf.setTextColor(...cor);
+    const linhas = docPdf.splitTextToSize(t, W-recuo);
+    const alt = size*0.5;
+    linhas.forEach(l=>{ espaco(alt+1); docPdf.text(l, M+recuo, y); y += alt; });
+    y += depois; desenhados++;
+  };
+  const linhaDupla = (esq, dir, { bold=false, size=9.5, cor=SOFT, corDir=null } = {}) => {
+    esq = norm(esq); dir = norm(dir); if(!esq && !dir) return;
+    docPdf.setFont('helvetica', bold?'bold':'normal'); docPdf.setFontSize(size);
+    const larguraDir = dir ? Math.min(W*0.42, docPdf.getTextWidth(dir)+2) : 0;
+    const linhas = docPdf.splitTextToSize(esq, W - larguraDir - 3);
+    const alt = size*0.5;
+    espaco(linhas.length*alt + 2);
+    docPdf.setTextColor(...cor); linhas.forEach((l,i)=>{ docPdf.text(l, M, y + i*alt); });
+    if(dir){ docPdf.setTextColor(...(corDir||cor)); docPdf.setFont('helvetica', bold?'bold':'normal'); docPdf.text(dir, M+W, y, { align:'right' }); }
+    y += linhas.length*alt + 1.4; desenhados++;
+  };
+  const titulo = t => { t = norm(t); if(!t) return; y += 3; espaco(12); docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10.5); docPdf.setTextColor(...INK); docPdf.text(t, M, y); y += 6; desenhados++; };
+  const canvas = el => {
+    if(!el.width || !el.height) return;
+    try{
+      let mw = W, mh = mw*el.height/el.width; if(mh>95){ mh = 95; mw = mh*el.width/el.height; }
+      espaco(mh+4);
+      docPdf.addImage(el.toDataURL('image/png'), 'PNG', M + (W-mw)/2, y, mw, mh);
+      y += mh + 4; desenhados++;
+    }catch(e){ console.error('PDF: gráfico não pôde ser incluído', e); }
+  };
+  const tabela = el => {
+    el.querySelectorAll('tr').forEach((tr,idx)=>{
+      const cel = [...tr.children].filter(c=>!oculto(c)).map(texto);
+      if(!cel.some(Boolean)) return;
+      const ehCab = tr.parentElement && tr.parentElement.tagName==='THEAD' || (idx===0 && tr.querySelector('th'));
+      if(cel.length===1){ paragrafo(cel[0], { bold:ehCab }); return; }
+      const wPrim = W*0.4, wRest = (W-wPrim)/(cel.length-1);
+      docPdf.setFont('helvetica', ehCab?'bold':'normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...(ehCab?INK:SOFT));
+      const l0 = docPdf.splitTextToSize(cel[0], wPrim-2);
+      const alt = 4.2; espaco(l0.length*alt+2);
+      l0.forEach((l,i)=>docPdf.text(l, M, y+i*alt));
+      cel.slice(1).forEach((c,i)=>{ const t = docPdf.splitTextToSize(c, wRest-2)[0] || ''; docPdf.text(t, M+wPrim+wRest*(i+1)-1, y, { align:'right' }); });
+      y += l0.length*alt + 1.6;
+      if(ehCab){ docPdf.setDrawColor(...LINEC); docPdf.line(M, y-1.6, M+W, y-1.6); }
+      desenhados++;
+    });
+  };
+  const linhaRelatorio = el => {                      // exatamente o desenho antigo de .report-line
+    const label = el.querySelector('span:first-child')?.textContent.trim() || '';
+    const valor = el.querySelector('.v')?.textContent.trim() || '';
+    const isTotal = el.classList.contains('total'), isResult = el.classList.contains('result');
+    espaco(7);
+    docPdf.setFont('helvetica', isTotal||isResult ? 'bold' : 'normal'); docPdf.setFontSize(isResult ? 11 : 9.5);
+    docPdf.setTextColor(...(isResult ? (valor.includes('-') ? DANGER : SUCCESS) : (isTotal ? INK : SOFT)));
+    docPdf.text(label, M, y); docPdf.text(valor, M+W, y, { align:'right' });
+    y += isResult ? 8 : 6;
+    if(isTotal){ docPdf.setDrawColor(...LINEC); docPdf.line(M, y-4.5, M+W, y-4.5); }
+    desenhados++;
+  };
+  const linhaCurta = el => {                          // flex/grid com 2–4 células simples (ex.: "descrição ... R$ valor")
+    const f = visiveis(el);
+    if(f.length<2 || f.length>4) return false;
+    if(!f.every(c=>!visiveis(c).some(ehBloco) && texto(c).length<=90 && !c.querySelector('canvas,table'))) return false;
+    return f.reduce((s,c)=>s+texto(c).length,0) <= 200;
+  };
+
+  const percorrer = el => {
+    if(el.nodeType!==1 || IGNORAR.has(el.tagName) || oculto(el)) return;
+    const cl = el.classList;
+    if(cl.contains('report-controls')) return;        // já vai no subtítulo do PDF
+    if(el.tagName==='CANVAS'){ canvas(el); return; }
+    if(cl.contains('report-title')){ titulo(el.textContent); return; }
+    if(cl.contains('report-line')){ linhaRelatorio(el); return; }
+    if(el.tagName==='TABLE'){ tabela(el); return; }
+    if(cl.contains('dash-section-label') || /^H[1-4]$/.test(el.tagName)){ titulo(texto(el)); return; }
+    if(cl.contains('note')){ paragrafo(texto(el), { size:8.5 }); return; }
+    if(cl.contains('ledger-row')){
+      const cel = visiveis(el).map(texto).filter(Boolean);
+      const cab = cl.contains('head');
+      if(cel.length<=1) paragrafo(cel[0]||'', { bold:cab });
+      else linhaDupla(cel.slice(0,-1).join('  ·  '), cel[cel.length-1], { bold:cab, size:9 });
+      return;
+    }
+    if(cl.contains('card') && el.querySelector('.label') && el.querySelector('.value')){
+      const rot = texto(el.querySelector('.label')), val = texto(el.querySelector('.value'));
+      const extra = norm(texto(el).replace(rot,'').replace(val,''));
+      linhaDupla(rot, val, { bold:true, size:9.5, cor:INK });
+      if(extra) paragrafo(extra, { size:8, recuo:3 });
+      return;
+    }
+    const f = visiveis(el);
+    if((getComputedStyle(el).display==='flex' || getComputedStyle(el).display==='grid') && linhaCurta(el)){
+      const t = f.map(texto);
+      if(t.length===2 && t[0].length<=3) paragrafo(t[0]+' '+t[1]);            // "1." + texto
+      else linhaDupla(t.slice(0,-1).join('  ·  '), t[t.length-1], { size:9 });
+      return;
+    }
+    // "mini-card": 2–4 blocos de texto simples (rótulo / valor / detalhe) -> "rótulo ..... valor" + detalhe
+    if(f.length>=2 && f.length<=4 && f.every(ehBloco) && f.every(c=>!visiveis(c).some(ehBloco) && !c.querySelector('canvas,table'))){
+      const t = f.map(texto).filter(Boolean);
+      if(t.length>=2){
+        const pareceValor = /R\$|%|^-?\d/.test(t[1]) && t[1].length<=28;
+        if(pareceValor){ linhaDupla(t[0], t[1], { size:9.5, cor:INK }); t.slice(2).forEach(x=>paragrafo(x,{ size:8, recuo:3, depois:0.6 })); }
+        else { paragrafo(t[0], { bold:true, size:9.5, cor:INK, depois:0.3 }); t.slice(1).forEach(x=>paragrafo(x,{ size:8.5, recuo:3, depois:0.6 })); }
+        y += 1; return;
+      }
+    }
+    if(!f.some(ehBloco) && !el.querySelector('canvas,table')){ paragrafo(texto(el)); return; }   // bloco de texto (folha)
+    el.childNodes.forEach(n=>{
+      if(n.nodeType===3){ const t = norm(n.nodeValue); if(t) paragrafo(t); }
+      else percorrer(n);
+    });
+  };
+  raiz.childNodes.forEach(n=>{ if(n.nodeType===1) percorrer(n); });
+  // Rede de segurança: se nada foi reconhecido, imprime o texto da tela — nunca sai em branco.
+  if(!desenhados){ const t = texto(raiz); if(t) paragrafo(t); else paragrafo('Este relatório não tem conteúdo para exportar no período selecionado.'); }
+  return y;
+}
+
 function exportarRelatorioPDF(titulo){
   if(typeof window.jspdf === 'undefined'){ showToast('Não foi possível carregar o gerador de PDF — verifique a internet e tente de novo'); return; }
   const panel = document.getElementById('reportPanel');
@@ -13100,28 +13252,7 @@ function exportarRelatorioPDF(titulo){
 
   let y = pdfCabecalho(docPdf, { relatorio: titulo.toUpperCase(), subtitulo: filtroTexto });
 
-  panel.querySelectorAll('.report-title, .report-line').forEach(el=>{
-    y = pdfChecarQuebra(docPdf, y);
-    if(el.classList.contains('report-title')){
-      y += 3;
-      docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10.5); docPdf.setTextColor(...INK);
-      docPdf.text(el.textContent.trim(), M, y);
-      y += 6;
-      return;
-    }
-    const label = el.querySelector('span:first-child')?.textContent.trim() || '';
-    const valor = el.querySelector('.v')?.textContent.trim() || '';
-    const isTotal = el.classList.contains('total');
-    const isResult = el.classList.contains('result');
-    docPdf.setFont('helvetica', isTotal||isResult ? 'bold' : 'normal');
-    docPdf.setFontSize(isResult ? 11 : 9.5);
-    const cor = isResult ? (valor.includes('-') ? DANGER : SUCCESS) : (isTotal ? INK : SOFT);
-    docPdf.setTextColor(...cor);
-    docPdf.text(label, M, y);
-    docPdf.text(valor, M+W, y, { align:'right' });
-    y += isResult ? 8 : 6;
-    if(isTotal){ docPdf.setDrawColor(...LINEC); docPdf.line(M, y-4.5, M+W, y-4.5); }
-  });
+  y = pdfDesenharPainel(docPdf, panel, y);
 
   y = pdfChecarQuebra(docPdf, y, 16);
   y += 10;
@@ -13640,6 +13771,26 @@ function renderSuperRelatorioMensal(mesRef){
       <div class="report-title">Créditos de clientes</div>
       <div class="report-line sub"><span>Saldo disponível (a usar em pedidos futuros)</span><span class="v">${brl(saldoCreditosClientes)}</span></div>
     </div>` : ''}
+
+    ${(()=>{
+      // Principais Fatos do Mês — gerado só a partir dos números já calculados acima neste mesmo
+      // relatório, nada inventado. Cada fato só entra na lista se passar de um limiar relevante.
+      const fatos = [];
+      if(varReceita!==null && Math.abs(varReceita)>=10) fatos.push(`${varReceita>=0?'📈':'📉'} Receita ${varReceita>=0?'subiu':'caiu'} ${Math.abs(varReceita).toFixed(1)}% vs ${competenciaLabel(mesAnteriorRef)}`);
+      if(varDespesa!==null && Math.abs(varDespesa)>=10) fatos.push(`${varDespesa<=0?'📉':'📈'} Despesas ${varDespesa>=0?'subiram':'caíram'} ${Math.abs(varDespesa).toFixed(1)}% vs ${competenciaLabel(mesAnteriorRef)}`);
+      fatos.push(`${lucro>=0?'✅':'⚠️'} ${lucro>=0?'Lucro':'Prejuízo'} do mês: ${brl(Math.abs(lucro))} (margem ${margem.toFixed(1)}%)`);
+      if(topDespesas.length) fatos.push(`💸 Maior categoria de despesa: "${topDespesas[0][0]}" com ${brl(topDespesas[0][1])}`);
+      if(atrasadas.length) fatos.push(`⏰ ${atrasadas.length} conta(s) em atraso, somando ${brl(atrasadas.reduce((s,l)=>s+valorEmAberto(l),0))}`);
+      if(dividasAtrasadas>0) fatos.push(`🏦 ${brl(dividasAtrasadas)} em parcela(s) de dívida atrasada(s)`);
+      if(dividendosDoMes>0) fatos.push(`💰 ${brl(dividendosDoMes)} recebidos em rendimentos de investimentos`);
+      if(contratosVenc && (contratosVenc.vencidos.length+contratosVenc.vencendo.length)) fatos.push(`📄 ${contratosVenc.vencidos.length+contratosVenc.vencendo.length} contrato(s) vencido(s) ou vencendo em breve`);
+      if(!fatos.length) return '';
+      return `
+    <div class="dash-section-label">📌 Principais Fatos do Mês</div>
+    <div class="panel"><div class="panel-body" style="padding:6px 18px;">
+      ${fatos.map(f=>`<div style="padding:7px 0;border-top:1px solid var(--line);font-size:13px;">${f}</div>`).join('')}
+    </div></div>`;
+    })()}
   `;
 }
 
@@ -13750,25 +13901,6 @@ function renderIndicadores(periodo){
     </div>`;
     })()}
 
-    ${(()=>{
-      // Principais Fatos do Mês — gerado só a partir dos números já calculados acima neste mesmo
-      // relatório, nada inventado. Cada fato só entra na lista se passar de um limiar relevante.
-      const fatos = [];
-      if(varReceita!==null && Math.abs(varReceita)>=10) fatos.push(`${varReceita>=0?'📈':'📉'} Receita ${varReceita>=0?'subiu':'caiu'} ${Math.abs(varReceita).toFixed(1)}% vs ${competenciaLabel(mesAnteriorRef)}`);
-      if(varDespesa!==null && Math.abs(varDespesa)>=10) fatos.push(`${varDespesa<=0?'📉':'📈'} Despesas ${varDespesa>=0?'subiram':'caíram'} ${Math.abs(varDespesa).toFixed(1)}% vs ${competenciaLabel(mesAnteriorRef)}`);
-      fatos.push(`${lucro>=0?'✅':'⚠️'} ${lucro>=0?'Lucro':'Prejuízo'} do mês: ${brl(Math.abs(lucro))} (margem ${margem.toFixed(1)}%)`);
-      if(topDespesas.length) fatos.push(`💸 Maior categoria de despesa: "${topDespesas[0][0]}" com ${brl(topDespesas[0][1])}`);
-      if(atrasadas.length) fatos.push(`⏰ ${atrasadas.length} conta(s) em atraso, somando ${brl(atrasadas.reduce((s,l)=>s+valorEmAberto(l),0))}`);
-      if(dividasAtrasadas>0) fatos.push(`🏦 ${brl(dividasAtrasadas)} em parcela(s) de dívida atrasada(s)`);
-      if(dividendosDoMes>0) fatos.push(`💰 ${brl(dividendosDoMes)} recebidos em rendimentos de investimentos`);
-      if(contratosVenc && (contratosVenc.vencidos.length+contratosVenc.vencendo.length)) fatos.push(`📄 ${contratosVenc.vencidos.length+contratosVenc.vencendo.length} contrato(s) vencido(s) ou vencendo em breve`);
-      if(!fatos.length) return '';
-      return `
-    <div class="dash-section-label">📌 Principais Fatos do Mês</div>
-    <div class="panel"><div class="panel-body" style="padding:6px 18px;">
-      ${fatos.map(f=>`<div style="padding:7px 0;border-top:1px solid var(--line);font-size:13px;">${f}</div>`).join('')}
-    </div></div>`;
-    })()}
   `;
 }
 
