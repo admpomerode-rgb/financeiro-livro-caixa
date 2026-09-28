@@ -107,10 +107,11 @@
   .sidebar.collapsed #btnAbrirBuscaGlobal .busca-label{display:none;}
   .sidebar.collapsed #btnAbrirBuscaGlobal .busca-icon{font-size:16px;}
 
-  /* Itens de destaque (Carros, Usina Solar) — acima de "Operacional", com ícone e letra maiores */
+  /* Itens de destaque (Central Financeira 360°, Carros, Usina Solar) — acima de "Operacional", com ícone e letra maiores */
   .nav-destaque{padding:2px 4px 12px;margin-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.1);}
   .nav-destaque .nav-item{font-size:15.5px;font-weight:700;color:#E7EAF0;padding:11px 12px;}
   .nav-destaque .nav-item .nav-abbr{font-size:16px;background:transparent;width:auto;height:auto;}
+  .nav-destaque .nav-item.nav-destaque-longo .nav-label{font-size:14.5px;white-space:nowrap;}   /* nome comprido (Central Financeira 360°): 1 linha só */
   .sidebar.collapsed .nav-destaque{padding:2px 0 12px;}
   .sidebar.collapsed .nav-destaque .nav-item{padding:10px 0;}
   .sidebar.collapsed .nav-destaque .nav-item .nav-abbr{display:flex;font-size:19px;}
@@ -845,6 +846,7 @@
     </button>
     <nav class="nav" id="nav">
       <div class="nav-destaque">
+        <div class="nav-item nav-destaque-item nav-destaque-longo" data-view="central-360" title="Central Financeira 360° — principal painel de dados da empresa"><span class="nav-abbr">🌐</span><span class="nav-label">🌐 Central Financeira 360°</span></div>
         <div class="nav-item nav-destaque-item" data-view="veiculos" title="Carros"><span class="nav-abbr">🚗</span><span class="nav-label">🚗 Carros</span></div>
         <div class="nav-item nav-destaque-item" data-view="usina-solar" title="Usina Solar"><span class="nav-abbr">☀️</span><span class="nav-label">☀️ Usina Solar</span></div>
       </div>
@@ -862,8 +864,7 @@
         <div class="nav-item" data-view="investimentos" title="Investimentos"><span class="nav-dot"></span><span class="nav-abbr">IV</span><span class="nav-label">Investimentos</span></div>
         <div class="nav-item" data-view="orcamentos-processos" title="Aprovação de Orçamentos"><span class="nav-dot"></span><span class="nav-abbr">OC</span><span class="nav-label">Aprovação de Orçamentos</span></div>
         <div class="nav-item" data-view="gestao-os" title="Gestão de Ordens de Serviço"><span class="nav-dot"></span><span class="nav-abbr">OS</span><span class="nav-label">Gestão de O.S.</span></div>
-        <div class="nav-item" data-view="central-360" title="Central Financeira 360°"><span class="nav-dot"></span><span class="nav-abbr">C3</span><span class="nav-label">Central Financeira 360°</span></div>
-        <div class="nav-item" data-view="caixa-fisico" title="Caixa Físico"><span class="nav-dot"></span><span class="nav-abbr">CX</span><span class="nav-label">Caixa Físico</span></div>
+                <div class="nav-item" data-view="caixa-fisico" title="Caixa Físico"><span class="nav-dot"></span><span class="nav-abbr">CX</span><span class="nav-label">Caixa Físico</span></div>
         <div class="nav-item" data-view="comissoes" title="Comissões"><span class="nav-dot"></span><span class="nav-abbr">CM</span><span class="nav-label">Comissões</span></div>
         <div class="nav-item" data-view="vendas" title="Vendas"><span class="nav-dot"></span><span class="nav-abbr">VD</span><span class="nav-label">Vendas</span></div>
         <div class="nav-item" data-view="creditos-clientes" title="Créditos de Clientes"><span class="nav-dot"></span><span class="nav-abbr">CC</span><span class="nav-label">Créditos de Clientes</span></div>
@@ -12948,15 +12949,19 @@ const RELATORIOS_NOMES = {
 };
 
 function viewRelatorioDetalhe(){
+  // A Central Financeira 360° (relatório 'executivo') é a tela principal do sistema, aberta pelo menu lateral:
+  // não mostra "voltar para Relatórios" nem o seletor de relatório (mantido oculto para os handlers).
+  const ehCentral360 = relatorioAtivo==='executivo';
   return `
     <div class="topbar">
       <div>
-        <span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="relatorios">← Central de Relatórios</span>
-        <h1 style="margin-top:6px;" id="reportTitulo">${RELATORIOS_NOMES[relatorioAtivo]||'Relatórios'}</h1>
+        ${ehCentral360 ? '' : `<span style="font-size:12.5px;color:var(--blue-accent);cursor:pointer;" data-goto="relatorios">← Central de Relatórios</span>`}
+        <h1 style="margin-top:${ehCentral360?'0':'6px'};" id="reportTitulo">${ehCentral360?'🌐 ':''}${RELATORIOS_NOMES[relatorioAtivo]||'Relatórios'}</h1>
+        ${ehCentral360 ? `<p>Painel principal da empresa: saúde, dinheiro, resultado, finanças, operação, comercial e investimentos num só lugar.</p>` : ''}
       </div>
       <button class="btn ghost" id="btnExportarRelatorioPDF">📄 Exportar PDF</button>
     </div>
-    <div class="field" style="max-width:420px;">
+    <div class="field" style="max-width:420px;${ehCentral360?'display:none;':''}">
       <label>Escolha o relatório</label>
       <select id="reportSelect">
         ${Object.entries(RELATORIOS_NOMES).map(([id,nome])=>`<option value="${id}" ${relatorioAtivo===id?'selected':''}>${nome}</option>`).join('')}
@@ -13922,7 +13927,9 @@ function renderRentabilidadeProduto(periodo){
 
 function projecaoDiariaSaldo(dias){
   const hoje = todayISO();
-  const saldoHoje = totaisPorMesRef(hoje.slice(0,7)).saldoAtual;
+  // Saldo de partida = caixa real (saldo inicial das contas + movimentações), o MESMO valor exibido em Contas, Balanço e
+  // Central 360°. totaisPorMesRef().saldoAtual soma só as movimentações e ignorava o saldo inicial das contas.
+  const saldoHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
   const fim = new Date(todayISO()+'T12:00:00'); fim.setDate(fim.getDate()+dias);
   const fimISO = fim.toISOString().slice(0,10);
   const pendentes = state.lancamentos.filter(l=>l.status==='pendente' && l.dataVencimento && l.dataVencimento>hoje && l.dataVencimento<=fimISO);
@@ -14079,7 +14086,7 @@ function renderPrevisaoSaldoFuturo(){
 
 function renderStressTest(){
   const hoje = todayISO();
-  const saldoHoje = totaisPorMesRef(hoje.slice(0,7)).saldoAtual;
+  const saldoHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);   // caixa real (inclui o saldo inicial das contas), igual às demais telas
   const receber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.dataVencimento && l.dataVencimento<=todayISOMais(60)).sort((a,b)=>b.valor-a.valor);
   const top3 = receber.slice(0,3);
   const somaTop3 = top3.reduce((s,l)=>s+l.valor,0);
@@ -14366,7 +14373,9 @@ function renderOrcamentoAnual(){
   `;
 }
 
-function renderRelatorioLiquidez(){
+// Índices de liquidez e estrutura de capital — UMA conta só, usada pelo relatório Liquidez e pela Central
+// Financeira 360° (antes a fórmula ficava embutida na tela do relatório).
+function indicesLiquidezEstrutura(){
   const bm = state.balancoManual || { estoques:0, realizavelLP:0, passivoNaoCirculante:0 };
   const disponivel = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
   const aReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
@@ -14389,7 +14398,6 @@ function renderRelatorioLiquidez(){
   const ccl = ativoCirculante - passivoCirculante;
 
   const razao = (num, den) => den > 0 ? num/den : null;
-  const fmtIdx = v => v===null ? '—' : v.toLocaleString('pt-BR',{minimumFractionDigits:2, maximumFractionDigits:2});
   const semDividaCurta = passivoCirculante<=0;
   const semDividaTotal = passivoTotal<=0;
 
@@ -14404,6 +14412,11 @@ function renderRelatorioLiquidez(){
   const imobilizacaoPL = patrimonioLiquido>0 ? imobilizado/patrimonioLiquido : null;
   const solvencia = passivoTotal>0 ? ativoTotal/passivoTotal : null;
 
+  return { bm, disponivel, aReceber, aPagar, cartoesAbertos, investimentos, imobilizado, estoques, realizavelLP, passivoLP, ativoCirculante, passivoCirculante, ativoTotal, passivoTotal, patrimonioLiquido, ccl, semDividaCurta, semDividaTotal, liqImediata, liqSeca, liqCorrente, liqGeral, endividamentoGeral, composicaoEndiv, capitalTerceiros, imobilizacaoPL, solvencia };
+}
+function renderRelatorioLiquidez(){
+  const { bm, disponivel, aReceber, aPagar, cartoesAbertos, investimentos, imobilizado, estoques, realizavelLP, passivoLP, ativoCirculante, passivoCirculante, ativoTotal, passivoTotal, patrimonioLiquido, ccl, semDividaCurta, semDividaTotal, liqImediata, liqSeca, liqCorrente, liqGeral, endividamentoGeral, composicaoEndiv, capitalTerceiros, imobilizacaoPL, solvencia } = indicesLiquidezEstrutura();
+  const fmtIdx = v => v===null ? '—' : v.toLocaleString('pt-BR',{minimumFractionDigits:2, maximumFractionDigits:2});
   const corIdx = (v, ruim, atencao) => v===null ? 'var(--text-soft)' : v < ruim ? 'var(--danger)' : v < atencao ? 'var(--warn)' : 'var(--success)';
   const corInversa = (v, bom, atencao) => v===null ? 'var(--text-soft)' : v <= bom ? 'var(--success)' : v <= atencao ? 'var(--warn)' : 'var(--danger)';
 
@@ -22013,13 +22026,118 @@ function cockpitExecutivoHTML(ctx){
       <button class="btn ghost sm" data-goto="busca-global">🔍 Busca global</button>
     </div>`));
 
+  // ==================== FINANÇAS EM DETALHE ====================
+  // Resumos dos relatórios financeiros já existentes, trazidos para cá. Cada bloco usa a MESMA função/fonte do
+  // relatório de origem (projecaoDiariaSaldo, indicesLiquidezEstrutura, resumoInadimplencia, dadosMesGerencial,
+  // faturaStatus/limiteDisponivel, cronogramaDivida, orçamento por categoria) e leva ao relatório completo.
+  const btnRel = (id, txt='Ver relatório') => `<div style="text-align:right;margin-top:6px;"><button class="btn ghost sm" data-abrir-relatorio="${id}">${txt}</button></div>`;
+  const btnTela = (view, txt) => `<div style="text-align:right;margin-top:6px;"><button class="btn ghost sm" data-goto="${view}">${txt}</button></div>`;
+  const celF = (rot, val, sub, cor, tip) => `<div><div style="font-size:10.5px;color:var(--text-soft);">${rot} ${tip?info(tip):''}</div><div class="mono" style="font-size:16px;font-weight:700;${cor?'color:'+cor+';':''}">${val}</div>${sub?`<div style="font-size:10.5px;color:var(--text-soft);">${sub}</div>`:''}</div>`;
+  const gradeF = (min, itens) => `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(${min}px,1fr));gap:12px;">${itens.join('')}</div>`;
+  const linhaF = (esq, dir, corDir) => `<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--line);font-size:12.5px;"><span style="min-width:0;">${esq}</span><span class="mono" style="white-space:nowrap;flex-shrink:0;${corDir?'color:'+corDir+';':''}">${dir}</span></div>`;
+  const semBase = (titulo, msg) => cartao(`${cabecalho(titulo)}<div style="font-size:12.5px;color:var(--text-soft);">${msg||semDados}</div>`);
+
+  const fPrevisao = seguro('Previsão de saldo', ()=>{
+    if(!state.contas.length) return semBase('🔮 PREVISÃO DE SALDO');
+    const proj = projecaoDiariaSaldo(90), pts = proj.pontos||[];
+    if(!pts.length) return semBase('🔮 PREVISÃO DE SALDO');
+    const em = n => { const alvo = addDiasISO(hoje,n); return (pts.find(x=>x.data===alvo) || pts[pts.length-1]).saldo; };
+    const menor = pts.reduce((m,x)=>x.saldo<m.saldo?x:m, pts[0]);
+    const neg = v => v<0 ? 'var(--danger)' : '';
+    return cartao(`${cabecalho('🔮 PREVISÃO DE SALDO — 90 dias '+info('Mesma projeção do relatório Previsão de Saldo Futuro: contas pendentes somadas às previsões de gasto. Não inclui vendas futuras ainda não lançadas.'))}
+      ${gradeF(120,[celF('Saldo hoje', brl(proj.saldoHoje)), celF('Em 30 dias', brl(em(30)), '', neg(em(30))), celF('Em 60 dias', brl(em(60)), '', neg(em(60))), celF('Em 90 dias', brl(em(90)), '', neg(em(90))), celF('Menor saldo previsto', brl(menor.saldo), 'em '+fmtDate(menor.data), neg(menor.saldo))])}
+      ${btnRel('previsao')}`);
+  });
+
+  const fInadimplencia = seguro('Inadimplência e atrasos', ()=>{
+    if(!state.lancamentos.length) return semBase('⚠️ INADIMPLÊNCIA E ATRASOS');
+    const R = resumoInadimplencia();
+    const pagarVenc = atrasadasAll.reduce((s,l)=>s+valorEmAberto(l),0);
+    return cartao(`${cabecalho('⚠️ INADIMPLÊNCIA E ATRASOS '+info('Inadimplência = contas a receber vencidas ÷ carteira total a receber (pendente + já recebido). Usa o saldo em aberto: pagamento parcial não conta como atraso. Referência do relatório: até 5% é saudável.'))}
+      ${gradeF(130,[celF('A receber vencido', brl(R.totalVencido), `${R.vencidas.length} conta(s)`, R.totalVencido>0?'var(--danger)':''), celF('Taxa de inadimplência', R.taxaInadimplencia.toFixed(1)+'%', 'da carteira a receber', R.taxaInadimplencia>=15?'var(--danger)':R.taxaInadimplencia>=5?'var(--warn)':''), celF('A pagar vencido', brl(pagarVenc), `${atrasadasAll.length} conta(s)`, pagarVenc>0?'var(--danger)':'')])}
+      ${R.rankingInadimplentes.slice(0,3).map(([nome,i])=>linhaF(`${escapeHTML(nome)} <span style="color:var(--text-soft);">· ${i.qtd} conta(s) · maior atraso ${i.maiorAtraso}d</span>`, brl(i.valor), 'var(--danger)')).join('')}
+      ${btnRel('inadimplencia_cac')}`);
+  });
+
+  const fCartoes = seguro('Cartões de crédito', ()=>{
+    if(!state.cartoes.length) return '';
+    const linhas = state.cartoes.map(c=>{
+      const comp = competenciaAtual(c);
+      const fatura = faturaStatus(c.id,comp)==='aberta' ? totalCompetencia(c.id,comp) : 0;
+      const usado = dividaCartaoAberta(c.id), lim = c.limite||0, pct = lim>0 ? usado/lim*100 : null;
+      return { nome:c.nome, fatura, usado, lim, pct };
+    });
+    return cartao(`${cabecalho('💳 CARTÕES DE CRÉDITO '+info('Fatura atual = fatura ainda não fechada da competência corrente. Utilizado = tudo o que está devendo no cartão (faturas não pagas), contra o limite.'))}
+      ${linhas.map(l=>linhaF(`<strong>${escapeHTML(l.nome)}</strong><br><span style="color:var(--text-soft);font-size:11px;">fatura atual ${brl(l.fatura)}</span>`, l.pct!==null ? `${brl(l.usado)} de ${brl(l.lim)} (${l.pct.toFixed(0)}%)` : brl(l.usado), l.pct!==null && l.pct>=80 ? 'var(--danger)' : '')).join('')}
+      ${btnTela('cartoes','Abrir cartões')}`);
+  });
+
+  const fDividas = seguro('Dívidas', ()=>{
+    const ativas = (state.emprestimos||[]).filter(e=>statusDivida(e)!=='quitada' && statusDivida(e)!=='renegociada');
+    if(!ativas.length) return '';
+    let noMes = 0, atrasado = 0;
+    ativas.forEach(e=>cronogramaDivida(e).filter(x=>!x.paga).forEach(x=>{ if(x.vencimento.slice(0,7)===mesGlobalRef) noMes += x.valor; if(x.vencimento<hoje) atrasado += x.valor; }));
+    const proximas = ativas.map(e=>({ nome:e.nome||e.credor||'Dívida', p:proximaParcelaDivida(e) })).filter(x=>x.p).sort((a,b)=>a.p.vencimento.localeCompare(b.p.vencimento)).slice(0,4);
+    return cartao(`${cabecalho('📉 DÍVIDAS '+info('Saldo devedor = parcelas restantes × valor da parcela (o mesmo cálculo do Balanço e da Gestão de Dívidas).'))}
+      ${gradeF(130,[celF('Saldo devedor', brl(pat.emprestimosSaldo), `${ativas.length} dívida(s) ativa(s)`), celF('Parcelas do mês', brl(noMes), competenciaLabel(mesGlobalRef)), celF('Parcelas em atraso', brl(atrasado), '', atrasado>0?'var(--danger)':'')])}
+      ${proximas.map(x=>linhaF(`${escapeHTML(x.nome)} <span style="color:var(--text-soft);">· parcela ${x.p.numero}, vence ${fmtDate(x.p.vencimento)}</span>`, brl(x.p.valor), x.p.vencimento<hoje?'var(--danger)':'')).join('')}
+      ${btnTela('gestao-dividas','Abrir gestão de dívidas')}`);
+  });
+
+  const fLiquidez = seguro('Liquidez', ()=>{
+    const L = indicesLiquidezEstrutura();
+    if(L.ativoTotal<=0 && L.passivoTotal<=0) return semBase('🛟 LIQUIDEZ E ENDIVIDAMENTO');
+    const idx = v => v===null ? '—' : v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+    return cartao(`${cabecalho('🛟 LIQUIDEZ E ENDIVIDAMENTO '+info('Mesmas fórmulas do relatório Liquidez. Liquidez = quanto se tem para cada R$ 1,00 devido (acima de 1 cobre a dívida). "—" significa que não há dívida no prazo considerado.'))}
+      ${gradeF(120,[celF('Liquidez imediata', idx(L.liqImediata), L.semDividaCurta?'sem dívida de curto prazo':'só o caixa'), celF('Liquidez corrente', idx(L.liqCorrente), 'curto prazo'), celF('Liquidez geral', idx(L.liqGeral), 'todas as dívidas'), celF('Endividamento geral', L.endividamentoGeral===null?'—':(L.endividamentoGeral*100).toFixed(1)+'%', 'dívidas ÷ ativos'), celF('Capital circ. líquido', brl(L.ccl), 'ativo − passivo circulante', L.ccl<0?'var(--danger)':'')])}
+      ${btnRel('liquidez')}`);
+  });
+
+  const fOrcamento = seguro('Orçamento do mês', ()=>{
+    const orc = state.orcamentoCategorias||{}, alertaPct = state.orcamentoAlertaPct||{};
+    const cats = Object.keys(orc).filter(c=>orc[c]>0);
+    if(!cats.length) return semBase('🎯 ORÇAMENTO DO MÊS', 'Sem orçamento definido.'+btnTela('orcamento','Definir orçamento'));
+    const linhas = cats.map(cat=>{ const real = totalCategoriaTipoNoPeriodo(cat,'saida',ctx.deAtual,ctx.ateAtual); const pct = real/orc[cat]*100; return { cat, real, orc:orc[cat], pct, estourou:pct>=100, alerta:pct>=(alertaPct[cat]||80) && pct<100 }; }).sort((a,b)=>b.pct-a.pct);
+    const totOrc = linhas.reduce((s,l)=>s+l.orc,0), totReal = linhas.reduce((s,l)=>s+l.real,0);
+    return cartao(`${cabecalho('🎯 ORÇAMENTO DO MÊS — '+competenciaLabel(mesGlobalRef)+' '+info('Gasto realizado no mês contra o orçamento de cada categoria. Estourou = 100% ou mais; atenção = acima do limite de alerta da categoria (padrão 80%).'))}
+      ${gradeF(130,[celF('Orçado', brl(totOrc)), celF('Realizado', brl(totReal), `${(totReal/totOrc*100).toFixed(0)}% do orçado`), celF('Categorias estouradas', String(linhas.filter(l=>l.estourou).length), `${linhas.filter(l=>l.alerta).length} em atenção`, linhas.some(l=>l.estourou)?'var(--danger)':'')])}
+      ${linhas.slice(0,5).map(l=>linhaF(`${escapeHTML(l.cat)} <span style="color:var(--text-soft);">· ${brl(l.real)} de ${brl(l.orc)}</span>`, l.pct.toFixed(0)+'%', l.estourou?'var(--danger)':l.alerta?'var(--warn)':'')).join('')}
+      ${btnTela('orcamento','Abrir orçamento')}`);
+  });
+
+  const fEquilibrio = seguro('Ponto de equilíbrio', ()=>{
+    const d = dadosMesGerencial(mesGlobalRef,'todos');
+    if(!(d.receita>0 || d.despesaTotal>0)) return semBase('⚖️ PONTO DE EQUILÍBRIO E CUSTOS');
+    const pe = d.pontoEquilibrio;
+    const aviso = d.custoFixo<=0 ? '<div style="font-size:11.5px;color:var(--text-soft);margin-top:8px;">Nenhuma categoria está marcada como custo fixo, então o ponto de equilíbrio não pode ser calculado. Marque no relatório Fixo x Variável.</div>' : '';
+    return cartao(`${cabecalho('⚖️ PONTO DE EQUILÍBRIO E CUSTOS — '+competenciaLabel(mesGlobalRef)+' '+info('Ponto de equilíbrio = custo fixo ÷ margem de contribuição. Mesmo cálculo do Dashboard Gerencial e do relatório Break-even.'))}
+      ${gradeF(130,[celF('Receita do mês', brl(d.receita)), celF('Ponto de equilíbrio', pe===null?'—':brl(pe), pe===null?'':(d.receita>=pe?'receita já cobre':'receita abaixo'), pe!==null && d.receita<pe?'var(--danger)':''), celF('Custo fixo', brl(d.custoFixo)), celF('Custo variável', brl(d.custoVariavel)), celF('Margem de contribuição', d.margemContribPct===null?'—':(d.margemContribPct*100).toFixed(1)+'%')])}
+      ${pe!==null && pe>0 ? `<div style="font-size:12px;color:var(--text-soft);margin-top:8px;">A receita do mês equivale a <strong>${(d.receita/pe*100).toFixed(0)}%</strong> do ponto de equilíbrio.</div>` : ''}${aviso}
+      ${btnRel('breakeven')}`);
+  });
+
+  const fAnoAnterior = seguro('Comparativo com o ano anterior', ()=>{
+    const ly = iso => { const [y,m,dd] = iso.split('-').map(Number); return _isoLocal(y-1, m, Math.min(dd, new Date(y-1,m,0).getDate())); };
+    const ant = resultadoOperacionalPeriodo(ly(ctx.deAtual), ly(ctx.ateAtual));
+    if(!(ant.receitaTotal>0 || ant.despesaTotal>0)) return semBase('📆 COMPARATIVO COM O MESMO MÊS DO ANO ANTERIOR', 'Sem lançamentos no mesmo período do ano anterior.');
+    const v = (a,b)=>b!==0?((a-b)/Math.abs(b)*100):null;
+    const lin = (rot, a, b, bomSubir)=>{ const p=v(a,b); const bom = p===null?null:(bomSubir?p>=0:p<=0); return linhaF(`<strong>${rot}</strong> <span style="color:var(--text-soft);">· ${brl(a)} agora × ${brl(b)} em ${ly(ctx.deAtual).slice(0,4)}</span>`, p===null?'—':`${p>=0?'+':''}${p.toFixed(1)}%`, bom===null?'':bom?'var(--success)':'var(--danger)'); };
+    return cartao(`${cabecalho('📆 COMPARATIVO COM O MESMO MÊS DO ANO ANTERIOR '+info('Mesmo período do ano passado (dia a dia, até a data de hoje se o mês está em andamento), pelas mesmas contas da DRE.'))}
+      ${lin('Receita', ctx.receitaTotal, ant.receitaTotal, true)}${lin('Despesas', ctx.despesaTotal, ant.despesaTotal, false)}${lin('Resultado', ctx.lucroLiquido, ant.lucroLiquido, true)}
+      ${btnRel('yoy')}`);
+  });
+
+  const financas = fPrevisao + fInadimplencia + fCartoes + fDividas + fLiquidez + fOrcamento + fEquilibrio + fAnoAnterior;
+  const anc = id => `<div id="c360-${id}" style="scroll-margin-top:12px;"></div>`;
+  const irPara = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px;">${[['saude','Saúde'],['dinheiro','Dinheiro'],['resultado','Resultado'],['financas','Finanças'],['operacao','Operação'],['comercial','Comercial'],['investimentos','Investimentos'],['riscos','Riscos'],['timeline','Linha do tempo']].map(([id,t])=>`<button type="button" class="graf-chip" data-c360-ancora="c360-${id}">${t}</button>`).join('')}</div>`;
+
   const hora = new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
   return `
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
       <div style="font-size:12px;color:var(--text-soft);">Atualizado às ${hora}</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="btn ghost sm" id="btnGerarRelatorioExecutivo">📄 Relatório executivo</button><button class="btn ghost sm" id="btnCockpitAtualizar">↻ Atualizar</button></div>
     </div>
-    ${saude}${notaSaude}${prioridades}${radar}${dinheiro}${posicao}${mudou}${decisoes}${futuro}${riscos}${pulso}${comercial}${oportunidades}${processos}${investimentos}${metasAtencao}${resultado}${extras360}${timeline}${aprofundar}${acessos}
+    ${irPara}${anc('saude')}${saude}${notaSaude}${prioridades}${radar}${anc('dinheiro')}${dinheiro}${posicao}${mudou}${decisoes}${futuro}${anc('riscos')}${riscos}${anc('operacao')}${pulso}${anc('comercial')}${comercial}${oportunidades}${processos}${anc('investimentos')}${investimentos}${metasAtencao}${anc('resultado')}${resultado}${anc('financas')}${financas}${extras360}${anc('timeline')}${timeline}${aprofundar}${acessos}
     <div class="dash-section-label" style="margin-top:18px;">Indicadores detalhados</div>
   `;
 }
@@ -22292,10 +22410,12 @@ function renderRelatorioABCFornecedores(){
   `;
 }
 
-function renderRelatorioInadimplenciaCAC(){
+// Inadimplência (contas a receber vencidas, posição de hoje) — UMA conta só, usada pelo relatório e pela
+// Central Financeira 360°. Usa o saldo em aberto, então pagamento parcial não é contado como atraso.
+function resumoInadimplencia(){
   const hoje = todayISO();
   const vencidas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.dataVencimento && l.dataVencimento<hoje);
-  const totalVencido = vencidas.reduce((s,l)=>s+l.valor,0);
+  const totalVencido = vencidas.reduce((s,l)=>s+valorEmAberto(l),0);   // saldo em aberto (descontando pagamento parcial)
   const totalCarteira = state.lancamentos.filter(l=>l.tipo==='entrada' && (l.status==='pendente'||l.status==='recebido') && l.origem!=='transferencia').reduce((s,l)=>s+l.valor,0);
   const taxaInadimplencia = totalCarteira>0 ? totalVencido/totalCarteira*100 : 0;
 
@@ -22304,11 +22424,15 @@ function renderRelatorioInadimplenciaCAC(){
     const nome = l.fornecedor || 'Sem identificação';
     if(!porCliente[nome]) porCliente[nome] = { valor:0, qtd:0, maiorAtraso:0 };
     const dias = Math.round((new Date(hoje)-new Date(l.dataVencimento))/86400000);
-    porCliente[nome].valor += l.valor; porCliente[nome].qtd++;
+    porCliente[nome].valor += valorEmAberto(l); porCliente[nome].qtd++;
     porCliente[nome].maiorAtraso = Math.max(porCliente[nome].maiorAtraso, dias);
   });
   const rankingInadimplentes = Object.entries(porCliente).sort((a,b)=>b[1].valor-a[1].valor).slice(0,10);
 
+  return { hoje, vencidas, totalVencido, totalCarteira, taxaInadimplencia, rankingInadimplentes };
+}
+function renderRelatorioInadimplenciaCAC(){
+  const { hoje, vencidas, totalVencido, totalCarteira, taxaInadimplencia, rankingInadimplentes } = resumoInadimplencia();
   const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
   const deMes = `${mesGlobalRef}-01`;
   const ateMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
@@ -32260,6 +32384,7 @@ function attachViewHandlers(){
     };
     const bindReportInner = ()=>{
       bindDataGoto(document.getElementById('reportPanel')); // atalhos dentro do relatório recém-pintado
+      document.querySelectorAll('[data-c360-ancora]').forEach(b=>b.addEventListener('click', ()=>{ document.getElementById(b.dataset.c360Ancora)?.scrollIntoView({ behavior:'smooth', block:'start' }); }));
       document.querySelectorAll('[data-dre-categoria]').forEach(el=>{
         el.addEventListener('click', ()=> abrirDrilldownDRE(el.dataset.dreCategoria, el.dataset.dreTipo));
       });
