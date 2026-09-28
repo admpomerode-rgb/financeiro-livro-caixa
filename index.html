@@ -12610,12 +12610,14 @@ function htmlComparadorGraficos(){
   const rotuloTipo = comparadorGraficos.tipo==='categoria' ? 'Categoria de despesa' : 'Cliente/fornecedor';
   return `
     <div style="font-size:11px;font-weight:700;color:var(--text-soft);margin-bottom:8px;">🔀 COMPARADOR — dentro de ${escapeHTML(P.nome)}</div>
-    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:10px;">
-      <div class="field" style="margin:0;flex:1 1 150px;"><label>Comparar por</label>
+    <div class="field-row" style="margin-bottom:8px;">
+      <div class="field" style="margin:0;"><label>Comparar por</label>
         <select id="cmpTipo"><option value="categoria" ${comparadorGraficos.tipo==='categoria'?'selected':''}>Categoria de despesa</option><option value="fornecedor" ${comparadorGraficos.tipo==='fornecedor'?'selected':''}>Cliente/fornecedor</option></select></div>
-      <div class="field" style="margin:0;flex:1 1 170px;"><label>${rotuloTipo} A</label>
+    </div>
+    <div class="field-row" style="margin-bottom:10px;">
+      <div class="field" style="margin:0;"><label>${rotuloTipo} A</label>
         <select id="cmpA">${opcoes.map(o=>`<option ${o===a?'selected':''}>${escapeHTML(o)}</option>`).join('')}</select></div>
-      <div class="field" style="margin:0;flex:1 1 170px;"><label>${rotuloTipo} B</label>
+      <div class="field" style="margin:0;"><label>${rotuloTipo} B</label>
         <select id="cmpB">${opcoes.map(o=>`<option ${o===b?'selected':''}>${escapeHTML(o)}</option>`).join('')}</select></div>
     </div>
     ${!opcoes.length ? `<div class="empty">Sem dados suficientes nesse período.</div>` : `
