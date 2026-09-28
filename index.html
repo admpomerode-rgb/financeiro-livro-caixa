@@ -234,6 +234,8 @@
      inline em algum lugar específico (estilo inline sempre vence sobre esta regra de classe).
   */
   p.sub, div.sub{margin:4px 0 12px;}
+  .graf-chip{border:1px solid var(--line);background:var(--white);border-radius:999px;padding:5px 12px;font-size:12px;cursor:pointer;color:var(--ink);font-family:inherit;}
+  .graf-chip.sel{background:var(--blue-accent);border-color:var(--blue-accent);color:#fff;}
 
   .btn{
     background:var(--blue-accent);color:var(--white);border:none;padding:9px 16px;
@@ -1227,6 +1229,7 @@ function aplicarMigracoes(s){
     if(u.supervisor===undefined) u.supervisor = false; // pode liberar telas protegidas sem precisar ser admin
   });
   if(!s.resultadosInvestimento) s.resultadosInvestimento = [];
+  if(!s.graficosPrefs) s.graficosPrefs = {}; // escolha de gráficos e período da Central de Gráficos, por usuário (e-mail)
   if(!s.apresentacoesResultados) s.apresentacoesResultados = []; // [{id, tipo:'mensal'|'trimestral', periodoRef, comparacao, textos:{comoFoi,acontecimentos,proximosPassos,observacoes}, status, snapshot, criadoEm, atualizadoEm}] // [id] — relatórios marcados com estrela
   if(!s.relatoriosRecentes) s.relatoriosRecentes = []; // [{id, data}] — últimos relatórios abertos, mais recente primeiro // [{id, ticker, contaId, subContaId, data, quantidade, precoVenda, valorBruto, custoMedioAplicado, custoAtribuido, resultadoBruto, numeroNota, notaId}] — resultado realizado POR VENDA, nunca por nota inteira
   if(!s.telasProtegidas) s.telasProtegidas = []; // views que exigem senha de admin pra abrir, mesmo pra quem já está logado
@@ -5679,6 +5682,8 @@ function _prepararCanvas(canvasId, cssHeight){
   ctx.scale(dpr, dpr); ctx.clearRect(0,0,cssWidth,cssHeight);
   return { ctx, w: cssWidth, h: cssHeight };
 }
+// Com muitos períodos (12 meses, personalizado longo) os rótulos do eixo X se sobrepõem: desenha só alguns.
+function _rotuloVisivel(i, n){ return n<=12 || i%Math.ceil(n/12)===0; }
 const PALETA_GRAFICOS = ['#2E6BE0','#2E7D5B','#C24A3D','#D9A441','#6B5CF6','#17A6B8','#B85C9E','#8A8F98'];
 // Formato compacto de valor pra caber nos eixos dos gráficos: 1.234 -> "1,2k", 2.500.000 -> "2,5M"
 function brlCompacto(v){
@@ -5740,7 +5745,7 @@ function desenharGraficoBarrasSimples(canvasId, dados, cor){
     ctx.fillStyle = d.cor || cor || '#2E6BE0';
     ctx.beginPath(); ctx.roundRect ? ctx.roundRect(cx-barW/2, padT+chartH-hb, barW, hb, 3) : ctx.rect(cx-barW/2, padT+chartH-hb, barW, hb);
     ctx.fill();
-    if(dados.length<=10){ ctx.fillStyle='#8A8F98'; ctx.textAlign='center'; ctx.fillText(d.label, cx, h-6); }
+    if(_rotuloVisivel(i, dados.length)){ ctx.fillStyle='#8A8F98'; ctx.textAlign='center'; ctx.fillText(d.label, cx, h-6); }
   });
 }
 function desenharGraficoBarrasHorizontais(canvasId, dados){
@@ -5840,7 +5845,7 @@ function desenharGraficoBarrasEmpilhadas(canvasId, dados){
       ctx.fillRect(cx-barW/2, yAtual-hb, barW, hb);
       yAtual -= hb;
     });
-    ctx.fillStyle='#8A8F98'; ctx.textAlign='center'; ctx.fillText(d.label, cx, h-6);
+    if(_rotuloVisivel(i, dados.length)){ ctx.fillStyle='#8A8F98'; ctx.textAlign='center'; ctx.fillText(d.label, cx, h-6); }
   });
 }
 // Combo barra+linha: barras = valores absolutos (eixo esquerdo implícito), linha = percentual 0-100
@@ -5858,23 +5863,26 @@ function desenharGraficoCombo(canvasId, dados, corBarra, corLinha){
     const hb = (d.barra/maxBarra)*chartH;
     ctx.fillStyle = corBarra||'#2E6BE0';
     ctx.fillRect(cx-barW/2, padT+chartH-hb, barW, hb);
-    ctx.fillStyle='#8A8F98'; ctx.textAlign='center'; ctx.fillText(d.label, cx, h-6);
+    if(_rotuloVisivel(i, dados.length)){ ctx.fillStyle='#8A8F98'; ctx.textAlign='center'; ctx.fillText(d.label, cx, h-6); }
   });
   ctx.strokeStyle = corLinha||'#D9A441'; ctx.lineWidth=2.2; ctx.beginPath();
+  let segAberto = false;                                   // linha == null => sem dado naquele período: interrompe a linha
   dados.forEach((d,i)=>{
+    if(d.linha==null){ segAberto = false; return; }
     const cx = padL+grupoW*i+grupoW/2;
     const y = padT+chartH-(Math.max(0,Math.min(100,d.linha))/100)*chartH;
-    i===0?ctx.moveTo(cx,y):ctx.lineTo(cx,y);
+    segAberto ? ctx.lineTo(cx,y) : ctx.moveTo(cx,y); segAberto = true;
   });
   ctx.stroke();
   ctx.fillStyle = corLinha||'#D9A441';
   dados.forEach((d,i)=>{
+    if(d.linha==null) return;
     const cx = padL+grupoW*i+grupoW/2;
     const y = padT+chartH-(Math.max(0,Math.min(100,d.linha))/100)*chartH;
     ctx.beginPath(); ctx.arc(cx,y,2.8,0,7); ctx.fill();
   });
   ctx.textAlign='left'; ctx.fillStyle='#8A8F98'; ctx.font='9px Inter, sans-serif';
-  ctx.fillText('% (linha)', w-padR+2, padT+8);
+  ctx.fillText('%', w-padR+6, padT+8);
 }
 // Cascata/Waterfall: dados = [{label, valor, tipo:'inicio'|'soma'|'subtrai'|'total'}]
 function desenharGraficoCascata(canvasId, dados){
@@ -6042,7 +6050,9 @@ function desenharMapaCalor(canvasId, dados){
   const diaIniSemana = dataIni.getDay();
   const totalDias = Math.round((dataFim-dataIni)/86400000)+1+diaIniSemana;
   const nSemanas = Math.ceil(totalDias/7);
-  const cel = 14, gap=2, padL=24, padT=14;
+  const gap=2, padL=24, padT=14;
+  const larguraDisp = (document.getElementById(canvasId)?.clientWidth || 340) - padL - 6;
+  const cel = Math.max(4, Math.min(14, Math.floor(larguraDisp/nSemanas) - gap));   // encolhe a célula quando o período é longo
   const p = _prepararCanvas(canvasId, padT+7*(cel+gap)+16); if(!p) return;
   const { ctx } = p;
   const max = Math.max(1, ...Object.values(porData));
@@ -6127,7 +6137,7 @@ function desenharGraficoBarrasDuasCores(canvasId, dados){
     if(dados.length<=15){
       ctx.fillStyle = '#8A8F98';
       ctx.textAlign = 'center';
-      ctx.fillText(d.label, cx, cssHeight-5);
+      if(_rotuloVisivel(i, dados.length)) ctx.fillText(d.label, cx, cssHeight-5);
     }
   });
 }
@@ -12342,325 +12352,275 @@ function gerarPDFApresentacao(dados, comparacoes, textos){
   const nomeArquivo = dados.tipo==='mensal' ? `Resultados_Mensal_${dados.periodoRef}.pdf` : `Resultados_${dados.periodoRef.replace('-Q','T')}.pdf`;
   docPdf.save(nomeArquivo);
 }
-function viewGraficos(){
-  const meses6 = ultimos6Meses();
-  const saldoAcumulado = (()=>{ let s=0; return meses6.map(m=>{ s += m.entradas-m.saidas; return { label:m.label, valor:s }; }); })();
-  const receitaMeses = meses6.map(m=>({ label:m.label, valor:m.entradas }));
-  const despesaMeses = meses6.map(m=>({ label:m.label, valor:m.saidas }));
+// ============================================================
+// CENTRAL DE GRÁFICOS — catálogo de 30 gráficos + filtros (quais gráficos e qual período).
+// Nada aparece por padrão além de um pequeno "Resumo": o usuário escolhe no painel de cima, e
+// só o que foi escolhido é calculado e desenhado. A escolha e o período ficam salvos (state.graficosPrefs).
+// Reaproveita as funções de desenho em canvas (desenharGrafico*) e os mesmos cálculos do sistema.
+// ============================================================
+const GRAFICOS_PERIODOS = [['30d','Últimos 30 dias'],['3m','Últimos 3 meses'],['6m','Últimos 6 meses'],['12m','Últimos 12 meses'],['ano','Este ano'],['ano_ant','Ano passado'],['custom','Personalizado']];
+const GRAFICOS_PRESETS = {
+  resumo: ['entradas_saidas','fluxo_area','despesas_pizza','health_velocimetro'],
+  faturamento: ['fat_linha','fat_area','fat_pizza','fat_combo'],
+  despesas: ['despesas_barras','despesas_pizza','despesas_pareto','fornecedores_ranking'],
+  investimentos: ['inv_linha','inv_aportes_resgates','inv_pizza','inv_ranking'],
+  saude: ['health_velocimetro','health_radar'],
+};
+const GRAFICOS_ICONES = { 'Linha':'📈','Área':'🏔️','Barras':'📊','Barras (2 cores)':'📊','Pizza':'🥧','Rosca':'🍩','Barras horizontais':'📏','Radar':'🕸️','Empilhadas':'🧱','Combo':'🔀','Cascata':'🌊','Velocímetro':'⏱️','Funil':'🔻','Dispersão':'🔵','Histograma':'📶','Pareto':'📐','Mapa de calor':'🗓️','Treemap':'🧩' };
 
-  const hoje = todayISO();
-  const de30 = addDiasISO(hoje,-30);
-  const movs30 = state.lancamentos.filter(l=>l.dataPagamento>=de30 && l.dataPagamento<=hoje && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
-  const porCatDespesa = {};
-  movs30.filter(l=>l.tipo==='saida' && !ehMovimentoDeCapital(l)).forEach(l=>{ porCatDespesa[l.categoria]=(porCatDespesa[l.categoria]||0)+l.valor; });
-  const pizzaDespesas = Object.entries(porCatDespesa).sort((a,b)=>b[1]-a[1]).slice(0,7).map(([label,valor])=>({label,valor}));
-
-  const porFornecedor = {};
-  movs30.filter(l=>l.tipo==='saida' && l.fornecedor).forEach(l=>{ porFornecedor[l.fornecedor]=(porFornecedor[l.fornecedor]||0)+l.valor; });
-  const rankingFornecedores = Object.entries(porFornecedor).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([label,valor])=>({label,valor}));
-
-  const porConta = state.contas.filter(c=>!c.arquivada).map(c=>({ label:c.nome, valor: Math.max(0,saldoConta(c.id)) })).filter(c=>c.valor>0);
-
-
-  return `
-    <div class="topbar">
-      <div><h1>📊 Central de Gráficos</h1><p>Vários jeitos de olhar pros mesmos dados — linha, barra, pizza, área, ranking e radar.</p></div>
-    </div>
-
-    <div class="dash-section-label">📈 Linha — Receita, últimos 6 meses</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafLinha1" height="160"></canvas></div></div>
-
-    <div class="dash-section-label">🏔️ Área — Saldo acumulado, últimos 6 meses</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafArea1" height="160"></canvas></div></div>
-
-    <div class="dash-section-label">📊 Barras — Entradas x Saídas, últimos 6 meses</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafBarrasDuasCores1" height="160"></canvas></div></div>
-
-    <div class="dash-section-label">🟦 Barras simples — Despesas, últimos 6 meses</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafBarras1" height="160"></canvas></div></div>
-
-    <div class="dash-section-label">🥧 Pizza — Despesas por categoria, últimos 30 dias</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;">${pizzaDespesas.length?'<canvas id="grafPizza1" height="200"></canvas>':'<div class="empty">Sem despesas nos últimos 30 dias.</div>'}</div></div>
-
-    <div class="dash-section-label">🍩 Rosca — Saldo por conta bancária</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;">${porConta.length?'<canvas id="grafRosca1" height="200"></canvas>':'<div class="empty">Sem saldo positivo em nenhuma conta.</div>'}</div></div>
-
-    <div class="dash-section-label">📏 Barras horizontais — Ranking de fornecedores, últimos 30 dias</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;">${rankingFornecedores.length?'<canvas id="grafBarrasHoriz1"></canvas>':'<div class="empty">Sem compras com fornecedor identificado nos últimos 30 dias.</div>'}</div></div>
-
-    <div class="dash-section-label">🕸️ Radar — Health Score, os 4 componentes (0 a 100)</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafRadar1" height="220"></canvas></div></div>
-
-    <div class="dash-section-label">🧱 Barras empilhadas — Top 3 categorias de despesa, últimos 6 meses</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafEmpilhadas1" height="180"></canvas></div></div>
-
-    <div class="dash-section-label">🔀 Combo (barra + linha) — Despesa e margem %, últimos 6 meses</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafCombo1" height="170"></canvas></div></div>
-
-    <div class="dash-section-label">🌊 Cascata — Como o resultado do mês se formou</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafCascata1" height="190"></canvas></div></div>
-
-    <div class="dash-section-label">⏱️ Velocímetro — Health Score</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;text-align:center;"><canvas id="grafVelocimetro1" height="150" style="max-width:280px;"></canvas></div></div>
-
-    <div class="dash-section-label">🔻 Funil — Contas a receber, do total ao recebido</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;">${(()=>{ return '<canvas id="grafFunil1"></canvas>'; })()}</div></div>
-
-    <div class="dash-section-label">🔵 Dispersão — Valor x dias até o vencimento, contas em aberto</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafDispersao1" height="200"></canvas></div></div>
-
-    <div class="dash-section-label">📶 Histograma — Distribuição dos valores de lançamento, últimos 90 dias</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafHistograma1" height="170"></canvas></div></div>
-
-    <div class="dash-section-label">📐 Pareto (regra 80/20) — Categorias de despesa, últimos 90 dias</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafPareto1" height="190"></canvas></div></div>
-
-    <div class="dash-section-label">🗓️ Mapa de calor — Movimentação diária, últimos ~90 dias</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;overflow-x:auto;"><canvas id="grafMapaCalor1"></canvas></div></div>
-
-    <div class="dash-section-label">🧩 Treemap — Despesas por categoria, últimos 90 dias</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafTreemap1" height="220"></canvas></div></div>
-
-    <div class="dash-section-label" style="margin-top:30px;">💵 FATURAMENTO</div>
-
-    <div class="dash-section-label">📈 Linha — Faturamento (receita operacional), últimos 6 meses</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafFatLinha" height="160"></canvas></div></div>
-
-    <div class="dash-section-label">🏔️ Área — Faturamento acumulado no ano</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafFatArea" height="160"></canvas></div></div>
-
-    <div class="dash-section-label">🥧 Pizza — Faturamento por categoria de receita, últimos 90 dias</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafFatPizza" height="200"></canvas></div></div>
-
-    <div class="dash-section-label">📊 Barras — Faturamento por categoria de receita, últimos 90 dias</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafFatBarras" height="160"></canvas></div></div>
-
-    <div class="dash-section-label">🔀 Combo — Faturamento (barra) x Despesa operacional em % dele (linha), últimos 6 meses</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafFatCombo" height="170"></canvas></div></div>
-
-    <div class="dash-section-label" style="margin-top:30px;">📈 INVESTIMENTOS</div>
-
-    <div class="dash-section-label">📈 Linha — Evolução do capital investido (acumulado), últimos 6 meses</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafInvLinha" height="160"></canvas></div></div>
-
-    <div class="dash-section-label">📊 Barras (duas cores) — Aportes x Resgates, últimos 6 meses</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafInvAportesResgates" height="160"></canvas></div></div>
-
-    <div class="dash-section-label">🥧 Pizza — Distribuição da carteira por ativo</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;">${state.ativosInvestimento.filter(a=>!a.resgatado&&!a.manual&&(a.quantidade||0)>0).length?'<canvas id="grafInvPizza" height="200"></canvas>':'<div class="empty">Sem posição em investimentos.</div>'}</div></div>
-
-    <div class="dash-section-label">📏 Barras horizontais — Ranking de ativos por resultado realizado</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;">${(state.resultadosInvestimento||[]).length?'<canvas id="grafInvRanking"></canvas>':'<div class="empty">Nenhuma venda de investimento registrada ainda.</div>'}</div></div>
-
-    <div class="dash-section-label">🏔️ Área — Resultado acumulado de investimentos (ganho − perda)</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;">${(state.resultadosInvestimento||[]).length?'<canvas id="grafInvResultadoAcumulado" height="160"></canvas>':'<div class="empty">Nenhuma venda de investimento registrada ainda.</div>'}</div></div>
-
-    <div class="dash-section-label">📈 Linha — Rendimentos recebidos, últimos 6 meses</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafInvRendimentos" height="160"></canvas></div></div>
-
-    <div class="dash-section-label">📊 Barras (duas cores) — Ganho x Perda de capital, últimos 6 meses</div>
-    <div class="panel"><div class="panel-body" style="padding:14px 10px;"><canvas id="grafInvGanhoPerda" height="160"></canvas></div></div>
-  `;
+function graficosPrefs(){
+  // A escolha é guardada POR USUÁRIO (o estado do sistema é um documento compartilhado: sem isso, o que um
+  // usuário marcasse mudaria a tela de todos). Formato antigo (uma escolha só) é descartado e recriado.
+  if(!state.graficosPrefs || typeof state.graficosPrefs!=='object' || 'selecionados' in state.graficosPrefs) state.graficosPrefs = {};
+  const chave = (emailLogadoAtual()||'_').toLowerCase();
+  if(!state.graficosPrefs[chave]) state.graficosPrefs[chave] = { selecionados:null, periodo:'6m', de:'', ate:'' };
+  const g = state.graficosPrefs[chave];
+  if(!Array.isArray(g.selecionados)) g.selecionados = GRAFICOS_PRESETS.resumo.slice();   // 1ª vez: só um resumo pequeno, nunca tudo
+  if(!g.periodo) g.periodo = '6m';
+  return g;
 }
-function desenharTodosOsGraficosDaCentral(){
-  const meses6 = ultimos6Meses();
-  if(!document.getElementById('grafLinha1')) return; // tela não está aberta, não desenha nada à toa
-  const saldoAcumulado = (()=>{ let s=0; return meses6.map(m=>{ s += m.entradas-m.saidas; return { label:m.label, valor:s }; }); })();
-  desenharGraficoLinha('grafLinha1', meses6.map(m=>({label:m.label, valor:m.entradas})), '#2E7D5B');
-  desenharGraficoArea('grafArea1', saldoAcumulado, '#2E6BE0');
-  desenharGraficoBarrasDuasCores('grafBarrasDuasCores1', meses6);
-  desenharGraficoBarrasSimples('grafBarras1', meses6.map(m=>({label:m.label, valor:m.saidas})), '#C24A3D');
-  if(document.getElementById('grafPizza1')){
-    const hoje = todayISO(); const de30 = addDiasISO(hoje,-30);
-    const movs30 = state.lancamentos.filter(l=>l.dataPagamento>=de30 && l.dataPagamento<=hoje && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
-    const porCat = {}; movs30.filter(l=>l.tipo==='saida' && !ehMovimentoDeCapital(l)).forEach(l=>{ porCat[l.categoria]=(porCat[l.categoria]||0)+l.valor; });
-    desenharGraficoPizza('grafPizza1', Object.entries(porCat).sort((a,b)=>b[1]-a[1]).slice(0,7).map(([label,valor])=>({label,valor})));
+const _isoLocal = (y,m,d)=>`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+// Período escolhido -> intervalo + "baldes" (semanas se ≤ 62 dias, senão meses) usados pelos gráficos de evolução
+function periodoGraficos(){
+  const g = graficosPrefs(), hoje = todayISO(), [ay,am] = hoje.split('-').map(Number);
+  const inicioMes = n => { const d = new Date(ay, am-1-n, 1); return _isoLocal(d.getFullYear(), d.getMonth()+1, 1); };
+  let de, ate = hoje, nome = (GRAFICOS_PERIODOS.find(p=>p[0]===g.periodo)||['','Últimos 6 meses'])[1];
+  switch(g.periodo){
+    case '30d': de = addDiasISO(hoje,-29); break;
+    case '3m': de = inicioMes(2); break;
+    case '12m': de = inicioMes(11); break;
+    case 'ano': de = _isoLocal(ay,1,1); break;
+    case 'ano_ant': de = _isoLocal(ay-1,1,1); ate = _isoLocal(ay-1,12,31); break;
+    case 'custom':
+      if(g.de && g.ate){ de = g.de<=g.ate ? g.de : g.ate; ate = g.de<=g.ate ? g.ate : g.de; }
+      else { de = inicioMes(5); nome = 'Últimos 6 meses (defina as datas)'; }
+      break;
+    default: de = inicioMes(5);
   }
-  if(document.getElementById('grafRosca1')){
-    const porConta = state.contas.filter(c=>!c.arquivada).map(c=>({ label:c.nome, valor: Math.max(0,saldoConta(c.id)) })).filter(c=>c.valor>0);
-    desenharGraficoPizza('grafRosca1', porConta, true);
-  }
-  if(document.getElementById('grafBarrasHoriz1')){
-    const hoje = todayISO(); const de30 = addDiasISO(hoje,-30);
-    const movs30 = state.lancamentos.filter(l=>l.dataPagamento>=de30 && l.dataPagamento<=hoje && (l.status==='pago') && l.fornecedor);
-    const porForn = {}; movs30.forEach(l=>{ porForn[l.fornecedor]=(porForn[l.fornecedor]||0)+l.valor; });
-    desenharGraficoBarrasHorizontais('grafBarrasHoriz1', Object.entries(porForn).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([label,valor])=>({label,valor})));
-  }
-  if(document.getElementById('grafRadar1')){
-    // Os 4 componentes REAIS da nota de saúde (25 pontos cada), na mesma base das demais telas.
-    const hsR = calcularHealthScoreEm(todayISO(), mesGlobalRef);
-    desenharGraficoRadar('grafRadar1', [
-      { label:'Margem', valor: hsR.scoreMargem/25*100 },
-      { label:'Fôlego de caixa', valor: hsR.scoreFolego/25*100 },
-      { label:'Pontualidade', valor: hsR.scoreAtraso/25*100 },
-      { label:'Baixo endividamento', valor: hsR.scoreEndividamento/25*100 },
-    ]);
-  }
-  if(document.getElementById('grafEmpilhadas1')){
-    // Top 3 categorias de despesa (olhando os últimos 6 meses inteiros) e como cada uma se
-    // comportou mês a mês — cada barra empilhada é um mês, cada cor é uma categoria.
-    const porCatTotal = {};
-    meses6.forEach(m=>{
-      state.lancamentos.filter(l=>l.tipo==='saida' && (l.dataPagamento||'').slice(0,7)===m.ym && l.status==='pago' && !ehMovimentoDeCapital(l)).forEach(l=>{
-        porCatTotal[l.categoria] = (porCatTotal[l.categoria]||0)+l.valor;
-      });
-    });
-    const top3 = Object.entries(porCatTotal).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([nome])=>nome);
-    const cores = ['#2E6BE0','#D9A441','#C24A3D'];
-    const dadosEmpilhado = meses6.map(m=>{
-      const partes = top3.map((cat,i)=>({
-        nome: cat, cor: cores[i],
-        valor: state.lancamentos.filter(l=>l.tipo==='saida' && l.categoria===cat && (l.dataPagamento||'').slice(0,7)===m.ym && l.status==='pago').reduce((s,l)=>s+l.valor,0)
-      }));
-      return { label: m.label, partes };
-    });
-    desenharGraficoBarrasEmpilhadas('grafEmpilhadas1', dadosEmpilhado);
-  }
-  if(document.getElementById('grafCombo1')){
-    const dadosCombo = meses6.map(m=>({
-      label: m.label, barra: m.saidas,
-      linha: m.entradas>0 ? Math.max(0,Math.min(100, ((m.entradas-m.saidas)/m.entradas)*100 )) : 0
-    }));
-    desenharGraficoCombo('grafCombo1', dadosCombo, '#C24A3D', '#2E7D5B');
-  }
-  if(document.getElementById('grafCascata1')){
-    const mesAtual = meses6[meses6.length-1];
-    desenharGraficoCascata('grafCascata1', [
-      { label:'Receita', valor: mesAtual.entradas, tipo:'inicio' },
-      { label:'Despesas', valor: mesAtual.saidas, tipo:'subtrai' },
-      { label:'Resultado', valor: mesAtual.entradas-mesAtual.saidas, tipo:'total' },
-    ]);
-  }
-  if(document.getElementById('grafVelocimetro1')){
-    const hoje = todayISO();
-    const scoreHoje = calcularHealthScoreEm(hoje, mesGlobalRef).scoreTotal;
-    desenharGraficoVelocimetro('grafVelocimetro1', scoreHoje, 'Health Score');
-  }
-  if(document.getElementById('grafFunil1')){
-    const totalReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.origem!=='transferencia').reduce((s,l)=>s+l.valor,0);
-    const naoAtrasado = state.lancamentos.filter(l=>l.tipo==='entrada' && l.origem!=='transferencia' && !(l.status==='pendente' && l.dataVencimento<todayISO())).reduce((s,l)=>s+l.valor,0);
-    const recebido = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido').reduce((s,l)=>s+l.valor,0);
-    desenharGraficoFunil('grafFunil1', [
-      { label:'Total de contas a receber (histórico)', valor: totalReceber },
-      { label:'Sem atraso', valor: naoAtrasado },
-      { label:'Já recebido', valor: recebido },
-    ]);
-  }
-  if(document.getElementById('grafDispersao1')){
-    const hoje = todayISO();
-    const abertas = state.lancamentos.filter(l=>l.status==='pendente' && l.tipo==='saida');
-    const pontos = abertas.map(l=>{
-      const dias = Math.round((new Date(l.dataVencimento+'T12:00:00')-new Date(hoje+'T12:00:00'))/86400000);
-      return { x: dias, y: valorEmAberto(l), cor: dias<0?'rgba(194,74,61,0.65)':'rgba(46,107,224,0.65)' };
-    });
-    desenharGraficoDispersao('grafDispersao1', pontos, 'Dias até o vencimento (negativo = atrasado)', 'Valor em aberto (R$)');
-  }
-  if(document.getElementById('grafHistograma1')){
-    const de90 = addDiasISO(todayISO(),-90);
-    const valores = state.lancamentos.filter(l=>(l.status==='pago'||l.status==='recebido') && l.dataPagamento>=de90 && l.origem!=='transferencia').map(l=>l.valor);
-    desenharGraficoHistograma('grafHistograma1', valores, 8);
-  }
-  if(document.getElementById('grafPareto1')){
-    const de90 = addDiasISO(todayISO(),-90);
-    const porCat90 = {};
-    state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de90 && !ehMovimentoDeCapital(l)).forEach(l=>{ porCat90[l.categoria]=(porCat90[l.categoria]||0)+l.valor; });
-    desenharGraficoPareto('grafPareto1', Object.entries(porCat90).map(([label,valor])=>({label,valor})));
-  }
-  if(document.getElementById('grafMapaCalor1')){
-    const de90 = addDiasISO(todayISO(),-90);
-    const movs90 = state.lancamentos.filter(l=>(l.status==='pago'||l.status==='recebido') && l.dataPagamento>=de90 && l.origem!=='transferencia').map(l=>({ data:l.dataPagamento, valor: l.tipo==='saida'?l.valor:l.valor*0.3 }));
-    desenharMapaCalor('grafMapaCalor1', movs90);
-  }
-  if(document.getElementById('grafTreemap1')){
-    const de90 = addDiasISO(todayISO(),-90);
-    const porCatTree = {};
-    state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de90 && !ehMovimentoDeCapital(l)).forEach(l=>{ porCatTree[l.categoria]=(porCatTree[l.categoria]||0)+l.valor; });
-    desenharTreemap('grafTreemap1', Object.entries(porCatTree).map(([label,valor])=>({label,valor})));
-  }
-
-  // ---- FATURAMENTO ----
-  const faturamentoMeses = meses6.map(m=>{
-    const receitaOperacional = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && (l.dataPagamento||'').slice(0,7)===m.ym && !ehMovimentoDeCapital(l)).reduce((s,l)=>s+l.valor,0);
-    return { label:m.label, valor: receitaOperacional, ym:m.ym };
-  });
-  if(document.getElementById('grafFatLinha')) desenharGraficoLinha('grafFatLinha', faturamentoMeses, '#2E7D5B');
-  if(document.getElementById('grafFatArea')){
-    const anoAtual = todayISO().slice(0,4);
-    let acumulado=0;
-    const porMesAno = [];
-    for(let m=1;m<=12;m++){
-      const ym = `${anoAtual}-${String(m).padStart(2,'0')}`;
-      if(ym>todayISO().slice(0,7)) break;
-      const v = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && (l.dataPagamento||'').slice(0,7)===ym && !ehMovimentoDeCapital(l)).reduce((s,l)=>s+l.valor,0);
-      acumulado += v;
-      porMesAno.push({ label: new Date(anoAtual,m-1,1).toLocaleDateString('pt-BR',{month:'short'}).replace('.',''), valor: acumulado });
+  const dias = Math.round((new Date(ate+'T12:00:00') - new Date(de+'T12:00:00'))/86400000) + 1;
+  const buckets = [];
+  if(dias<=62){
+    for(let ini=de; ini<=ate; ini=addDiasISO(ini,7)){ const f = addDiasISO(ini,6); buckets.push({ ini, fim: f>ate?ate:f, label: fmtDate(ini).slice(0,5) }); }
+  } else {
+    let [y,m] = de.split('-').map(Number); const [ye,me] = ate.split('-').map(Number); const variosAnos = de.slice(0,4)!==ate.slice(0,4);
+    while(y<ye || (y===ye && m<=me)){
+      const iniMes = _isoLocal(y,m,1), fimMes = _isoLocal(y,m,new Date(y,m,0).getDate());
+      const nomeMes = new Date(y,m-1,1).toLocaleDateString('pt-BR',{month:'short'}).replace('.','');
+      buckets.push({ ini: iniMes<de?de:iniMes, fim: fimMes>ate?ate:fimMes, label: (variosAnos && (m===1 || buckets.length===0)) ? `${nomeMes}/${String(y).slice(2)}` : nomeMes });
+      m++; if(m>12){ m=1; y++; }
     }
-    desenharGraficoArea('grafFatArea', porMesAno, '#2E7D5B');
   }
-  if(document.getElementById('grafFatPizza') || document.getElementById('grafFatBarras')){
-    const de90 = addDiasISO(todayISO(),-90);
-    const porCatReceita = {};
-    state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento>=de90 && !ehMovimentoDeCapital(l)).forEach(l=>{ porCatReceita[l.categoria]=(porCatReceita[l.categoria]||0)+l.valor; });
-    const topReceitaCat = Object.entries(porCatReceita).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([label,valor])=>({label,valor}));
-    if(document.getElementById('grafFatPizza')) desenharGraficoPizza('grafFatPizza', topReceitaCat);
-    if(document.getElementById('grafFatBarras')) desenharGraficoBarrasSimples('grafFatBarras', topReceitaCat, '#2E7D5B');
-  }
-  if(document.getElementById('grafFatCombo')){
-    const dadosComboFat = meses6.map((m,i)=>({
-      label: m.label, barra: faturamentoMeses[i].valor,
-      linha: faturamentoMeses[i].valor>0 ? Math.min(100, (m.saidas/faturamentoMeses[i].valor)*100) : 0
-    }));
-    desenharGraficoCombo('grafFatCombo', dadosComboFat, '#2E7D5B', '#C24A3D');
-  }
-
-  // ---- INVESTIMENTOS ----
-  if(document.getElementById('grafInvLinha')){
-    let acumInv=0;
-    const invLinha = meses6.map(m=>{
-      const aportesM = state.lancamentos.filter(l=>l.tipo==='saida' && ehMovimentoDeCapital(l) && (l.dataPagamento||'').slice(0,7)===m.ym).reduce((s,l)=>s+l.valor,0);
-      const resgatesM = state.lancamentos.filter(l=>l.tipo==='entrada' && ehMovimentoDeCapital(l) && (l.dataPagamento||'').slice(0,7)===m.ym).reduce((s,l)=>s+l.valor,0);
-      acumInv += aportesM-resgatesM;
-      return { label:m.label, valor: acumInv };
-    });
-    desenharGraficoLinha('grafInvLinha', invLinha, '#6B5CF6');
-  }
-  if(document.getElementById('grafInvAportesResgates')){
-    desenharGraficoBarrasDuasCores('grafInvAportesResgates', meses6.map(m=>({
-      label:m.label,
-      entradas: state.lancamentos.filter(l=>l.tipo==='saida' && ehMovimentoDeCapital(l) && (l.dataPagamento||'').slice(0,7)===m.ym).reduce((s,l)=>s+l.valor,0),
-      saidas: state.lancamentos.filter(l=>l.tipo==='entrada' && ehMovimentoDeCapital(l) && (l.dataPagamento||'').slice(0,7)===m.ym).reduce((s,l)=>s+l.valor,0)
-    })));
-  }
-  if(document.getElementById('grafInvPizza')){
-    const posicoes = state.ativosInvestimento.filter(a=>!a.resgatado&&!a.manual&&(a.quantidade||0)>0);
-    desenharGraficoPizza('grafInvPizza', posicoes.map(a=>({ label:a.ticker||a.nome, valor: valorAtivo(a) })).sort((a,b)=>b.valor-a.valor).slice(0,8));
-  }
-  if(document.getElementById('grafInvRanking')){
-    const porAtivo = {};
-    (state.resultadosInvestimento||[]).forEach(r=>{ porAtivo[r.ticker]=(porAtivo[r.ticker]||0)+r.resultadoBruto; });
-    desenharGraficoBarrasHorizontais('grafInvRanking', Object.entries(porAtivo).sort((a,b)=>b[1]-a[1]).map(([label,valor])=>({label,valor,cor:valor>=0?'#2E7D5B':'#C24A3D'})));
-  }
-  if(document.getElementById('grafInvResultadoAcumulado')){
-    const ordenados = [...(state.resultadosInvestimento||[])].sort((a,b)=>a.data.localeCompare(b.data));
-    let acumResult=0;
-    desenharGraficoArea('grafInvResultadoAcumulado', ordenados.map(r=>{ acumResult+=r.resultadoBruto; return { label:fmtDate(r.data).slice(0,5), valor:acumResult }; }), acumResult>=0?'#2E7D5B':'#C24A3D');
-  }
-  if(document.getElementById('grafInvRendimentos')){
-    desenharGraficoLinha('grafInvRendimentos', meses6.map(m=>({
-      label:m.label, valor: (state.rendimentosInvestimento||[]).filter(r=>r.data.slice(0,7)===m.ym).reduce((s,r)=>s+r.valor,0)
-    })), '#17A6B8');
-  }
-  if(document.getElementById('grafInvGanhoPerda')){
-    desenharGraficoBarrasDuasCores('grafInvGanhoPerda', meses6.map(m=>({
-      label:m.label,
-      entradas: state.lancamentos.filter(l=>l.categoria==='Ganho de Capital' && (l.dataPagamento||'').slice(0,7)===m.ym).reduce((s,l)=>s+l.valor,0),
-      saidas: state.lancamentos.filter(l=>l.categoria==='Perda de Capital' && (l.dataPagamento||'').slice(0,7)===m.ym).reduce((s,l)=>s+l.valor,0)
-    })));
-  }
+  return { de, ate, hoje, dias, buckets, nome, rotulo: `${fmtDate(de)} a ${fmtDate(ate)}` };
 }
+const _movGraf = () => state.lancamentos.filter(l=>(l.status==='pago'||l.status==='recebido') && l.dataPagamento && l.origem!=='transferencia');
+const _somaB = (mov,b,tipo,filtro) => mov.filter(l=>l.tipo===tipo && l.dataPagamento>=b.ini && l.dataPagamento<=b.fim && (!filtro||filtro(l))).reduce((s,l)=>s+l.valor,0);
+const _semCapital = l => !ehMovimentoDeCapital(l);
+const _temValor = arr => arr.some(x=>Math.abs(x.valor)>0.004);
+const _acumular = arr => { let s=0; return arr.map(x=>({ ...x, valor: (s+=x.valor) })); };
+const _porCategoriaGraf = (mov,tipo,P,filtro) => { const m={}; mov.filter(l=>l.tipo===tipo && l.dataPagamento>=P.de && l.dataPagamento<=P.ate && (!filtro||filtro(l))).forEach(l=>{ m[l.categoria]=(m[l.categoria]||0)+l.valor; }); return Object.entries(m).map(([label,valor])=>({label,valor})).filter(x=>x.valor>0.004).sort((a,b)=>b.valor-a.valor); };
+const _legendaHTML = itens => `<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:6px;font-size:11px;color:var(--text-soft);">${itens.map(i=>`<span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${i.cor};margin-right:4px;"></span>${escapeHTML(i.nome)}</span>`).join('')}</div>`;
+
+const GRAFICOS_CATALOGO = [
+  // ---------------- Evolução no tempo ----------------
+  { id:'entradas_linha', grupo:'Evolução no tempo', tipo:'Linha', nome:'Entradas por período', desc:'Tudo que entrou nas contas, período a período',
+    dados:(P,mov)=>{ const d=P.buckets.map(b=>({label:b.label, valor:_somaB(mov,b,'entrada')})); return _temValor(d)?d:null; },
+    desenhar:(id,d)=>desenharGraficoLinha(id,d,'#2E7D5B') },
+  { id:'fluxo_area', grupo:'Evolução no tempo', tipo:'Área', nome:'Fluxo de caixa acumulado', desc:'Entradas menos saídas, somando período a período',
+    dados:(P,mov)=>{ const d=P.buckets.map(b=>({label:b.label, valor:_somaB(mov,b,'entrada')-_somaB(mov,b,'saida')})); return _temValor(d)?_acumular(d):null; },
+    desenhar:(id,d)=>desenharGraficoArea(id,d,'#2E6BE0') },
+  { id:'entradas_saidas', grupo:'Evolução no tempo', tipo:'Barras (2 cores)', nome:'Entradas x Saídas', desc:'Verde = entradas, vermelho = saídas',
+    dados:(P,mov)=>{ const d=P.buckets.map(b=>({label:b.label, entradas:_somaB(mov,b,'entrada'), saidas:_somaB(mov,b,'saida')})); return d.some(x=>x.entradas>0||x.saidas>0)?d:null; },
+    desenhar:(id,d)=>desenharGraficoBarrasDuasCores(id,d) },
+  { id:'despesas_barras', grupo:'Evolução no tempo', tipo:'Barras', nome:'Despesas por período', desc:'Despesas operacionais (sem aportes em investimento)',
+    dados:(P,mov)=>{ const d=P.buckets.map(b=>({label:b.label, valor:_somaB(mov,b,'saida',_semCapital)})); return _temValor(d)?d:null; },
+    desenhar:(id,d)=>desenharGraficoBarrasSimples(id,d,'#C24A3D') },
+  { id:'despesa_margem', grupo:'Evolução no tempo', tipo:'Combo', nome:'Despesa e margem (%)', desc:'Barras: despesa. Linha: margem (% da receita que sobrou)', altura:170,
+    dados:(P,mov)=>{ const d=P.buckets.map(b=>{ const r=_somaB(mov,b,'entrada',_semCapital), s=_somaB(mov,b,'saida',_semCapital); return { label:b.label, barra:s, linha: r>0?Math.max(0,Math.min(100,(r-s)/r*100)):null }; }); return d.some(x=>x.barra>0)?d:null; },
+    desenhar:(id,d)=>desenharGraficoCombo(id,d,'#C24A3D','#2E7D5B') },
+  { id:'top3_empilhadas', grupo:'Evolução no tempo', tipo:'Empilhadas', nome:'Top 3 categorias de despesa', desc:'As 3 maiores categorias do período, período a período', altura:180,
+    dados:(P,mov)=>{ const top=_porCategoriaGraf(mov,'saida',P,_semCapital).slice(0,3).map(x=>x.label); if(!top.length) return null; const cores=['#2E6BE0','#D9A441','#C24A3D'];
+      return { legenda: top.map((n,i)=>({nome:n,cor:cores[i]})), barras: P.buckets.map(b=>({ label:b.label, partes: top.map((cat,i)=>({ nome:cat, cor:cores[i], valor:_somaB(mov,b,'saida',l=>l.categoria===cat) })) })) }; },
+    desenhar:(id,d)=>desenharGraficoBarrasEmpilhadas(id,d.barras), extra:d=>_legendaHTML(d.legenda) },
+  { id:'resultado_cascata', grupo:'Evolução no tempo', tipo:'Cascata', nome:'Como o resultado se formou', desc:'Receita, menos despesas, igual ao resultado do período', altura:190,
+    dados:(P,mov)=>{ const r=P.buckets.reduce((s,b)=>s+_somaB(mov,b,'entrada',_semCapital),0), d=P.buckets.reduce((s,b)=>s+_somaB(mov,b,'saida',_semCapital),0); if(r<=0&&d<=0) return null;
+      return [{label:'Receita',valor:r,tipo:'inicio'},{label:'Despesas',valor:d,tipo:'subtrai'},{label:'Resultado',valor:r-d,tipo:'total'}]; },
+    desenhar:(id,d)=>desenharGraficoCascata(id,d) },
+  // ---------------- Despesas e composição ----------------
+  { id:'despesas_pizza', grupo:'Despesas e composição', tipo:'Pizza', nome:'Despesas por categoria', desc:'Para onde foi o dinheiro no período', altura:200,
+    dados:(P,mov)=>{ const d=_porCategoriaGraf(mov,'saida',P,_semCapital).slice(0,7); return d.length?d:null; }, desenhar:(id,d)=>desenharGraficoPizza(id,d) },
+  { id:'despesas_treemap', grupo:'Despesas e composição', tipo:'Treemap', nome:'Despesas em blocos', desc:'Área proporcional ao gasto de cada categoria', altura:220,
+    dados:(P,mov)=>{ const d=_porCategoriaGraf(mov,'saida',P,_semCapital); return d.length?d:null; }, desenhar:(id,d)=>desenharTreemap(id,d) },
+  { id:'despesas_pareto', grupo:'Despesas e composição', tipo:'Pareto', nome:'Pareto 80/20 das despesas', desc:'Poucas categorias concentram a maior parte do gasto', altura:190,
+    dados:(P,mov)=>{ const d=_porCategoriaGraf(mov,'saida',P,_semCapital); return d.length?d:null; }, desenhar:(id,d)=>desenharGraficoPareto(id,d) },
+  { id:'fornecedores_ranking', grupo:'Despesas e composição', tipo:'Barras horizontais', nome:'Ranking de fornecedores', desc:'Quem mais recebeu no período',
+    dados:(P,mov)=>{ const m={}; mov.filter(l=>l.tipo==='saida' && l.fornecedor && l.dataPagamento>=P.de && l.dataPagamento<=P.ate && _semCapital(l)).forEach(l=>{ m[l.fornecedor]=(m[l.fornecedor]||0)+l.valor; }); const d=Object.entries(m).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([label,valor])=>({label,valor})); return d.length?d:null; },
+    desenhar:(id,d)=>desenharGraficoBarrasHorizontais(id,d) },
+  { id:'valores_histograma', grupo:'Despesas e composição', tipo:'Histograma', nome:'Distribuição dos valores', desc:'Quantos lançamentos há em cada faixa de valor', altura:170,
+    dados:(P,mov)=>{ const v=mov.filter(l=>l.dataPagamento>=P.de && l.dataPagamento<=P.ate).map(l=>l.valor); return v.length>=2?v:null; }, desenhar:(id,d)=>desenharGraficoHistograma(id,d,8) },
+  { id:'movimentacao_calor', grupo:'Despesas e composição', tipo:'Mapa de calor', nome:'Movimentação diária', desc:'Um quadrado por dia; mais escuro = mais dinheiro movimentado',
+    dados:(P,mov)=>{ const d=mov.filter(l=>l.dataPagamento>=P.de && l.dataPagamento<=P.ate).map(l=>({data:l.dataPagamento, valor:l.valor})); return d.length?d:null; }, desenhar:(id,d)=>desenharMapaCalor(id,d) },
+  // ---------------- Situação atual (foto de hoje) ----------------
+  { id:'saldo_rosca', grupo:'Situação atual', foto:true, tipo:'Rosca', nome:'Saldo por conta bancária', desc:'Como o caixa está distribuído entre as contas', altura:200,
+    dados:()=>{ const d=state.contas.filter(c=>!c.arquivada).map(c=>({label:c.nome,valor:Math.max(0,saldoConta(c.id))})).filter(c=>c.valor>0); return d.length?d:null; }, desenhar:(id,d)=>desenharGraficoPizza(id,d,true) },
+  { id:'contas_dispersao', grupo:'Situação atual', foto:true, tipo:'Dispersão', nome:'Contas a pagar em aberto', desc:'Cada ponto é uma conta: dias até vencer x valor (vermelho = atrasada)', altura:200,
+    dados:(P)=>{ const d=state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente').map(l=>{ const dias=Math.round((new Date(l.dataVencimento+'T12:00:00')-new Date(P.hoje+'T12:00:00'))/86400000); return { x:dias, y:valorEmAberto(l), cor: dias<0?'rgba(194,74,61,0.65)':'rgba(46,107,224,0.65)' }; }); return d.length?d:null; },
+    desenhar:(id,d)=>desenharGraficoDispersao(id,d,'Dias até o vencimento (negativo = atrasada)','Valor em aberto (R$)') },
+  { id:'health_velocimetro', grupo:'Situação atual', foto:true, tipo:'Velocímetro', nome:'Health Score', desc:'Nota de saúde financeira de 0 a 100 (a mesma das outras telas)', altura:150,
+    dados:(P)=>(state.contas.length||state.lancamentos.length) ? calcularHealthScoreEm(P.hoje, mesGlobalRef).scoreTotal : null, desenhar:(id,d)=>desenharGraficoVelocimetro(id,d,'Health Score') },
+  { id:'health_radar', grupo:'Situação atual', foto:true, tipo:'Radar', nome:'Health Score: os 4 componentes', desc:'Margem, fôlego de caixa, pontualidade e endividamento (0 a 100)', altura:220,
+    dados:(P)=>{ if(!state.contas.length && !state.lancamentos.length) return null; const h=calcularHealthScoreEm(P.hoje, mesGlobalRef);
+      return [{label:'Margem',valor:h.scoreMargem/25*100},{label:'Fôlego de caixa',valor:h.scoreFolego/25*100},{label:'Pontualidade',valor:h.scoreAtraso/25*100},{label:'Baixo endividamento',valor:h.scoreEndividamento/25*100}]; },
+    desenhar:(id,d)=>desenharGraficoRadar(id,d) },
+  // ---------------- Faturamento ----------------
+  { id:'fat_linha', grupo:'Faturamento', tipo:'Linha', nome:'Faturamento por período', desc:'Receita operacional (sem resgates de investimento)',
+    dados:(P,mov)=>{ const d=P.buckets.map(b=>({label:b.label, valor:_somaB(mov,b,'entrada',_semCapital)})); return _temValor(d)?d:null; }, desenhar:(id,d)=>desenharGraficoLinha(id,d,'#2E7D5B') },
+  { id:'fat_area', grupo:'Faturamento', tipo:'Área', nome:'Faturamento acumulado', desc:'Quanto já foi faturado, somando período a período',
+    dados:(P,mov)=>{ const d=P.buckets.map(b=>({label:b.label, valor:_somaB(mov,b,'entrada',_semCapital)})); return _temValor(d)?_acumular(d):null; }, desenhar:(id,d)=>desenharGraficoArea(id,d,'#2E7D5B') },
+  { id:'fat_pizza', grupo:'Faturamento', tipo:'Pizza', nome:'Faturamento por categoria', desc:'De onde vem a receita', altura:200,
+    dados:(P,mov)=>{ const d=_porCategoriaGraf(mov,'entrada',P,_semCapital).slice(0,7); return d.length?d:null; }, desenhar:(id,d)=>desenharGraficoPizza(id,d) },
+  { id:'fat_barras', grupo:'Faturamento', tipo:'Barras', nome:'Faturamento por categoria (barras)', desc:'Comparação direta entre as categorias de receita',
+    dados:(P,mov)=>{ const d=_porCategoriaGraf(mov,'entrada',P,_semCapital).slice(0,8); return d.length?d:null; }, desenhar:(id,d)=>desenharGraficoBarrasSimples(id,d,'#2E7D5B') },
+  { id:'fat_combo', grupo:'Faturamento', tipo:'Combo', nome:'Faturamento x despesa em % dele', desc:'Barras: faturamento. Linha: quanto % dele virou despesa', altura:170,
+    dados:(P,mov)=>{ const d=P.buckets.map(b=>{ const r=_somaB(mov,b,'entrada',_semCapital), s=_somaB(mov,b,'saida',_semCapital); return { label:b.label, barra:r, linha: r>0?Math.min(100,s/r*100):null }; }); return d.some(x=>x.barra>0)?d:null; },
+    desenhar:(id,d)=>desenharGraficoCombo(id,d,'#2E7D5B','#C24A3D') },
+  { id:'receber_funil', grupo:'Faturamento', tipo:'Funil', nome:'Contas a receber no período', desc:'Do total previsto ao que já foi recebido', 
+    dados:(P)=>{ const l=state.lancamentos.filter(x=>x.tipo==='entrada' && x.origem!=='transferencia' && _semCapital(x) && x.dataVencimento>=P.de && x.dataVencimento<=P.ate);
+      const total=l.reduce((s,x)=>s+x.valor,0); if(total<=0) return null;
+      return [{label:'Previsto no período',valor:total},{label:'Sem atraso',valor:l.filter(x=>!(x.status==='pendente' && x.dataVencimento<P.hoje)).reduce((s,x)=>s+x.valor,0)},{label:'Já recebido',valor:l.filter(x=>x.status==='recebido').reduce((s,x)=>s+x.valor,0)}]; },
+    desenhar:(id,d)=>desenharGraficoFunil(id,d) },
+  // ---------------- Investimentos (só quem pode ver a tela) ----------------
+  { id:'inv_linha', grupo:'Investimentos', perm:'investimentos', tipo:'Linha', nome:'Capital aportado (acumulado)', desc:'Aportes menos resgates, somando período a período',
+    dados:(P,mov)=>{ const d=P.buckets.map(b=>({label:b.label, valor:_somaB(mov,b,'saida',ehMovimentoDeCapital)-_somaB(mov,b,'entrada',ehMovimentoDeCapital)})); return _temValor(d)?_acumular(d):null; }, desenhar:(id,d)=>desenharGraficoLinha(id,d,'#6B5CF6') },
+  { id:'inv_aportes_resgates', grupo:'Investimentos', perm:'investimentos', tipo:'Barras (2 cores)', nome:'Aportes x Resgates', desc:'Verde = aportes, vermelho = resgates',
+    dados:(P,mov)=>{ const d=P.buckets.map(b=>({label:b.label, entradas:_somaB(mov,b,'saida',ehMovimentoDeCapital), saidas:_somaB(mov,b,'entrada',ehMovimentoDeCapital)})); return d.some(x=>x.entradas>0||x.saidas>0)?d:null; }, desenhar:(id,d)=>desenharGraficoBarrasDuasCores(id,d) },
+  { id:'inv_pizza', grupo:'Investimentos', perm:'investimentos', foto:true, tipo:'Pizza', nome:'Carteira por ativo', desc:'Como o dinheiro investido está distribuído', altura:200,
+    dados:()=>{ const d=state.ativosInvestimento.filter(a=>!a.resgatado && !a.manual && (a.quantidade||0)>0).map(a=>({label:a.ticker||a.nome,valor:valorAtivo(a)})).filter(x=>x.valor>0).sort((a,b)=>b.valor-a.valor).slice(0,8); return d.length?d:null; }, desenhar:(id,d)=>desenharGraficoPizza(id,d) },
+  { id:'inv_ranking', grupo:'Investimentos', perm:'investimentos', tipo:'Barras horizontais', nome:'Resultado por ativo (vendas)', desc:'Ganho ou perda das vendas feitas no período',
+    dados:(P)=>{ const m={}; (state.resultadosInvestimento||[]).filter(r=>r.data>=P.de && r.data<=P.ate).forEach(r=>{ m[r.ticker]=(m[r.ticker]||0)+r.resultadoBruto; }); const d=Object.entries(m).sort((a,b)=>b[1]-a[1]).map(([label,valor])=>({label,valor,cor:valor>=0?'#2E7D5B':'#C24A3D'})); return d.length?d:null; }, desenhar:(id,d)=>desenharGraficoBarrasHorizontais(id,d) },
+  { id:'inv_resultado_acum', grupo:'Investimentos', perm:'investimentos', tipo:'Área', nome:'Resultado acumulado das vendas', desc:'Ganho menos perda, somando venda a venda',
+    dados:(P)=>{ const l=(state.resultadosInvestimento||[]).filter(r=>r.data>=P.de && r.data<=P.ate).sort((a,b)=>a.data.localeCompare(b.data)); if(!l.length) return null; let s=0; return l.map(r=>({ label:fmtDate(r.data).slice(0,5), valor:(s+=r.resultadoBruto) })); },
+    desenhar:(id,d)=>desenharGraficoArea(id,d,d[d.length-1].valor>=0?'#2E7D5B':'#C24A3D') },
+  { id:'inv_rendimentos', grupo:'Investimentos', perm:'investimentos', tipo:'Linha', nome:'Rendimentos recebidos', desc:'Dividendos, juros e rendimentos por período',
+    dados:(P)=>{ const d=P.buckets.map(b=>({label:b.label, valor:(state.rendimentosInvestimento||[]).filter(r=>r.data>=b.ini && r.data<=b.fim).reduce((s,r)=>s+r.valor,0)})); return _temValor(d)?d:null; }, desenhar:(id,d)=>desenharGraficoLinha(id,d,'#17A6B8') },
+  { id:'inv_ganho_perda', grupo:'Investimentos', perm:'investimentos', tipo:'Barras (2 cores)', nome:'Ganho x Perda de capital', desc:'Verde = ganho, vermelho = perda (vendas de ativos)',
+    dados:(P,mov)=>{ const d=P.buckets.map(b=>({label:b.label, entradas:_somaB(mov,b,'entrada',l=>l.categoria==='Ganho de Capital')||0, saidas:_somaB(mov,b,'saida',l=>l.categoria==='Perda de Capital')||0})); return d.some(x=>x.entradas>0||x.saidas>0)?d:null; }, desenhar:(id,d)=>desenharGraficoBarrasDuasCores(id,d) },
+];
+// Ganho/Perda de Capital têm contaId nulo e por isso não passam por _movGraf() com origem 'transferencia' — mas entram normalmente aqui.
+const _graficosVisiveis = () => GRAFICOS_CATALOGO.filter(c=>!c.perm || usuarioPodeVerTela(c.perm));
+
+function htmlAreaGraficos(){
+  const g = graficosPrefs(), P = periodoGraficos(), mov = _movGraf();
+  const sel = g.selecionados.map(id=>_graficosVisiveis().find(c=>c.id===id)).filter(Boolean);
+  window.__grafDados = {};
+  if(!sel.length) return `<div class="panel"><div class="panel-body" style="padding:26px 18px;text-align:center;color:var(--text-soft);">Nenhum gráfico selecionado.<br>Escolha nos grupos acima ou use um atalho (Resumo, Faturamento, Despesas…).</div></div>`;
+  return `<div style="margin:0 2px 10px;font-size:12px;color:var(--text-soft);">${sel.length} gráfico(s) · <strong>${escapeHTML(P.nome)}</strong> (${P.rotulo})</div>` + sel.map(c=>{
+    let d = null, erro = false;
+    try{ d = c.dados(P, mov); }catch(e){ console.error('Gráfico', c.id, e); erro = true; }
+    window.__grafDados[c.id] = d;
+    return `<div class="panel" style="margin-bottom:12px;"><div class="panel-body" style="padding:12px 14px;">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
+        <div style="min-width:0;"><div style="font-size:13px;font-weight:700;">${GRAFICOS_ICONES[c.tipo]||'📊'} ${escapeHTML(c.nome)}</div>
+        <div style="font-size:11px;color:var(--text-soft);">${escapeHTML(c.desc)} · ${c.foto?'posição de hoje':escapeHTML(P.nome.toLowerCase())}</div></div>
+        <button class="icon-btn" data-graf-remover="${c.id}" title="Tirar este gráfico da tela">✕</button>
+      </div>
+      ${erro ? `<div class="empty" style="padding:14px 0;">Não foi possível montar este gráfico.</div>` : d==null ? `<div class="empty" style="padding:14px 0;">Sem dados neste período.</div>` : `<canvas id="graf_${c.id}" height="${c.altura||160}" style="margin-top:8px;width:100%;"></canvas>${c.extra?c.extra(d):''}`}
+    </div></div>`;
+  }).join('');
+}
+function desenharGraficosSelecionados(){
+  graficosPrefs().selecionados.forEach(id=>{
+    const c = _graficosVisiveis().find(x=>x.id===id), d = (window.__grafDados||{})[id];
+    if(!c || d==null || !document.getElementById('graf_'+id)) return;
+    try{ c.desenhar('graf_'+id, d); }catch(e){ console.error('Desenho do gráfico', id, e); }
+  });
+}
+function viewGraficos(){
+  const g = graficosPrefs(), vis = _graficosVisiveis(), grupos = [...new Set(vis.map(c=>c.grupo))];
+  const ehCustom = g.periodo==='custom';
+  const chip = c => `<button type="button" class="graf-chip ${g.selecionados.includes(c.id)?'sel':''}" data-graf-toggle="${c.id}" data-busca="${escapeHTML((c.nome+' '+c.tipo+' '+c.grupo+' '+c.desc).toLowerCase())}" title="${escapeHTML(c.desc)}">${GRAFICOS_ICONES[c.tipo]||'📊'} ${escapeHTML(c.nome)}</button>`;
+  return `
+    <div class="topbar"><div><h1>📈 Central de Gráficos</h1><p>Escolha quais gráficos quer ver e o período — só o que você marcar aparece.</p></div></div>
+    <div class="panel" id="grafFiltro" style="margin-bottom:14px;"><div class="panel-body" style="padding:14px 16px;">
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:12px;">
+        <div class="field" style="margin:0;flex:1 1 190px;"><label>Período</label>
+          <select id="grafPeriodo">${GRAFICOS_PERIODOS.map(([v,t])=>`<option value="${v}" ${g.periodo===v?'selected':''}>${t}</option>`).join('')}</select></div>
+        <div id="grafCustom" style="display:${ehCustom?'flex':'none'};gap:8px;align-items:flex-end;flex:1 1 260px;">
+          <div class="field" style="margin:0;flex:1;"><label>De</label><input type="date" id="grafDe" value="${g.de||''}"></div>
+          <div class="field" style="margin:0;flex:1;"><label>Até</label><input type="date" id="grafAte" value="${g.ate||''}"></div>
+        </div>
+      </div>
+      <div style="font-size:11px;font-weight:700;color:var(--text-soft);margin-bottom:6px;">ATALHOS</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">
+        <button type="button" class="graf-chip" data-graf-preset="resumo">Resumo</button>
+        <button type="button" class="graf-chip" data-graf-preset="faturamento">Faturamento</button>
+        <button type="button" class="graf-chip" data-graf-preset="despesas">Despesas</button>
+        ${usuarioPodeVerTela('investimentos')?'<button type="button" class="graf-chip" data-graf-preset="investimentos">Investimentos</button>':''}
+        <button type="button" class="graf-chip" data-graf-preset="saude">Saúde</button>
+        <button type="button" class="graf-chip" data-graf-preset="limpar" style="border-style:dashed;">✕ Limpar tudo</button>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+        <div style="font-size:11px;font-weight:700;color:var(--text-soft);">GRÁFICOS <span id="grafContagem" style="font-weight:600;"></span></div>
+        <div class="field" style="margin:0;flex:1 1 200px;max-width:280px;"><input type="text" id="grafBusca" placeholder="🔎 Buscar (ex.: pizza, fornecedor)"></div>
+      </div>
+      <div id="grafPicker">
+        ${grupos.map(gr=>{ const lista = vis.filter(c=>c.grupo===gr); const abre = lista.some(c=>g.selecionados.includes(c.id));
+          return `<details class="graf-grupo" data-grupo="${escapeHTML(gr)}" ${abre?'open':''} style="border-top:1px solid var(--line);padding:6px 0;">
+            <summary style="cursor:pointer;font-size:13px;font-weight:600;padding:4px 0;">${escapeHTML(gr)} <span class="graf-cont" style="font-weight:400;color:var(--text-soft);font-size:11.5px;"></span></summary>
+            <div style="display:flex;gap:10px;margin:2px 0 6px;font-size:11.5px;"><a href="#" data-graf-grupo="${escapeHTML(gr)}|todos">marcar todos</a><a href="#" data-graf-grupo="${escapeHTML(gr)}|nenhum">limpar grupo</a></div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;padding-bottom:6px;">${lista.map(chip).join('')}</div>
+          </details>`; }).join('')}
+      </div>
+    </div></div>
+    <div id="grafArea">${htmlAreaGraficos()}</div>`;
+}
+function sincronizarFiltrosGraficos(){
+  const g = graficosPrefs(), vis = _graficosVisiveis();
+  document.querySelectorAll('[data-graf-toggle]').forEach(b=>b.classList.toggle('sel', g.selecionados.includes(b.dataset.grafToggle)));
+  document.querySelectorAll('details.graf-grupo').forEach(d=>{
+    const lista = vis.filter(c=>c.grupo===d.dataset.grupo);
+    const n = lista.filter(c=>g.selecionados.includes(c.id)).length;
+    const cont = d.querySelector('.graf-cont'); if(cont) cont.textContent = `(${n} de ${lista.length})`;
+  });
+  const total = g.selecionados.filter(id=>vis.some(c=>c.id===id)).length;
+  const el = document.getElementById('grafContagem'); if(el) el.textContent = `— ${total} selecionado(s) de ${vis.length}`;
+}
+function ligarFiltrosGraficos(){
+  const g = graficosPrefs();
+  const redesenhar = ()=>{ persist(); const a = document.getElementById('grafArea'); if(a){ a.innerHTML = htmlAreaGraficos(); desenharGraficosSelecionados(); } sincronizarFiltrosGraficos(); };
+  const definir = ids => { g.selecionados = ids.filter(id=>_graficosVisiveis().some(c=>c.id===id)); redesenhar(); };
+  document.getElementById('grafPeriodo')?.addEventListener('change', e=>{
+    g.periodo = e.target.value;
+    document.getElementById('grafCustom').style.display = g.periodo==='custom' ? 'flex' : 'none';
+    if(g.periodo==='custom' && (!g.de || !g.ate)){ const P = periodoGraficos(); g.de = P.de; g.ate = P.ate; document.getElementById('grafDe').value = g.de; document.getElementById('grafAte').value = g.ate; }
+    redesenhar();
+  });
+  ['grafDe','grafAte'].forEach(id=>document.getElementById(id)?.addEventListener('change', e=>{ g[id==='grafDe'?'de':'ate'] = e.target.value; if(g.de && g.ate) redesenhar(); }));
+  document.getElementById('grafPicker')?.addEventListener('click', e=>{
+    const chip = e.target.closest('[data-graf-toggle]');
+    if(chip){ const id = chip.dataset.grafToggle; definir(g.selecionados.includes(id) ? g.selecionados.filter(x=>x!==id) : [...g.selecionados, id]); return; }
+    const gr = e.target.closest('[data-graf-grupo]');
+    if(gr){ e.preventDefault(); const [nome, acao] = gr.dataset.grafGrupo.split('|'); const idsGrupo = _graficosVisiveis().filter(c=>c.grupo===nome).map(c=>c.id);
+      definir(acao==='todos' ? [...new Set([...g.selecionados, ...idsGrupo])] : g.selecionados.filter(id=>!idsGrupo.includes(id))); }
+  });
+  document.querySelectorAll('[data-graf-preset]').forEach(b=>b.addEventListener('click', ()=>{ const k = b.dataset.grafPreset; definir(k==='limpar' ? [] : GRAFICOS_PRESETS[k]||[]); }));
+  document.getElementById('grafArea')?.addEventListener('click', e=>{ const r = e.target.closest('[data-graf-remover]'); if(r) definir(g.selecionados.filter(id=>id!==r.dataset.grafRemover)); });
+  document.getElementById('grafBusca')?.addEventListener('input', e=>{
+    const t = e.target.value.trim().toLowerCase();
+    document.querySelectorAll('[data-graf-toggle]').forEach(b=>{ b.style.display = (!t || b.dataset.busca.includes(t)) ? '' : 'none'; });
+    document.querySelectorAll('details.graf-grupo').forEach(d=>{ const algum = [...d.querySelectorAll('[data-graf-toggle]')].some(b=>b.style.display!=='none'); d.style.display = algum ? '' : 'none'; if(t && algum) d.open = true; });
+  });
+  sincronizarFiltrosGraficos();
+}
+// Chamada ao fim de todo render(): só faz algo quando a Central de Gráficos está aberta.
+function desenharTodosOsGraficosDaCentral(){
+  if(!document.getElementById('grafFiltro')) return;
+  desenharGraficosSelecionados();
+  ligarFiltrosGraficos();
+}
+
 function viewRelatorios(){
   const cards = [
-    { id:'graficos', icone:'📊', nome:'Central de Gráficos', desc:'Vários tipos de gráfico com os dados do sistema — linha, área, barras, pizza, rosca, ranking e radar' , cat:'Visão Geral e Diagnóstico', viewDireta:'graficos' },
+    { id:'graficos', icone:'📊', nome:'Central de Gráficos', desc:'30 gráficos à escolha (linha, barras, pizza, radar, mapa de calor…) — você seleciona quais ver e o período' , cat:'Visão Geral e Diagnóstico', viewDireta:'graficos' },
     { id:'apresentacao_resultados', icone:'📊', nome:'Apresentação de Resultados', desc:'Monta uma apresentação gerencial mensal ou trimestral, pronta pra reunião, a partir dos dados que já existem no sistema' , cat:'Visão Geral e Diagnóstico', viewDireta:'apresentacao-resultados' },
     { id:'gerencial', icone:'📊', nome:'Dashboard Gerencial', desc:'Visão anual completa — receita/despesa por mês, saídas e entradas por categoria, margem de contribuição, lucro e ponto de equilíbrio' , cat:'Visão Geral e Diagnóstico' },
     { id:'executivo', icone:'🧭', nome:'Central Financeira 360°', desc:'Painel único de comando: saúde, dinheiro, resultado, decisões, próximos dias, comercial, investimentos, posição financeira e relatório executivo' , cat:'Visão Geral e Diagnóstico' },
