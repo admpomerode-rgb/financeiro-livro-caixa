@@ -1685,16 +1685,25 @@ function mesEstaFechado(dataISO, mesesFechados){
 function podeFecharMes(mes, mesesFechados){
   return !(mesesFechados||[]).includes(mes);
 }
+// A checagem de permissão fica AQUI DENTRO — não só escondendo o botão na tela — porque é o ponto
+// que qualquer caminho (botão, atalho, console do navegador) precisa passar pra executar de verdade.
+// Sem isso, "fechar_mes" existia na lista de permissões mas nunca era conferido em lugar nenhum.
 function fecharMes(mes, motivo){
+  if(!podeAgora('fechar_mes')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra fechar o mês.'); return false; }
   if(!podeFecharMes(mes, state.mesesFechados)) return false;
   state.mesesFechados.push(mes);
-  state.historicoFechamentoMensal.push({ id: uid(), mes, acao:'fechado', motivo: motivo||null, data: new Date().toISOString() });
+  const quem = emailLogadoAtual();
+  state.historicoFechamentoMensal.push({ id: uid(), mes, acao:'fechado', motivo: motivo||null, usuario: quem, data: new Date().toISOString() });
+  registrarLog('Mês fechado', `${mes} fechado por ${quem||'(sem login)'}`);
   return true;
 }
 function reabrirMes(mes, motivo){
+  if(!podeAgora('reabrir_mes')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra reabrir um mês fechado.'); return false; }
   if(!motivo || !motivo.trim()) return false; // reabertura exige justificativa — "reabertura controlada"
   state.mesesFechados = state.mesesFechados.filter(m=>m!==mes);
-  state.historicoFechamentoMensal.push({ id: uid(), mes, acao:'reaberto', motivo: motivo.trim(), data: new Date().toISOString() });
+  const quem = emailLogadoAtual();
+  state.historicoFechamentoMensal.push({ id: uid(), mes, acao:'reaberto', motivo: motivo.trim(), usuario: quem, data: new Date().toISOString() });
+  registrarLog('Mês reaberto', `${mes} reaberto por ${quem||'(sem login)'} — motivo: ${motivo.trim()}`);
   return true;
 }
 // ---- Detecção de duplicidade e órfão ----
@@ -1731,7 +1740,7 @@ function detectarOrfaos(lancamentos, contasValidas, cartoesValidos){
 // cadastrado, um e-mail fora da lista cai no nível mais restrito (visualização), não em admin.
 // Testada isoladamente antes de usar.
 const PERMISSAO_REGRAS = {
-  admin: ['ver','criar','editar','excluir','fechar_mes','aprovar_qualquer_valor'],
+  admin: ['ver','criar','editar','excluir','fechar_mes','reabrir_mes','aprovar_qualquer_valor'],
   operador: ['ver','criar','editar'],
   visualizacao: ['ver'],
 };
@@ -11484,6 +11493,7 @@ function openImportarFaturaModal(cartaoId, faturaPendenteId){
 }
 
 function publicarFaturaCartao(fatura){
+  if(!podeAgora('criar')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra publicar fatura de cartão.'); return false; }
   const cartao = state.cartoes.find(c=>c.id===fatura.cartaoId);
   if(!cartao) return;
   const itens = (fatura.itens||[]).filter(it=>it.descricao && it.valor);
@@ -12573,6 +12583,49 @@ function desenharGraficosSelecionados(){
     try{ c.desenhar('graf_'+id, d); }catch(e){ console.error('Desenho do gráfico', id, e); }
   });
 }
+// Comparador (item 4.7) — categoria × categoria e cliente/fornecedor × cliente/fornecedor, dentro
+// do MESMO período já escolhido no painel de filtros da Central de Gráficos. Não recalcula nada:
+// usa lancamentosRealizados() e ehMovimentoDeCapital, as mesmas fontes dos outros gráficos.
+let comparadorGraficos = { tipo:'categoria', a:'', b:'' };
+function _comparadorOpcoes(tipo, P){
+  const mov = lancamentosRealizados().filter(l=>l.dataPagamento>=P.de && l.dataPagamento<=P.ate && l.origem!=='transferencia');
+  if(tipo==='categoria'){
+    return [...new Set(mov.filter(l=>l.tipo==='saida' && !ehMovimentoDeCapital(l)).map(l=>l.categoria))].filter(Boolean).sort();
+  }
+  return [...new Set(mov.map(l=>l.fornecedor).filter(Boolean))].sort();
+}
+function _comparadorValor(tipo, nome, P){
+  const mov = lancamentosRealizados().filter(l=>l.dataPagamento>=P.de && l.dataPagamento<=P.ate && l.origem!=='transferencia');
+  if(tipo==='categoria') return mov.filter(l=>l.tipo==='saida' && l.categoria===nome).reduce((s,l)=>s+l.valor,0);
+  return mov.filter(l=>l.fornecedor===nome).reduce((s,l)=>s+l.valor,0);
+}
+function htmlComparadorGraficos(){
+  const P = periodoGraficos();
+  const opcoes = _comparadorOpcoes(comparadorGraficos.tipo, P);
+  const a = comparadorGraficos.a || opcoes[0] || '', b = comparadorGraficos.b || opcoes[1] || '';
+  const valorA = a ? _comparadorValor(comparadorGraficos.tipo, a, P) : null;
+  const valorB = b ? _comparadorValor(comparadorGraficos.tipo, b, P) : null;
+  const dif = (valorA!=null && valorB!=null) ? valorA-valorB : null;
+  const difPct = (dif!=null && valorB>0) ? (dif/valorB*100) : null;
+  const rotuloTipo = comparadorGraficos.tipo==='categoria' ? 'Categoria de despesa' : 'Cliente/fornecedor';
+  return `
+    <div style="font-size:11px;font-weight:700;color:var(--text-soft);margin-bottom:8px;">🔀 COMPARADOR — dentro de ${escapeHTML(P.nome)}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:10px;">
+      <div class="field" style="margin:0;flex:1 1 150px;"><label>Comparar por</label>
+        <select id="cmpTipo"><option value="categoria" ${comparadorGraficos.tipo==='categoria'?'selected':''}>Categoria de despesa</option><option value="fornecedor" ${comparadorGraficos.tipo==='fornecedor'?'selected':''}>Cliente/fornecedor</option></select></div>
+      <div class="field" style="margin:0;flex:1 1 170px;"><label>${rotuloTipo} A</label>
+        <select id="cmpA">${opcoes.map(o=>`<option ${o===a?'selected':''}>${escapeHTML(o)}</option>`).join('')}</select></div>
+      <div class="field" style="margin:0;flex:1 1 170px;"><label>${rotuloTipo} B</label>
+        <select id="cmpB">${opcoes.map(o=>`<option ${o===b?'selected':''}>${escapeHTML(o)}</option>`).join('')}</select></div>
+    </div>
+    ${!opcoes.length ? `<div class="empty">Sem dados suficientes nesse período.</div>` : `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;">
+      <div><div style="font-size:10.5px;color:var(--text-soft);">${escapeHTML(a)||'—'}</div><div class="mono" style="font-size:17px;font-weight:700;">${valorA!=null?brl(valorA):'—'}</div></div>
+      <div><div style="font-size:10.5px;color:var(--text-soft);">${escapeHTML(b)||'—'}</div><div class="mono" style="font-size:17px;font-weight:700;">${valorB!=null?brl(valorB):'—'}</div></div>
+      <div><div style="font-size:10.5px;color:var(--text-soft);">Diferença</div><div class="mono" style="font-size:17px;font-weight:700;color:${dif>0?'var(--danger)':dif<0?'var(--success)':''};">${dif!=null?(dif>=0?'+':'')+brl(dif):'—'}</div>${difPct!=null?`<div style="font-size:10.5px;color:var(--text-soft);">${difPct>=0?'+':''}${difPct.toFixed(1)}%</div>`:''}</div>
+    </div>`}
+  `;
+}
 function viewGraficos(){
   const g = graficosPrefs(), vis = _graficosVisiveis(), grupos = [...new Set(vis.map(c=>c.grupo))];
   const ehCustom = g.periodo==='custom';
@@ -12609,6 +12662,9 @@ function viewGraficos(){
             <div style="display:flex;flex-wrap:wrap;gap:6px;padding-bottom:6px;">${lista.map(chip).join('')}</div>
           </details>`; }).join('')}
       </div>
+    </div></div>
+    <div class="panel" id="grafComparador" style="margin-bottom:14px;"><div class="panel-body" style="padding:14px 16px;">
+      ${htmlComparadorGraficos()}
     </div></div>
     <div id="grafArea">${htmlAreaGraficos()}</div>`;
 }
@@ -12649,6 +12705,12 @@ function ligarFiltrosGraficos(){
     document.querySelectorAll('details.graf-grupo').forEach(d=>{ const algum = [...d.querySelectorAll('[data-graf-toggle]')].some(b=>b.style.display!=='none'); d.style.display = algum ? '' : 'none'; if(t && algum) d.open = true; });
   });
   sincronizarFiltrosGraficos();
+  ligarComparadorGraficos();
+}
+function ligarComparadorGraficos(){
+  document.getElementById('cmpTipo')?.addEventListener('change', e=>{ comparadorGraficos = { tipo:e.target.value, a:'', b:'' }; const el = document.getElementById('grafComparador'); if(el) el.innerHTML = htmlComparadorGraficos(); ligarComparadorGraficos(); });
+  document.getElementById('cmpA')?.addEventListener('change', e=>{ comparadorGraficos.a = e.target.value; const el = document.getElementById('grafComparador'); if(el) el.innerHTML = htmlComparadorGraficos(); ligarComparadorGraficos(); });
+  document.getElementById('cmpB')?.addEventListener('change', e=>{ comparadorGraficos.b = e.target.value; const el = document.getElementById('grafComparador'); if(el) el.innerHTML = htmlComparadorGraficos(); ligarComparadorGraficos(); });
 }
 // Chamada ao fim de todo render(): só faz algo quando a Central de Gráficos está aberta.
 function desenharTodosOsGraficosDaCentral(){
@@ -28885,24 +28947,64 @@ function viewOrcamentosProcessos(){
   `;
 }
 
+// Checklist de pré-fechamento — reaproveita exatamente as funções que já rodam na tela de
+// Verificação de Integridade (nenhuma lógica nova de detecção). 🔴 bloqueia o fechamento; 🟡 só avisa.
+function checklistFechamento(mes){
+  const doMes = l => (l.dataVencimento||'').slice(0,7)===mes;
+  const itens = [];
+  const semCategoria = state.lancamentos.filter(l=>doMes(l) && !l.categoria);
+  itens.push({ nivel: semCategoria.length?'atencao':'ok', titulo:'Lançamentos sem categoria', n:semCategoria.length });
+  const semConta = state.lancamentos.filter(l=>doMes(l) && (l.status==='pago'||l.status==='recebido') && !l.contaId && l.origem!=='investimento');
+  itens.push({ nivel: semConta.length?'atencao':'ok', titulo:'Lançamentos realizados sem conta', n:semConta.length });
+  const dup = detectarDuplicidades(state.lancamentos.filter(doMes), 3).filter(p=>!state.integridadeIgnorados.includes(p[1].id));
+  itens.push({ nivel: dup.length?'atencao':'ok', titulo:'Possíveis duplicidades', n:dup.length });
+  const orf = detectarOrfaos(state.lancamentos.filter(doMes), state.contas, state.cartoes).filter(l=>!state.integridadeIgnorados.includes(l.id));
+  itens.push({ nivel: orf.length?'bloqueio':'ok', titulo:'Lançamentos órfãos (conta/cartão inexistente)', n:orf.length });
+  const pagarPend = state.lancamentos.filter(l=>doMes(l) && l.tipo==='saida' && l.status==='pendente').length;
+  itens.push({ nivel: pagarPend?'atencao':'ok', titulo:'Contas a pagar ainda pendentes no mês', n:pagarPend });
+  const receberPend = state.lancamentos.filter(l=>doMes(l) && l.tipo==='entrada' && l.status==='pendente').length;
+  itens.push({ nivel: receberPend?'atencao':'ok', titulo:'Contas a receber ainda pendentes no mês', n:receberPend });
+  const faturasAbertas = state.cartoes.filter(c=>{ const comp=mes; return (state.comprasCartao||[]).some(x=>x.cartaoId===c.id && x.competencia===comp) && faturaStatus(c.id,comp)!=='paga'; });
+  itens.push({ nivel: faturasAbertas.length?'atencao':'ok', titulo:'Faturas de cartão do mês ainda não pagas', n:faturasAbertas.length });
+  const notasPend = (state.notasPendentes||[]).filter(n=>(n.dataPregao||'').slice(0,7)===mes).length;
+  itens.push({ nivel: notasPend?'atencao':'ok', titulo:'Notas de corretagem do mês aguardando revisão', n:notasPend });
+  const caixaConf = (state.caixaFisicoFechamentos||[]).filter(f=>(f.data||'').slice(0,7)===mes);
+  const diasComMov = new Set(state.lancamentos.filter(l=>doMes(l) && l.origem==='caixa-fisico').map(l=>l.dataVencimento)).size;
+  itens.push({ nivel: (diasComMov>0 && caixaConf.length<diasComMov)?'atencao':'ok', titulo:'Dias de caixa físico sem conferência registrada', n: Math.max(0,diasComMov-caixaConf.length) });
+  const bloqueio = itens.some(i=>i.nivel==='bloqueio');
+  const [ay,am] = mes.split('-').map(Number);
+  const ateMes = `${mes}-${String(new Date(ay,am,0).getDate()).padStart(2,'0')}`;
+  return { itens, bloqueio, resumo: resultadoOperacionalPeriodo(mes+'-01', ateMes) };
+}
 function viewFechamentoMensal(){
   const mesesFechados = (state.mesesFechados||[]).slice().sort().reverse();
   const historico = (state.historicoFechamentoMensal||[]).slice().sort((a,b)=>b.data.localeCompare(a.data)).slice(0,20);
   const mesParaFechar = fechamentoMesSelecionado || mesGlobalRef;
   const pendentesNoMes = state.lancamentos.filter(l=>(l.dataVencimento||'').slice(0,7)===mesParaFechar && l.status==='pendente').length;
   const jaFechado = mesesFechados.includes(mesParaFechar);
+  const podeFechar = podeAgora('fechar_mes'), podeReabrir = podeAgora('reabrir_mes');
+  const chk = jaFechado ? null : checklistFechamento(mesParaFechar);
+  const icone = { ok:'🟢', atencao:'🟡', bloqueio:'🔴' };
 
   return `
     <div class="topbar">
       <div><h1>🔒 Fechamento Mensal</h1><p>Trava um mês contra edição ou exclusão de lançamento sem querer. Reabrir exige justificativa, fica registrado.</p></div>
     </div>
+    ${!podeFechar ? `<div class="note" style="border-color:var(--danger);margin-bottom:16px;">🔒 Seu usuário não tem permissão pra fechar mês. Só administradores conseguem.</div>` : ''}
     <div class="panel" style="margin-bottom:16px;">
       <div class="panel-head"><h2>Fechar um mês</h2></div>
       <div style="padding:16px 18px;">
         <div class="field"><label>Mês</label><input type="month" id="fechamentoMesInput" value="${mesParaFechar}"></div>
-        ${jaFechado ? `<div class="note" style="border-color:var(--accent);">Esse mês já está fechado.</div>` :
+        ${jaFechado ? `<div class="note" style="border-color:var(--accent);">Esse mês já está fechado.</div>` : `
+        <div class="dash-section-label" style="margin:14px 0 4px;">Checklist antes de fechar</div>
+        <div class="panel" style="margin-bottom:8px;"><div class="panel-body" style="padding:4px 16px;">
+          ${chk.itens.map(i=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-top:1px solid var(--line);font-size:13px;"><span>${icone[i.nivel]} ${i.titulo}</span><span class="mono" style="font-weight:600;">${i.n}</span></div>`).join('')}
+        </div></div>
+        <div class="note" style="margin:0 0 10px;">Resumo do mês — Receita ${brl(chk.resumo.receitaTotal)} · Despesa ${brl(chk.resumo.despesaTotal)} · Resultado ${brl(chk.resumo.lucroLiquido)}</div>
+        ${chk.bloqueio ? `<div class="note" style="border-color:var(--danger);">🔴 Tem item que bloqueia o fechamento (veja acima em vermelho). Resolva antes de fechar.</div>` :
           pendentesNoMes>0 ? `<div class="note" style="border-color:var(--amber);">⚠️ Ainda tem ${pendentesNoMes} lançamento(s) pendente(s) nesse mês — fechar mesmo assim não apaga nada, só trava edição, mas confira antes se está tudo certo.</div>` : ''}
-        ${!jaFechado ? `<button class="btn" id="btnFecharMes" style="margin-top:10px;">Fechar ${mesParaFechar}</button>` : ''}
+        `}
+        ${(!jaFechado && podeFechar && !(chk&&chk.bloqueio)) ? `<button class="btn" id="btnFecharMes" style="margin-top:10px;">Fechar ${mesParaFechar}</button>` : ''}
       </div>
     </div>
     <div class="dash-section-label">Meses fechados</div>
@@ -28910,7 +29012,7 @@ function viewFechamentoMensal(){
       <div class="panel" style="margin-bottom:10px;">
         <div style="padding:14px 18px;display:flex;justify-content:space-between;align-items:center;">
           <div style="font-weight:600;">🔒 ${new Date(mes+'-01').toLocaleDateString('pt-BR',{month:'long',year:'numeric'})}</div>
-          <button class="btn ghost sm" data-reabrir-mes="${mes}">Reabrir</button>
+          ${podeReabrir ? `<button class="btn ghost sm" data-reabrir-mes="${mes}">Reabrir</button>` : ''}
         </div>
       </div>`).join('')}
     <div class="dash-section-label" style="margin-top:20px;">Histórico</div>
@@ -29493,23 +29595,61 @@ function intervaloVisao360(visao, hojeISO){
 function viewCaixaFisico(){
   const caixas = (state.contas||[]).filter(c=>c.tipo==='caixa');
   if(!caixas.length) return `<div class="topbar"><div><h1>💵 Caixa Físico</h1><p>Nenhuma conta do tipo "Caixa físico" cadastrada.</p></div></div><div class="empty">Crie uma conta bancária com o tipo "Caixa físico" pra usar sangria, suprimento e fechamento diário.</div>`;
+  const hoje = todayISO(), podeMexer = podeAgora('criar');
   return `
     <div class="topbar"><div><h1>💵 Caixa Físico</h1><p>Sangria, suprimento e conferência de gaveta — só pras contas marcadas como caixa físico.</p></div></div>
+    ${!podeMexer ? `<div class="note" style="border-color:var(--danger);margin-bottom:16px;">🔒 Seu usuário só pode ver — sem permissão pra sangria, suprimento ou fechamento.</div>` : ''}
     ${caixas.map(c=>{
       const saldo = saldoConta(c.id);
-      const historico = (state.fechamentosCaixaFisico||[]).filter(f=>f.contaId===c.id).sort((a,b)=>b.data.localeCompare(a.data)).slice(0,10);
+      const todosFechamentos = (state.fechamentosCaixaFisico||[]).filter(f=>f.contaId===c.id).sort((a,b)=>(b.horaFechamento||b.data).localeCompare(a.horaFechamento||a.data));
+      const historico = todosFechamentos.slice(0,10);
+      const fechouHoje = todosFechamentos.find(f=>f.data===hoje);
+      const statusHoje = !fechouHoje ? { icone:'🟡', texto:'Ainda não conferido hoje' } : fechouHoje.status==='bateu' ? { icone:'🟢', texto:'Conferido — bateu certinho' } : fechouHoje.status==='sobra' ? { icone:'🟡', texto:'Sobrou '+brl(Math.abs(fechouHoje.diferenca)) } : { icone:'🔴', texto:'Faltou '+brl(Math.abs(fechouHoje.diferenca)) };
+      // Resumo do dia (item 9.1): saldo inicial do dia + entradas − saídas + suprimentos − sangrias = esperado agora
+      const saldoInicioDia = saldoContaEmData(c.id, addDiasISO(hoje,-1));
+      const movsHoje = state.lancamentos.filter(l=>l.contaId===c.id && (l.status==='pago'||l.status==='recebido') && l.dataPagamento===hoje);
+      const entradasDia = movsHoje.filter(l=>l.tipo==='entrada' && l.categoria!=='Suprimento de Caixa').reduce((s,l)=>s+l.valor,0);
+      const saidasDia = movsHoje.filter(l=>l.tipo==='saida' && l.categoria!=='Sangria de Caixa').reduce((s,l)=>s+l.valor,0);
+      const suprimentosDia = movsHoje.filter(l=>l.categoria==='Suprimento de Caixa').reduce((s,l)=>s+l.valor,0);
+      const sangriasDia = movsHoje.filter(l=>l.categoria==='Sangria de Caixa').reduce((s,l)=>s+l.valor,0);
+      // Indicadores (9.4)
+      const mes30 = addDiasISO(hoje,-30);
+      const sangriasMes = state.lancamentos.filter(l=>l.contaId===c.id && l.categoria==='Sangria de Caixa' && l.dataPagamento>=mes30).reduce((s,l)=>s+l.valor,0);
+      const suprimentosMes = state.lancamentos.filter(l=>l.contaId===c.id && l.categoria==='Suprimento de Caixa' && l.dataPagamento>=mes30).reduce((s,l)=>s+l.valor,0);
+      const divergentes = todosFechamentos.filter(f=>f.status!=='bateu');
+      const totalFaltante = divergentes.filter(f=>f.status==='falta').reduce((s,f)=>s+Math.abs(f.diferenca),0);
+      const totalExcedente = divergentes.filter(f=>f.status==='sobra').reduce((s,f)=>s+Math.abs(f.diferenca),0);
+      const ultima = todosFechamentos[0];
       return `
       <div class="panel" style="margin-bottom:16px;">
         <div class="panel-head"><h2>${escapeHTML(c.nome)}</h2><span class="mono" style="font-weight:700;">${brl(saldo)}</span></div>
         <div style="padding:14px 18px;">
-          <div class="row">
+          <div style="font-size:13px;font-weight:600;margin-bottom:10px;">${statusHoje.icone} ${statusHoje.texto}</div>
+          ${podeMexer ? `<div class="row">
             <button class="btn ghost sm" data-sangria-caixa="${c.id}">↓ Sangria (retirar)</button>
             <button class="btn ghost sm" data-suprimento-caixa="${c.id}">↑ Suprimento (repor)</button>
             <button class="btn sm" data-fechar-caixa="${c.id}">✓ Fechar o dia</button>
+          </div>` : ''}
+          <div class="dash-section-label" style="margin-top:14px;">Resumo de hoje</div>
+          <div class="report-block">
+            <div class="report-line sub"><span>Saldo no início do dia</span><span class="v">${brl(saldoInicioDia)}</span></div>
+            <div class="report-line sub"><span>(+) Entradas</span><span class="v">${brl(entradasDia)}</span></div>
+            <div class="report-line sub"><span>(−) Saídas</span><span class="v">(${brl(saidasDia)})</span></div>
+            <div class="report-line sub"><span>(+) Suprimentos</span><span class="v">${brl(suprimentosDia)}</span></div>
+            <div class="report-line sub"><span>(−) Sangrias</span><span class="v">(${brl(sangriasDia)})</span></div>
+            <div class="report-line total"><span>(=) Saldo esperado agora</span><span class="v">${brl(saldo)}</span></div>
           </div>
+          <div class="dash-section-label" style="margin-top:14px;">Indicadores (últimos 30 dias)</div>
+          <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));">
+            <div class="card"><div class="label">Sangrias</div><div class="value mono">${brl(sangriasMes)}</div></div>
+            <div class="card"><div class="label">Suprimentos</div><div class="value mono">${brl(suprimentosMes)}</div></div>
+            <div class="card"><div class="label">Total faltante</div><div class="value mono" style="color:${totalFaltante>0?'var(--danger)':''};">${brl(totalFaltante)}</div></div>
+            <div class="card"><div class="label">Total excedente</div><div class="value mono">${brl(totalExcedente)}</div></div>
+          </div>
+          ${ultima ? `<div class="sub" style="font-size:11px;margin-top:8px;">Última conferência: ${fmtDate(ultima.data)}${ultima.responsavel?' · por '+escapeHTML(ultima.responsavel):''}</div>` : ''}
           ${historico.length ? `
           <div class="dash-section-label" style="margin-top:14px;">Últimos fechamentos</div>
-          ${historico.map(f=>`<div class="ledger-row compact"><div class="desc-cell"><div>${f.status==='bateu'?'✅ Bateu certinho':(f.status==='sobra'?'⬆️ Sobrou':'⬇️ Faltou')}</div><div class="cat">${fmtDate(f.data)} · esperado ${brl(f.saldoEsperado)}, contado ${brl(f.valorContado)}</div></div>${f.status!=='bateu'?`<span class="mono ${f.status==='falta'?'neg':'pos'}">${brl(Math.abs(f.diferenca))}</span>`:''}</div>`).join('')}
+          ${historico.map(f=>`<div class="ledger-row compact"><div class="desc-cell"><div>${f.status==='bateu'?'✅ Bateu certinho':(f.status==='sobra'?'⬆️ Sobrou':'⬇️ Faltou')}</div><div class="cat">${fmtDate(f.data)} · esperado ${brl(f.saldoEsperado)}, contado ${brl(f.valorContado)}${f.responsavel?' · '+escapeHTML(f.responsavel):''}${f.motivo?' · "'+escapeHTML(f.motivo)+'"':''}</div></div>${f.status!=='bateu'?`<span class="mono ${f.status==='falta'?'neg':'pos'}">${brl(Math.abs(f.diferenca))}</span>`:''}</div>`).join('')}
           ` : ''}
         </div>
       </div>`;
@@ -34581,6 +34721,7 @@ function attachViewHandlers(){
   }
   const btnFecharFatura = document.getElementById('btnFecharFatura');
   if(btnFecharFatura) btnFecharFatura.addEventListener('click', async ()=>{
+    if(!podeAgora('criar')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra fechar fatura.'); return; }
     const cartao = state.cartoes.find(c=>c.id===faturaCartaoId);
     const comp = faturaCompetenciaAtual;
     const total = totalCompetencia(cartao.id, comp);
@@ -34600,6 +34741,7 @@ function attachViewHandlers(){
       lancAberto.contaId = contaId;
       lancAberto.descricao = `Fatura ${cartao.nome} — ${competenciaLabel(comp)}`;
       state.faturasFechadas.push({ cartaoId: cartao.id, competencia: comp, lancamentoIds:[lancAberto.id], lancamentoId: lancAberto.id });
+      registrarLog('Fatura de cartão fechada', `${cartao.nome} — ${competenciaLabel(comp)} — ${brl(total)} — por ${emailLogadoAtual()||'(sem login)'}`);
       persist(); render();
       showToast('Fatura fechada e lançada em Contas a Pagar');
       return;
@@ -34632,6 +34774,7 @@ function attachViewHandlers(){
       lancamentoIds.push(lancId);
     }
     state.faturasFechadas.push({ cartaoId: cartao.id, competencia: comp, lancamentoIds, lancamentoId: lancamentoIds[0] });
+    registrarLog('Fatura de cartão fechada', `${cartao.nome} — ${competenciaLabel(comp)} — ${brl(total)}${parcelasSaldo>1?' em '+parcelasSaldo+'x':''} — por ${emailLogadoAtual()||'(sem login)'}`);
     persist(); render();
     showToast(parcelasSaldo>1 ? `Fatura fechada e parcelada em ${parcelasSaldo}x em Contas a Pagar` : 'Fatura fechada e lançada em Contas a Pagar');
   });
@@ -34978,34 +35121,50 @@ function attachViewHandlers(){
   });
   document.querySelectorAll('[data-sangria-caixa]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
+      if(!podeAgora('criar')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra mexer no caixa físico.'); return; }
       const valorStr = prompt('Valor da sangria (retirada do caixa físico):');
       if(valorStr===null) return;
       const valor = numBR(valorStr);
       if(!valor || valor<=0){ showToast('Valor inválido.'); return; }
-      state.lancamentos.push({ id: uid(), tipo:'saida', categoria:'Sangria de Caixa', descricao:'Sangria de caixa físico', valor, contaId: btn.dataset.sangriaCaixa, dataVencimento: todayISO(), status:'pago', dataPagamento: todayISO(), criadoEm: new Date().toISOString() });
+      const motivo = (prompt('Motivo da sangria (obrigatório):')||'').trim();
+      if(!motivo){ showToast('Sangria cancelada — o motivo é obrigatório.'); return; }
+      state.lancamentos.push({ id: uid(), tipo:'saida', categoria:'Sangria de Caixa', descricao:`Sangria de caixa físico — ${motivo}`, valor, contaId: btn.dataset.sangriaCaixa, dataVencimento: todayISO(), status:'pago', dataPagamento: todayISO(), criadoEm: new Date().toISOString(), responsavel: emailLogadoAtual()||null });
+      registrarLog('Sangria de caixa físico', `${brl(valor)} — ${motivo} — por ${emailLogadoAtual()||'(sem login)'}`);
       persist(); render(); showToast('Sangria registrada.');
     });
   });
   document.querySelectorAll('[data-suprimento-caixa]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
+      if(!podeAgora('criar')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra mexer no caixa físico.'); return; }
       const valorStr = prompt('Valor do suprimento (reforço no caixa físico):');
       if(valorStr===null) return;
       const valor = numBR(valorStr);
       if(!valor || valor<=0){ showToast('Valor inválido.'); return; }
-      state.lancamentos.push({ id: uid(), tipo:'entrada', categoria:'Suprimento de Caixa', descricao:'Suprimento de caixa físico', valor, contaId: btn.dataset.suprimentoCaixa, dataVencimento: todayISO(), status:'recebido', dataPagamento: todayISO(), criadoEm: new Date().toISOString() });
+      state.lancamentos.push({ id: uid(), tipo:'entrada', categoria:'Suprimento de Caixa', descricao:'Suprimento de caixa físico', valor, contaId: btn.dataset.suprimentoCaixa, dataVencimento: todayISO(), status:'recebido', dataPagamento: todayISO(), criadoEm: new Date().toISOString(), responsavel: emailLogadoAtual()||null });
+      registrarLog('Suprimento de caixa físico', `${brl(valor)} — por ${emailLogadoAtual()||'(sem login)'}`);
       persist(); render(); showToast('Suprimento registrado.');
     });
   });
   document.querySelectorAll('[data-fechar-caixa]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
+      if(!podeAgora('criar')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra fechar o caixa físico.'); return; }
       const contaId = btn.dataset.fecharCaixa;
+      // Não deixa fechar o mesmo dia duas vezes sem perceber — evita confundir com uma conferência já feita hoje.
+      const jaFechouHoje = (state.fechamentosCaixaFisico||[]).some(f=>f.contaId===contaId && f.data===todayISO());
+      if(jaFechouHoje && !confirm('Esse caixa já foi conferido hoje. Registrar uma NOVA conferência mesmo assim (as duas ficam no histórico)?')) return;
       const saldoEsperado = saldoConta(contaId);
       const valorStr = prompt(`Quanto tem de verdade na gaveta agora? (esperado: ${brl(saldoEsperado)})`);
       if(valorStr===null) return;
       const valorContado = numBR(valorStr);
       if(isNaN(valorContado)){ showToast('Valor inválido.'); return; }
       const { diferenca, status } = calcularFechamentoCaixa(saldoEsperado, valorContado);
-      state.fechamentosCaixaFisico.push({ id: uid(), contaId, data: todayISO(), saldoEsperado, valorContado, diferenca, status });
+      let motivo = null;
+      if(status!=='bateu'){
+        motivo = (prompt(`${status==='sobra'?'Sobrou':'Faltou'} ${brl(Math.abs(diferenca))}. Motivo/observação (obrigatório):`)||'').trim();
+        if(!motivo){ showToast('Fechamento cancelado — com diferença, o motivo é obrigatório.'); return; }
+      }
+      state.fechamentosCaixaFisico.push({ id: uid(), contaId, data: todayISO(), horaFechamento: new Date().toISOString(), saldoEsperado, valorContado, diferenca, status, motivo, responsavel: emailLogadoAtual()||null });
+      registrarLog('Fechamento de caixa físico', `${status} ${brl(Math.abs(diferenca))} — por ${emailLogadoAtual()||'(sem login)'}${motivo?' — '+motivo:''}`);
       persist(); render();
       showToast(status==='bateu' ? 'Bateu certinho!' : `${status==='sobra'?'Sobrou':'Faltou'} ${brl(Math.abs(diferenca))} — registrado.`);
     });
@@ -38783,15 +38942,17 @@ function viewCentrosCusto(){
     ${resumo.rankingCentros.length ? `
     <div class="dash-section-label">🎯 Orçamento × Realizado por centro</div>
     <div class="panel" style="margin-bottom:14px;"><div class="panel-body" style="padding:0;overflow-x:auto;">
-      <div class="ledger-row head" style="grid-template-columns:1fr 110px 110px 110px 80px;min-width:520px;"><span>Centro</span><span>Orçado</span><span>Realizado</span><span>Diferença</span><span>%</span></div>
-      <div style="min-width:520px;">
+      <div class="ledger-row head" style="grid-template-columns:1fr 90px 110px 110px 110px 80px;min-width:600px;"><span>Centro</span><span>Participação</span><span>Orçado</span><span>Realizado</span><span>Diferença</span><span>%</span></div>
+      <div style="min-width:600px;">
         ${resumo.rankingCentros.map(c=>{
           const orcC = orc[c.nome];
           const temOrcamento = orcC>0;
           const diferencaC = temOrcamento ? c.valor-orcC : null;
           const pctC = temOrcamento ? Math.round(c.valor/orcC*100) : null;
-          return `<div class="ledger-row compact" style="grid-template-columns:1fr 110px 110px 110px 80px;">
+          const participacao = resumo.total>0 ? (c.valor/resumo.total*100) : 0;
+          return `<div class="ledger-row compact" style="grid-template-columns:1fr 90px 110px 110px 110px 80px;">
             <span style="font-size:12.5px;">${escapeHTML(c.nome)}</span>
+            <span class="mono" style="font-size:11.5px;">${participacao.toFixed(1)}%</span>
             <span class="mono" style="font-size:11.5px;color:${temOrcamento?'inherit':'var(--text-soft)'};">${temOrcamento?brl(orcC):'Não informado'}</span>
             <span class="mono" style="font-size:11.5px;">${brl(c.valor)}</span>
             <span class="mono" style="font-size:11.5px;color:${!temOrcamento?'var(--text-soft)':diferencaC>0?'var(--danger)':'var(--success)'};">${temOrcamento?(diferencaC>=0?'+':'')+brl(diferencaC):'—'}</span>
@@ -38930,6 +39091,7 @@ function openOrcamentoCentroCustoModal(){
   document.getElementById('btnSalvarOrcamentoCentroCusto').addEventListener('click', ()=>{
     const btn_btnSalvarOrcamentoCentroCusto_Click = document.getElementById('btnSalvarOrcamentoCentroCusto');
     if(btn_btnSalvarOrcamentoCentroCusto_Click.disabled) return;
+    if(!podeAgora('criar')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra alterar orçamento de centro de custo.'); return; }
     btn_btnSalvarOrcamentoCentroCusto_Click.disabled = true;
     try{
     const novo = {};
@@ -38938,6 +39100,7 @@ function openOrcamentoCentroCustoModal(){
       if(!isNaN(v) && v>0) novo[inp.dataset.centro] = v;
     });
     state.orcamentoCentrosCusto = novo;
+    registrarLog('Orçamento de centro de custo alterado', `${Object.keys(novo).length} centro(s) definido(s) — por ${emailLogadoAtual()||'(sem login)'}`);
     persist(); closeModal(); render();
     showToast('Orçamentos salvos');
   
