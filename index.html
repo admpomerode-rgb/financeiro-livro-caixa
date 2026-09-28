@@ -2214,7 +2214,7 @@ function viewCustosMargemProdutos(){
     label = new Date(anoM, mesM-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
   }
 
-  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
+  const realizados = lancamentosRealizados().filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
 
   const comFicha = (state.custosProdutosVK||[]).filter(c=>c.custoUnitario!==null);
   const semFicha = (state.custosProdutosVK||[]).filter(c=>c.custoUnitario===null);
@@ -9550,7 +9550,7 @@ function gerarExtratoConsolidadoPDF(){
     docPdf.text(brl(saldoConta(conta.id)), M+W, y, { align:'right' });
     y += 6;
 
-    const lista = state.lancamentos.filter(l=>l.contaId===conta.id && (l.status==='pago'||l.status==='recebido') && l.dataPagamento>=de && l.dataPagamento<=hoje).sort((a,b)=>(a.dataPagamento||'').localeCompare(b.dataPagamento||''));
+    const lista = lancamentosRealizados().filter(l=>l.contaId===conta.id && (l.status==='pago'||l.status==='recebido') && l.dataPagamento>=de && l.dataPagamento<=hoje).sort((a,b)=>(a.dataPagamento||'').localeCompare(b.dataPagamento||''));
     if(!lista.length){
       docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...SOFT);
       docPdf.text('Sem movimentação no mês.', M, y);
@@ -13930,7 +13930,7 @@ function renderRentabilidadeProduto(periodo){
     label = 'Período personalizado';
   }
 
-  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
+  const realizados = lancamentosRealizados().filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
   const porProduto = {};
   realizados.forEach(l=>{
     const tag = l.produtoTag || 'Não classificado';
@@ -15258,7 +15258,7 @@ function renderCentralAlertas(){
   const orc = state.orcamentoCategorias||{};
   const deMes = `${hoje.slice(0,7)}-01`;
   Object.entries(orc).forEach(([cat,limite])=>{
-    const gasto = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.categoria===cat && l.dataPagamento>=deMes && l.dataPagamento<=hoje).reduce((s,l)=>s+l.valor,0);
+    const gasto = lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.categoria===cat && l.dataPagamento>=deMes && l.dataPagamento<=hoje).reduce((s,l)=>s+l.valor,0);
     if(limite>0 && gasto>limite) alertas.push({ icone:'🔴', titulo:`Orçamento de "${cat}" estourado`, texto:`${brl(gasto)} de ${brl(limite)}`, view:'orcamento' });
   });
 
@@ -15406,8 +15406,8 @@ function renderCargaTributaria(mesRef){
   const [anoM, mesM] = mesRef.split('-').map(Number);
   const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
   const deAno = `${anoM}-01-01`;
-  const impostosMes = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de && l.dataPagamento<=ate && (l.categoria==='Impostos'||(l.categoria||'').startsWith('Impostos / '))).reduce((s,l)=>s+l.valor,0);
-  const impostosAno = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=deAno && l.dataPagamento<=ate && (l.categoria==='Impostos'||(l.categoria||'').startsWith('Impostos / '))).reduce((s,l)=>s+l.valor,0);
+  const impostosMes = lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de && l.dataPagamento<=ate && (l.categoria==='Impostos'||(l.categoria||'').startsWith('Impostos / '))).reduce((s,l)=>s+l.valor,0);
+  const impostosAno = lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=deAno && l.dataPagamento<=ate && (l.categoria==='Impostos'||(l.categoria||'').startsWith('Impostos / '))).reduce((s,l)=>s+l.valor,0);
   const { receitaTotal } = resultadoOperacionalPeriodo(de, ate);
   const cargaPct = receitaTotal>0 ? (impostosMes/receitaTotal*100) : 0;
   const dasEstimado = state.balancoManual?.aliquotaEfetiva ? receitaTotal * (state.balancoManual.aliquotaEfetiva/100) : null;
@@ -16554,7 +16554,7 @@ function renderLimiteCreditoDisponivel(){
 // 80. Multas e Penalidades Pagas — usa o campo ehMulta do lançamento
 function renderMultasPenalidades(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
-  const multas = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.ehMulta && l.dataPagamento>=de && l.dataPagamento<=ate);
+  const multas = lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.ehMulta && l.dataPagamento>=de && l.dataPagamento<=ate);
   const total = multas.reduce((s,l)=>s+l.valor,0);
   return `
     <div class="note" style="margin-top:0;">Últimos 12 meses. Só conta despesas marcadas com o checkbox "É multa/penalidade" no lançamento.</div>
@@ -17367,7 +17367,7 @@ function renderVendasCanceladas(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
   const canceladas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='cancelado' && l.dataVencimento>=de && l.dataVencimento<=ate);
   const totalCancelado = canceladas.reduce((s,l)=>s+l.valor,0);
-  const totalRecebido = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+  const totalRecebido = lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
   const pctImpacto = (totalRecebido+totalCancelado)>0 ? (totalCancelado/(totalRecebido+totalCancelado)*100) : 0;
   const porCliente = {};
   canceladas.forEach(l=>{ const n=l.fornecedor||'Sem identificação'; porCliente[n]=(porCliente[n]||0)+l.valor; });
@@ -17681,8 +17681,8 @@ function renderSuperRelatorioAnual(ano){
   const melhorMes = [...dados].sort((a,b)=>b.lucro-a.lucro)[0];
   const piorMes = [...dados].sort((a,b)=>a.lucro-b.lucro)[0];
   const { de:deAno, ate:ateAno } = { de:`${ano}-01-01`, ate: ano.toString()===hoje.slice(0,4) ? hoje : `${ano}-12-31` };
-  const clientesAno = new Set(state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=deAno && l.dataPagamento<=ateAno).map(l=>l.fornecedor)).size;
-  const fornecedoresAno = new Set(state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.fornecedor && l.dataPagamento>=deAno && l.dataPagamento<=ateAno).map(l=>l.fornecedor)).size;
+  const clientesAno = new Set(lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=deAno && l.dataPagamento<=ateAno).map(l=>l.fornecedor)).size;
+  const fornecedoresAno = new Set(lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.fornecedor && l.dataPagamento>=deAno && l.dataPagamento<=ateAno).map(l=>l.fornecedor)).size;
   const porCategoriaAno = {};
   dados.forEach(d=>Object.entries(d.despesasPorCategoria).forEach(([c,v])=>{ porCategoriaAno[c]=(porCategoriaAno[c]||0)+v; }));
   const topDespesa = Object.entries(porCategoriaAno).sort((a,b)=>b[1]-a[1])[0];
@@ -17744,10 +17744,10 @@ function renderCrescimentoClientes(mesRef){
   const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
   const mesPassadoRef = (()=>{ const d=new Date(anoM,mesM-2,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; })();
   const dePassado = `${mesPassadoRef}-01`, atePassado = `${mesPassadoRef}-31`;
-  const clientesQueCompraram = (deP,ateP) => new Set(state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=deP && l.dataPagamento<=ateP).map(l=>l.fornecedor));
+  const clientesQueCompraram = (deP,ateP) => new Set(lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=deP && l.dataPagamento<=ateP).map(l=>l.fornecedor));
   const clientesMes = clientesQueCompraram(de, ate);
   const clientesMesPassado = clientesQueCompraram(dePassado, atePassado);
-  const clientesAntesDoMes = new Set(state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento<de).map(l=>l.fornecedor));
+  const clientesAntesDoMes = new Set(lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento<de).map(l=>l.fornecedor));
   const novos = [...clientesMes].filter(c=>!clientesAntesDoMes.has(c));
   const recuperados = [...clientesMes].filter(c=>clientesAntesDoMes.has(c) && !clientesMesPassado.has(c));
   const ativosContinuos = [...clientesMes].filter(c=>clientesMesPassado.has(c));
@@ -18117,7 +18117,7 @@ function renderRiscoCaixaPorData(){
 // 16. Rentabilidade por Forma de Pagamento — usa custoProdutoVendido agrupado por formaPagamento
 function renderRentabilidadeFormaPagamento(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
-  const vendas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.formaPagamento && l.dataPagamento>=de && l.dataPagamento<=ate);
+  const vendas = lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.formaPagamento && l.dataPagamento>=de && l.dataPagamento<=ate);
   const porForma = {};
   vendas.forEach(l=>{
     if(!porForma[l.formaPagamento]) porForma[l.formaPagamento] = { receita:0, custo:0, temCusto:0, qtd:0 };
@@ -18373,7 +18373,7 @@ function renderDiagnosticoAutomatico(mesRef){
   // Concentração de clientes
   const { de:de12m, ate:ate12m } = ultimos12MesesAte(mesRef);
   const porCliente = {};
-  state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=de12m && l.dataPagamento<=ate12m).forEach(l=>{ porCliente[l.fornecedor]=(porCliente[l.fornecedor]||0)+l.valor; });
+  lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=de12m && l.dataPagamento<=ate12m).forEach(l=>{ porCliente[l.fornecedor]=(porCliente[l.fornecedor]||0)+l.valor; });
   const totalCli = Object.values(porCliente).reduce((a,b)=>a+b,0);
   const top3 = Object.values(porCliente).sort((a,b)=>b-a).slice(0,3).reduce((a,b)=>a+b,0);
   const pctTop3 = totalCli>0 ? (top3/totalCli*100) : 0;
@@ -18497,7 +18497,7 @@ function renderCustoEfetivoConta(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
   const dados = state.contas.map(c=>{
     const movimentado = movimentosRealizados().filter(ev=>ev.contaId===c.id && ev.data>=de && ev.data<=ate).reduce((s,ev)=>s+ev.valor,0);
-    const tarifas = state.lancamentos.filter(l=>l.contaId===c.id && l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de && l.dataPagamento<=ate && /taxa|tarifa|anuidade|manuten[çc][ãa]o.*conta/i.test(l.descricao+' '+(l.categoria||''))).reduce((s,l)=>s+l.valor,0);
+    const tarifas = lancamentosRealizados().filter(l=>l.contaId===c.id && l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de && l.dataPagamento<=ate && /taxa|tarifa|anuidade|manuten[çc][ãa]o.*conta/i.test(l.descricao+' '+(l.categoria||''))).reduce((s,l)=>s+l.valor,0);
     return { nome:c.nome, movimentado, tarifas, pctCusto: movimentado>0 ? (tarifas/movimentado*100) : null };
   }).filter(d=>d.movimentado>0 || d.tarifas>0).sort((a,b)=>b.tarifas-a.tarifas);
   return `
@@ -18732,7 +18732,7 @@ function renderEfeitoDominoFinanceiro(){
   const hoje = todayISO();
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
   const porCliente = {};
-  state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{ porCliente[l.fornecedor]=(porCliente[l.fornecedor]||0)+l.valor; });
+  lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{ porCliente[l.fornecedor]=(porCliente[l.fornecedor]||0)+l.valor; });
   const clientesTop = Object.entries(porCliente).sort((a,b)=>b[1]-a[1]).slice(0,15).map(([nome])=>nome);
   const pendentesDoCliente = {};
   clientesTop.forEach(nome=>{
@@ -18803,7 +18803,7 @@ function renderRiscoAumentoFornecedor(){
 // Custo Oculto dos Fornecedores — cruza preço + prazo + frequência num score simples
 function renderCustoOcultoFornecedores(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
-  const compras = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate);
+  const compras = lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate);
   const porFornecedor = {};
   compras.forEach(l=>{
     if(!porFornecedor[l.fornecedor]) porFornecedor[l.fornecedor] = { valor:0, qtd:0, atrasos:[] };
@@ -18832,7 +18832,7 @@ function renderCustoOcultoFornecedores(){
 // Cliente que Dá Trabalho e Pouco Resultado — muitas transações, baixo ticket ou baixa margem
 function renderClienteDaTrabalhoPoucoResultado(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
-  const vendas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate);
+  const vendas = lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate);
   const porCliente = {};
   vendas.forEach(l=>{
     if(!porCliente[l.fornecedor]) porCliente[l.fornecedor] = { valor:0, qtd:0, custo:0, temCusto:0 };
@@ -18859,7 +18859,7 @@ function renderClienteDaTrabalhoPoucoResultado(){
 // Cliente Mais Valioso — combina receita + margem + frequência + pontualidade num score
 function renderClienteMaisValioso(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
-  const vendas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate);
+  const vendas = lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate);
   const porCliente = {};
   vendas.forEach(l=>{
     if(!porCliente[l.fornecedor]) porCliente[l.fornecedor] = { valor:0, qtd:0, custo:0, temCusto:0, atrasos:[] };
@@ -19008,7 +19008,7 @@ function renderOQueFariaSeFosseDono(){
 
   const { de:de12m, ate:ate12m } = ultimos12MesesAte(mesGlobalRef);
   const porCliente = {};
-  state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=de12m && l.dataPagamento<=ate12m).forEach(l=>{ porCliente[l.fornecedor]=(porCliente[l.fornecedor]||0)+l.valor; });
+  lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=de12m && l.dataPagamento<=ate12m).forEach(l=>{ porCliente[l.fornecedor]=(porCliente[l.fornecedor]||0)+l.valor; });
   const totalCli = Object.values(porCliente).reduce((a,b)=>a+b,0);
   const top3valor = Object.values(porCliente).sort((a,b)=>b-a).slice(0,3).reduce((a,b)=>a+b,0);
   const pctTop3 = totalCli>0 ? (top3valor/totalCli*100) : 0;
@@ -19384,7 +19384,7 @@ function renderSaudePorArea(){
 
   const { de:de12m, ate:ate12m } = ultimos12MesesAte(mesGlobalRef);
   const porCliente = {};
-  state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=de12m && l.dataPagamento<=ate12m).forEach(l=>{ porCliente[l.fornecedor]=(porCliente[l.fornecedor]||0)+l.valor; });
+  lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=de12m && l.dataPagamento<=ate12m).forEach(l=>{ porCliente[l.fornecedor]=(porCliente[l.fornecedor]||0)+l.valor; });
   const totalCli = Object.values(porCliente).reduce((a,b)=>a+b,0);
   const top1 = Math.max(0,...Object.values(porCliente));
   const pctTop1 = totalCli>0 ? (top1/totalCli*100) : 0;
@@ -19449,7 +19449,7 @@ function renderIndiceGeralGestao(){
 
   const { de:de12m, ate:ate12m } = ultimos12MesesAte(mesGlobalRef);
   const porCliente = {};
-  state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=de12m && l.dataPagamento<=ate12m).forEach(l=>{ porCliente[l.fornecedor]=(porCliente[l.fornecedor]||0)+l.valor; });
+  lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=de12m && l.dataPagamento<=ate12m).forEach(l=>{ porCliente[l.fornecedor]=(porCliente[l.fornecedor]||0)+l.valor; });
   const totalCli = Object.values(porCliente).reduce((a,b)=>a+b,0);
   const top1 = Math.max(0,...Object.values(porCliente));
   const pctTop1 = totalCli>0 ? (top1/totalCli*100) : 0;
@@ -19519,7 +19519,7 @@ function renderDNAFinanceiro(){
 
   const { de:de12m, ate:ate12m } = ultimos12MesesAte(mesGlobalRef);
   const porCliente = {};
-  state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=de12m && l.dataPagamento<=ate12m).forEach(l=>{ porCliente[l.fornecedor]=(porCliente[l.fornecedor]||0)+l.valor; });
+  lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=de12m && l.dataPagamento<=ate12m).forEach(l=>{ porCliente[l.fornecedor]=(porCliente[l.fornecedor]||0)+l.valor; });
   const totalCli = Object.values(porCliente).reduce((a,b)=>a+b,0);
   const top1 = Math.max(0,...Object.values(porCliente));
   const pctTop1 = totalCli>0 ? (top1/totalCli*100) : 0;
@@ -19559,7 +19559,7 @@ function verificarAutomacoes(){
   (state.automacoes||[]).filter(a=>a.ativo).forEach(regra=>{
     if(regra.tipo==='separar_percentual_receita'){
       const deMes = `${hoje.slice(0,7)}-01`;
-      const receitaMes = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento>=deMes && l.dataPagamento<=hoje).reduce((s,l)=>s+l.valor,0);
+      const receitaMes = lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento>=deMes && l.dataPagamento<=hoje).reduce((s,l)=>s+l.valor,0);
       const valorSugerido = receitaMes*(regra.percentual/100);
       if(valorSugerido>0) sugestoes.push({ regraId:regra.id, texto:`Separar ${brl(valorSugerido)} (${regra.percentual}% da receita do mês, ${brl(receitaMes)}) para "${regra.nomeSeparacao}"` });
     } else if(regra.tipo==='avisar_caixa_acima'){
@@ -19570,8 +19570,8 @@ function verificarAutomacoes(){
       const mesAnt = m===1?`${a-1}-12`:`${a}-${String(m-1).padStart(2,'0')}`;
       const deMesAnt = `${mesAnt}-01`, ateMesAnt = `${mesAnt}-31`;
       const deMes = `${hoje.slice(0,7)}-01`;
-      const gastoAnterior = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.categoria===regra.categoria && l.dataPagamento>=deMesAnt && l.dataPagamento<=ateMesAnt).reduce((s,l)=>s+l.valor,0);
-      const gastoAtual = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.categoria===regra.categoria && l.dataPagamento>=deMes && l.dataPagamento<=hoje).reduce((s,l)=>s+l.valor,0);
+      const gastoAnterior = lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.categoria===regra.categoria && l.dataPagamento>=deMesAnt && l.dataPagamento<=ateMesAnt).reduce((s,l)=>s+l.valor,0);
+      const gastoAtual = lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.categoria===regra.categoria && l.dataPagamento>=deMes && l.dataPagamento<=hoje).reduce((s,l)=>s+l.valor,0);
       if(gastoAnterior>0){
         const varPct = (gastoAtual-gastoAnterior)/gastoAnterior*100;
         if(varPct>=regra.percentualLimite) sugestoes.push({ regraId:regra.id, texto:`"${regra.categoria}" subiu ${varPct.toFixed(0)}% em relação ao mês passado (${brl(gastoAnterior)} → ${brl(gastoAtual)}).` });
@@ -19819,7 +19819,7 @@ function renderMovimentacoesAltoValor(mesRef){
   mesRef = mesRef || mesGlobalRef;
   const [anoM,mesM] = mesRef.split('-').map(Number);
   const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
-  const entradas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate).sort((a,b)=>b.valor-a.valor).slice(0,10);
+  const entradas = lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate).sort((a,b)=>b.valor-a.valor).slice(0,10);
   const saidas = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=de && l.dataPagamento<=ate).sort((a,b)=>b.valor-a.valor).slice(0,10);
   const bloco = (titulo, lista, cor) => `
     <div class="dash-section-label">${titulo}</div>
@@ -19862,7 +19862,7 @@ function renderPontualidadePagamento(){
 // Pontualidade e Prazo Real de Recebimento — mesmo conceito, do lado dos clientes
 function renderPontualidadeRecebimento(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
-  const recebidos = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataVencimento && l.dataPagamento>=de && l.dataPagamento<=ate);
+  const recebidos = lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataVencimento && l.dataPagamento>=de && l.dataPagamento<=ate);
   let antes=0, noDia=0, depois=0; const diffs=[];
   recebidos.forEach(l=>{
     const diff = Math.round((new Date(l.dataPagamento)-new Date(l.dataVencimento))/86400000);
@@ -19939,8 +19939,8 @@ function renderCustoAtrasoPagamentos(){
 function renderRentabilidadePorContaBancaria(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
   const dados = state.contas.map(c=>{
-    const tarifas = state.lancamentos.filter(l=>l.contaId===c.id && l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de && l.dataPagamento<=ate && /taxa|tarifa|anuidade|manuten[çc][ãa]o.*conta/i.test(l.descricao+' '+(l.categoria||''))).reduce((s,l)=>s+l.valor,0);
-    const rendimentos = state.lancamentos.filter(l=>l.contaId===c.id && l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento>=de && l.dataPagamento<=ate && /rendimento|juros.*conta/i.test(l.descricao)).reduce((s,l)=>s+l.valor,0);
+    const tarifas = lancamentosRealizados().filter(l=>l.contaId===c.id && l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de && l.dataPagamento<=ate && /taxa|tarifa|anuidade|manuten[çc][ãa]o.*conta/i.test(l.descricao+' '+(l.categoria||''))).reduce((s,l)=>s+l.valor,0);
+    const rendimentos = lancamentosRealizados().filter(l=>l.contaId===c.id && l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento>=de && l.dataPagamento<=ate && /rendimento|juros.*conta/i.test(l.descricao)).reduce((s,l)=>s+l.valor,0);
     return { nome:c.nome, tarifas, rendimentos, resultado: rendimentos-tarifas };
   }).filter(d=>d.tarifas>0 || d.rendimentos>0);
   return `
@@ -19991,7 +19991,7 @@ function renderClienteMaisCaroAtender(){
 // Clientes Mais Pontuais — ranking por comportamento de pagamento
 function renderClientesMaisPontuais(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
-  const recebidos = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.fornecedor && l.dataVencimento && l.dataPagamento>=de && l.dataPagamento<=ate);
+  const recebidos = lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.fornecedor && l.dataVencimento && l.dataPagamento>=de && l.dataPagamento<=ate);
   const porCliente = {};
   recebidos.forEach(l=>{
     const diff = Math.round((new Date(l.dataPagamento)-new Date(l.dataVencimento))/86400000);
@@ -20050,7 +20050,7 @@ function renderEvolucaoIndividualCliente(clienteEscolhido){
   if(!clienteEscolhido) clienteEscolhido = todosClientes[0]||'';
   const porMes = meses.map(m=>{
     const de = `${m}-01`, ate = `${m}-31`;
-    const valor = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor===clienteEscolhido && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+    const valor = lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor===clienteEscolhido && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
     return { mes:m, valor };
   });
   const valores = porMes.map(p=>p.valor);
@@ -20070,8 +20070,8 @@ function renderClientesAumentaramReduziram(){
   const de2 = new Date(hoje.getFullYear(), hoje.getMonth()-6, 1).toISOString().slice(0,10);
   const ate2 = new Date(hoje.getFullYear(), hoje.getMonth()-3, 0).toISOString().slice(0,10);
   const porClienteRecente = {}, porClienteAnterior = {};
-  state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=de1 && l.dataPagamento<=ate1).forEach(l=>{ porClienteRecente[l.fornecedor]=(porClienteRecente[l.fornecedor]||0)+l.valor; });
-  state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=de2 && l.dataPagamento<=ate2).forEach(l=>{ porClienteAnterior[l.fornecedor]=(porClienteAnterior[l.fornecedor]||0)+l.valor; });
+  lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=de1 && l.dataPagamento<=ate1).forEach(l=>{ porClienteRecente[l.fornecedor]=(porClienteRecente[l.fornecedor]||0)+l.valor; });
+  lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=de2 && l.dataPagamento<=ate2).forEach(l=>{ porClienteAnterior[l.fornecedor]=(porClienteAnterior[l.fornecedor]||0)+l.valor; });
   const todosNomes = [...new Set([...Object.keys(porClienteRecente),...Object.keys(porClienteAnterior)])];
   const comparativo = todosNomes.map(nome=>{
     const recente = porClienteRecente[nome]||0, anterior = porClienteAnterior[nome]||0;
@@ -20095,7 +20095,7 @@ function renderClientesAumentaramReduziram(){
 // Ranking de Fornecedores — consolida "mais econômico", "mais caro" e "mais utilizado" numa lista só
 function renderRankingFornecedores(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
-  const compras = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate);
+  const compras = lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate);
   const porFornecedor = {};
   compras.forEach(l=>{
     if(!porFornecedor[l.fornecedor]) porFornecedor[l.fornecedor] = { valor:0, qtd:0 };
@@ -20124,8 +20124,8 @@ function renderEvolucaoPrecoFornecedor(){
   const de2 = new Date(hoje.getFullYear(), hoje.getMonth()-6, 1).toISOString().slice(0,10);
   const ate2 = new Date(hoje.getFullYear(), hoje.getMonth()-3, 0).toISOString().slice(0,10);
   const porFornRecente = {}, porFornAnterior = {};
-  state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.fornecedor && l.dataPagamento>=de1 && l.dataPagamento<=ate1).forEach(l=>{ porFornRecente[l.fornecedor]=(porFornRecente[l.fornecedor]||0)+l.valor; });
-  state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.fornecedor && l.dataPagamento>=de2 && l.dataPagamento<=ate2).forEach(l=>{ porFornAnterior[l.fornecedor]=(porFornAnterior[l.fornecedor]||0)+l.valor; });
+  lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.fornecedor && l.dataPagamento>=de1 && l.dataPagamento<=ate1).forEach(l=>{ porFornRecente[l.fornecedor]=(porFornRecente[l.fornecedor]||0)+l.valor; });
+  lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.fornecedor && l.dataPagamento>=de2 && l.dataPagamento<=ate2).forEach(l=>{ porFornAnterior[l.fornecedor]=(porFornAnterior[l.fornecedor]||0)+l.valor; });
   const nomes = [...new Set([...Object.keys(porFornRecente),...Object.keys(porFornAnterior)])];
   const comparativo = nomes.map(nome=>{
     const recente = porFornRecente[nome]||0, anterior = porFornAnterior[nome]||0;
@@ -20146,7 +20146,7 @@ function renderCustoRealCartoes(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
   const dados = state.cartoes.map(c=>{
     const compras = (state.comprasCartao||[]).filter(cc=>cc.cartaoId===c.id && cc.data>=de && cc.data<=ate).reduce((s,cc)=>s+cc.valor,0);
-    const tarifasJuros = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.contaId===c.id && l.dataPagamento>=de && l.dataPagamento<=ate && /anuidade|juros|tarifa|iof/i.test(l.descricao+' '+(l.categoria||''))).reduce((s,l)=>s+l.valor,0);
+    const tarifasJuros = lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.contaId===c.id && l.dataPagamento>=de && l.dataPagamento<=ate && /anuidade|juros|tarifa|iof/i.test(l.descricao+' '+(l.categoria||''))).reduce((s,l)=>s+l.valor,0);
     return { nome:c.nome, compras, tarifasJuros, total:compras+tarifasJuros };
   }).filter(d=>d.total>0);
   return `
@@ -20232,7 +20232,7 @@ function renderVelocidadeCrescimento(){
   const { de:de12m, ate:ate12m } = ultimos12MesesAte(mesGlobalRef);
   const clientesPorMes = meses.map(m=>{
     const de = `${m}-01`, ate = `${m}-31`;
-    return new Set(state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate).map(l=>l.fornecedor)).size;
+    return new Set(lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate).map(l=>l.fornecedor)).size;
   });
   const itens = [
     { nome:'Receita', pct: calcularSlopePct(receitas) },
@@ -20332,8 +20332,8 @@ function renderOQueEstaDrenandoDinheiro(){
   state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{ porCategoria[l.categoria||'Sem categoria']=(porCategoria[l.categoria||'Sem categoria']||0)+l.valor; });
   const ranking = Object.entries(porCategoria).sort((a,b)=>b[1]-a[1]).slice(0,8);
   const porCategoriaRecente = {}, porCategoriaAnterior = {};
-  state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de1 && l.dataPagamento<=ate1).forEach(l=>{ porCategoriaRecente[l.categoria||'Sem categoria']=(porCategoriaRecente[l.categoria||'Sem categoria']||0)+l.valor; });
-  state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de2 && l.dataPagamento<=ate2).forEach(l=>{ porCategoriaAnterior[l.categoria||'Sem categoria']=(porCategoriaAnterior[l.categoria||'Sem categoria']||0)+l.valor; });
+  lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de1 && l.dataPagamento<=ate1).forEach(l=>{ porCategoriaRecente[l.categoria||'Sem categoria']=(porCategoriaRecente[l.categoria||'Sem categoria']||0)+l.valor; });
+  lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de2 && l.dataPagamento<=ate2).forEach(l=>{ porCategoriaAnterior[l.categoria||'Sem categoria']=(porCategoriaAnterior[l.categoria||'Sem categoria']||0)+l.valor; });
   let maiorAumento = null;
   Object.keys(porCategoriaRecente).forEach(cat=>{
     const anterior = porCategoriaAnterior[cat]||0;
@@ -20355,7 +20355,7 @@ function renderOQueEstaDrenandoDinheiro(){
 function renderOndeEstouGanhandoDinheiro(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
   const porCanal = {};
-  state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.canalVenda && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{
+  lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.canalVenda && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{
     if(!porCanal[l.canalVenda]) porCanal[l.canalVenda] = { receita:0, custo:0, temCusto:0 };
     porCanal[l.canalVenda].receita += l.valor;
     if(l.custoProdutoVendido!=null){ porCanal[l.canalVenda].custo += l.custoProdutoVendido; porCanal[l.canalVenda].temCusto += 1; }
@@ -20395,8 +20395,8 @@ function renderOndeEstouPerdendoDinheiro(){
   const de2 = new Date(hoje.getFullYear(), hoje.getMonth()-6, 1).toISOString().slice(0,10);
   const ate2 = new Date(hoje.getFullYear(), hoje.getMonth()-3, 0).toISOString().slice(0,10);
   const porFornRecente = {}, porFornAnterior = {};
-  state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.fornecedor && l.dataPagamento>=de1 && l.dataPagamento<=ate1).forEach(l=>{ porFornRecente[l.fornecedor]=(porFornRecente[l.fornecedor]||0)+l.valor; });
-  state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.fornecedor && l.dataPagamento>=de2 && l.dataPagamento<=ate2).forEach(l=>{ porFornAnterior[l.fornecedor]=(porFornAnterior[l.fornecedor]||0)+l.valor; });
+  lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.fornecedor && l.dataPagamento>=de1 && l.dataPagamento<=ate1).forEach(l=>{ porFornRecente[l.fornecedor]=(porFornRecente[l.fornecedor]||0)+l.valor; });
+  lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.fornecedor && l.dataPagamento>=de2 && l.dataPagamento<=ate2).forEach(l=>{ porFornAnterior[l.fornecedor]=(porFornAnterior[l.fornecedor]||0)+l.valor; });
   Object.keys(porFornRecente).forEach(nome=>{
     const anterior = porFornAnterior[nome]||0;
     if(anterior>0){
@@ -20415,7 +20415,7 @@ function renderTaxasTarifasBancarias(mesRef){
   mesRef = mesRef || mesGlobalRef;
   const [anoM, mesM] = mesRef.split('-').map(Number);
   const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
-  const taxas = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de && l.dataPagamento<=ate && /taxa|tarifa|anuidade|manuten[çc][ãa]o.*conta/i.test(l.descricao+' '+(l.categoria||'')));
+  const taxas = lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de && l.dataPagamento<=ate && /taxa|tarifa|anuidade|manuten[çc][ãa]o.*conta/i.test(l.descricao+' '+(l.categoria||'')));
   const total = taxas.reduce((s,l)=>s+l.valor,0);
   return `
     <div class="report-controls"><input type="month" id="taxasBancMes" value="${mesRef}"></div>
@@ -20497,7 +20497,7 @@ function renderTaxaRecompra(){
 function renderLTVeCAC(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
   const receitaTotal12m = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
-  const clientesUnicos = new Set(state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate).map(l=>l.fornecedor)).size;
+  const clientesUnicos = new Set(lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate).map(l=>l.fornecedor)).size;
   const ticketMedioAnual = clientesUnicos>0 ? receitaTotal12m/clientesUnicos : 0;
   const marketingGasto = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && (l.categoria==='Marketing'||(l.categoria||'').startsWith('Marketing / ')) && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
   const cac = clientesUnicos>0 ? marketingGasto/clientesUnicos : 0;
@@ -20625,7 +20625,7 @@ function renderFluxoCaixaLivre(mesRef){
   const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
   const dadosMes = dadosMesGerencial(mesRef, 'todos');
   const ebitdaMes = ebitdaPeriodo(de, ate, 1);
-  const investimentoAtivos = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.categoria==='Ativos Patrimoniais' && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+  const investimentoAtivos = lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.categoria==='Ativos Patrimoniais' && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
   const fcl = ebitdaMes - investimentoAtivos;
   return `
     <div class="report-controls"><input type="month" id="fclMes" value="${mesRef}"></div>
@@ -20660,7 +20660,7 @@ function renderCVLMultiproduto(mesRef){
   const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
   const produtos = (state.custosProdutosVK||[]).filter(c=>c.custoUnitario!==null && c.precoVendaVK>0);
   const linhas = produtos.map(p=>{
-    const vendas = state.lancamentos.filter(l=>l.produtoTag===p.nome && l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento>=de && l.dataPagamento<=ate);
+    const vendas = lancamentosRealizados().filter(l=>l.produtoTag===p.nome && l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento>=de && l.dataPagamento<=ate);
     const receita = vendas.reduce((s,l)=>s+l.valor,0);
     const qtd = p.precoVendaVK>0 ? receita/p.precoVendaVK : 0;
     const margemContribUnit = p.precoVendaVK - p.custoUnitario;
@@ -20801,7 +20801,7 @@ function renderFormasPagamento(mesRef){
   mesRef = mesRef || mesGlobalRef;
   const [anoM, mesM] = mesRef.split('-').map(Number);
   const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
-  const realizados = state.lancamentos.filter(l=>l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
+  const realizados = lancamentosRealizados().filter(l=>l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
   const comForma = realizados.filter(l=>l.formaPagamento);
   const semForma = realizados.length - comForma.length;
   const porForma = {};
@@ -20918,7 +20918,7 @@ function renderPontoEquilibrioProduto(mesRef){
   const produtos = (state.custosProdutosVK||[]).filter(c=>c.custoUnitario!==null && c.precoVendaVK>0);
   const receitaMesTotal = dadosMes.receita;
   const linhas = produtos.map(p=>{
-    const realizadosProduto = state.lancamentos.filter(l=>l.produtoTag===p.nome && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido'));
+    const realizadosProduto = lancamentosRealizados().filter(l=>l.produtoTag===p.nome && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido'));
     const receitaProduto = realizadosProduto.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+l.valor,0);
     const participacao = receitaMesTotal>0 ? receitaProduto/receitaMesTotal : 0;
     const custoFixoAlocado = dadosMes.custoFixo * participacao;
@@ -20952,7 +20952,7 @@ function renderMetasComerciais(mesRef){
   const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
   const vendedoresComMeta = (state.vendedores||[]).filter(v=>v.metaMensal>0);
   const linhas = vendedoresComMeta.map(v=>{
-    const vendas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.vendedorId===v.id && l.dataPagamento>=de && l.dataPagamento<=ate);
+    const vendas = lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.vendedorId===v.id && l.dataPagamento>=de && l.dataPagamento<=ate);
     const vendido = vendas.reduce((s,l)=>s+l.valor,0);
     const pct = v.metaMensal>0 ? Math.min(150, vendido/v.metaMensal*100) : 0;
     return { nome:v.nome, vendido, meta:v.metaMensal, pct, valoresVenda: vendas.map(l=>l.valor) };
@@ -21145,7 +21145,7 @@ function renderHealthScore(){
 // 13. Eficiência de Cobrança — prazo médio entre vencimento e recebimento de fato + taxa de sucesso
 function renderEficienciaCobranca(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
-  const recebidos = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate && l.dataVencimento);
+  const recebidos = lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate && l.dataVencimento);
   const atrasos = recebidos.map(l=>{ const dv = new Date(l.dataVencimento), dp = new Date(l.dataPagamento); return Math.round((dp-dv)/86400000); });
   const mediaDias = atrasos.length ? atrasos.reduce((a,b)=>a+b,0)/atrasos.length : 0;
   const noPrazoOuAntes = atrasos.filter(a=>a<=0).length;
@@ -21239,7 +21239,7 @@ function renderRankingVolumeMargem(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
   const produtos = (state.custosProdutosVK||[]).filter(c=>c.custoUnitario!==null && c.precoVendaVK>0);
   const linhas = produtos.map(p=>{
-    const vendas = state.lancamentos.filter(l=>l.produtoTag===p.nome && l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento>=de && l.dataPagamento<=ate);
+    const vendas = lancamentosRealizados().filter(l=>l.produtoTag===p.nome && l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento>=de && l.dataPagamento<=ate);
     const receita = vendas.reduce((s,l)=>s+l.valor,0);
     const qtdEstimada = p.precoVendaVK>0 ? receita/p.precoVendaVK : 0;
     const margemUnitPct = p.precoVendaVK>0 ? ((p.precoVendaVK-p.custoUnitario)/p.precoVendaVK*100) : 0;
@@ -22314,7 +22314,7 @@ function renderDashboardExecutivo(){
 function renderRelatorioABCClientes(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
   const porCliente = {};
-  state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{
+  lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate).forEach(l=>{
     const nome = l.fornecedor || 'Sem identificação';
     if(!porCliente[nome]) porCliente[nome] = { valor:0, qtd:0 };
     porCliente[nome].valor += l.valor;
@@ -22400,7 +22400,7 @@ function renderRelatorioABCDespesas(){
 
 function renderRelatorioABCFornecedores(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
-  const compras = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate);
+  const compras = lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.fornecedor && l.dataPagamento>=de && l.dataPagamento<=ate);
   const porFornecedor = {};
   compras.forEach(l=>{
     if(!porFornecedor[l.fornecedor]) porFornecedor[l.fornecedor] = { valor:0, qtd:0, somaPrazo:0, qtdComPrazo:0 };
@@ -22514,8 +22514,8 @@ function renderRelatorioCanalVenda(){
   const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
   const deMes = `${mesGlobalRef}-01`;
   const ateMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
-  const vendas = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.canalVenda && l.dataPagamento>=deMes && l.dataPagamento<=ateMes);
-  const semCanal = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && !l.canalVenda && l.origem!=='transferencia' && l.dataPagamento>=deMes && l.dataPagamento<=ateMes);
+  const vendas = lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.canalVenda && l.dataPagamento>=deMes && l.dataPagamento<=ateMes);
+  const semCanal = lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && !l.canalVenda && l.origem!=='transferencia' && l.dataPagamento>=deMes && l.dataPagamento<=ateMes);
 
   const porCanal = {};
   vendas.forEach(l=>{
@@ -22550,7 +22550,7 @@ function renderRelatorioBreakEven(){
   const [anoM, mesM] = mesGlobalRef.split('-').map(Number);
   const deMes = `${mesGlobalRef}-01`;
   const ateMes = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
-  const receitaMes = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=deMes && l.dataPagamento<=ateMes).reduce((s,l)=>s+l.valor,0);
+  const receitaMes = lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=deMes && l.dataPagamento<=ateMes).reduce((s,l)=>s+l.valor,0);
   const despesasMes = {};
   state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=deMes && l.dataPagamento<=ateMes).forEach(l=>{
     despesasMes[l.categoria] = (despesasMes[l.categoria]||0) + l.valor;
@@ -22607,7 +22607,7 @@ function renderRelatorioBreakEven(){
 
 function renderRelatorioValuation(){
   const { de, ate } = ultimos12MesesAte(mesGlobalRef);
-  const receita12m = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+  const receita12m = lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
   const despesas12m = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
   const ebitdaEstimado = receita12m - despesas12m;
   const multEbitda = state.valuationConfig?.multEbitda ?? 4;
@@ -24217,7 +24217,7 @@ function viewCapex(){
   // realizado = pago de verdade (ativo patrimonial), olhando a data de pagamento — testado isolado.
   const meses12 = Array.from({length:12},(_,i)=>{ const d=new Date(); d.setMonth(d.getMonth()-(11-i)); return d.toISOString().slice(0,7); });
   const pagoPorMes = {};
-  state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem==='ativo_patrimonial' && l.dataPagamento).forEach(l=>{
+  lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem==='ativo_patrimonial' && l.dataPagamento).forEach(l=>{
     const mes = l.dataPagamento.slice(0,7);
     pagoPorMes[mes] = (pagoPorMes[mes]||0) + l.valor;
   });
@@ -24300,7 +24300,7 @@ function viewCapex(){
       ${(()=>{
         const mesAtual = hoje.slice(0,7);
         const capexPagoMes = pagoPorMes[mesAtual]||0;
-        const totalSaidasMes = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento && l.dataPagamento.slice(0,7)===mesAtual && l.origem!=='transferencia').reduce((s,l)=>s+l.valor,0);
+        const totalSaidasMes = lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento && l.dataPagamento.slice(0,7)===mesAtual && l.origem!=='transferencia').reduce((s,l)=>s+l.valor,0);
         const pct = totalSaidasMes>0 ? Math.round(capexPagoMes/totalSaidasMes*100) : null;
         return `<div class="row" style="gap:24px;flex-wrap:wrap;">
           <div><div class="label" style="font-size:11px;color:var(--text-soft);">CAPEX pago esse mês</div><div class="mono" style="font-size:18px;font-weight:700;">${brl(capexPagoMes)}</div></div>
@@ -24390,7 +24390,7 @@ function renderCapexFCL(mesRef){
   const [anoM,mesM] = mesRef.split('-').map(Number);
   const de = `${mesRef}-01`, ate = `${mesRef}-${String(new Date(anoM,mesM,0).getDate()).padStart(2,'0')}`;
   const ebitdaMes = ebitdaPeriodo(de, ate, 1);
-  const investimentoAtivos = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.categoria==='Ativos Patrimoniais' && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+  const investimentoAtivos = lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.categoria==='Ativos Patrimoniais' && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
   const fcl = ebitdaMes - investimentoAtivos;
   return `
     <div class="report-controls"><input type="month" id="capexFclMes" value="${mesRef}"></div>
@@ -36697,8 +36697,8 @@ function aumentoPrecoFornecedor(nome){
   const hoje = todayISO();
   const de90 = new Date(todayISO()+'T12:00:00'); de90.setDate(de90.getDate()-90);
   const de180 = new Date(todayISO()+'T12:00:00'); de180.setDate(de180.getDate()-180);
-  const recentes = state.lancamentos.filter(l=>l.tipo==='saida' && l.fornecedor===nome && l.status==='pago' && l.dataPagamento>=de90.toISOString().slice(0,10));
-  const anteriores = state.lancamentos.filter(l=>l.tipo==='saida' && l.fornecedor===nome && l.status==='pago' && l.dataPagamento>=de180.toISOString().slice(0,10) && l.dataPagamento<de90.toISOString().slice(0,10));
+  const recentes = lancamentosRealizados().filter(l=>l.tipo==='saida' && l.fornecedor===nome && l.status==='pago' && l.dataPagamento>=de90.toISOString().slice(0,10));
+  const anteriores = lancamentosRealizados().filter(l=>l.tipo==='saida' && l.fornecedor===nome && l.status==='pago' && l.dataPagamento>=de180.toISOString().slice(0,10) && l.dataPagamento<de90.toISOString().slice(0,10));
   if(!recentes.length || !anteriores.length) return null;
   const mediaRecente = recentes.reduce((s,l)=>s+l.valor,0)/recentes.length;
   const mediaAnterior = anteriores.reduce((s,l)=>s+l.valor,0)/anteriores.length;
@@ -38454,7 +38454,7 @@ function tipoCustoDaCategoria(nomeCategoria){
   return cat?.tipoCusto || null;
 }
 function lancamentosCentroCustoNoPeriodo(dataDe, dataAte){
-  return state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.categoria!=='Ativos Patrimoniais' && l.dataPagamento>=dataDe && l.dataPagamento<=dataAte);
+  return lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.categoria!=='Ativos Patrimoniais' && l.dataPagamento>=dataDe && l.dataPagamento<=dataAte);
 }
 function dadosCentroCusto(dataDe, dataAte, filtros){
   filtros = filtros || {};
