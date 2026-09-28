@@ -11989,13 +11989,15 @@ function periodoTrimestral(anoTri, tri){
 // existente (não é uma segunda fórmula, é a mesma, só isolada numa função pra poder ser chamada
 // também daqui sem duplicar a lógica).
 function patrimonioLiquidoResumo(){
-  const caixaBancos = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+  // Um único cadastro incompleto (ex.: insumo sem valorTotal) não pode contaminar tudo com NaN.
+  const num = v => Number.isFinite(v) ? v : 0;
+  const caixaBancos = num(state.contas.reduce((s,c)=>s+saldoConta(c.id),0));
   const aReceber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
   const aPagar = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
   const cartoesNaoFaturados = state.cartoes.reduce((s,c)=>{ const comp=competenciaAtual(c); return s+(faturaStatus(c.id,comp)==='aberta'?totalCompetencia(c.id,comp):0); },0);
-  const investimentos = totalInvestimentos();
-  const ativoImobilizado = totalAtivosPatrimoniais();
-  const estoqueInsumos = totalEstoqueInsumos();
+  const investimentos = num(totalInvestimentos());
+  const ativoImobilizado = num(totalAtivosPatrimoniais());
+  const estoqueInsumos = num(totalEstoqueInsumos());
   const adiantamentoClientes = (state.creditosClientes||[]).reduce((s,c)=>s+Math.max(0,c.valor-(c.valorUsado||0)),0);
   const emprestimosSaldo = (state.emprestimos||[]).reduce((s,e)=>s+Math.max(0,(e.numeroParcelas-e.parcelasPagas))*e.valorParcela,0);
   const totalAtivo = caixaBancos+aReceber+investimentos+ativoImobilizado+estoqueInsumos;
@@ -21362,6 +21364,492 @@ function renderDashboardGerencial(ano, centroCusto){
   `;
 }
 
+// ============================================================
+// COCKPIT EXECUTIVO (Fase A) — camada de comando NO TOPO do Dashboard Executivo. Não calcula nada
+// por conta própria: reaproveita saldoConta/valorEmAberto (caixa e pendências), o mesmo resumo
+// patrimonial do Balanço (patrimonioLiquidoResumo), resultadoOperacionalPeriodo (DRE), o motor
+// de alertas gerarInsightsFinanceiros e os cadastros de estoque/investimentos/processos.
+// Regra: onde não há dado, mostra "Sem dados suficientes" — nunca R$ 0 como se fosse informação —
+// e uma falha num bloco não derruba os outros (aparece "Tentar novamente").
+// ============================================================
+let __cockpitHorizonte = 30; // aba ativa do bloco 'Próximos dias' (30/60/90)
+function cockpitExecutivoHTML(ctx){
+  const hoje = todayISO();
+  const seguro = (titulo, fn)=>{
+    try{ return fn(); }
+    catch(e){
+      console.error('Cockpit Executivo —', titulo, e);
+      return `<div class="panel" style="margin-bottom:12px;"><div class="panel-body" style="padding:10px 14px;font-size:12px;color:var(--text-soft);">Não foi possível carregar "${titulo}". <span style="color:var(--blue-accent);cursor:pointer;" data-action="ir-para-alerta" data-view="${currentView}">Tentar novamente</span></div></div>`;
+    }
+  };
+  const bola = s => s==='ok'?'🟢':s==='atencao'?'🟡':s==='critico'?'🔴':s==='restrito'?'🔒':'⚪';
+  const corBorda = s => s==='ok'?'var(--success)':s==='atencao'?'var(--warn)':s==='critico'?'var(--danger)':'var(--line)';
+  const semDados = '<span style="color:var(--text-soft);">Sem dados suficientes.</span>';
+  const info = txt => `<span title="${escapeHTML(txt)}" style="cursor:help;color:var(--text-soft);font-size:11px;">ⓘ</span>`;
+  const pat = patrimonioLiquidoResumo();
+
+  // ---------- SAÚDE POR ÁREA — cada estado tem uma regra explícita e um "por quê" baseado nos dados ----------
+  const saude = seguro('Saúde da empresa', ()=>{
+    const areas = [];
+    // Financeiro
+    { const pendSaida = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente');
+      const atrasadas = pendSaida.filter(l=>l.dataVencimento<hoje);
+      const pagar15 = pendSaida.filter(l=>l.dataVencimento>=hoje && l.dataVencimento<=addDiasISO(hoje,15)).reduce((s,l)=>s+valorEmAberto(l),0);
+      const neg = projecaoDiariaSaldo(90).pontos.find(p=>p.saldo<0);
+      let st='ok', why='Sem contas em atraso e sem saldo projetado negativo nos próximos 90 dias.';
+      if(!state.contas.length && !state.lancamentos.length){ st='sem'; why='Sem dados suficientes.'; }
+      else if(neg){ st='critico'; why=`O saldo projetado fica negativo em ${fmtDate(neg.data)}.`; }
+      else if(atrasadas.length){ st='atencao'; why=`${atrasadas.length} conta(s) a pagar em atraso, somando ${brl(atrasadas.reduce((s,l)=>s+valorEmAberto(l),0))}.`; }
+      else if(pat.caixaBancos>0 && pagar15>pat.caixaBancos*0.5){ st='atencao'; why=`Pagamentos dos próximos 15 dias (${brl(pagar15)}) somam ${(pagar15/pat.caixaBancos*100).toFixed(0)}% do caixa.`; }
+      areas.push({ nome:'Financeiro', st, why, view:'pagar' }); }
+    // Comercial
+    { const v = ctx.receitaAnt>0 ? ((ctx.receitaTotal/ctx.receitaAnt)-1)*100 : null;
+      let st='sem', why='Sem dados suficientes.';
+      if(v!==null){ st = v<=-10 ? 'atencao' : 'ok'; why = `Receita ${v>=0?'+':''}${v.toFixed(1)}% em relação ao mês anterior.`; }
+      areas.push({ nome:'Comercial', st, why, view:'receber' }); }
+    // Operacional — produção/pedidos/O.S. ficam no VK Industrial; o Livro Caixa não guarda esses dados
+    areas.push({ nome:'Operacional', st:'sem', why:'Produção e O.S. ficam no VK Industrial — sem dados aqui.', view:null });
+    // Estoque
+    { const comMin = (state.estoqueInsumos||[]).filter(i=>i.estoqueMinimo>0);
+      const abaixo = comMin.filter(i=>i.quantidade<i.estoqueMinimo);
+      let st = !comMin.length ? 'sem' : abaixo.length ? 'atencao' : 'ok';
+      areas.push({ nome:'Estoque', st, why: !comMin.length ? 'Sem dados suficientes.' : abaixo.length ? `${abaixo.length} insumo(s) abaixo do estoque mínimo.` : 'Nenhum insumo abaixo do mínimo.', relatorio:'estoque_abaixo_minimo' }); }
+    // Investimentos (respeita permissão)
+    { if(!usuarioPodeVerTela('investimentos')) areas.push({ nome:'Investimentos', st:'restrito', why:'Sem acesso a esta área.', view:null });
+      else { const ativos = state.ativosInvestimento.filter(a=>!a.resgatado);
+        const rfVenc = ativosVencidosRF().length, notasPend = (state.notasPendentes||[]).length;
+        let st = !ativos.length ? 'sem' : (rfVenc||notasPend) ? 'atencao' : 'ok';
+        let why = !ativos.length ? 'Sem dados suficientes.' : rfVenc ? `${rfVenc} aplicação(ões) de renda fixa vencida(s) aguardando resgate.` : notasPend ? `${notasPend} nota(s) de corretagem aguardando aprovação.` : `Posição de ${brl(pat.investimentos)} sem pendências.`;
+        areas.push({ nome:'Investimentos', st, why, view:'investimentos' }); } }
+    // Processos (respeita permissão)
+    { if(!usuarioPodeVerTela('orcamentos-processos')) areas.push({ nome:'Processos', st:'restrito', why:'Sem acesso a esta área.', view:null });
+      else { const orc = state.orcamentosProcessos||[]; const pend = orc.filter(o=>o.status==='pendente');
+        let st = !orc.length ? 'sem' : pend.length ? 'atencao' : 'ok';
+        areas.push({ nome:'Processos', st, why: !orc.length ? 'Sem dados suficientes.' : pend.length ? `${pend.length} orçamento(s) aguardando sua decisão (${brl(pend.reduce((s,o)=>s+(o.valorTotal||0),0))}).` : 'Nenhum orçamento pendente.', view:'orcamentos-processos' }); } }
+    const avaliadas = areas.filter(a=>a.st==='ok'||a.st==='atencao'||a.st==='critico');
+    const geral = !avaliadas.length ? 'sem' : avaliadas.some(a=>a.st==='critico') ? 'critico' : avaliadas.some(a=>a.st==='atencao') ? 'atencao' : 'ok';
+    const rotuloGeral = { ok:'NORMAL', atencao:'ATENÇÃO', critico:'CRÍTICO', sem:'SEM DADOS SUFICIENTES' }[geral];
+    const nAtencao = avaliadas.filter(a=>a.st!=='ok').length;
+    return `
+    <div class="panel" style="margin-bottom:12px;border-left:4px solid ${corBorda(geral)};">
+      <div class="panel-body" style="padding:12px 16px;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+          <div style="font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--text-soft);">SAÚDE DA EMPRESA ${info('Estado geral = a pior situação entre as áreas com dados. Cada área mostra abaixo a regra que a classificou.')}</div>
+          <div style="font-size:11px;color:var(--text-soft);">${nAtencao?nAtencao+' área(s) pedem atenção':'Nenhuma área pede atenção'}</div>
+        </div>
+        <div style="font-size:20px;font-weight:700;margin:4px 0 10px;">${bola(geral)} ${rotuloGeral}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;">
+          ${areas.map(a=>{
+            const clic = a.view || a.relatorio;
+            const attrs = !clic ? '' : a.relatorio ? `data-action="ir-para-insight" data-goto="relatorio" data-relatorio="${a.relatorio}"` : `data-action="ir-para-alerta" data-view="${a.view}"`;
+            return `<div ${attrs} style="border:1px solid var(--line);border-left:3px solid ${corBorda(a.st)};border-radius:8px;padding:8px 10px;${clic?'cursor:pointer;':''}">
+              <div style="font-size:12px;font-weight:700;">${bola(a.st)} ${a.nome}</div>
+              <div style="font-size:11.5px;color:var(--text-soft);margin-top:2px;line-height:1.35;">${escapeHTML(a.why)}</div>
+            </div>`; }).join('')}
+        </div>
+      </div>
+    </div>`;
+  });
+
+  // ---------- RADAR EXECUTIVO — reaproveita o motor de alertas existente + processos e notas pendentes ----------
+  const radar = seguro('Radar executivo', ()=>{
+    const itens = gerarInsightsFinanceiros().filter(i=>i.tipo==='risco'||i.tipo==='atencao').map(i=>({ tipo:i.tipo, titulo:i.titulo, texto:i.texto, goto:i.goto, view:i.view, relatorio:i.relatorio, origem:'Financeiro' }));
+    if(usuarioPodeVerTela('orcamentos-processos')){
+      const pend = (state.orcamentosProcessos||[]).filter(o=>o.status==='pendente');
+      if(pend.length) itens.push({ tipo:'atencao', titulo:`${pend.length} orçamento(s) aguardando decisão`, texto:`Somam ${brl(pend.reduce((s,o)=>s+(o.valorTotal||0),0))} — veja a fila de Aprovação de Orçamentos.`, goto:'view', view:'orcamentos-processos', origem:'Processos' });
+    }
+    if(usuarioPodeVerTela('investimentos')){
+      const notas = (state.notasPendentes||[]).length;
+      if(notas) itens.push({ tipo:'atencao', titulo:`${notas} nota(s) de corretagem aguardando revisão`, texto:'Enquanto não forem publicadas, as operações não entram na posição.', goto:'view', view:'investimentos', origem:'Investimentos' });
+    }
+    itens.sort((a,b)=>(a.tipo==='risco'?0:1)-(b.tipo==='risco'?0:1));
+    const mostrar = itens.slice(0,8);
+    return `
+    <div class="panel" style="margin-bottom:12px;">
+      <div class="panel-body" style="padding:12px 16px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--text-soft);">🚨 RADAR EXECUTIVO ${info('Situações identificadas nos dados existentes. Não é previsão: só aparece o que já está lançado/cadastrado.')}</div>
+        <div style="font-size:15px;font-weight:600;margin:2px 0 8px;">O que precisa da minha atenção hoje?</div>
+        ${!mostrar.length ? `<div style="font-size:13px;color:var(--text-soft);padding:6px 0;">Nada relevante identificado hoje. ✅</div>` : mostrar.map(i=>`
+          <div style="display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line);">
+            <span style="font-size:15px;">${i.tipo==='risco'?'🔴':'🟡'}</span>
+            <div style="min-width:0;">
+              <div style="font-size:13px;font-weight:600;">${escapeHTML(i.titulo)} <span style="font-size:10px;font-weight:600;color:var(--text-soft);border:1px solid var(--line);border-radius:10px;padding:1px 6px;margin-left:4px;">${i.origem}</span></div>
+              <div style="font-size:11.5px;color:var(--text-soft);line-height:1.35;">${escapeHTML(i.texto)}</div>
+            </div>
+            <button class="btn ghost sm" data-action="ir-para-insight" data-goto="${i.goto}" data-view="${i.view||''}" data-relatorio="${i.relatorio||''}">Ver</button>
+          </div>`).join('')}
+        ${itens.length>8?`<div style="font-size:11px;color:var(--text-soft);padding-top:6px;">+ ${itens.length-8} outro(s) na Central de Alertas.</div>`:''}
+      </div>
+    </div>`;
+  });
+
+  // ---------- DINHEIRO ----------
+  const dinheiro = seguro('Dinheiro', ()=>{
+    if(!state.contas.length) return `<div class="panel" style="margin-bottom:12px;"><div class="panel-body" style="padding:12px 16px;"><div style="font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--text-soft);">💰 DINHEIRO</div><div style="padding:6px 0;">${semDados}</div></div></div>`;
+    const em30 = addDiasISO(hoje,30);
+    const pagar30 = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.dataVencimento<=em30).reduce((s,l)=>s+valorEmAberto(l),0);
+    const receber30 = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.dataVencimento<=em30).reduce((s,l)=>s+valorEmAberto(l),0);
+    const projetado = pat.caixaBancos + receber30 - pagar30;
+    const pct = pat.caixaBancos>0 ? (pagar30/pat.caixaBancos*100) : null;
+    const cel = (rot, val, sub, cor, tip, goto)=>`<div ${goto?`data-action="ir-para-alerta" data-view="${goto}" style="cursor:pointer;"`:''}><div style="font-size:10.5px;color:var(--text-soft);">${rot} ${tip?info(tip):''}</div><div class="mono" style="font-size:17px;font-weight:700;${cor?'color:'+cor+';':''}">${val}</div>${sub?`<div style="font-size:10.5px;color:var(--text-soft);">${sub}</div>`:''}</div>`;
+    return `
+    <div class="panel" style="margin-bottom:12px;">
+      <div class="panel-body" style="padding:12px 16px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--text-soft);margin-bottom:8px;">💰 DINHEIRO</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;">
+          ${cel('Caixa disponível', brl(pat.caixaBancos), 'saldo de todas as contas', pat.caixaBancos<0?'var(--danger)':'', 'Mesmo saldo usado no Balanço Patrimonial.', 'contas')}
+          ${cel('Comprometido (30 dias)', brl(pagar30), 'a pagar até '+fmtDate(em30), '', 'Contas a pagar pendentes com vencimento em até 30 dias (inclui atrasadas).', 'pagar')}
+          ${cel('A receber (30 dias)', brl(receber30), 'até '+fmtDate(em30), '', 'Contas a receber pendentes com vencimento em até 30 dias (inclui atrasadas).', 'receber')}
+          ${cel('Saldo projetado (30 dias)', brl(projetado), 'caixa + a receber − a pagar', projetado<0?'var(--danger)':'', 'Projeção simples só com o que já está lançado — não considera vendas ou despesas futuras ainda não lançadas.', 'fluxo')}
+        </div>
+        ${pct!==null && pagar30>0 ? `<div style="font-size:12px;margin-top:8px;color:var(--text-soft);">📌 <strong>${pct.toFixed(0)}%</strong> do caixa disponível já está comprometido nos próximos 30 dias.</div>` : ''}
+      </div>
+    </div>`;
+  });
+
+  // ---------- RESULTADO E PATRIMÔNIO ----------
+  const resultado = seguro('Resultado e patrimônio', ()=>{
+    const ant = resultadoOperacionalPeriodo(ctx.deAnt, ctx.ateAnt);
+    const varPct = (a,b)=> b!==0 ? ((a-b)/Math.abs(b)*100) : null;
+    const linha = (rot, atual, anterior, tip, bomSubir)=>{
+      const p = varPct(atual, anterior);
+      const bom = p===null ? null : (bomSubir ? p>=0 : p<=0);
+      return `<div><div style="font-size:10.5px;color:var(--text-soft);">${rot} ${tip?info(tip):''}</div><div class="mono" style="font-size:17px;font-weight:700;">${brl(atual)}</div>${p!==null?`<div style="font-size:10.5px;color:${bom?'var(--success)':'var(--danger)'};">${p>=0?'+':''}${p.toFixed(1)}% vs mês anterior (${brl(atual-anterior)})</div>`:'<div style="font-size:10.5px;color:var(--text-soft);">sem base de comparação</div>'}</div>`;
+    };
+    const temMov = ctx.receitaTotal>0 || ctx.despesaTotal>0;
+    return `
+    <div class="panel" style="margin-bottom:12px;">
+      <div class="panel-body" style="padding:12px 16px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--text-soft);margin-bottom:8px;">📊 RESULTADO E PATRIMÔNIO — ${competenciaLabel(mesGlobalRef)}</div>
+        ${!temMov ? `<div style="padding:4px 0 8px;">${semDados}</div>` : `
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;">
+          ${linha('Receita', ctx.receitaTotal, ant.receitaTotal, 'Mesma receita da DRE do período.', true)}
+          ${linha('Despesas', ctx.despesaTotal, ant.despesaTotal, 'Mesmas despesas da DRE do período.', false)}
+          ${linha('Resultado', ctx.lucroLiquido, ant.lucroLiquido, 'Resultado = receitas − despesas do período, conforme a DRE (não é uma fórmula separada).', true)}
+        </div>
+        <div style="text-align:right;margin-top:6px;"><button class="btn ghost sm" data-action="ir-para-insight" data-goto="relatorio" data-relatorio="dre">Abrir DRE</button></div>`}
+        <div style="border-top:1px solid var(--line);margin:8px 0;"></div>
+        ${(pat.totalAtivo===0 && pat.totalPassivo===0) ? `<div style="padding:2px 0;">${semDados}</div>` : `
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;">
+          <div><div style="font-size:10.5px;color:var(--text-soft);">Ativos</div><div class="mono" style="font-size:15px;font-weight:600;">${brl(pat.totalAtivo)}</div></div>
+          <div><div style="font-size:10.5px;color:var(--text-soft);">Passivos</div><div class="mono" style="font-size:15px;font-weight:600;">${brl(pat.totalPassivo)}</div></div>
+          <div><div style="font-size:10.5px;color:var(--text-soft);">Patrimônio líquido ${info('Mesmo cálculo do Balanço Patrimonial (ativos − passivos).')}</div><div class="mono" style="font-size:15px;font-weight:700;color:${pat.patrimonioLiquido>=0?'var(--success)':'var(--danger)'};">${brl(pat.patrimonioLiquido)}</div></div>
+        </div>
+        <div style="text-align:right;margin-top:6px;"><button class="btn ghost sm" data-action="ir-para-insight" data-goto="relatorio" data-relatorio="balanco">Abrir Balanço</button></div>`}
+      </div>
+    </div>`;
+  });
+
+  // ==================== FASE B ====================
+  // ---------- O QUE MUDOU — variação vs mês anterior + maior categoria responsável (só se identificável) ----------
+  const mudou = seguro('O que mudou', ()=>{
+    const ant = resultadoOperacionalPeriodo(ctx.deAnt, ctx.ateAnt);
+    const catDelta = (tipo)=>{
+      const somar = (de,ate)=>{ const m={}; state.lancamentos.filter(l=>l.tipo===tipo && (l.status==='pago'||l.status==='recebido') && l.dataPagamento>=de && l.dataPagamento<=ate && l.origem!=='transferencia' && !ehMovimentoDeCapital(l)).forEach(l=>{ m[l.categoria]=(m[l.categoria]||0)+l.valor; }); return m; };
+      const a = somar(ctx.deAtual, ctx.ateAtual), b = somar(ctx.deAnt, ctx.ateAnt);
+      const arr = Object.keys({...a,...b}).map(c=>({cat:c, delta:(a[c]||0)-(b[c]||0)})).sort((x,y)=>Math.abs(y.delta)-Math.abs(x.delta));
+      return arr[0] && Math.abs(arr[0].delta)>0.004 ? arr[0] : null;
+    };
+    const varPct = (a,b)=> b!==0 ? ((a-b)/Math.abs(b)*100) : null;
+    const origemTxt = (p, cd)=> (p===null || Math.abs(p)<5) ? '' : cd ? `Maior variação em "${cd.cat}" (${cd.delta>=0?'+':''}${brl(cd.delta)}).` : 'Variação identificada. Consulte o relatório detalhado.';
+    const linhas = [];
+    const pR = varPct(ctx.receitaTotal, ant.receitaTotal);
+    if(pR!==null) linhas.push({ rot:'Receita', p:pR, dif:ctx.receitaTotal-ant.receitaTotal, bomSubir:true, origem:origemTxt(pR, catDelta('entrada')), rel:'dre' });
+    const pD = varPct(ctx.despesaTotal, ant.despesaTotal);
+    if(pD!==null) linhas.push({ rot:'Despesas', p:pD, dif:ctx.despesaTotal-ant.despesaTotal, bomSubir:false, origem:origemTxt(pD, catDelta('saida')), rel:'dre' });
+    const pL = varPct(ctx.lucroLiquido, ant.lucroLiquido);
+    if(pL!==null) linhas.push({ rot:'Resultado', p:pL, dif:ctx.lucroLiquido-ant.lucroLiquido, bomSubir:true, origem: (Math.abs(pL)<5?'':(ctx.causaVariacao||'Variação identificada. Consulte o relatório detalhado.')), rel:'causas_variacao_lucro' });
+    if(state.contas.length){
+      const diaAntes = addDiasISO(ctx.deAtual,-1);
+      const caixaIni = state.contas.reduce((s,c)=>s+saldoContaEmData(c.id, diaAntes),0);
+      const pC = varPct(pat.caixaBancos, caixaIni);
+      if(pC!==null) linhas.push({ rot:'Caixa (vs início do mês)', p:pC, dif:pat.caixaBancos-caixaIni, bomSubir:true, origem:'', view:'fluxo' });
+    }
+    return `
+    <div class="panel" style="margin-bottom:12px;">
+      <div class="panel-body" style="padding:12px 16px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--text-soft);margin-bottom:6px;">📈 O QUE MUDOU? ${info('Comparado com o mês anterior. A "possível origem" só aparece quando dá pra apontar a categoria de maior variação nos lançamentos — nunca é uma explicação presumida.')}</div>
+        ${!linhas.length ? `<div style="padding:6px 0;">${semDados}</div>` : linhas.map(l=>{
+          const bom = l.bomSubir ? l.p>=0 : l.p<=0;
+          const attrs = l.view ? `data-action="ir-para-alerta" data-view="${l.view}"` : `data-action="ir-para-insight" data-goto="relatorio" data-relatorio="${l.rel}"`;
+          return `<div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line);">
+            <div style="min-width:0;">
+              <div style="font-size:13px;font-weight:600;">${l.rot} <span class="mono" style="color:${Math.abs(l.p)<0.05?'var(--text-soft)':bom?'var(--success)':'var(--danger)'};">${l.p>=0?'+':''}${l.p.toFixed(1)}%</span> <span style="font-size:11px;color:var(--text-soft);">(${l.dif>=0?'+':''}${brl(l.dif)})</span></div>
+              ${l.origem?`<div style="font-size:11.5px;color:var(--text-soft);line-height:1.35;">${escapeHTML(l.origem)}</div>`:''}
+            </div>
+            <button class="btn ghost sm" ${attrs}>Analisar</button>
+          </div>`; }).join('')}
+      </div>
+    </div>`;
+  });
+
+  // ---------- DECISÕES PENDENTES — reaproveita orçamentos de processos, aprovação de despesas e decisões cadastradas ----------
+  const decisoes = seguro('Decisões pendentes', ()=>{
+    const itens = [];
+    if(usuarioPodeVerTela('orcamentos-processos')) (state.orcamentosProcessos||[]).filter(o=>o.status==='pendente').forEach(o=>itens.push({ titulo:`Orçamento N° ${o.numero}${o.processoTitulo?' — '+o.processoTitulo:''}`, valor:o.valorTotal||0, prazo:'', origem:'Processos', attrs:'data-action="ir-para-alerta" data-view="orcamentos-processos"' }));
+    state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.aprovacao==='pendente').forEach(l=>itens.push({ titulo:`Aprovar despesa: ${l.descricao||l.categoria}`, valor:valorEmAberto(l), prazo:l.dataVencimento?`vence ${fmtDate(l.dataVencimento)}`:'', origem:'Financeiro', attrs:`data-cockpit-lanc="${l.id}"` }));
+    (state.decisoesFinanceiras||[]).filter(d=>d.valorRealizado==null).forEach(d=>itens.push({ titulo:d.titulo, valor:d.valorPrevisto||0, prazo:d.data?`registrada ${fmtDate(d.data)}`:'', origem:'Decisões', attrs:'data-action="ir-para-insight" data-goto="relatorio" data-relatorio="decisoes_financeiras"' }));
+    itens.sort((a,b)=>b.valor-a.valor);
+    const mostrar = itens.slice(0,6);
+    return `
+    <div class="panel" style="margin-bottom:12px;">
+      <div class="panel-body" style="padding:12px 16px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--text-soft);margin-bottom:6px;">🧠 DECISÕES PENDENTES ${info('Orçamentos aguardando aprovação, despesas com aprovação pendente e decisões cadastradas ainda sem resultado. Nenhuma é decidida automaticamente.')}</div>
+        ${!mostrar.length ? `<div style="font-size:13px;color:var(--text-soft);padding:6px 0;">Nenhuma decisão pendente identificada. ✅</div>` : mostrar.map(i=>`
+          <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line);">
+            <div style="min-width:0;"><div style="font-size:13px;font-weight:600;">${escapeHTML(i.titulo)} <span style="font-size:10px;font-weight:600;color:var(--text-soft);border:1px solid var(--line);border-radius:10px;padding:1px 6px;">${i.origem}</span></div>
+            <div style="font-size:11.5px;color:var(--text-soft);">${i.valor>0?'<strong>'+brl(i.valor)+'</strong>':''}${i.valor>0&&i.prazo?' · ':''}${escapeHTML(i.prazo)}</div></div>
+            <button class="btn ghost sm" ${i.attrs}>Analisar</button>
+          </div>`).join('')}
+        ${itens.length>6?`<div style="font-size:11px;color:var(--text-soft);padding-top:6px;">+ ${itens.length-6} outra(s) decisão(ões).</div>`:''}
+      </div>
+    </div>`;
+  });
+
+  // ---------- PRÓXIMOS 30/60/90 DIAS + COMPROMISSOS RELEVANTES (só o que já está lançado/cadastrado) ----------
+  const futuro = seguro('Próximos dias', ()=>{
+    const hz = __cockpitHorizonte, ateHz = addDiasISO(hoje, hz);
+    const pend = tipo => state.lancamentos.filter(l=>l.tipo===tipo && l.status==='pendente' && l.dataVencimento<=ateHz);
+    const saidasL = pend('saida'), entradasL = pend('entrada');
+    const somaSaidas = saidasL.reduce((s,l)=>s+valorEmAberto(l),0), somaEntradas = entradasL.reduce((s,l)=>s+valorEmAberto(l),0);
+    const vencidas = saidasL.filter(l=>l.dataVencimento<hoje);
+    const contratos = (state.contratos||[]).filter(c=>c.dataVencimento && c.dataVencimento>=hoje && c.dataVencimento<=ateHz);
+    const origemDe = l => l.origem==='processo' ? 'Processo' : l.contratoId ? 'Contrato' : l.origem==='ativo_patrimonial' ? 'Patrimônio' : l.origem==='investimento' ? 'Investimento' : l.origem==='vk'||l.origem==='vk-estoque' ? 'VK Industrial' : l.recorrenciaId ? 'Recorrência' : 'Despesa';
+    const top = [...saidasL].sort((a,b)=>valorEmAberto(b)-valorEmAberto(a)).slice(0,5);
+    const temAlgo = state.contas.length || state.lancamentos.length;
+    return `
+    <div class="panel" style="margin-bottom:12px;">
+      <div class="panel-body" style="padding:12px 16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+          <div style="font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--text-soft);">🔮 PRÓXIMOS DIAS ${info('Só considera o que já está lançado (contas pendentes e contratos cadastrados). Não prevê vendas nem despesas ainda não lançadas.')}</div>
+          <div style="display:flex;gap:4px;">${[30,60,90].map(n=>`<button class="btn ${hz===n?'':'ghost'} sm" data-cockpit-horizonte="${n}">${n} dias</button>`).join('')}</div>
+        </div>
+        ${!temAlgo ? `<div style="padding:4px 0;">${semDados}</div>` : `
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;">
+          <div><div style="font-size:10.5px;color:var(--text-soft);">Entradas previstas</div><div class="mono" style="font-size:16px;font-weight:700;color:var(--success);">${brl(somaEntradas)}</div><div style="font-size:10.5px;color:var(--text-soft);">${entradasL.length} conta(s) a receber</div></div>
+          <div><div style="font-size:10.5px;color:var(--text-soft);">Saídas previstas</div><div class="mono" style="font-size:16px;font-weight:700;">${brl(somaSaidas)}</div><div style="font-size:10.5px;color:var(--text-soft);">${saidasL.length} conta(s) a pagar${vencidas.length?` (${vencidas.length} já vencida(s))`:''}</div></div>
+          <div><div style="font-size:10.5px;color:var(--text-soft);">Saldo projetado</div><div class="mono" style="font-size:16px;font-weight:700;color:${(pat.caixaBancos+somaEntradas-somaSaidas)<0?'var(--danger)':'var(--ink)'};">${brl(pat.caixaBancos+somaEntradas-somaSaidas)}</div><div style="font-size:10.5px;color:var(--text-soft);">caixa + entradas − saídas</div></div>
+        </div>
+        ${contratos.length?`<div style="font-size:12px;margin-top:8px;color:var(--text-soft);">📄 ${contratos.length} contrato(s) vencem até ${fmtDate(ateHz)}.</div>`:''}
+        <div style="font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--text-soft);margin:12px 0 2px;">🧾 COMPROMISSOS RELEVANTES (maiores saídas)</div>
+        ${!top.length ? `<div style="font-size:12.5px;color:var(--text-soft);padding:4px 0;">Nenhuma saída pendente nesse período.</div>` : top.map(l=>{
+          const atras = l.dataVencimento<hoje;
+          return `<div data-cockpit-lanc="${l.id}" style="display:grid;grid-template-columns:1fr auto;gap:8px;padding:7px 0;border-top:1px solid var(--line);cursor:pointer;">
+            <div style="min-width:0;"><div style="font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHTML(l.fornecedor||l.descricao||l.categoria)} <span style="font-size:10px;font-weight:600;color:var(--text-soft);border:1px solid var(--line);border-radius:10px;padding:1px 6px;">${origemDe(l)}</span></div>
+            <div style="font-size:11px;color:${atras?'var(--danger)':'var(--text-soft)'};">${atras?'Vencida em ':'Vence em '}${fmtDate(l.dataVencimento)}${l.aprovacao==='pendente'?' · ⏳ aguardando aprovação':''}</div></div>
+            <div class="mono" style="font-size:13px;font-weight:700;">${brl(valorEmAberto(l))}</div>
+          </div>`; }).join('')}`}
+      </div>
+    </div>`;
+  });
+
+  // ---------- METAS EM ATENÇÃO — só as atrasadas / abaixo do ritmo, com o status que o módulo de metas já calcula ----------
+  const metasAtencao = seguro('Metas em atenção', ()=>{
+    const metas = state.metasEmpresa||[];
+    if(!metas.length) return `<div class="panel" style="margin-bottom:12px;"><div class="panel-body" style="padding:12px 16px;"><div style="font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--text-soft);">🎯 METAS EM ATENÇÃO</div><div style="padding:6px 0;">${semDados}</div></div></div>`;
+    const mesIni = hoje.slice(0,8)+'01';
+    const [ay,am] = hoje.slice(0,7).split('-').map(Number);
+    const fimMes = new Date(ay,am,0).toISOString().slice(0,10);
+    const dadosFin = obterDadosFinanceirosParaMetas(mesIni, fimMes);
+    const lista = metas.filter(m=>!m.dataFinal || (m.dataInicial<=fimMes && m.dataFinal>=mesIni)).map(m=>{
+      const valorAtual = calcularValorAtualMeta(m, dadosFin, mesIni, fimMes);
+      return { ...m, valorAtual, statusCalc: calcularStatusMeta(m, valorAtual, hoje) };
+    }).filter(m=>m.statusCalc==='em_risco' || m.statusCalc==='atrasada');
+    return `
+    <div class="panel" style="margin-bottom:12px;">
+      <div class="panel-body" style="padding:12px 16px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--text-soft);margin-bottom:6px;">🎯 METAS EM ATENÇÃO ${info('Só metas atrasadas ou abaixo do ritmo. O status vem do módulo de Metas (compara o % atingido com o % do prazo decorrido).')}</div>
+        ${!lista.length ? `<div style="font-size:13px;color:var(--text-soft);padding:6px 0;">Nenhuma meta atrasada ou abaixo do ritmo. ✅</div>` : lista.map(m=>{
+          const pct = m.valorAlvo>0 ? (m.valorAtual/m.valorAlvo*100) : 0;
+          return `<div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line);">
+            <div style="min-width:0;"><div style="font-size:13px;font-weight:600;">${m.statusCalc==='atrasada'?'🔴':'🟠'} ${escapeHTML(m.nome)} <span class="mono">${pct.toFixed(0)}%</span></div>
+            <div style="font-size:11.5px;color:var(--text-soft);">${m.dataFinal?'Prazo: '+fmtDate(m.dataFinal)+' · ':''}${m.statusCalc==='atrasada'?'prazo vencido':'ritmo abaixo do necessário'}</div></div>
+            <button class="btn ghost sm" data-action="ir-para-alerta" data-view="metas">Abrir meta</button>
+          </div>`; }).join('')}
+      </div>
+    </div>`;
+  });
+
+  // ==================== FASE C ====================
+  const chipOrigem = t => `<span style="font-size:10px;font-weight:600;color:var(--text-soft);border:1px solid var(--line);border-radius:10px;padding:1px 6px;">${t}</span>`;
+  const cabecalho = t => `<div style="font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--text-soft);margin-bottom:6px;">${t}</div>`;
+  const cartao = (conteudo)=>`<div class="panel" style="margin-bottom:12px;"><div class="panel-body" style="padding:12px 16px;">${conteudo}</div></div>`;
+  const pendSaidaAll = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente');
+  const atrasadasAll = pendSaidaAll.filter(l=>l.dataVencimento<hoje);
+  const orcPend = usuarioPodeVerTela('orcamentos-processos') ? (state.orcamentosProcessos||[]).filter(o=>o.status==='pendente') : [];
+  const abaixoMin = (state.estoqueInsumos||[]).filter(i=>i.estoqueMinimo>0 && i.quantidade<i.estoqueMinimo);
+
+  // ---- dados comerciais (o "cliente" de uma entrada é o campo fornecedor, como no resto do sistema) ----
+  const comData = (()=>{ try{
+    const receita = (de,ate)=>{ const m={}; let semNome=0; state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento>=de && l.dataPagamento<=ate && l.origem!=='transferencia' && !ehMovimentoDeCapital(l)).forEach(l=>{ const n=(l.fornecedor||'').trim(); if(!n) semNome+=l.valor; else m[n]=(m[n]||0)+l.valor; }); return { m, semNome }; };
+    const a = receita(ctx.deAtual, ctx.ateAtual), b = receita(ctx.deAnt, ctx.ateAnt);
+    const identificado = Object.values(a.m).reduce((s,v)=>s+v,0);
+    const ranking = Object.entries(a.m).sort((x,y)=>y[1]-x[1]);
+    const reduziram = Object.keys(b.m).map(n=>({ n, ant:b.m[n], atual:a.m[n]||0 })).filter(x=>x.atual>0 && x.atual<x.ant*0.7).sort((x,y)=>(y.ant-y.atual)-(x.ant-x.atual)).slice(0,3);
+    // sem compra recente: comprou nos últimos 12 meses, mas nada nos últimos 60 dias
+    const de12 = addDiasISO(hoje,-365), de60 = addDiasISO(hoje,-60), ult = {};
+    state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento>=de12 && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && (l.fornecedor||'').trim()).forEach(l=>{ const n=l.fornecedor.trim(); if(!ult[n]) ult[n]={ ultima:l.dataPagamento, total:0 }; if(l.dataPagamento>ult[n].ultima) ult[n].ultima=l.dataPagamento; ult[n].total+=l.valor; });
+    const semCompra = Object.entries(ult).filter(([,v])=>v.ultima<de60).sort((x,y)=>y[1].total-x[1].total).slice(0,3).map(([n,v])=>({ n, ultima:v.ultima, total:v.total }));
+    const pedidosVK = state.lancamentos.filter(l=>l.tipo==='entrada' && l.origem==='vk' && l.dataVencimento>=ctx.deAtual && l.dataVencimento<=ctx.ateAtual).length;
+    return { nClientes:ranking.length, identificado, semNome:a.semNome, ranking, reduziram, semCompra, pedidosVK };
+  }catch(e){ console.error('Cockpit comercial', e); return null; } })();
+
+  // ---------- PRIORIDADES DE HOJE (regras objetivas, sem IA) ----------
+  const prioridades = seguro('Prioridades de hoje', ()=>{
+    const p = [];
+    const neg = projecaoDiariaSaldo(90).pontos.find(x=>x.saldo<0);
+    if(neg) p.push({ t:`Evitar saldo negativo previsto em ${fmtDate(neg.data)}`, attrs:'data-action="ir-para-insight" data-goto="relatorio" data-relatorio="previsao"' });
+    if(atrasadasAll.length) p.push({ t:`Regularizar ${atrasadasAll.length} conta(s) em atraso (${brl(atrasadasAll.reduce((s,l)=>s+valorEmAberto(l),0))})`, attrs:'data-action="ir-para-alerta" data-view="pagar"' });
+    if(orcPend.length){ const m = [...orcPend].sort((a,b)=>(b.valorTotal||0)-(a.valorTotal||0))[0]; p.push({ t:`Decidir orçamento N° ${m.numero} (${brl(m.valorTotal||0)})`, attrs:'data-action="ir-para-alerta" data-view="orcamentos-processos"' }); }
+    const aprov = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.aprovacao==='pendente');
+    if(aprov.length) p.push({ t:`Aprovar ${aprov.length} despesa(s) (${brl(aprov.reduce((s,l)=>s+valorEmAberto(l),0))})`, attrs:`data-cockpit-lanc="${aprov[0].id}"` });
+    if(abaixoMin.length) p.push({ t:`Verificar estoque crítico: ${abaixoMin.length} insumo(s) abaixo do mínimo`, attrs:'data-action="ir-para-insight" data-goto="relatorio" data-relatorio="estoque_abaixo_minimo"' });
+    if(comData && comData.reduziram[0]) p.push({ t:`Analisar queda de compras do cliente ${comData.reduziram[0].n}`, attrs:'data-action="ir-para-insight" data-goto="relatorio" data-relatorio="clientes_aumentaram_reduziram"' });
+    const top = p.slice(0,4);
+    return cartao(`${cabecalho('📌 PRIORIDADES DE HOJE '+info('Selecionadas por regras objetivas a partir dos dados do sistema (saldo, atrasos, decisões, estoque, clientes). Não usa IA.'))}
+      ${!top.length ? `<div style="font-size:13px;color:var(--text-soft);padding:4px 0;">Nenhuma prioridade urgente identificada. ✅</div>` : top.map((x,i)=>`<div ${x.attrs} style="display:flex;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--line);cursor:pointer;"><span style="font-weight:700;color:var(--blue-accent);">${i+1}.</span><span style="font-size:13px;">${escapeHTML(x.t)}</span></div>`).join('')}`);
+  });
+
+  // ---------- RISCOS DOS PRÓXIMOS DIAS (só situações objetivas com dado real) ----------
+  const riscos = seguro('Riscos dos próximos dias', ()=>{
+    if(!state.contas.length && !state.lancamentos.length) return cartao(`${cabecalho('⚠️ RISCOS DOS PRÓXIMOS DIAS')}<div>${semDados}</div>`);
+    const r = [];
+    const pagar15 = pendSaidaAll.filter(l=>l.dataVencimento>=hoje && l.dataVencimento<=addDiasISO(hoje,15)).reduce((s,l)=>s+valorEmAberto(l),0);
+    if(pat.caixaBancos>0 && pagar15>pat.caixaBancos*0.5) r.push(`Pagamentos relevantes concentrados nos próximos 15 dias: ${brl(pagar15)} (${(pagar15/pat.caixaBancos*100).toFixed(0)}% do caixa).`);
+    const perto = (state.estoqueInsumos||[]).filter(i=>i.estoqueMinimo>0 && i.quantidade>=i.estoqueMinimo && i.quantidade<=i.estoqueMinimo*1.2).length;
+    if(perto) r.push(`${perto} insumo(s) próximo(s) do estoque mínimo (até 20% acima).`);
+    const contr = (state.contratos||[]).filter(c=>c.dataVencimento && c.dataVencimento>=hoje && c.dataVencimento<=addDiasISO(hoje,30)).length;
+    if(contr) r.push(`${contr} contrato(s) vencem nos próximos 30 dias.`);
+    if(orcPend.length && pat.caixaBancos>0){ const m=Math.max(...orcPend.map(o=>o.valorTotal||0)); if(m>0) r.push(`Orçamento aguardando aprovação de ${brl(m)} equivale a ${(m/pat.caixaBancos*100).toFixed(0)}% do caixa.`); }
+    return cartao(`${cabecalho('⚠️ RISCOS DOS PRÓXIMOS DIAS '+info('Apenas situações objetivas nos dados já lançados/cadastrados. Não é previsão especulativa.'))}
+      ${!r.length ? `<div style="font-size:13px;color:var(--text-soft);padding:4px 0;">Nenhum risco objetivo identificado. ✅</div>` : r.map(t=>`<div style="padding:6px 0;border-top:1px solid var(--line);font-size:13px;">🟡 ${escapeHTML(t)}</div>`).join('')}`);
+  });
+
+  // ---------- PULSO OPERACIONAL / GARGALOS — só o que existe no Livro Caixa; produção/O.S./expedição ficam no VK ----------
+  const pulso = seguro('Pulso operacional', ()=>{
+    const vkAtras = state.lancamentos.filter(l=>l.tipo==='entrada' && l.origem==='vk' && l.status==='pendente' && l.dataVencimento<hoje).length;
+    const comprasPend = (state.comprasProcessosPendentes||[]).length;
+    const cel = (rot, n, atencao, attrs, sub)=>`<div ${attrs} style="cursor:pointer;border:1px solid var(--line);border-left:3px solid ${atencao?'var(--warn)':'var(--success)'};border-radius:8px;padding:8px 10px;"><div style="font-size:10.5px;color:var(--text-soft);">${rot}</div><div class="mono" style="font-size:18px;font-weight:700;">${atencao?'🟡':'🟢'} ${n}</div><div style="font-size:10.5px;color:var(--text-soft);">${sub}</div></div>`;
+    return cartao(`${cabecalho('🏭 PULSO OPERACIONAL E GARGALOS '+info('Mostra só o que o Livro Caixa conhece. Produção, expedição e O.S. ficam no VK Industrial e não entram aqui. Verde = zero pendências; amarelo = há pendência.'))}
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;">
+        ${cel('Estoque crítico', abaixoMin.length, abaixoMin.length>0, 'data-action="ir-para-insight" data-goto="relatorio" data-relatorio="estoque_abaixo_minimo"', 'insumo(s) abaixo do mínimo')}
+        ${cel('Compras/processos pendentes', orcPend.length, orcPend.length>0, 'data-action="ir-para-alerta" data-view="orcamentos-processos"', 'orçamento(s) aguardando decisão')}
+        ${cel('Aprovadas sem cadastro', comprasPend, comprasPend>0, 'data-action="ir-para-alerta" data-view="ativos"', 'compra(s) aguardando entrar no Patrimônio')}
+        ${cel('Pedidos VK a receber vencidos', vkAtras, vkAtras>0, 'data-action="ir-para-alerta" data-view="receber"', 'conta(s) a receber em atraso')}
+      </div>
+      <div style="font-size:11px;color:var(--text-soft);margin-top:8px;">Produção, expedição e O.S.: sem dados aqui — ficam no VK Industrial.</div>`);
+  });
+
+  // ---------- COMERCIAL + OPORTUNIDADES ----------
+  const comercial = seguro('Comercial', ()=>{
+    if(!comData || (ctx.receitaTotal<=0 && !comData.nClientes)) return cartao(`${cabecalho('🛒 PULSO COMERCIAL')}<div>${semDados}</div>`);
+    const v = ctx.receitaAnt>0 ? ((ctx.receitaTotal/ctx.receitaAnt)-1)*100 : null;
+    const top1 = comData.ranking[0];
+    const conc = top1 && comData.identificado>0 ? (top1[1]/comData.identificado*100) : null;
+    return cartao(`${cabecalho('🛒 PULSO COMERCIAL')}
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;">
+        <div><div style="font-size:10.5px;color:var(--text-soft);">Vendas (recebido)</div><div class="mono" style="font-size:16px;font-weight:700;">${brl(ctx.receitaTotal)}</div>${v!==null?`<div style="font-size:10.5px;color:${v>=0?'var(--success)':'var(--danger)'};">${v>=0?'+':''}${v.toFixed(1)}% vs mês anterior</div>`:''}</div>
+        <div><div style="font-size:10.5px;color:var(--text-soft);">Clientes ativos</div><div class="mono" style="font-size:16px;font-weight:700;">${comData.nClientes}</div><div style="font-size:10.5px;color:var(--text-soft);">com compra no mês</div></div>
+        ${comData.pedidosVK?`<div><div style="font-size:10.5px;color:var(--text-soft);">Pedidos (VK)</div><div class="mono" style="font-size:16px;font-weight:700;">${comData.pedidosVK}</div><div style="font-size:10.5px;color:var(--text-soft);">no período</div></div>`:''}
+        ${conc!==null?`<div><div style="font-size:10.5px;color:var(--text-soft);">Maior cliente ${info('Participação do maior cliente na receita com cliente identificado.')}</div><div class="mono" style="font-size:16px;font-weight:700;">${conc.toFixed(0)}%</div><div style="font-size:10.5px;color:var(--text-soft);">${escapeHTML(top1[0])}</div></div>`:''}
+      </div>
+      ${comData.ranking.slice(0,3).length ? `<div style="font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--text-soft);margin:10px 0 2px;">MAIORES CLIENTES DO MÊS</div>${comData.ranking.slice(0,3).map(([n,val])=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-top:1px solid var(--line);font-size:12.5px;"><span>${escapeHTML(n)}</span><span class="mono">${brl(val)}</span></div>`).join('')}` : ''}
+      ${comData.semNome>0?`<div style="font-size:11px;color:var(--text-soft);margin-top:6px;">ℹ️ ${brl(comData.semNome)} de receita sem cliente identificado no lançamento.</div>`:''}
+      <div style="text-align:right;margin-top:6px;"><button class="btn ghost sm" data-action="ir-para-insight" data-goto="relatorio" data-relatorio="concentracao_clientes">Ver mais</button></div>`);
+  });
+  const oportunidades = seguro('Oportunidades', ()=>{
+    if(!comData) return '';
+    const itens = [];
+    comData.reduziram.forEach(x=>itens.push({ t:`${x.n} reduziu compras: ${brl(x.ant)} → ${brl(x.atual)} (${(((x.atual/x.ant)-1)*100).toFixed(0)}%)`, rel:'clientes_aumentaram_reduziram' }));
+    comData.semCompra.forEach(x=>itens.push({ t:`${x.n} não compra desde ${fmtDate(x.ultima)} (comprou ${brl(x.total)} nos últimos 12 meses)`, rel:'clientes_perdidos_risco' }));
+    if(!itens.length && !comData.nClientes) return '';
+    return cartao(`${cabecalho('🎯 OPORTUNIDADES '+info('Só situações detectáveis nos lançamentos: cliente que reduziu compras (≥30% vs mês anterior) ou sem compra há mais de 60 dias.'))}
+      ${!itens.length ? `<div style="font-size:13px;color:var(--text-soft);padding:4px 0;">Nenhuma situação identificada. ✅</div>` : itens.map(i=>`<div data-action="ir-para-insight" data-goto="relatorio" data-relatorio="${i.rel}" style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:7px 0;border-top:1px solid var(--line);cursor:pointer;"><span style="font-size:12.5px;">${escapeHTML(i.t)}</span><span style="color:var(--blue-accent);font-size:12px;">Ver ›</span></div>`).join('')}`);
+  });
+
+  // ---------- PROCESSOS IMPORTANTES ----------
+  const processos = seguro('Processos', ()=>{
+    if(!usuarioPodeVerTela('orcamentos-processos')) return '';
+    const orc = state.orcamentosProcessos||[];
+    if(!orc.length) return cartao(`${cabecalho('🔄 PROCESSOS IMPORTANTES')}<div>${semDados}</div>`);
+    const aprovNaoPagos = orc.filter(o=>o.status==='aprovado' && o.lancamentoId).map(o=>({ o, l: state.lancamentos.find(x=>x.id===o.lancamentoId) })).filter(x=>x.l && x.l.status==='pendente');
+    const vencidos = aprovNaoPagos.filter(x=>x.l.dataVencimento<hoje);
+    const top = [...orcPend].sort((a,b)=>(b.valorTotal||0)-(a.valorTotal||0)).slice(0,3);
+    return cartao(`${cabecalho('🔄 PROCESSOS IMPORTANTES')}
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;">
+        <div><div style="font-size:10.5px;color:var(--text-soft);">Aguardando aprovação</div><div class="mono" style="font-size:16px;font-weight:700;">${orcPend.length}</div><div style="font-size:10.5px;color:var(--text-soft);">${brl(orcPend.reduce((s,o)=>s+(o.valorTotal||0),0))}</div></div>
+        <div><div style="font-size:10.5px;color:var(--text-soft);">Aprovados, não pagos</div><div class="mono" style="font-size:16px;font-weight:700;">${aprovNaoPagos.length}</div><div style="font-size:10.5px;color:var(--text-soft);">${brl(aprovNaoPagos.reduce((s,x)=>s+valorEmAberto(x.l),0))}</div></div>
+        <div><div style="font-size:10.5px;color:var(--text-soft);">Com pagamento vencido</div><div class="mono" style="font-size:16px;font-weight:700;color:${vencidos.length?'var(--danger)':'var(--ink)'};">${vencidos.length}</div></div>
+      </div>
+      ${top.map(o=>`<div data-action="ir-para-alerta" data-view="orcamentos-processos" style="display:flex;justify-content:space-between;gap:8px;padding:7px 0;border-top:1px solid var(--line);margin-top:${o===top[0]?'10px':'0'};cursor:pointer;"><span style="font-size:12.5px;">Orçamento N° ${o.numero}${o.processoTitulo?' — '+escapeHTML(o.processoTitulo):''} <span style="color:var(--text-soft);">· aguardando aprovação</span></span><span class="mono" style="font-size:12.5px;white-space:nowrap;flex-shrink:0;">${brl(o.valorTotal||0)}</span></div>`).join('')}
+      <div style="text-align:right;margin-top:6px;"><button class="btn ghost sm" data-action="ir-para-alerta" data-view="orcamentos-processos">Abrir processos</button></div>`);
+  });
+
+  // ---------- INVESTIMENTOS + CAPEX (permissão) ----------
+  const investimentos = seguro('Investimentos', ()=>{
+    if(!usuarioPodeVerTela('investimentos')) return '';
+    const posicoes = state.ativosInvestimento.filter(a=>!a.resgatado && (a.quantidade||0)>0);
+    const projetos = (state.capexProjetos||[]).filter(p=>!['Concluído','Cancelado'].includes(p.status));
+    if(!posicoes.length && !pat.investimentos && !projetos.length && !(state.resultadosInvestimento||[]).length) return cartao(`${cabecalho('🏗️ INVESTIMENTOS')}<div>${semDados}</div>`);
+    const resultadoReal = (state.resultadosInvestimento||[]).reduce((s,r)=>s+(r.resultadoBruto||0),0);
+    const acimaOrc = projetos.filter(p=>p.orcamento>0 && (capexRealizadoProjeto(p.id)+(p.comprometido||0))>p.orcamento);
+    const atrasados = projetos.filter(p=>p.dataPrevista && p.dataPrevista<hoje);
+    const atencao = [];
+    if(ativosVencidosRF().length) atencao.push(`${ativosVencidosRF().length} aplicação(ões) de renda fixa vencida(s) aguardando resgate.`);
+    if((state.notasPendentes||[]).length) atencao.push(`${state.notasPendentes.length} nota(s) de corretagem aguardando revisão.`);
+    if(acimaOrc.length) atencao.push(`${acimaOrc.length} projeto(s) de CAPEX acima do orçamento.`);
+    if(atrasados.length) atencao.push(`${atrasados.length} projeto(s) de CAPEX com prazo vencido.`);
+    return cartao(`${cabecalho('🏗️ INVESTIMENTOS')}
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;">
+        <div><div style="font-size:10.5px;color:var(--text-soft);">Patrimônio investido</div><div class="mono" style="font-size:16px;font-weight:700;">${brl(pat.investimentos)}</div></div>
+        <div><div style="font-size:10.5px;color:var(--text-soft);">Resultado realizado ${info('Soma do resultado de todas as vendas registradas (ganho − perda), como na Central de Investimentos.')}</div><div class="mono" style="font-size:16px;font-weight:700;color:${resultadoReal<0?'var(--danger)':resultadoReal>0?'var(--success)':'var(--ink)'};">${(state.resultadosInvestimento||[]).length?brl(resultadoReal):'—'}</div></div>
+        <div><div style="font-size:10.5px;color:var(--text-soft);">Ativos em carteira</div><div class="mono" style="font-size:16px;font-weight:700;">${posicoes.length}</div></div>
+        <div><div style="font-size:10.5px;color:var(--text-soft);">Projetos CAPEX ativos</div><div class="mono" style="font-size:16px;font-weight:700;">${projetos.length}</div></div>
+      </div>
+      ${atencao.length?`<div style="font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--text-soft);margin:10px 0 2px;">INVESTIMENTOS EM ATENÇÃO</div>${atencao.map(t=>`<div style="padding:5px 0;border-top:1px solid var(--line);font-size:12.5px;">🟡 ${escapeHTML(t)}</div>`).join('')}`:''}
+      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px;"><button class="btn ghost sm" data-action="ir-para-alerta" data-view="capex">Abrir CAPEX</button><button class="btn ghost sm" data-action="ir-para-alerta" data-view="investimentos">Abrir Investimentos</button></div>`);
+  });
+
+  // ---------- TIMELINE — só eventos reais já registrados nos últimos 7 dias ----------
+  const timeline = seguro('Linha do tempo', ()=>{
+    const de7 = addDiasISO(hoje,-7), ev = [];
+    state.lancamentos.filter(l=>(l.status==='pago'||l.status==='recebido') && l.dataPagamento>=de7 && l.dataPagamento<=hoje && l.origem!=='transferencia' && !ehMovimentoDeCapital(l)).forEach(l=>ev.push({ d:l.dataPagamento, t:`${l.tipo==='entrada'?'Recebimento':'Pagamento'}: ${l.fornecedor||l.descricao||l.categoria}`, v:l.valor, attrs:`data-cockpit-lanc="${l.id}"` }));
+    if(usuarioPodeVerTela('orcamentos-processos')) (state.orcamentosProcessos||[]).filter(o=>o.decididoEm && o.decididoEm.slice(0,10)>=de7).forEach(o=>ev.push({ d:o.decididoEm.slice(0,10), t:`Orçamento N° ${o.numero} ${o.status==='aprovado'?'aprovado':'recusado'}`, v:o.valorTotal||0, attrs:'data-action="ir-para-alerta" data-view="orcamentos-processos"' }));
+    if(usuarioPodeVerTela('investimentos')) (state.resultadosInvestimento||[]).filter(r=>r.data>=de7).forEach(r=>ev.push({ d:r.data, t:`Venda de ${r.quantidade} ${r.ticker} (${r.resultadoBruto>=0?'ganho':'perda'} de capital)`, v:Math.abs(r.resultadoBruto), attrs:'data-action="ir-para-alerta" data-view="investimentos"' }));
+    (state.apresentacoesResultados||[]).filter(a=>a.status==='finalizada' && (a.atualizadoEm||'').slice(0,10)>=de7).forEach(a=>ev.push({ d:a.atualizadoEm.slice(0,10), t:`Apresentação de resultados finalizada: ${a.snapshot?.label||a.periodoRef}`, v:null, attrs:'data-action="ir-para-alerta" data-view="apresentacao-resultados"' }));
+    ev.sort((a,b)=>b.d.localeCompare(a.d) || (b.v||0)-(a.v||0));
+    const ontem = addDiasISO(hoje,-1);
+    const grupos = [['HOJE', ev.filter(e=>e.d===hoje)], ['ONTEM', ev.filter(e=>e.d===ontem)], ['ESTA SEMANA', ev.filter(e=>e.d<ontem)]];
+    let restante = 10;
+    return cartao(`${cabecalho('🕐 O QUE ACONTECEU NA EMPRESA '+info('Eventos reais já registrados nos últimos 7 dias (pagamentos, recebimentos, decisões, vendas de investimento). Nada é gerado artificialmente.'))}
+      ${!ev.length ? `<div style="font-size:13px;color:var(--text-soft);padding:4px 0;">Nenhum evento registrado nos últimos 7 dias.</div>` : grupos.filter(g=>g[1].length && restante>0).map(([nome,lista])=>{
+        const mostrar = lista.slice(0, restante); restante -= mostrar.length;
+        return `<div style="font-size:10.5px;font-weight:700;color:var(--text-soft);margin:8px 0 2px;">${nome}</div>${mostrar.map(e=>`<div ${e.attrs} style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-top:1px solid var(--line);font-size:12.5px;cursor:pointer;"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;">• ${escapeHTML(e.t)}${nome==='ESTA SEMANA'?' <span style="color:var(--text-soft);">('+fmtDate(e.d).slice(0,5)+')</span>':''}</span>${e.v?`<span class="mono" style="white-space:nowrap;flex-shrink:0;">${brl(e.v)}</span>`:''}</div>`).join('')}`; }).join('')}`);
+  });
+
+  // ---------- ACESSOS RÁPIDOS (compactos, respeitando permissão) ----------
+  const acessos = seguro('Acessos rápidos', ()=>{
+    const itens = [
+      { t:'DRE', a:'data-action="ir-para-insight" data-goto="relatorio" data-relatorio="dre"' },
+      { t:'Balanço', a:'data-action="ir-para-insight" data-goto="relatorio" data-relatorio="balanco"' },
+      { t:'Fluxo de Caixa', v:'fluxo' }, { t:'Contas a Pagar', v:'pagar' }, { t:'Contas a Receber', v:'receber' },
+      { t:'Processos', v:'orcamentos-processos' }, { t:'Investimentos', v:'investimentos' }, { t:'CAPEX', v:'capex' },
+      { t:'Metas', v:'metas' }, { t:'Relatórios', v:'relatorios' },
+    ].filter(i=>!i.v || usuarioPodeVerTela(i.v));
+    return `<div class="dash-section-label" style="margin-top:14px;">⚡ Acessos rápidos</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;">${itens.map(i=>`<button class="btn ghost sm" ${i.a || `data-action="ir-para-alerta" data-view="${i.v}"`}>${i.t}</button>`).join('')}</div>`;
+  });
+
+  const hora = new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+      <div style="font-size:12px;color:var(--text-soft);">Atualizado às ${hora}</div>
+      <button class="btn ghost sm" id="btnCockpitAtualizar">↻ Atualizar</button>
+    </div>
+    ${saude}${prioridades}${radar}${dinheiro}${mudou}${decisoes}${futuro}${riscos}${pulso}${comercial}${oportunidades}${processos}${investimentos}${metasAtencao}${resultado}${timeline}${acessos}
+    <div class="dash-section-label" style="margin-top:18px;">Indicadores detalhados</div>
+  `;
+}
 function renderDashboardExecutivo(){
   const t = totaisPorMesRef(mesGlobalRef);
   const hoje = todayISO();
@@ -21433,6 +21921,7 @@ function renderDashboardExecutivo(){
     </div>`;
 
   return `
+    ${cockpitExecutivoHTML({ receitaTotal, despesaTotal, lucroLiquido, receitaAnt, lucroAnt, causaVariacao, deAtual: de, ateAtual: ate, deAnt: tAnt.de, ateAnt: (tAnt.ateMes<hoje?tAnt.ateMes:hoje) })}
     <div class="report-controls"><span style="font-size:12.5px;color:var(--text-soft);">${competenciaLabel(mesGlobalRef)} · comparado com ${competenciaLabel(mesAnteriorRef)}</span></div>
     <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
       ${kpiCard('Receita Total', brl(receitaTotal), semaforo(receitaTotal, receitaAnt, receitaAnt*0.85), receitaAnt>0?`${receitaTotal>=receitaAnt?'+':''}${(((receitaTotal/receitaAnt)-1)*100).toFixed(1)}% vs mês anterior`:'')}
@@ -28018,7 +28507,7 @@ function viewOrcamentosProcessos(){
 
         <div style="padding:14px 20px 4px;font-size:10.5px;font-weight:700;color:var(--text-soft);text-transform:uppercase;letter-spacing:0.3px;">Itens</div>
         <div class="panel-body" style="padding:0 0 4px;">
-          ${o.itens.length ? o.itens.map(it=>`
+          ${(o.itens||[]).length ? (o.itens||[]).map(it=>`
             <div class="ledger-row compact" style="grid-template-columns:1fr auto;">
               <span style="font-size:12.5px;">${escapeHTML(it.descricao)}${it.link ? ` — <a href="${escapeHTML(it.link)}" target="_blank" rel="noreferrer">link</a>` : ''}</span>
               <span class="mono" style="font-size:12.5px;">${brl(it.valor)}</span>
@@ -34093,6 +34582,9 @@ function attachViewHandlers(){
   document.querySelectorAll('[data-action="ir-para-alerta"]').forEach(el=>{
     el.addEventListener('click', ()=>{ currentView = el.dataset.view; render(); });
   });
+  document.getElementById('btnCockpitAtualizar')?.addEventListener('click', ()=>{ __limparCacheRender(); render(); });
+  document.querySelectorAll('[data-cockpit-horizonte]').forEach(b=>b.addEventListener('click', ()=>{ __cockpitHorizonte = Number(b.dataset.cockpitHorizonte); render(); }));
+  document.querySelectorAll('[data-cockpit-lanc]').forEach(el=>el.addEventListener('click', ()=>{ const l = state.lancamentos.find(x=>x.id===el.dataset.cockpitLanc); if(l) openLancamentoModal(l.tipo, l); }));
   document.querySelectorAll('[data-action="selecionar-dia-calendario"]').forEach(el=>{
     el.addEventListener('click', ()=>{
       calendarioFinanceiroDiaSelecionado = calendarioFinanceiroDiaSelecionado===el.dataset.data ? null : el.dataset.data;
