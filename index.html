@@ -1049,6 +1049,13 @@ const CATEGORIAS_ENTRADA = ['Vendas', 'Serviços', 'Recebimento de cliente', 'Re
 // rendimentos). Reconhece tanto o mecanismo antigo (categoria "Investimentos" + origem "investimento",
 // usado pelo botão de resgate/aporte automático) quanto qualquer categoria que o usuário marcar
 // manualmente com o checkbox "🔄 É retorno/aporte de capital" em Categorias.
+// Categorias que o próprio sistema cria (rendimento de investimento, juros/multa, ganho/perda de capital) precisam contar como
+// FINANCEIRAS mesmo que o cadastro do usuário use outros nomes — senão o rendimento de investimento entrava na receita operacional.
+const CATEGORIAS_FINANCEIRAS_DO_SISTEMA = { entrada:['Rendimentos','Ganho de Capital'], saida:['Despesas Financeiras','Perda de Capital'] };
+function nomesCategoriasFinanceiras(tipo){
+  const doCadastro = ((state.categorias||{})[tipo]||[]).filter(c=>c.ehFinanceira).map(c=>c.nome);
+  return [...new Set([...doCadastro, ...CATEGORIAS_FINANCEIRAS_DO_SISTEMA[tipo]])];
+}
 function ehMovimentoDeCapital(l){
   if(!l) return false;
   if(l.categoria==='Investimentos' && l.origem==='investimento') return true;
@@ -2830,8 +2837,10 @@ function saldoConta(contaId){
   const conta = state.contas.find(c=>c.id===contaId);
   if(!conta) return 0;
   let saldo = conta.saldoInicial || 0;
+  const hojeISO = todayISO();
   movimentosRealizados().forEach(ev=>{
     if(ev.contaId!==contaId) return;
+    if(ev.data && ev.data>hojeISO) return;   // recebido/pago com data FUTURA ainda não mexeu no caixa de hoje (igual a saldoContaEmData(hoje))
     if(ev.tipo==='entrada') saldo += ev.valor;
     if(ev.tipo==='saida') saldo -= ev.valor;
   });
@@ -3081,7 +3090,15 @@ function dividaCartaoAberta(cartaoId){
   });
   let total = 0;
   Object.entries(porCompetencia).forEach(([comp,val])=>{
-    if(faturaStatus(cartaoId, comp) !== 'paga') total += val;
+    if(faturaStatus(cartaoId, comp) === 'paga') return;
+    // Fatura já FECHADA e ainda pendente: falta pagar só o SALDO EM ABERTO do lançamento da fatura (desconta o que já foi pago
+    // em parcelas). Somar o valor cheio das compras fazia a dívida parecer maior e o limite disponível menor do que o real.
+    const fech = state.faturasFechadas.find(f=>f.cartaoId===cartaoId && f.competencia===comp);
+    if(fech){
+      const abertos = (fech.lancamentoIds || [fech.lancamentoId]).map(id=>state.lancamentos.find(l=>l.id===id)).filter(l=>l && l.status==='pendente');
+      if(abertos.length){ total += abertos.reduce((sm,l)=>sm+valorEmAberto(l),0); return; }
+    }
+    total += val;
   });
   return total;
 }
@@ -6229,7 +6246,7 @@ function ultimos6Meses(){
 
 /* ---------------- Views ---------------- */
 function gastoCategoriaNoPeriodo(categoria, de, ate){
-  return state.lancamentos.filter(l=>l.categoria===categoria && l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
+  return lancamentosRealizados().filter(l=>l.categoria===categoria && l.tipo==='saida' && l.status==='pago' && l.dataPagamento>=de && l.dataPagamento<=ate).reduce((s,l)=>s+l.valor,0);
 }
 function totalCategoriaTipoNoPeriodo(categoria, tipo, de, ate){
   const statusOk = tipo==='entrada' ? 'recebido' : 'pago';
@@ -6403,25 +6420,30 @@ function totaisPorMesRef(mesRef){
   const mesAtualRef = hoje.slice(0,7);
   const eventos = movimentosRealizados();
 
-  let saldoInicial = 0;
+  // Saldo de abertura das contas + tudo o que já foi movimentado antes do mês. Sem o saldo de abertura, o "Saldo em
+  // caixa" do Início não batia com o caixa real das Contas/Balanço (faltava a soma dos saldos iniciais das contas).
+  let saldoInicial = state.contas.reduce((sm,c)=>sm+(c.saldoInicial||0),0);
   eventos.forEach(ev=>{
     if(!ev.data || ev.data>=de) return;
     if(ev.tipo==='entrada') saldoInicial += ev.valor;
     if(ev.tipo==='saida') saldoInicial -= ev.valor;
   });
 
-  let entradasMes = 0, saidasMes = 0;
+  // Entradas/saídas do mês NÃO incluem transferência entre contas próprias (dinheiro que só trocou de lugar);
+  // ela entra apenas no saldo (líquida, normalmente zero), então a ponte Inicial + Entradas − Saídas = Atual continua fechando.
+  let entradasMes = 0, saidasMes = 0, transferenciaLiquida = 0;
   if(mesRef <= mesAtualRef){
     const ateReal = mesRef === mesAtualRef ? hoje : ateMes;
     eventos.forEach(ev=>{
       const ref = ev.data;
       if(!ref || ref<de || ref>ateReal) return;
+      if(ev.origem==='transferencia'){ transferenciaLiquida += (ev.tipo==='entrada' ? ev.valor : -ev.valor); return; }
       if(ev.tipo==='entrada') entradasMes += ev.valor;
       if(ev.tipo==='saida') saidasMes += ev.valor;
     });
   }
 
-  const saldoAtual = saldoInicial + entradasMes - saidasMes;
+  const saldoAtual = saldoInicial + entradasMes - saidasMes + transferenciaLiquida;
   const pendentes = state.lancamentos.filter(l=>l.status==='pendente' && l.dataVencimento && l.dataVencimento>=de && l.dataVencimento<=ateMes);
   const pendentesLiquido = pendentes.reduce((s,l)=> s + (l.tipo==='entrada'?valorEmAberto(l):-valorEmAberto(l)), 0);
   const saldoPrevisto = saldoAtual + pendentesLiquido;
@@ -6434,7 +6456,7 @@ function rankingCategoriasHTML(mesRef){
   const hoje = todayISO();
   const mesAtualRef = hoje.slice(0,7);
   const ateReal = mesRef === mesAtualRef ? hoje : (mesRef < mesAtualRef ? t.ateMes : t.de);
-  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=t.de && l.dataPagamento<=ateReal && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
+  const realizados = lancamentosRealizados().filter(l=>l.dataPagamento && l.dataPagamento>=t.de && l.dataPagamento<=ateReal && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
 
   const rank = (tipo)=>{
     const map = {};
@@ -6523,7 +6545,7 @@ function economiaMensalHTML(mesRef){
 function resumoCartoesHTML(){
   if(!state.cartoes.length) return '';
   const limiteTotal = state.cartoes.reduce((s,c)=>s+(c.limite||0),0);
-  const faturasAPagar = state.lancamentos.filter(l=>l.origem==='cartao' && l.status==='pendente').reduce((s,l)=>s+l.valor,0);
+  const faturasAPagar = state.lancamentos.filter(l=>l.origem==='cartao' && l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
   const disponivel = limiteTotal - faturasAPagar;
   return `
     <div class="panel">
@@ -6784,8 +6806,8 @@ function ponteCaixaHTML(t){
 function painelHojeHTML(){
   const hoje = todayISO();
   const saldoContasHoje = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
-  const entraHoje = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento===hoje).reduce((s,l)=>s+l.valor,0);
-  const saiHoje = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento===hoje).reduce((s,l)=>s+l.valor,0);
+  const entraHoje = lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento===hoje).reduce((s,l)=>s+l.valor,0);
+  const saiHoje = lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento===hoje).reduce((s,l)=>s+l.valor,0);
   const venceHojeQtd = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento===hoje).length;
   const insights = gerarInsightsFinanceiros();
   const risco = insights.find(i=>i.tipo==='risco');
@@ -6939,8 +6961,8 @@ function montarResumoDiaTexto(){
   const hoje = todayISO();
   const t = totaisPorMesRef(hoje.slice(0,7));
   const pend = pendentesResumo();
-  const entraHoje = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento===hoje).reduce((s,l)=>s+l.valor,0);
-  const saiHoje = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento===hoje).reduce((s,l)=>s+l.valor,0);
+  const entraHoje = lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento===hoje).reduce((s,l)=>s+l.valor,0);
+  const saiHoje = lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.dataPagamento===hoje).reduce((s,l)=>s+l.valor,0);
   const venceHojeQtd = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.origem!=='transferencia' && l.dataVencimento===hoje).length;
   const pendCriticas = levantarPendencias().filter(p=>p.prioridade==='critica').length;
   const linhas = [
@@ -7446,6 +7468,22 @@ function valorEmAberto(l){
 // Lançamento com pagamento em uma parcela só = 1 evento (o próprio lançamento).
 // Lançamento pago em partes (historicoRecebimentos) = 1 evento por parcela, cada um na sua data —
 // pra não "engolir" pagamentos antigos na data do último pagamento.
+// Lançamentos REALIZADOS vistos pela DATA REAL de cada pagamento: um item por pagamento. Assim o pagamento PARCIAL de algo que
+// continua pendente (ex.: fatura de cartão paga aos poucos) e o pagamento em vários dias entram no período certo. Mantém todos os
+// campos do lançamento original (categoria, fornecedor, itens, centro de custo...). É a mesma régua de movimentosRealizados().
+function lancamentosRealizados(){
+  return __memoRender('lancamentosRealizados', ()=>{
+    const out = [];
+    state.lancamentos.forEach(l=>{
+      const finalizado = l.status==='pago' || l.status==='recebido';
+      const hist = l.historicoRecebimentos;
+      if(hist && hist.length){
+        hist.forEach(h=>out.push({ ...l, valor:h.valor, dataPagamento:h.data, contaId:h.contaId||l.contaId, formaRecebimento:h.formaRecebimento||l.formaRecebimento, status: l.tipo==='entrada'?'recebido':'pago', _pagamentoParcial: !finalizado || hist.length>1 }));
+      } else if(finalizado) out.push(l);
+    });
+    return out;
+  });
+}
 function movimentosRealizados(){ return __memoRender('movimentosRealizados', movimentosRealizadosImpl); }
 function movimentosRealizadosImpl(){
   const eventos = [];
@@ -12052,7 +12090,7 @@ function calcularDadosApresentacao(tipo, periodoRef){
   const r = resultadoOperacionalPeriodo(de, ate);
   const margem = r.receitaTotal>0 ? (r.lucroLiquido/r.receitaTotal*100) : null;
   const pat = patrimonioLiquidoResumo();
-  const movsPeriodo = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
+  const movsPeriodo = lancamentosRealizados().filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
   const aportes = movsPeriodo.filter(l=>l.tipo==='saida' && ehMovimentoDeCapital(l)).reduce((s,l)=>s+l.valor,0);
   const resgates = movsPeriodo.filter(l=>l.tipo==='entrada' && ehMovimentoDeCapital(l)).reduce((s,l)=>s+l.valor,0);
   const ganhoCapital = movsPeriodo.filter(l=>l.categoria==='Ganho de Capital').reduce((s,l)=>s+l.valor,0);
@@ -12413,7 +12451,7 @@ function periodoGraficos(){
   }
   return { de, ate, hoje, dias, buckets, nome, rotulo: `${fmtDate(de)} a ${fmtDate(ate)}` };
 }
-const _movGraf = () => state.lancamentos.filter(l=>(l.status==='pago'||l.status==='recebido') && l.dataPagamento && l.origem!=='transferencia');
+const _movGraf = () => lancamentosRealizados().filter(l=>l.dataPagamento && l.origem!=='transferencia');
 const _somaB = (mov,b,tipo,filtro) => mov.filter(l=>l.tipo===tipo && l.dataPagamento>=b.ini && l.dataPagamento<=b.fim && (!filtro||filtro(l))).reduce((s,l)=>s+l.valor,0);
 const _semCapital = l => !ehMovimentoDeCapital(l);
 const _temValor = arr => arr.some(x=>Math.abs(x.valor)>0.004);
@@ -13381,7 +13419,7 @@ function renderRelatorioInvestimentos(){
 // no mesmo período que estava sendo visto (não reconstrói o período, usa o que já foi calculado).
 function abrirDrilldownDRE(categoria, tipo){
   const periodo = window._dreDrilldownPeriodo || {};
-  const itens = state.lancamentos.filter(l=>l.categoria===categoria && l.tipo===tipo && (l.status==='pago'||l.status==='recebido') && l.dataPagamento>=periodo.de && l.dataPagamento<=periodo.ate).sort((a,b)=>b.dataPagamento.localeCompare(a.dataPagamento));
+  const itens = lancamentosRealizados().filter(l=>l.categoria===categoria && l.tipo===tipo && (l.status==='pago'||l.status==='recebido') && l.dataPagamento>=periodo.de && l.dataPagamento<=periodo.ate).sort((a,b)=>b.dataPagamento.localeCompare(a.dataPagamento));
   const total = itens.reduce((s,l)=>s+l.valor,0);
   const modal = document.getElementById('modalContent');
   modal.className = 'modal';
@@ -13441,8 +13479,8 @@ function renderDRE(periodo){
   // "Rendimentos / Juros Bancários" por exemplo, então Resultado Financeiro ficava zerado por engano.
   // Categoria financeira agora é definida pelo usuário (checkbox "É uma categoria financeira" no cadastro),
   // não mais por um nome fixo — assim funciona com "Rendimentos", "Receitas Financeiras" ou qualquer nome escolhido.
-  const nomesFinanceirosReceita = (state.categorias.entrada||[]).filter(c=>c.ehFinanceira).map(c=>c.nome);
-  const nomesFinanceirosDespesa = (state.categorias.saida||[]).filter(c=>c.ehFinanceira).map(c=>c.nome);
+  const nomesFinanceirosReceita = nomesCategoriasFinanceiras('entrada');
+  const nomesFinanceirosDespesa = nomesCategoriasFinanceiras('saida');
   const somaCategoriasFinanceiras = (mapa, nomesPai) => Object.entries(mapa).filter(([k])=>nomesPai.some(p=>k===p || k.startsWith(p+' / '))).reduce((s,[,v])=>s+v,0);
   const ehCategoriaFinanceira = (nomesPai, k) => nomesPai.some(p=>k===p || k.startsWith(p+' / '));
   const totalReceitas = Object.values(receitas).reduce((a,b)=>a+b,0);
@@ -13594,8 +13632,8 @@ function renderSuperRelatorioMensal(mesRef){
   const ultimoDiaAnt = new Date(mesAnteriorDate.getFullYear(), mesAnteriorDate.getMonth()+1, 0).getDate();
   const ateAnt = `${mesAnteriorRef}-${String(ultimoDiaAnt).padStart(2,'0')}`;
 
-  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
-  const realizadosAnt = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=deAnt && l.dataPagamento<=ateAnt && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
+  const realizados = lancamentosRealizados().filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
+  const realizadosAnt = lancamentosRealizados().filter(l=>l.dataPagamento && l.dataPagamento>=deAnt && l.dataPagamento<=ateAnt && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
 
   const totalReceitas = realizados.filter(l=>l.tipo==='entrada').reduce((s,l)=>s+l.valor,0);
   const totalDespesas = realizados.filter(l=>l.tipo==='saida').reduce((s,l)=>s+l.valor,0);
@@ -13782,7 +13820,7 @@ function renderIndicadores(periodo){
     label = 'Período personalizado';
   }
 
-  const realizados = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
+  const realizados = lancamentosRealizados().filter(l=>l.dataPagamento && l.dataPagamento>=de && l.dataPagamento<=ate && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && !ehMovimentoDeCapital(l));
   const receitas = realizados.filter(l=>l.tipo==='entrada');
   const despesas = realizados.filter(l=>l.tipo==='saida');
   const totalReceitas = receitas.reduce((s,l)=>s+l.valor,0);
@@ -13848,7 +13886,7 @@ function renderIndicadores(periodo){
       const dias = Math.max(1, Math.round((new Date(ate)-new Date(de))/86400000)+1);
       const estoqueMedio = totalEstoqueInsumos();
       const categoriaEstoque = state.vkConfig?.categoriaEstoque || 'Insumos';
-      const cmvPeriodo = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate && (l.categoria===categoriaEstoque || (l.categoria||'').startsWith(categoriaEstoque+' / '))).reduce((s,l)=>s+l.valor,0);
+      const cmvPeriodo = lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && l.dataPagamento>=de && l.dataPagamento<=ate && (l.categoria===categoriaEstoque || (l.categoria||'').startsWith(categoriaEstoque+' / '))).reduce((s,l)=>s+l.valor,0);
       const pmeTrad = cmvPeriodo>0 ? (estoqueMedio/cmvPeriodo)*dias : null;
       const aReceberMedio = aReceberPendente;
       const aPagarMedio = aPagarPendente;
@@ -14090,7 +14128,7 @@ function renderStressTest(){
   const receber = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='pendente' && l.dataVencimento && l.dataVencimento<=todayISOMais(60)).sort((a,b)=>b.valor-a.valor);
   const top3 = receber.slice(0,3);
   const somaTop3 = top3.reduce((s,l)=>s+l.valor,0);
-  const pagar60 = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.dataVencimento && l.dataVencimento<=todayISOMais(60)).reduce((s,l)=>s+l.valor,0);
+  const pagar60 = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pendente' && l.dataVencimento && l.dataVencimento<=todayISOMais(60)).reduce((s,l)=>s+valorEmAberto(l),0);
   const saldoComAtraso = saldoHoje - pagar60;
   const folgaSemTop3 = saldoHoje + (receber.reduce((s,l)=>s+l.valor,0) - somaTop3) - pagar60;
   const aguenta = folgaSemTop3 >= 0;
@@ -14386,7 +14424,7 @@ function indicesLiquidezEstrutura(){
   }, 0);
   const investimentos = totalInvestimentos();
   const imobilizado = totalAtivosPatrimoniais();
-  const estoques = bm.estoques || 0;
+  const estoques = bm.estoques>0 ? bm.estoques : totalEstoqueInsumos();   // o campo manual só vale se preenchido; senão usa o estoque real (mesma fonte do Balanço)
   const realizavelLP = bm.realizavelLP || 0;
   const passivoLP = bm.passivoNaoCirculante || 0;
 
@@ -14494,7 +14532,7 @@ function renderRelatorioLiquidez(){
         const ebitdaAno = ebitdaPeriodo(de12, hoje, 12);
         const alavancagem = ebitdaAno>0 ? dividaLiquida/ebitdaAno : null;
         const { resultadoOp } = resultadoOperacionalPeriodo(de12, hoje);
-        const nomesFinDespesa = (state.categorias.saida||[]).filter(c=>c.ehFinanceira).map(c=>c.nome);
+        const nomesFinDespesa = nomesCategoriasFinanceiras('saida');
         const ehFinanceira = (nomesPai, k) => nomesPai.some(p=>k===p || k.startsWith(p+' / '));
         const despesasFinanceirasAno = movimentosRealizados().filter(ev=>ev.tipo==='saida' && ev.data>=de12 && ev.data<=hoje && ehFinanceira(nomesFinDespesa, ev.categoria||'')).reduce((s,ev)=>s+ev.valor,0);
         const icj = despesasFinanceirasAno>0 ? resultadoOp/despesasFinanceirasAno : null;
@@ -14619,8 +14657,8 @@ function renderDFC(){
   const ate = `${mesGlobalRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
   const label = new Date(anoM, mesM-1, 1).toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
 
-  const realizados = state.lancamentos.filter(l=>(l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && l.dataPagamento);
-  const saldoInicial = realizados.filter(l=>l.dataPagamento<de).reduce((s,l)=>s+(l.tipo==='entrada'?l.valor:-l.valor),0);
+  const realizados = lancamentosRealizados().filter(l=>(l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia' && l.dataPagamento);
+  const saldoInicial = state.contas.reduce((sm,c)=>sm+(c.saldoInicial||0),0) + realizados.filter(l=>l.dataPagamento<de).reduce((s,l)=>s+(l.tipo==='entrada'?l.valor:-l.valor),0);   // inclui o saldo de abertura das contas
   const doMes = realizados.filter(l=>l.dataPagamento>=de && l.dataPagamento<=ate);
 
   const ehFinanciamento = l => /empr[eé]st|financiament/i.test((l.categoria||'')+' '+(l.descricao||''));
@@ -14817,27 +14855,25 @@ function dadosMesGerencialImpl(mesRef, centroCusto){
   const deMes = `${mesRef}-01`;
   const ateMes = `${mesRef}-${String(new Date(anoM, mesM, 0).getDate()).padStart(2,'0')}`;
   const filtroCentro = l => !centroCusto || centroCusto==='todos' || (l.centroCusto||'')===centroCusto;
-  const receitasLanc = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && l.dataPagamento>=deMes && l.dataPagamento<=ateMes && filtroCentro(l));
-  const despesasLanc = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=deMes && l.dataPagamento<=ateMes && filtroCentro(l));
+  // MESMA régua do resultadoOperacionalPeriodo/DRE: eventos de caixa por data real de pagamento (inclui pagamento parcial),
+  // sem transferência entre contas e sem movimento de capital (resgate/aporte de investimento não é receita nem despesa).
+  const eventos = movimentosRealizados().filter(ev=>ev.data && ev.data>=deMes && ev.data<=ateMes && ev.origem!=='transferencia' && !ehMovimentoDeCapital(ev) && filtroCentro(ev));
+  const receitasLanc = eventos.filter(ev=>ev.tipo==='entrada');
+  const despesasLanc = eventos.filter(ev=>ev.tipo==='saida');
   const receita = receitasLanc.reduce((s,l)=>s+l.valor,0);
   const despesasPorCategoria = {}, entradasPorCategoria = {};
-  // Quando um lançamento tem itens com categoria própria (NF unificada com categorias diferentes
-  // por item — ex: aprovação VK com "categorizar cada item separadamente"), soma cada item na SUA
-  // categoria, em vez de jogar o valor inteiro na categoria "dominante" do lançamento.
-  despesasLanc.forEach(l=>{
+  // Quando um lançamento tem itens com categoria própria (NF unificada com categorias diferentes por item), soma cada item na SUA
+  // categoria. Num pagamento parcial, os itens entram proporcionalmente ao que foi pago.
+  const somarPorCategoria = (lista, alvo) => lista.forEach(l=>{
     if(l.itens && l.itens.some(it=>it.categoria)){
-      l.itens.forEach(it=>{ const cat = it.categoria || l.categoria; despesasPorCategoria[cat] = (despesasPorCategoria[cat]||0)+it.valor; });
+      const fator = l.valorTotalLancamento>0 ? l.valor/l.valorTotalLancamento : 1;
+      l.itens.forEach(it=>{ const cat = it.categoria || l.categoria; alvo[cat] = (alvo[cat]||0)+it.valor*fator; });
     } else {
-      despesasPorCategoria[l.categoria] = (despesasPorCategoria[l.categoria]||0)+l.valor;
+      alvo[l.categoria] = (alvo[l.categoria]||0)+l.valor;
     }
   });
-  receitasLanc.forEach(l=>{
-    if(l.itens && l.itens.some(it=>it.categoria)){
-      l.itens.forEach(it=>{ const cat = it.categoria || l.categoria; entradasPorCategoria[cat] = (entradasPorCategoria[cat]||0)+it.valor; });
-    } else {
-      entradasPorCategoria[l.categoria] = (entradasPorCategoria[l.categoria]||0)+l.valor;
-    }
-  });
+  somarPorCategoria(despesasLanc, despesasPorCategoria);
+  somarPorCategoria(receitasLanc, entradasPorCategoria);
   const despesaTotal = despesasLanc.reduce((s,l)=>s+l.valor,0);
   const fixas = new Set(state.categoriasFixas||[]);
   const custoFixo = Object.keys(despesasPorCategoria).filter(c=>fixas.has(c)).reduce((s,c)=>s+despesasPorCategoria[c],0);
@@ -15095,7 +15131,7 @@ function gerarInsightsFinanceiros(){
   // RISCO — concentração alta num único cliente
   const { de: de12m, ate: ate12m } = ultimos12MesesAte(mesGlobalRef);
   const porCliente = {};
-  state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=de12m && l.dataPagamento<=ate12m).forEach(l=>{
+  lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && l.dataPagamento>=de12m && l.dataPagamento<=ate12m).forEach(l=>{
     const nome = l.fornecedor||'Sem identificação'; porCliente[nome] = (porCliente[nome]||0)+l.valor;
   });
   const totalReceita12m = Object.values(porCliente).reduce((a,b)=>a+b,0);
@@ -15123,7 +15159,7 @@ function gerarInsightsFinanceiros(){
   const orc = state.orcamentoCategorias||{};
   const deMes = `${mesAtual}-01`;
   Object.entries(orc).forEach(([cat,limite])=>{
-    const gasto = state.lancamentos.filter(l=>l.tipo==='saida' && l.status==='pago' && l.categoria===cat && l.dataPagamento>=deMes && l.dataPagamento<=hoje).reduce((s,l)=>s+l.valor,0);
+    const gasto = lancamentosRealizados().filter(l=>l.tipo==='saida' && l.status==='pago' && l.categoria===cat && l.dataPagamento>=deMes && l.dataPagamento<=hoje).reduce((s,l)=>s+l.valor,0);
     if(limite>0 && gasto>limite) insights.push({ tipo:'atencao', titulo:`Orçamento de "${cat}" estourado`, texto:`Já gastou ${brl(gasto)} nessa categoria, orçamento era ${brl(limite)}.`, goto:'view', view:'orcamento' });
   });
 
@@ -15137,7 +15173,7 @@ function gerarInsightsFinanceiros(){
 
   // OPORTUNIDADE — meta comercial já batida
   (state.vendedores||[]).filter(v=>v.metaMensal>0).forEach(v=>{
-    const vendido = state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.vendedorId===v.id && l.dataPagamento>=deMes && l.dataPagamento<=hoje).reduce((s,l)=>s+l.valor,0);
+    const vendido = lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.vendedorId===v.id && l.dataPagamento>=deMes && l.dataPagamento<=hoje).reduce((s,l)=>s+l.valor,0);
     if(vendido>=v.metaMensal) insights.push({ tipo:'oportunidade', titulo:`Meta de ${v.nome} batida`, texto:`Já vendeu ${brl(vendido)}, meta era ${brl(v.metaMensal)}. Bom momento pra reconhecer o resultado.`, goto:'relatorio', relatorio:'metas_comerciais' });
   });
 
@@ -18942,7 +18978,7 @@ function renderCrescimentoQueDaPrejuizo(){
       <div style="font-size:38px;font-weight:800;color:${risco?'var(--danger)':'var(--success)'};">${margemContribPct!==null?margemContribPct.toFixed(1)+'%':'—'}</div>
       <div style="font-size:13px;color:var(--text-soft);margin-top:4px;">margem de contribuição atual</div>
     </div></div>
-    <div class="note" style="${risco?'border-color:var(--danger);':'border-color:var(--success);'}">${risco ? '⚠️ Sua margem de contribuição está zerada ou negativa — cada venda a mais está gerando MAIS prejuízo, não lucro. Crescer nesse cenário piora o resultado, não melhora. Reveja preço ou custo variável antes de investir em crescer.' : `Com margem de contribuição positiva (${margemContribPct.toFixed(1)}%), cada venda a mais ajuda a cobrir o custo fixo e gerar lucro — crescer tende a ajudar, desde que o custo fixo não precise crescer na mesma proporção.`}</div>
+    <div class="note" style="${risco?'border-color:var(--danger);':'border-color:var(--success);'}">${margemContribPct===null ? 'Ainda não há receita no mês para calcular a margem de contribuição.' : risco ? '⚠️ Sua margem de contribuição está zerada ou negativa — cada venda a mais está gerando MAIS prejuízo, não lucro. Crescer nesse cenário piora o resultado, não melhora. Reveja preço ou custo variável antes de investir em crescer.' : `Com margem de contribuição positiva (${margemContribPct.toFixed(1)}%), cada venda a mais ajuda a cobrir o custo fixo e gerar lucro — crescer tende a ajudar, desde que o custo fixo não precise crescer na mesma proporção.`}</div>
   `;
 }
 
@@ -21654,7 +21690,7 @@ function cockpitExecutivoHTML(ctx){
   const mudou = seguro('O que mudou', ()=>{
     const ant = resultadoOperacionalPeriodo(ctx.deAnt, ctx.ateAnt);
     const catDelta = (tipo)=>{
-      const somar = (de,ate)=>{ const m={}; state.lancamentos.filter(l=>l.tipo===tipo && (l.status==='pago'||l.status==='recebido') && l.dataPagamento>=de && l.dataPagamento<=ate && l.origem!=='transferencia' && !ehMovimentoDeCapital(l)).forEach(l=>{ m[l.categoria]=(m[l.categoria]||0)+l.valor; }); return m; };
+      const somar = (de,ate)=>{ const m={}; lancamentosRealizados().filter(l=>l.tipo===tipo && (l.status==='pago'||l.status==='recebido') && l.dataPagamento>=de && l.dataPagamento<=ate && l.origem!=='transferencia' && !ehMovimentoDeCapital(l)).forEach(l=>{ m[l.categoria]=(m[l.categoria]||0)+l.valor; }); return m; };
       const a = somar(ctx.deAtual, ctx.ateAtual), b = somar(ctx.deAnt, ctx.ateAnt);
       const arr = Object.keys({...a,...b}).map(c=>({cat:c, delta:(a[c]||0)-(b[c]||0)})).sort((x,y)=>Math.abs(y.delta)-Math.abs(x.delta));
       return arr[0] && Math.abs(arr[0].delta)>0.004 ? arr[0] : null;
@@ -21790,14 +21826,14 @@ function cockpitExecutivoHTML(ctx){
 
   // ---- dados comerciais (o "cliente" de uma entrada é o campo fornecedor, como no resto do sistema) ----
   const comData = (()=>{ try{
-    const receita = (de,ate)=>{ const m={}; let semNome=0; state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento>=de && l.dataPagamento<=ate && l.origem!=='transferencia' && !ehMovimentoDeCapital(l)).forEach(l=>{ const n=(l.fornecedor||'').trim(); if(!n) semNome+=l.valor; else m[n]=(m[n]||0)+l.valor; }); return { m, semNome }; };
+    const receita = (de,ate)=>{ const m={}; let semNome=0; lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento>=de && l.dataPagamento<=ate && l.origem!=='transferencia' && !ehMovimentoDeCapital(l)).forEach(l=>{ const n=(l.fornecedor||'').trim(); if(!n) semNome+=l.valor; else m[n]=(m[n]||0)+l.valor; }); return { m, semNome }; };
     const a = receita(ctx.deAtual, ctx.ateAtual), b = receita(ctx.deAnt, ctx.ateAnt);
     const identificado = Object.values(a.m).reduce((s,v)=>s+v,0);
     const ranking = Object.entries(a.m).sort((x,y)=>y[1]-x[1]);
     const reduziram = Object.keys(b.m).map(n=>({ n, ant:b.m[n], atual:a.m[n]||0 })).filter(x=>x.atual>0 && x.atual<x.ant*0.7).sort((x,y)=>(y.ant-y.atual)-(x.ant-x.atual)).slice(0,3);
     // sem compra recente: comprou nos últimos 12 meses, mas nada nos últimos 60 dias
     const de12 = addDiasISO(hoje,-365), de60 = addDiasISO(hoje,-60), ult = {};
-    state.lancamentos.filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento>=de12 && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && (l.fornecedor||'').trim()).forEach(l=>{ const n=l.fornecedor.trim(); if(!ult[n]) ult[n]={ ultima:l.dataPagamento, total:0 }; if(l.dataPagamento>ult[n].ultima) ult[n].ultima=l.dataPagamento; ult[n].total+=l.valor; });
+    lancamentosRealizados().filter(l=>l.tipo==='entrada' && l.status==='recebido' && l.dataPagamento>=de12 && l.origem!=='transferencia' && !ehMovimentoDeCapital(l) && (l.fornecedor||'').trim()).forEach(l=>{ const n=l.fornecedor.trim(); if(!ult[n]) ult[n]={ ultima:l.dataPagamento, total:0 }; if(l.dataPagamento>ult[n].ultima) ult[n].ultima=l.dataPagamento; ult[n].total+=l.valor; });
     const semCompra = Object.entries(ult).filter(([,v])=>v.ultima<de60).sort((x,y)=>y[1].total-x[1].total).slice(0,3).map(([n,v])=>({ n, ultima:v.ultima, total:v.total }));
     const pedidosVK = state.lancamentos.filter(l=>l.tipo==='entrada' && l.origem==='vk' && l.dataVencimento>=ctx.deAtual && l.dataVencimento<=ctx.ateAtual).length;
     return { nClientes:ranking.length, identificado, semNome:a.semNome, ranking, reduziram, semCompra, pedidosVK };
@@ -21922,7 +21958,7 @@ function cockpitExecutivoHTML(ctx){
   // ---------- TIMELINE — só eventos reais já registrados nos últimos 7 dias ----------
   const timeline = seguro('Linha do tempo', ()=>{
     const de7 = addDiasISO(hoje,-7), ev = [];
-    state.lancamentos.filter(l=>(l.status==='pago'||l.status==='recebido') && l.dataPagamento>=de7 && l.dataPagamento<=hoje && l.origem!=='transferencia' && !ehMovimentoDeCapital(l)).forEach(l=>ev.push({ d:l.dataPagamento, t:`${l.tipo==='entrada'?'Recebimento':'Pagamento'}: ${l.fornecedor||l.descricao||l.categoria}`, v:l.valor, attrs:`data-cockpit-lanc="${l.id}"` }));
+    lancamentosRealizados().filter(l=>(l.status==='pago'||l.status==='recebido') && l.dataPagamento>=de7 && l.dataPagamento<=hoje && l.origem!=='transferencia' && !ehMovimentoDeCapital(l)).forEach(l=>ev.push({ d:l.dataPagamento, t:`${l.tipo==='entrada'?'Recebimento':'Pagamento'}: ${l.fornecedor||l.descricao||l.categoria}`, v:l.valor, attrs:`data-cockpit-lanc="${l.id}"` }));
     if(usuarioPodeVerTela('orcamentos-processos')) (state.orcamentosProcessos||[]).filter(o=>o.decididoEm && o.decididoEm.slice(0,10)>=de7).forEach(o=>ev.push({ d:o.decididoEm.slice(0,10), t:`Orçamento N° ${o.numero} ${o.status==='aprovado'?'aprovado':'recusado'}`, v:o.valorTotal||0, attrs:'data-action="ir-para-alerta" data-view="orcamentos-processos"' }));
     if(usuarioPodeVerTela('investimentos')) (state.resultadosInvestimento||[]).filter(r=>r.data>=de7).forEach(r=>ev.push({ d:r.data, t:`Venda de ${r.quantidade} ${r.ticker} (${r.resultadoBruto>=0?'ganho':'perda'} de capital)`, v:Math.abs(r.resultadoBruto), attrs:'data-action="ir-para-alerta" data-view="investimentos"' }));
     (state.apresentacoesResultados||[]).filter(a=>a.status==='finalizada' && (a.atualizadoEm||'').slice(0,10)>=de7).forEach(a=>ev.push({ d:a.atualizadoEm.slice(0,10), t:`Apresentação de resultados finalizada: ${a.snapshot?.label||a.periodoRef}`, v:null, attrs:'data-action="ir-para-alerta" data-view="apresentacao-resultados"' }));
@@ -22602,7 +22638,7 @@ function renderRelatorioValuation(){
   `;
 }
 
-function totalEstoqueInsumos(){ return (state.estoqueInsumos||[]).reduce((s,i)=>s+i.valorTotal,0); }
+function totalEstoqueInsumos(){ return (state.estoqueInsumos||[]).reduce((s,i)=>s+(Number.isFinite(i.valorTotal)?i.valorTotal:0),0); }   // um insumo sem valorTotal não pode contaminar o total com NaN
 
 /* ====================== CENTRAL DE DEMONSTRAÇÕES FINANCEIRAS ====================== */
 // Camada de navegação e apresentação SOBRE renderDRE/renderBalanco/renderDFC/renderDMPL, que já
@@ -22700,7 +22736,7 @@ function renderBalanco(){
   // estoque/investimentos no passado, então isso seria inventar precisão que não existe).
   const balancoPeriodoSel = window._balancoPeriodo || 'mes';
   const inicioPeriodo = balancoPeriodoSel==='mes' ? dataRef.slice(0,7)+'-01' : addDiasISO(dataRef, balancoPeriodoSel==='30d'?-30:balancoPeriodoSel==='90d'?-90:-365);
-  const movsPeriodo = state.lancamentos.filter(l=>l.dataPagamento && l.dataPagamento>=inicioPeriodo && l.dataPagamento<=dataRef && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
+  const movsPeriodo = lancamentosRealizados().filter(l=>l.dataPagamento && l.dataPagamento>=inicioPeriodo && l.dataPagamento<=dataRef && (l.status==='pago'||l.status==='recebido') && l.origem!=='transferencia');
   const resultadoPeriodo = movsPeriodo.filter(l=>!ehMovimentoDeCapital(l)).reduce((s,l)=>s+(l.tipo==='entrada'?l.valor:-l.valor),0);
   const aportesPeriodo = movsPeriodo.filter(l=>l.tipo==='saida' && ehMovimentoDeCapital(l)).reduce((s,l)=>s+l.valor,0);
   const retiradasPeriodo = movsPeriodo.filter(l=>l.tipo==='entrada' && ehMovimentoDeCapital(l)).reduce((s,l)=>s+l.valor,0);
@@ -24736,8 +24772,8 @@ function depreciacaoMensal(){
 // marcadas como financeiras) — mesma régua usada no DRE, só que devolvendo números crus em vez de HTML,
 // pra reaproveitar em cards/rankings sem duplicar toda a lógica de novo.
 function resultadoOperacionalPeriodo(de, ate){
-  const nomesFinReceita = (state.categorias.entrada||[]).filter(c=>c.ehFinanceira).map(c=>c.nome);
-  const nomesFinDespesa = (state.categorias.saida||[]).filter(c=>c.ehFinanceira).map(c=>c.nome);
+  const nomesFinReceita = nomesCategoriasFinanceiras('entrada');
+  const nomesFinDespesa = nomesCategoriasFinanceiras('saida');
   const ehFinanceira = (nomesPai, k) => nomesPai.some(p=>k===p || k.startsWith(p+' / '));
   const eventos = movimentosRealizados().filter(ev=>ev.data && ev.data>=de && ev.data<=ate && ev.origem!=='transferencia' && !ehMovimentoDeCapital(ev));
   const receitaOp = eventos.filter(ev=>ev.tipo==='entrada' && !ehFinanceira(nomesFinReceita, ev.categoria||'')).reduce((s,ev)=>s+ev.valor,0);
@@ -26106,7 +26142,7 @@ function viewCreditosClientes(){
 
 function viewAtivosPatrimoniais(){
   const hoje = todayISO();
-  const em60ISO = (()=>{ const d=new Date(); d.setDate(d.getDate()+60); return d.toISOString().slice(0,10); })();
+  const em60ISO = todayISOMais(60);
   const todosAtivos = state.ativosPatrimoniais;
   const ativosVivos = todosAtivos.filter(a=>!a.baixa);
   const ativosBaixados = todosAtivos.filter(a=>a.baixa);
@@ -26251,7 +26287,7 @@ function atualizarAtivosListaConteudo(){
   const ativosVivos = state.ativosPatrimoniais.filter(a=>!a.baixa);
   const ativosBaixados = state.ativosPatrimoniais.filter(a=>a.baixa);
   const hoje = todayISO();
-  const em60ISO = (()=>{ const d=new Date(); d.setDate(d.getDate()+60); return d.toISOString().slice(0,10); })();
+  const em60ISO = todayISOMais(60);
   const alertasAtivo = (a) => {
     const d = calcDepreciacao(a);
     const avisos = [];
@@ -30554,6 +30590,9 @@ function abrirQuitarModal(id){
     const contaId = document.getElementById('qtConta').value;
     const formaRecebimento = document.getElementById('qtFormaRecebimento')?.value || null;
     if(isNaN(valorInformado) || valorInformado<=0){ mostrarAvisoValidacao('Informe um valor válido'); return; }
+    // Trava contra pagar/receber MAIS do que falta (ex.: R$ 400 numa fatura de R$ 26,47) — costuma ser lançamento no item errado.
+    const faltaAntes = Math.round((l.valor - (l.valorRecebido||0))*100)/100;
+    if(valorInformado > faltaAntes + 0.01 && !confirm(`O valor informado (${brl(valorInformado)}) é MAIOR que o saldo em aberto deste lançamento (${brl(faltaAntes)}).\n\nDiferença: ${brl(valorInformado-faltaAntes)}.\n\nRegistrar mesmo assim?`)) return;
     if(!l.historicoRecebimentos) l.historicoRecebimentos = [];
     l.historicoRecebimentos.push({ valor: valorInformado, data, contaId, formaRecebimento: formaRecebimento||null });
     const novoRecebido = Math.round(((l.valorRecebido||0) + valorInformado)*100)/100;
@@ -37502,6 +37541,9 @@ function viewProvSimuladorAba(){
   `;
 }
 function calcularESimular(){
+  // O Simulador de Preço e o Simulador de Provisão compartilham ids de campo (simValor, simMargem...). Este cálculo é só do de
+  // Provisão: se os campos dele não estão na tela, não há nada a calcular (antes disso quebrava a tela do Simulador de Preço).
+  if(!document.getElementById('simReservado') || !document.getElementById('simVencimento') || !document.getElementById('simValor') || !document.getElementById('simMargem')) return;
   const valor = numBR(document.getElementById('simValor').value)||0;
   const margem = numBR(document.getElementById('simMargem').value)||0;
   const reservado = numBR(document.getElementById('simReservado').value)||0;
@@ -37571,6 +37613,83 @@ function viewProvRelatoriosAba(ativos){
   `;
 }
 
+// ============================================================
+// CONFERÊNCIA DE CÁLCULOS — roda sozinha na tela de Diagnóstico de Dados. Não corrige nada: compara números que aparecem
+// em telas diferentes (devem ser iguais) e aponta dados que costumam gerar erro de contabilização.
+// ============================================================
+function conferenciaCalculos(){
+  const R = [], hoje = todayISO(), mes = mesGlobalRef, tol = 0.011;
+  const ok = (titulo, detalhe) => R.push({ nivel:'ok', titulo, detalhe });
+  const aviso = (titulo, detalhe, nivel) => R.push({ nivel: nivel||'atencao', titulo, detalhe });
+  const igual = (a,b) => Math.abs(a-b) <= tol;
+  const L = state.lancamentos;
+  // 1) Caixa: quatro caminhos precisam dar o mesmo número
+  try{
+    const base = state.contas.reduce((s,c)=>s+saldoConta(c.id),0);
+    const fontes = { 'Início (Saldo em caixa)': totaisPorMesRef(hoje.slice(0,7)).saldoAtual, 'Balanço': patrimonioLiquidoResumo().caixaBancos, 'Liquidez': indicesLiquidezEstrutura().disponivel, 'Central 360°': patrimonioLiquidoResumo().caixaBancos };
+    const dif = Object.entries(fontes).filter(([,v])=>!igual(v,base));
+    if(!dif.length) ok('Caixa bate em todas as telas', `${brl(base)} — soma das contas = Início = Balanço = Liquidez = Central 360°.`);
+    else aviso('Caixa diferente entre telas', `Soma das contas: ${brl(base)}. Difere em: ${dif.map(([n,v])=>`${n} ${brl(v)}`).join('; ')}.`, 'erro');
+  }catch(e){ aviso('Conferência do caixa falhou', String(e.message), 'erro'); }
+  // 2) Resultado do mês: as três réguas devem coincidir
+  try{
+    const [y,m]=mes.split('-').map(Number), de=mes+'-01', ate=mes+'-'+String(new Date(y,m,0).getDate()).padStart(2,'0');
+    const a = resultadoOperacionalPeriodo(de,ate), g = dadosMesGerencial(mes,'todos');
+    if(igual(a.receitaTotal,g.receita) && igual(a.despesaTotal,g.despesaTotal)) ok(`Receita e despesa de ${competenciaLabel(mes)} batem`, `Receita ${brl(a.receitaTotal)} · despesa ${brl(a.despesaTotal)} — iguais na DRE/Central 360° e no Gerencial/nota de saúde.`);
+    else aviso(`Receita/despesa de ${competenciaLabel(mes)} diferentes entre telas`, `DRE: ${brl(a.receitaTotal)} / ${brl(a.despesaTotal)} · Gerencial: ${brl(g.receita)} / ${brl(g.despesaTotal)}.`, 'erro');
+  }catch(e){ aviso('Conferência do resultado falhou', String(e.message), 'erro'); }
+  // 3) Contas a pagar / a receber: Balanço x soma dos saldos em aberto
+  try{
+    const pat = patrimonioLiquidoResumo();
+    const pagar = L.filter(l=>l.tipo==='saida' && l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0), receber = L.filter(l=>l.tipo==='entrada' && l.status==='pendente').reduce((s,l)=>s+valorEmAberto(l),0);
+    if(igual(pat.aPagar,pagar) && igual(pat.aReceber,receber)) ok('A pagar e a receber batem com os saldos em aberto', `A pagar ${brl(pagar)} · a receber ${brl(receber)}.`);
+    else aviso('A pagar/a receber do Balanço diferem da soma dos saldos em aberto', `Balanço: ${brl(pat.aPagar)} / ${brl(pat.aReceber)} · soma real: ${brl(pagar)} / ${brl(receber)}.`, 'erro');
+  }catch(e){ aviso('Conferência de pendências falhou', String(e.message), 'erro'); }
+  // 4) Pagamento maior que o lançado
+  const somaHist = l => (l.historicoRecebimentos||[]).reduce((s,p)=>s+(p.valor||0),0);
+  const excesso = L.filter(l=>(l.historicoRecebimentos||[]).length && somaHist(l)>l.valor+0.02);
+  if(!excesso.length) ok('Nenhum pagamento maior que o valor lançado', 'Todos os pagamentos registrados respeitam o valor do lançamento.');
+  else aviso('Pagamento MAIOR que o valor lançado', excesso.slice(0,5).map(l=>`${l.descricao||l.categoria}: lançado ${brl(l.valor)}, pago ${brl(somaHist(l))} (${brl(somaHist(l)-l.valor)} a mais)`).join(' · ')+(excesso.length>5?` · +${excesso.length-5}`:'')+' — costuma ser pagamento lançado no item errado.');
+  // 5) Contas com saldo negativo (conta de dinheiro/poupança/digital não pode ficar negativa)
+  const neg = state.contas.filter(c=>saldoConta(c.id)<-0.005 && !(c.limiteChequeEspecial>0));
+  if(!neg.length) ok('Nenhuma conta com saldo negativo', 'Todas as contas estão com saldo zero ou positivo.');
+  else aviso('Conta com saldo NEGATIVO', neg.map(c=>`${c.nome}: ${brl(saldoConta(c.id))}`).join(' · ')+' — indica entrada ou transferência que ficou sem lançar.');
+  // 6) Estoque negativo
+  const estNeg = (state.estoqueInsumos||[]).filter(i=>i.quantidade<-0.0001);
+  if(!estNeg.length) ok('Nenhum insumo com estoque negativo', 'Todas as quantidades em estoque são positivas.');
+  else aviso('Insumo com estoque NEGATIVO', estNeg.slice(0,6).map(i=>`${i.nome}: ${i.quantidade.toFixed(2)} ${i.unidade||''}`).join(' · ')+' — consumo lançado acima do que entrou no estoque.');
+  // 7) Transferências
+  const porT = {}; L.filter(l=>l.origem==='transferencia').forEach(l=>{ (porT[l.transferenciaId||l.id]=porT[l.transferenciaId||l.id]||[]).push(l); });
+  const semPar = Object.values(porT).filter(a=>a.length!==2 || !(a.some(x=>x.tipo==='entrada') && a.some(x=>x.tipo==='saida')) || Math.abs(a[0].valor-a[1].valor)>0.005);
+  if(!semPar.length) ok('Todas as transferências têm as duas pontas', `${Object.keys(porT).length} transferência(s) entre contas, sem diferença de valor.`);
+  else aviso('Transferência sem par ou com valores diferentes', `${semPar.length} transferência(s) com problema — o caixa total fica errado por esse valor.`, 'erro');
+  // 8) Realizado com data futura
+  const fut = L.filter(l=>(l.status==='pago'||l.status==='recebido') && l.dataPagamento && l.dataPagamento>hoje && l.origem!=='transferencia');
+  if(!fut.length) ok('Nenhum lançamento "pago/recebido" com data futura', 'Todo pagamento efetivado tem data até hoje.');
+  else aviso('Lançamento marcado como pago/recebido com data FUTURA', fut.slice(0,4).map(l=>`${l.descricao||l.categoria} (${fmtDate(l.dataPagamento)}, ${brl(l.valor)})`).join(' · ')+' — não conta no caixa de hoje até a data chegar.', 'baixa');
+  // 9) Investimento sem ativo de origem
+  const semAtivo = L.filter(l=>l.investimentoAtivoId && !state.ativosInvestimento.find(a=>a.id===l.investimentoAtivoId));
+  if(!semAtivo.length) ok('Todo aporte de investimento tem o ativo correspondente', 'Aportes e resgates apontam para ativos que existem.');
+  else aviso('Aporte de investimento sem o ativo correspondente', `${semAtivo.length} lançamento(s) somando ${brl(semAtivo.reduce((s,l)=>s+l.valor,0))} apontam para ativos que foram excluídos — o dinheiro saiu do caixa mas não aparece na carteira.`);
+  // 10) Categorias do sistema que não existem no cadastro (tratadas como financeiras automaticamente)
+  return R;
+}
+function conferenciaCalculosHTML(){
+  let R; try{ R = conferenciaCalculos(); }catch(e){ return `<div class="note">Não foi possível rodar a conferência de cálculos.</div>`; }
+  const cor = { ok:'var(--success)', atencao:'var(--warn)', baixa:'var(--text-soft)', erro:'var(--danger)' };
+  const icone = { ok:'✅', atencao:'⚠️', baixa:'ℹ️', erro:'🔴' };
+  const ordem = { erro:0, atencao:1, baixa:2, ok:3 };
+  const lista = R.slice().sort((a,b)=>ordem[a.nivel]-ordem[b.nivel]);
+  const problemas = R.filter(r=>r.nivel!=='ok').length;
+  return `
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-head"><h2>🧮 Conferência de cálculos</h2><span style="font-size:12px;color:var(--text-soft);">${problemas?`${problemas} ponto(s) pedem atenção`:'tudo confere'}</span></div>
+      <div class="note" style="margin:0 16px 8px;">Compara números que aparecem em telas diferentes (devem ser iguais) e aponta dados que costumam gerar erro de contabilização. Só avisa — não altera nada.</div>
+      <div class="panel-body" style="padding:6px 16px 12px;">
+        ${lista.map(r=>`<div style="display:flex;gap:10px;padding:8px 0;border-top:1px solid var(--line);"><span>${icone[r.nivel]}</span><div style="min-width:0;"><div style="font-size:13px;font-weight:600;color:${r.nivel==='ok'?'var(--ink)':cor[r.nivel]};">${escapeHTML(r.titulo)}</div><div style="font-size:12px;color:var(--text-soft);line-height:1.4;">${escapeHTML(r.detalhe)}</div></div></div>`).join('')}
+      </div>
+    </div>`;
+}
 function viewDiagnosticoDados(){
   const problemas = diagnosticoDadosOrfaos();
   const ordemGravidade = { critica:0, alta:1, media:2, baixa:3 };
@@ -37600,6 +37719,7 @@ function viewDiagnosticoDados(){
     <div class="topbar">
       <div><h1>Diagnóstico de Dados</h1><p>${problemas.length} situação(ões) encontrada(s) · isso só lista, não corrige nada sozinho</p></div>
     </div>
+    ${conferenciaCalculosHTML()}
     ${!problemas.length ? `<div class="panel"><div class="empty" style="padding:40px 20px;">Nenhum problema encontrado. 🎉</div></div>` : tiposOrdenados.map(([tipo, lista])=>`
       <div class="panel" style="margin-bottom:14px;">
         <div class="panel-head"><h2 style="color:${corGravidade[lista[0].gravidade]};">${tipo}</h2><span style="font-size:12px;color:var(--text-soft);">${lista.length} ocorrência(s) · gravidade: ${lista[0].gravidade}</span></div>
@@ -39225,7 +39345,7 @@ function viewMetasReserva(){
       const visao = metasEmpresaVisao;
       let de, ate;
       if(visao==='semana'){ const d=new Date(); const dia=d.getDay(); const seg=new Date(d); seg.setDate(d.getDate()-((dia+6)%7)); const dom=new Date(seg); dom.setDate(seg.getDate()+6); de=seg.toISOString().slice(0,10); ate=dom.toISOString().slice(0,10); }
-      else if(visao==='30d'){ de=hoje2; const f=new Date(); f.setDate(f.getDate()+30); ate=f.toISOString().slice(0,10); }
+      else if(visao==='30d'){ de=hoje2; ate=todayISOMais(30); }
       else if(visao==='trimestre'){ const m=new Date().getMonth(); const ini=Math.floor(m/3)*3; de=new Date(new Date().getFullYear(),ini,1).toISOString().slice(0,10); ate=new Date(new Date().getFullYear(),ini+3,0).toISOString().slice(0,10); }
       else if(visao==='ano'){ de=hoje2.slice(0,4)+'-01-01'; ate=hoje2.slice(0,4)+'-12-31'; }
       else if(visao==='todas'){ de='0000-01-01'; ate='9999-12-31'; }
@@ -43179,9 +43299,10 @@ function openEscolherContaInvestirModal(){
 }
 
 function addDiasISO(isoDate, dias){
-  const d = new Date(isoDate);
+  // Meio-dia LOCAL + componentes locais: o resultado não depende do fuso (new Date('AAAA-MM-DD') é meia-noite UTC).
+  const d = new Date(String(isoDate).slice(0,10)+'T12:00:00');
   d.setDate(d.getDate()+dias);
-  return d.toISOString().slice(0,10);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 function addDiasUteis(isoDate, dias){
   const d = new Date((isoDate||todayISO())+'T12:00:00');
