@@ -34106,11 +34106,32 @@ function attachViewHandlers(){
   document.querySelectorAll('[data-action="avaliar-fornecedor"]').forEach(btn=>{
     btn.addEventListener('click', ()=>openAvaliarFornecedorModal(btn.dataset.id));
   });
+  document.querySelectorAll('[data-action="inativar-fornecedor"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!podeAgora('editar')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra inativar fornecedor.'); return; }
+      const f = (state.fornecedores||[]).find(x=>x.id===btn.dataset.id);
+      if(!f) return;
+      f.situacao = 'inativo';
+      registrarLog('Fornecedor inativado', normalizarNomeFornecedor(f.nome));
+      persist(); render(); showToast('Fornecedor inativado — continua pesquisável e o histórico dele não muda.');
+    });
+  });
+  document.querySelectorAll('[data-action="reativar-fornecedor"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!podeAgora('editar')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra reativar fornecedor.'); return; }
+      const f = (state.fornecedores||[]).find(x=>x.id===btn.dataset.id);
+      if(!f) return;
+      f.situacao = 'ativo';
+      registrarLog('Fornecedor reativado', normalizarNomeFornecedor(f.nome));
+      persist(); render(); showToast('Fornecedor reativado.');
+    });
+  });
   document.querySelectorAll('[data-action="excluir-fornecedor"]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
-      if(!(await avisoModal({mensagem: 'Excluir este fornecedor? Os lançamentos já feitos com ele não são apagados.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
+      if(!podeAgora('excluir')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra excluir fornecedor. Considere inativar em vez de excluir.'); return; }
+      if(!(await avisoModal({mensagem: 'Excluir este fornecedor DEFINITIVAMENTE? Os lançamentos já feitos com ele não são apagados, mas o cadastro some. Prefira "Inativar" se não tem certeza.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
       const f = (state.fornecedores||[]).find(x=>x.id===btn.dataset.id);
-      if(f) registrarLog('Fornecedor excluído', f.nome);
+      if(f) registrarLog('Fornecedor excluído', normalizarNomeFornecedor(f.nome));
       state.fornecedores = (state.fornecedores||[]).filter(f=>f.id!==btn.dataset.id);
       persist(); render(); showToast('Fornecedor excluído');
     });
@@ -38299,6 +38320,31 @@ function viewDescricaoDetalhe(){
     </div>
   `;
 }
+// Normalização de nome de fornecedor/prestador PARA EXIBIÇÃO — nunca altera o dado guardado (f.nome
+// continua exatamente igual, é a chave usada em toda comparação de lançamento por fornecedor).
+// Trata: espaços duplicados, Title Case, preposições em minúsculo, siglas empresariais conhecidas
+// (cada uma com a grafia certa — "LTDA"→"Ltda" mas "ME"/"EPP" continuam maiúsculas, por convenção)
+// e marcas/siglas curtas (ex.: "ABC", "XPTO"), que ficam como estavam.
+// Limitação conhecida: um nome próprio real de 4 letras (ex.: "JOSE") vira Title Case; uma sigla real
+// de 4 letras com vogal que não esteja na lista abaixo (algo além de XPTO/XYZ) também viraria Title
+// Case — não dá pra diferenciar as duas coisas só pela grafia, sem uma lista fechada de siglas.
+const FORNECEDOR_SIGLAS = { 'LTDA':'Ltda', 'ME':'ME', 'EPP':'EPP', 'EIRELI':'Eireli', 'SA':'S.A.', 'MEI':'MEI', 'CIA':'Cia', 'XPTO':'XPTO', 'XYZ':'XYZ' };
+const FORNECEDOR_PREPOSICOES = new Set(['de','da','do','das','dos','e','em','para','a','o','com']);
+function normalizarNomeFornecedor(nomeOriginal){
+  const nome = String(nomeOriginal||'').trim().replace(/\s+/g,' ');
+  if(!nome) return '';
+  const palavras = nome.split(' ');
+  return palavras.map((p,i)=>{
+    if(/^S\.?\/?A\.?$/i.test(p)) return 'S.A.';                              // "S.A." / "SA" / "S/A"
+    const semPontuacao = p.replace(/[.,]/g,'').toUpperCase();
+    if(FORNECEDOR_SIGLAS[semPontuacao]) return FORNECEDOR_SIGLAS[semPontuacao]; // sigla empresarial conhecida
+    const minusc = p.toLocaleLowerCase('pt-BR');
+    if(i>0 && FORNECEDOR_PREPOSICOES.has(minusc)) return minusc;              // preposição de ligação
+    const temVogal = /[aeiouàáâãéêíóôõúü]/i.test(minusc);
+    if(p===p.toUpperCase() && /[A-ZÀ-Ú]/.test(p) && (p.length<=3 || !temVogal)) return p; // marca/sigla curta sem vogal (ex.: ABC)
+    return minusc.charAt(0).toLocaleUpperCase('pt-BR') + minusc.slice(1);      // Title Case padrão
+  }).join(' ');
+}
 function viewFornecedores(){
   const lista = [...(state.fornecedores||[])].sort((a,b)=>a.nome.localeCompare(b.nome));
   const dadosPorFornecedor = lista.map(f=>{
@@ -38338,12 +38384,12 @@ function viewFornecedores(){
       <div class="card"><div class="label">Com pendência</div><div class="value mono">${comPendencia}</div></div>
       <div class="card"><div class="label">Com aumento de preço</div><div class="value mono" style="color:${comAumento.length>0?'var(--warn)':'inherit'};">${comAumento.length}</div></div>
     </div>
-    ${maior ? `<div class="note" style="margin-top:0;">Maior fornecedor: <strong>${escapeHTML(maior.nome)}</strong> (${brl(maior.totalComprado)})${ranking.length>=3?` · Os 3 maiores fornecedores concentram ${top3Pct.toFixed(0)}% das compras.`:''}</div>` : ''}
+    ${maior ? `<div class="note" style="margin-top:0;">Maior fornecedor: <strong>${escapeHTML(normalizarNomeFornecedor(maior.nome))}</strong> (${brl(maior.totalComprado)})${ranking.length>=3?` · Os 3 maiores fornecedores concentram ${top3Pct.toFixed(0)}% das compras.`:''}</div>` : ''}
 
     ${comAumento.length ? `
     <div class="dash-section-label">⚠️ Aumento de preço</div>
     <div class="panel" style="margin-bottom:14px;border-left:3px solid var(--warn);"><div class="panel-body" style="padding:0;">
-      ${comAumento.map(f=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span style="font-size:12.5px;">${escapeHTML(f.nome)}: ${brl(f.aumento.mediaAnterior)} → ${brl(f.aumento.mediaRecente)} (médias)</span><span class="mono" style="font-weight:600;color:var(--danger);">+${f.aumento.variacaoPct.toFixed(0)}%</span></div>`).join('')}
+      ${comAumento.map(f=>`<div class="ledger-row compact" style="grid-template-columns:1fr auto;"><span style="font-size:12.5px;">${escapeHTML(normalizarNomeFornecedor(f.nome))}: ${brl(f.aumento.mediaAnterior)} → ${brl(f.aumento.mediaRecente)} (médias)</span><span class="mono" style="font-weight:600;color:var(--danger);">+${f.aumento.variacaoPct.toFixed(0)}%</span></div>`).join('')}
     </div></div>` : ''}
 
     <div class="panel">
@@ -38354,10 +38400,10 @@ function viewFornecedores(){
         ${dadosPorFornecedor.length ? dadosPorFornecedor.map(f=>{
           const aval = mediaAvaliacaoFornecedor(f.id, state.avaliacoesFornecedor);
           return `
-          <div class="ledger-row fornecedor-row" data-id="${f.id}">
-            <span class="dot" style="background:${corStatus[f.status]};" title="${iconeStatus[f.status]}"></span>
+          <div class="ledger-row fornecedor-row" data-id="${f.id}" style="${f.situacao==='inativo'?'opacity:.55;':''}">
+            ${f.situacao==='inativo' ? `<span class="dot" style="background:var(--text-soft);" title="Inativo"></span>` : `<span class="dot" style="background:${corStatus[f.status]};" title="${iconeStatus[f.status]}"></span>`}
             <div class="desc-cell" data-action="editar-fornecedor" data-id="${f.id}" style="cursor:pointer;">
-              <div style="text-transform:lowercase;">${escapeHTML(f.nome)}</div>
+              <div>${escapeHTML(normalizarNomeFornecedor(f.nome))}${f.situacao==='inativo'?' <span style="font-size:10.5px;color:var(--text-soft);">(inativo)</span>':''}</div>
               <div class="cat">${escapeHTML(f.cnpjCpf||'sem CNPJ/CPF cadastrado')}${f.contratoPrecoFixo ? ` · 📑 contrato ${brl(f.contratoPrecoFixo)}${f.contratoVigenciaFim?' até '+fmtDate(f.contratoVigenciaFim):''}` : ''}${f.aPagar>0?' · a pagar '+brl(f.aPagar):''}${aval?` · ⭐ ${aval.media.toFixed(1)} (${aval.qtd})`:''}</div>
             </div>
             <span class="fornecedor-contato" style="font-size:12.5px;color:var(--text-soft);">${escapeHTML(f.telefone||f.email||'—')}</span>
@@ -38366,7 +38412,8 @@ function viewFornecedores(){
               <button class="icon-btn" data-action="ver-fornecedor" data-id="${f.id}" title="Ver lançamentos">📋</button>
               <button class="icon-btn" data-action="avaliar-fornecedor" data-id="${f.id}" title="Avaliar">⭐</button>
               <button class="icon-btn" data-action="editar-fornecedor" data-id="${f.id}" title="Editar">✎</button>
-              <button class="icon-btn" data-action="excluir-fornecedor" data-id="${f.id}" title="Excluir">✕</button>
+              <button class="icon-btn" data-action="${f.situacao==='inativo'?'reativar':'inativar'}-fornecedor" data-id="${f.id}" title="${f.situacao==='inativo'?'Reativar':'Inativar'}">${f.situacao==='inativo'?'✅':'🚫'}</button>
+              <button class="icon-btn" data-action="excluir-fornecedor" data-id="${f.id}" title="Excluir definitivamente">✕</button>
             </div>
           </div>
         `;}).join('') : `<div class="empty">Nenhum fornecedor cadastrado ainda.</div>`}
@@ -38381,7 +38428,7 @@ function openAvaliarFornecedorModal(fornecedorId){
   const historico = (state.avaliacoesFornecedor||[]).filter(a=>a.fornecedorId===fornecedorId).sort((a,b)=>b.data.localeCompare(a.data));
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
-    <h3>⭐ Avaliar ${escapeHTML(f.nome)}</h3>
+    <h3>⭐ Avaliar ${escapeHTML(normalizarNomeFornecedor(f.nome))}</h3>
     <div class="field"><label>Nota (1 a 5)</label>
       <select id="avalNota"><option value="5">5 - Excelente</option><option value="4">4 - Bom</option><option value="3">3 - Regular</option><option value="2">2 - Ruim</option><option value="1">1 - Péssimo</option></select>
     </div>
@@ -38449,7 +38496,13 @@ function openFornecedorModal(existing){
       if(!resp.ok) throw new Error('não encontrado');
       const dados = await resp.json();
       const nomeAtual = document.getElementById('fnNome').value.trim();
-      if(!nomeAtual) document.getElementById('fnNome').value = dados.nome_fantasia || dados.razao_social || '';
+      const razaoOriginal = dados.razao_social || dados.nome_fantasia || '';
+      if(!nomeAtual){
+        // Sugere o nome já padronizado pra exibição (item 6 do documento), mas guarda o texto exato
+        // que a Receita devolveu — nada aqui é inventado, só uma forma diferente de mostrar o mesmo dado.
+        document.getElementById('fnNome').value = normalizarNomeFornecedor(dados.nome_fantasia || razaoOriginal);
+        document.getElementById('fnNome').dataset.razaoSocialOriginal = razaoOriginal;
+      }
       const telAtual = document.getElementById('fnTelefone').value.trim();
       if(!telAtual && dados.ddd_telefone_1) document.getElementById('fnTelefone').value = dados.ddd_telefone_1;
       const emailAtual = document.getElementById('fnEmail').value.trim();
@@ -38472,9 +38525,23 @@ function openFornecedorModal(existing){
     const nome = document.getElementById('fnNome').value.trim();
     if(!nome){ mostrarAvisoValidacao('Digite o nome do fornecedor'); return; }
     if(!state.fornecedores) state.fornecedores = [];
+    const cnpjDigitado = document.getElementById('fnDoc').value.replace(/\D/g,'');
+    if(!isEdit && cnpjDigitado.length>=11){
+      // CNPJ/CPF é a identidade principal (item 12 do documento) — verifica antes do nome, senão
+      // dois cadastros do mesmo fornecedor com nomes diferentes passariam batido.
+      const existenteMesmoDoc = state.fornecedores.find(f=>(f.cnpjCpf||'').replace(/\D/g,'')===cnpjDigitado);
+      if(existenteMesmoDoc){
+        showToast(`Este CNPJ já está cadastrado como "${normalizarNomeFornecedor(existenteMesmoDoc.nome)}" — abrindo o cadastro existente.`);
+        closeModal();
+        setTimeout(()=>{ openFornecedorModal(existenteMesmoDoc); }, 50);
+        btn_btnSalvarFornecedor_Click.disabled = false;
+        return;
+      }
+    }
     if(!isEdit && state.fornecedores.some(f=>f.nome.toLowerCase()===nome.toLowerCase())){ showToast('Já existe um fornecedor com esse nome'); return; }
     const payload = {
       nome,
+      razaoSocialOriginal: document.getElementById('fnNome').dataset.razaoSocialOriginal || (isEdit ? existing?.razaoSocialOriginal : null) || null,
       cnpjCpf: document.getElementById('fnDoc').value.trim(),
       telefone: document.getElementById('fnTelefone').value.trim(),
       email: document.getElementById('fnEmail').value.trim(),
