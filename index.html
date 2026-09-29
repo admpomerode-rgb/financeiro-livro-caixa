@@ -12114,7 +12114,7 @@ function calcularDadosApresentacao(tipo, periodoRef){
   const topReceitas = Object.entries(porCategoriaReceita).sort((a,b)=>b[1]-a[1]).slice(0,5);
   const hoje = todayISO();
   const atrasadas = state.lancamentos.filter(l=>l.status==='pendente'&&l.dataVencimento<hoje);
-  return { tipo, periodoRef, de, ate, label, ...r, margem, ...pat, aportes, resgates, ganhoCapital, perdaCapital, rendimentosInv, topDespesas, topReceitas, atrasadas: atrasadas.length, atrasadasValor: atrasadas.reduce((s,l)=>s+valorEmAberto(l),0) };
+  return { tipo, periodoRef, de, ate, label, ...r, margem, ...pat, aportes, resgates, ganhoCapital, perdaCapital, rendimentosInv, topDespesas, topReceitas, porCategoriaDespesa, porCategoriaReceita, atrasadas: atrasadas.length, atrasadasValor: atrasadas.reduce((s,l)=>s+valorEmAberto(l),0) };
 }
 function periodoAnteriorRef(tipo, periodoRef){
   if(tipo==='mensal'){
@@ -12415,6 +12415,40 @@ function pdfApresGrafico(docPdf, x, y, w, h, funcaoDesenho, dadosGrafico){
     return true;
   }catch(e){ console.error('PDF apresentação: gráfico não pôde ser desenhado', e); return false; }
 }
+// Tabela estilo release de resultados (cabeçalho azul escuro, linhas alternadas, números
+// monetários alinhados à direita, variação em destaque) — reaproveita 100% dos números já
+// calculados; esta função só desenha.
+function pdfApresTabela(docPdf, x, y, larguras, cabecalho, linhas){
+  const C = PDF_APRES_COR;
+  let cx = x;
+  docPdf.setFillColor(...C.azul);
+  docPdf.rect(x, y, larguras.reduce((a,b)=>a+b,0), 7, 'F');
+  docPdf.setFont('helvetica','bold'); docPdf.setFontSize(8); docPdf.setTextColor(255,255,255);
+  cabecalho.forEach((h,i)=>{ docPdf.text(h, i===0?cx+2:cx+larguras[i]-2, y+5, i===0?{}:{align:'right'}); cx += larguras[i]; });
+  let yy = y+7;
+  linhas.forEach((linha,li)=>{
+    const alturaLinha = 6;
+    if(li%2===1){ docPdf.setFillColor(244,246,249); docPdf.rect(x, yy, larguras.reduce((a,b)=>a+b,0), alturaLinha, 'F'); }
+    cx = x;
+    linha.forEach((celula,ci)=>{
+      const negrito = li===linha.negrito || linha.bold;
+      docPdf.setFont('helvetica', linha.bold?'bold':'normal'); docPdf.setFontSize(8);
+      let cor = C.grafite;
+      if(ci===linha.length-1 && typeof celula==='string' && celula.includes('%')){ cor = celula.trim().startsWith('-') ? C.vermelho : (celula.trim()==='—'||celula.trim()==='-') ? C.cinza : C.verde; }
+      docPdf.setTextColor(...cor);
+      docPdf.text(String(celula), ci===0?cx+2:cx+larguras[ci]-2, yy+4.2, ci===0?{}:{align:'right'});
+      cx += larguras[ci];
+    });
+    yy += alturaLinha;
+  });
+  docPdf.setDrawColor(...C.cinzaClaro); docPdf.setLineWidth(0.2); docPdf.rect(x, y, larguras.reduce((a,b)=>a+b,0), yy-y);
+  return yy;
+}
+function pdfApresVarTxt(atual, anterior){
+  if(anterior==null || anterior===0) return '—';
+  const pct = ((atual-anterior)/Math.abs(anterior))*100;
+  return `${pct>=0?'+':''}${pct.toFixed(1)}%`;
+}
 function gerarPDFApresentacao(dados, comparacoes, textos){
   const C = PDF_APRES_COR;
   const docPdf = criarPDF({ orientation:'landscape' });
@@ -12534,7 +12568,7 @@ function gerarPDFApresentacao(dados, comparacoes, textos){
   for(let i=0;i<nPeriodos;i++){
     const d = i===0 ? dados : calcularDadosApresentacao(dados.tipo, refEvo);
     const rot = dados.tipo==='mensal' ? competenciaLabel(refEvo).split('/')[0].slice(0,3) : refEvo.replace('-Q','T');
-    serieEvolucao.unshift({ label: rot, entradas: d.receitaTotal, saidas: d.despesaTotal });
+    serieEvolucao.unshift({ label: rot, entradas: d.receitaTotal, saidas: d.despesaTotal, resultado: d.lucroLiquido, margem: d.margem });
     refEvo = periodoAnteriorRef(dados.tipo, refEvo);
   }
   if(serieEvolucao.some(p=>p.entradas>0 || p.saidas>0)){
@@ -12542,33 +12576,57 @@ function gerarPDFApresentacao(dados, comparacoes, textos){
     y = pdfApresTitulo(docPdf, 'Evolução Financeira', dados);
     docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...C.cinza);
     docPdf.text(`Receita × Despesas — últimos ${nPeriodos} ${dados.tipo==='mensal'?'meses':'trimestres'}`, M, y-2);
-    pdfApresGrafico(docPdf, M, y+6, LARG-M*2, 90, desenharGraficoBarrasDuasCores, serieEvolucao);
+    pdfApresGrafico(docPdf, M, y+6, LARG-M*2, 78, desenharGraficoBarrasDuasCores, serieEvolucao);
+    // Track-record: mesma série, agora em tabela — período em coluna, igual ao estilo de release de resultados.
+    const yTab = y+90;
+    const larguraCol = (LARG-M*2-60)/serieEvolucao.length;
+    const larguras = [60, ...serieEvolucao.map(()=>larguraCol)];
+    const linha = (rot, campo, fmt) => [rot, ...serieEvolucao.map(p=>fmt(p[campo]))];
+    pdfApresTabela(docPdf, M, yTab, larguras, ['Indicador', ...serieEvolucao.map(p=>p.label.toUpperCase())],
+      [ linha('Receita', 'entradas', v=>pdfApresFmtGrande(v)).concat([]), linha('Despesas', 'saidas', v=>pdfApresFmtGrande(v)),
+        Object.assign(linha('Resultado', 'resultado', v=>pdfApresFmtGrande(v)), {bold:true}),
+        linha('Margem', 'margem', v=>v==null?'—':v.toFixed(1)+'%') ]);
   }
 
-  // ---------- RECEITAS E DESPESAS POR CATEGORIA (item 11, adaptado — o sistema não tem cálculo
-  // oficial por cliente, então usa o que já existe de verdade: categoria) ----------
+  // ---------- INDICADORES FINANCEIROS DETALHADOS — tabela categoria a categoria, no mesmo
+  // espírito da tabela "INDICADORES FINANCEIROS" de um release de resultados: cabeçalho escuro,
+  // linha a linha, com a comparação ao lado. Tudo vindo de porCategoriaReceita/porCategoriaDespesa,
+  // que calcularDadosApresentacao já calculava — só não expunha antes. ----------
   if(dados.topReceitas.length || dados.topDespesas.length){
     pdfApresNovaPagina(docPdf);
-    y = pdfApresTitulo(docPdf, 'Receitas e Despesas por Categoria', dados);
-    const metadeW = (LARG-M*2-16)/2;
-    const colunaRanking = (x, titulo, lista, cor)=>{
-      docPdf.setFont('helvetica','bold'); docPdf.setFontSize(10); docPdf.setTextColor(...cor);
-      docPdf.text(titulo.toUpperCase(), x, y+8);
-      let yy = y+18;
-      const max = Math.max(...lista.map(([,v])=>v), 1);
-      lista.slice(0,6).forEach(([nome,valor])=>{
-        docPdf.setFont('helvetica','normal'); docPdf.setFontSize(9); docPdf.setTextColor(...C.grafite);
-        const nomeC = nome.length>26 ? nome.slice(0,25)+'…' : nome;
-        docPdf.text(nomeC, x, yy);
-        docPdf.setFont('helvetica','bold'); docPdf.text(pdfApresFmtGrande(valor), x+metadeW-2, yy, { align:'right' });
-        yy += 4;
-        docPdf.setFillColor(...C.cinzaClaro); docPdf.rect(x, yy, metadeW, 2.2, 'F');
-        docPdf.setFillColor(...cor); docPdf.rect(x, yy, metadeW*(valor/max), 2.2, 'F');
-        yy += 7;
-      });
+    y = pdfApresTitulo(docPdf, 'Indicadores Financeiros', dados);
+    const temAnt = !!comparacoes.anterior;
+    const antD = temAnt ? comparacoes.anterior.dados : null;
+    const cab = temAnt ? ['Categoria', dados.label, comparacoes.anterior.ref, 'Var %'] : ['Categoria', dados.label];
+    const larguras = temAnt ? [LARG-M*2-140, 55, 55, 30] : [LARG-M*2-55, 55];
+    const linhaCat = (nome, atual, anterior, bold, recuo)=>{
+      const c = [ (recuo?'   ':'') + nome, brl(atual) ];
+      if(temAnt) c.push(brl(anterior), pdfApresVarTxt(atual, anterior));
+      if(bold) c.bold = true;
+      return c;
     };
-    if(dados.topReceitas.length) colunaRanking(M, 'Principais receitas', dados.topReceitas, C.azulClaro);
-    if(dados.topDespesas.length) colunaRanking(M+metadeW+16, 'Principais despesas', dados.topDespesas, C.vermelho);
+    const linhas = [];
+    linhas.push(linhaCat('RECEITA OPERACIONAL', dados.receitaTotal, antD?.receitaTotal, true));
+    const agruparCategorias = (mapaAtual, mapaAnt, maxLinhas)=>{
+      const ordenado = Object.entries(mapaAtual).sort((a,b)=>b[1]-a[1]);
+      const principais = ordenado.slice(0, maxLinhas);
+      const outras = ordenado.slice(maxLinhas);
+      const linhasCat = principais.map(([cat,v])=> linhaCat(cat, v, mapaAnt?.[cat]||0, false, true));
+      if(outras.length){
+        const somaOutras = outras.reduce((s,[,v])=>s+v,0);
+        const somaOutrasAnt = mapaAnt ? outras.reduce((s,[cat])=>s+(mapaAnt[cat]||0),0) : 0;
+        linhasCat.push(linhaCat(`Outras (${outras.length} categoria${outras.length>1?'s':''})`, somaOutras, somaOutrasAnt, false, true));
+      }
+      return linhasCat;
+    };
+    // No máximo 8 categorias de cada lado — a tabela precisa caber numa página só, igual o
+    // documento pede ("reduzir tabelas... poucos campos"). O resto entra agrupado em "Outras".
+    linhas.push(...agruparCategorias(dados.porCategoriaReceita, antD?.porCategoriaReceita, 8));
+    linhas.push(linhaCat('DESPESAS OPERACIONAIS', dados.despesaTotal, antD?.despesaTotal, true));
+    linhas.push(...agruparCategorias(dados.porCategoriaDespesa, antD?.porCategoriaDespesa, 8));
+    linhas.push(linhaCat(dados.lucroLiquido>=0?'RESULTADO':'PREJUÍZO', dados.lucroLiquido, antD?.lucroLiquido, true));
+    const yFim = pdfApresTabela(docPdf, M, y+6, larguras, cab, linhas);
+    if(dados.margem!=null){ docPdf.setFont('helvetica','normal'); docPdf.setFontSize(8.5); docPdf.setTextColor(...C.cinza); docPdf.text(`Margem: ${dados.margem.toFixed(1)}%${antD?.margem!=null?`  ·  ${comparacoes.anterior.ref}: ${antD.margem.toFixed(1)}%`:''}`, M, yFim+6); }
   }
 
   // ---------- PATRIMÔNIO E INVESTIMENTOS (item 13) — só se houver posição investida ou movimento
