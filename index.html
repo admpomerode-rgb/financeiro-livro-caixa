@@ -2546,6 +2546,7 @@ function moreItensDefBase(){
     { view:'simulacao', icone:'🔮', nome:'Simulações', grupo:'Análise' },
     { view:'categorias', icone:'🏷️', nome:'Categorias', grupo:'Cadastros e Configurações' },
     { view:'fornecedores', icone:'🚚', nome:'Fornecedores', grupo:'Cadastros e Configurações' },
+    { view:'estoque', icone:'📦', nome:'Estoque', grupo:'Cadastros e Configurações' },
     { view:'descricoes', icone:'📝', nome:'Padronizar Descrições', grupo:'Cadastros e Configurações' },
     { view:'diagnostico-dados', icone:'🩺', nome:'Diagnóstico de Dados', grupo:'Análise' },
     { view:'provisionamentos', icone:'🗓️', nome:'Provisionamentos', grupo:'Operacional' },
@@ -2790,6 +2791,7 @@ function render(){
   else if(currentView==='permissoes') main.innerHTML = viewPermissoes();
   else if(currentView==='apresentacao-resultados') main.innerHTML = viewApresentacaoResultados();
   else if(currentView==='graficos') main.innerHTML = viewGraficos();
+  else if(currentView==='estoque') main.innerHTML = viewEstoque();
   else if(currentView==='central-360'){ currentView='relatorio-detalhe'; relatorioAtivo='executivo'; main.innerHTML = viewRelatorioDetalhe(); } // fundida com o antigo Dashboard Executivo
   else if(currentView==='caixa-fisico') main.innerHTML = viewCaixaFisico();
   else if(currentView==='configuracoes') main.innerHTML = viewConfiguracoes();
@@ -4318,6 +4320,152 @@ async function sincronizarCustosProdutosVK(){
   }
 }
 
+// ==================== ESTOQUE (integrado ao VK Industrial) ====================
+// state.estoqueInsumos já é alimentado por sincronizarEstoqueInsumosVK() (leitura). Esta tela
+// só ORGANIZA essa leitura visualmente + permite registrar uma entrada por NF que grava direto
+// no banco do VK Industrial (vk-provisorio), replicando EXATAMENTE a transação que o próprio VK usa
+// (aplicarMovimentoEstoqueComSaldo): lê o saldoAtual do insumo, grava o documento da entrada e
+// atualiza o saldoAtual — tudo atômico. Sem isso, o estoque do Industrial ficaria desatualizado.
+let estoqueBuscaFornecedorVK = [];
+async function conectarVKParaEscrita(){
+  const cfg = state.vkConfig;
+  if(!cfg.firebaseConfig){ showToast('Configure a conexão com o VK Industrial primeiro (⚙️ nas configurações).'); return null; }
+  if(!cfg.email || !cfg.senha){ mostrarAvisoValidacao('Informe o e-mail e a senha de acesso ao VK Industrial nas configurações.'); return null; }
+  if(typeof firebase==='undefined'){ showToast('Não foi possível carregar o Firebase — confira a internet.'); return null; }
+  if(!vkFirebaseApp) vkFirebaseApp = firebase.initializeApp(cfg.firebaseConfig, 'vk-industrial');
+  const auth = vkFirebaseApp.auth();
+  if(!auth.currentUser) await auth.signInWithEmailAndPassword(cfg.email, cfg.senha);
+  return vkFirebaseApp.firestore();
+}
+async function registrarEntradaEstoqueNoVK(dados){
+  // dados: { insumoId, quantidade, valorUnitario, numeroNF, semNF, fornecedorId, data, observacoes }
+  const db = await conectarVKParaEscrita();
+  if(!db) return false;
+  const entradaId = 'ent_' + uid();
+  const documento = {
+    id: entradaId, numeroNF: dados.semNF ? '' : dados.numeroNF, semNF: !!dados.semNF,
+    fornecedorId: dados.fornecedorId||null, data: dados.data || todayISO(),
+    itens: [{ produtoId: dados.insumoId, quantidade: dados.quantidade, valorUnitario: dados.valorUnitario }],
+    observacoes: (dados.observacoes||'') + ' (lançado pelo Livro Caixa)',
+    criadoEm: new Date().toISOString()
+  };
+  // MESMA transação do VK Industrial (aplicarMovimentoEstoqueComSaldo): lê saldoAtual, grava a
+  // entrada, atualiza saldoAtual — atômico, senão o estoque do Industrial fica errado.
+  await db.runTransaction(async tx=>{
+    const refInsumo = db.collection('insumos').doc(dados.insumoId);
+    const snap = await tx.get(refInsumo);
+    if(!snap.exists) throw new Error('Esse insumo não existe mais no VK Industrial — sincronize de novo antes de lançar.');
+    const saldoBase = snap.data().saldoAtual || 0;
+    tx.set(db.collection('entradas_estoque').doc(entradaId), documento);
+    tx.update(refInsumo, { saldoAtual: saldoBase + dados.quantidade, saldoAtualizadoEm: new Date().toISOString() });
+  });
+  registrarLog('Entrada de estoque registrada (VK Industrial)', `${dados.quantidade} un. de insumoId ${dados.insumoId} — NF ${dados.semNF?'(sem NF)':dados.numeroNF}`);
+  return true;
+}
+async function buscarFornecedoresVK(){
+  const db = await conectarVKParaEscrita();
+  if(!db) return [];
+  const snap = await db.collection('fornecedores').get({ source:'server' });
+  return snap.docs.map(d=>({ id:d.id, ...d.data() }));
+}
+function viewEstoque(){
+  const itens = [...(state.estoqueInsumos||[])].sort((a,b)=>a.nome.localeCompare(b.nome));
+  const totalValor = itens.reduce((s,i)=>s+i.valorTotal,0);
+  const abaixoMinimo = itens.filter(i=>i.estoqueMinimo>0 && i.quantidade<i.estoqueMinimo);
+  const zerados = itens.filter(i=>i.quantidade<=0);
+  const ultimaSinc = state.vkConfig?.ultimaSincronizacaoEstoqueInsumos;
+  return `
+    <div class="topbar">
+      <div><h1>📦 Estoque</h1><p>Mesmo estoque do VK Industrial — insumos, saldo e valor, sincronizados por lá.</p></div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn ghost" id="btnSincronizarEstoqueAgora">🔄 Sincronizar</button>
+        <button class="btn" id="btnNovaEntradaEstoque">+ Entrada por NF</button>
+      </div>
+    </div>
+    ${ultimaSinc ? `<div class="sub" style="margin:0 2px 12px;">Última sincronização: ${new Date(ultimaSinc).toLocaleString('pt-BR')}</div>` : `<div class="note" style="border-color:var(--warn);">Ainda não sincronizado com o VK Industrial. Clique em "Sincronizar" — precisa da conexão configurada (⚙️ Configurações).</div>`}
+    <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));margin-bottom:14px;">
+      <div class="card"><div class="label">Insumos</div><div class="value mono">${itens.length}</div></div>
+      <div class="card"><div class="label">Valor em estoque</div><div class="value mono">${brl(totalValor)}</div></div>
+      <div class="card"><div class="label">Abaixo do mínimo</div><div class="value mono" style="color:${abaixoMinimo.length?'var(--warn)':'inherit'};">${abaixoMinimo.length}</div></div>
+      <div class="card"><div class="label">Zerados</div><div class="value mono" style="color:${zerados.length?'var(--danger)':'inherit'};">${zerados.length}</div></div>
+    </div>
+    ${!itens.length ? `<div class="empty">Nenhum insumo sincronizado ainda.</div>` : `
+    <div class="panel">
+      <div class="ledger-row head" style="grid-template-columns:1fr 90px 100px 100px 110px;min-width:520px;"><span>Insumo</span><span>Qtd.</span><span>Preço médio</span><span>Valor</span><span>Mínimo</span></div>
+      <div style="min-width:520px;">
+        ${itens.map(i=>{
+          const critico = i.quantidade<=0, baixo = !critico && i.estoqueMinimo>0 && i.quantidade<i.estoqueMinimo;
+          return `<div class="ledger-row compact" style="grid-template-columns:1fr 90px 100px 100px 110px;">
+            <span style="font-size:12.5px;">${critico?'🔴 ':baixo?'🟡 ':''}${escapeHTML(i.nome)}${i.categoria?` <span style="color:var(--text-soft);">· ${escapeHTML(i.categoria)}</span>`:''}</span>
+            <span class="mono" style="font-size:11.5px;">${i.quantidade.toFixed(2)} ${escapeHTML(i.unidade)}</span>
+            <span class="mono" style="font-size:11.5px;">${brl(i.precoMedio)}</span>
+            <span class="mono" style="font-size:11.5px;font-weight:600;">${brl(i.valorTotal)}</span>
+            <span class="mono" style="font-size:11.5px;color:var(--text-soft);">${i.estoqueMinimo>0?i.estoqueMinimo.toFixed(2):'—'}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`}
+  `;
+}
+async function openNovaEntradaEstoqueModal(){
+  if(!podeAgora('criar')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra registrar entrada de estoque.'); return; }
+  const modal = document.getElementById('modalContent');
+  modal.innerHTML = `
+    <h3>+ Entrada de estoque por NF</h3>
+    <div class="note" style="margin-top:0;">Grava direto no VK Industrial — o mesmo lugar onde a entrada apareceria se fosse lançada por lá.</div>
+    <div class="field"><label>Insumo</label>
+      <select id="entInsumo">${(state.estoqueInsumos||[]).slice().sort((a,b)=>a.nome.localeCompare(b.nome)).map(i=>`<option value="${i.insumoId}">${escapeHTML(i.nome)} (${escapeHTML(i.unidade)})</option>`).join('')}</select>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Quantidade</label><input type="text" inputmode="decimal" id="entQtd" placeholder="Ex: 25"></div>
+      <div class="field"><label>Valor unitário (R$)</label><input type="text" inputmode="decimal" id="entValorUnit" placeholder="Ex: 4,50"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Data</label><input type="date" id="entData" value="${todayISO()}"></div>
+      <div class="field"><label>Nº da NF</label><input type="text" id="entNF" placeholder="Ex: 123456"></div>
+    </div>
+    <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;margin:2px 0 10px;"><input type="checkbox" id="entSemNF"> Entrada sem nota fiscal</label>
+    <div class="field"><label>Fornecedor (opcional)</label><select id="entFornecedor"><option value="">Carregando fornecedores do VK Industrial...</option></select></div>
+    <div class="field"><label>Observações (opcional)</label><input type="text" id="entObs"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
+      <button class="btn" id="btnSalvarEntradaEstoque">Registrar entrada</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
+  document.getElementById('entSemNF').addEventListener('change', e=>{ document.getElementById('entNF').disabled = e.target.checked; });
+  buscarFornecedoresVK().then(lista=>{
+    const sel = document.getElementById('entFornecedor'); if(!sel) return;
+    lista.sort((a,b)=>(a.razaoSocial||'').localeCompare(b.razaoSocial||''));
+    sel.innerHTML = `<option value="">— nenhum —</option>` + lista.map(f=>`<option value="${f.id}">${escapeHTML(normalizarNomeFornecedor(f.nomeFantasia||f.razaoSocial))}</option>`).join('');
+  }).catch(()=>{ const sel=document.getElementById('entFornecedor'); if(sel) sel.innerHTML = `<option value="">Não consegui carregar — pode deixar em branco</option>`; });
+  document.getElementById('btnSalvarEntradaEstoque').addEventListener('click', async ()=>{
+    const btn = document.getElementById('btnSalvarEntradaEstoque'); if(btn.disabled) return; btn.disabled = true;
+    try{
+      const insumoId = document.getElementById('entInsumo').value;
+      const quantidade = numBR(document.getElementById('entQtd').value);
+      const valorUnitario = numBR(document.getElementById('entValorUnit').value);
+      const semNF = document.getElementById('entSemNF').checked;
+      const numeroNF = document.getElementById('entNF').value.trim();
+      if(!insumoId || !quantidade || quantidade<=0){ showToast('Escolha o insumo e uma quantidade válida.'); btn.disabled=false; return; }
+      if(isNaN(valorUnitario) || valorUnitario<0){ showToast('Informe o valor unitário.'); btn.disabled=false; return; }
+      if(!semNF && !numeroNF){ showToast('Informe o número da NF (ou marque "sem nota fiscal").'); btn.disabled=false; return; }
+      await registrarEntradaEstoqueNoVK({
+        insumoId, quantidade, valorUnitario, semNF, numeroNF,
+        fornecedorId: document.getElementById('entFornecedor').value || null,
+        data: document.getElementById('entData').value || todayISO(),
+        observacoes: document.getElementById('entObs').value.trim()
+      });
+      closeModal();
+      showToast('Entrada registrada no VK Industrial. Sincronizando estoque...');
+      await sincronizarEstoqueInsumosVK();
+    }catch(e){
+      console.error('Erro ao registrar entrada de estoque:', e);
+      showToast('Não consegui registrar a entrada: ' + (e.message||'erro desconhecido'));
+    }finally{ const b=document.getElementById('btnSalvarEntradaEstoque'); if(b) b.disabled=false; }
+  });
+}
 async function sincronizarEstoqueInsumosVK(){
   const cfg = state.vkConfig;
   if(!cfg.firebaseConfig){ showToast('Cole a configuração do Firebase antes de sincronizar'); render(); return; }
@@ -34090,52 +34238,18 @@ function attachViewHandlers(){
 
   // Fornecedores
   document.getElementById('btnNovoFornecedor')?.addEventListener('click', ()=>openFornecedorModal());
-  document.querySelectorAll('[data-action="ver-fornecedor"]').forEach(el=>{
-    el.addEventListener('click', ()=>{
-      const f = (state.fornecedores||[]).find(x=>x.id===el.dataset.id);
-      if(!f) return;
-      lancamentosBuscaPreenchida = f.nome;
-      currentView = 'pagar';
-      document.querySelectorAll('.nav-item, .bottom-nav-item[data-view]').forEach(n=>n.classList.toggle('active', n.dataset.view===navViewAtiva()));
-      render();
-    });
+  document.getElementById('btnSincronizarEstoqueAgora')?.addEventListener('click', ()=>sincronizarEstoqueInsumosVK());
+  document.getElementById('btnNovaEntradaEstoque')?.addEventListener('click', ()=>openNovaEntradaEstoqueModal());
+  document.getElementById('fornecedorBusca')?.addEventListener('input', e=>{
+    fornecedoresFiltro.busca = e.target.value;
+    const corpo = document.getElementById('fornecedoresListaBody');
+    if(corpo){ corpo.innerHTML = htmlListaFornecedores(fornecedoresFiltrados(), fornecedoresDadosCache.length); religarLinhasFornecedores(); }
   });
-  document.querySelectorAll('[data-action="editar-fornecedor"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>openFornecedorModal((state.fornecedores||[]).find(x=>x.id===btn.dataset.id)));
+  document.querySelectorAll('[data-situacao-filtro]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{ fornecedoresFiltro.situacao = btn.dataset.situacaoFiltro; render(); });
   });
-  document.querySelectorAll('[data-action="avaliar-fornecedor"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>openAvaliarFornecedorModal(btn.dataset.id));
-  });
-  document.querySelectorAll('[data-action="inativar-fornecedor"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      if(!podeAgora('editar')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra inativar fornecedor.'); return; }
-      const f = (state.fornecedores||[]).find(x=>x.id===btn.dataset.id);
-      if(!f) return;
-      f.situacao = 'inativo';
-      registrarLog('Fornecedor inativado', normalizarNomeFornecedor(f.nome));
-      persist(); render(); showToast('Fornecedor inativado — continua pesquisável e o histórico dele não muda.');
-    });
-  });
-  document.querySelectorAll('[data-action="reativar-fornecedor"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      if(!podeAgora('editar')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra reativar fornecedor.'); return; }
-      const f = (state.fornecedores||[]).find(x=>x.id===btn.dataset.id);
-      if(!f) return;
-      f.situacao = 'ativo';
-      registrarLog('Fornecedor reativado', normalizarNomeFornecedor(f.nome));
-      persist(); render(); showToast('Fornecedor reativado.');
-    });
-  });
-  document.querySelectorAll('[data-action="excluir-fornecedor"]').forEach(btn=>{
-    btn.addEventListener('click', async ()=>{
-      if(!podeAgora('excluir')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra excluir fornecedor. Considere inativar em vez de excluir.'); return; }
-      if(!(await avisoModal({mensagem: 'Excluir este fornecedor DEFINITIVAMENTE? Os lançamentos já feitos com ele não são apagados, mas o cadastro some. Prefira "Inativar" se não tem certeza.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
-      const f = (state.fornecedores||[]).find(x=>x.id===btn.dataset.id);
-      if(f) registrarLog('Fornecedor excluído', normalizarNomeFornecedor(f.nome));
-      state.fornecedores = (state.fornecedores||[]).filter(f=>f.id!==btn.dataset.id);
-      persist(); render(); showToast('Fornecedor excluído');
-    });
-  });
+  document.getElementById('fornecedorTipoFiltro')?.addEventListener('change', e=>{ fornecedoresFiltro.tipo = e.target.value; render(); });
+  religarLinhasFornecedores();
 
   document.getElementById('btnBaixarExtratoCategoria')?.addEventListener('click', ()=>{
     const dataDe = document.getElementById('catFiltroDe').value || null;
@@ -38345,6 +38459,10 @@ function normalizarNomeFornecedor(nomeOriginal){
     return minusc.charAt(0).toLocaleUpperCase('pt-BR') + minusc.slice(1);      // Title Case padrão
   }).join(' ');
 }
+// Busca tolerante a maiúsculas/minúsculas e acentos — usada na Central de Fornecedores (item 18).
+function buscaTolerante(texto){ return String(texto||'').toLocaleLowerCase('pt-BR').normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+let fornecedoresFiltro = { busca:'', situacao:'todos', tipo:'todos' };
+let fornecedoresDadosCache = [];
 function viewFornecedores(){
   const lista = [...(state.fornecedores||[])].sort((a,b)=>a.nome.localeCompare(b.nome));
   const dadosPorFornecedor = lista.map(f=>{
@@ -38358,6 +38476,7 @@ function viewFornecedores(){
     else if(aumento || (diasSemCompra!==null && diasSemCompra>90)) status = 'atencao';
     return { ...f, totalComprado, aPagar, ultimaCompra, aumento, diasSemCompra, status };
   });
+  fornecedoresDadosCache = dadosPorFornecedor;
 
   const totalFornecedores = lista.length;
   const totalComprado = dadosPorFornecedor.reduce((s,f)=>s+f.totalComprado,0);
@@ -38365,11 +38484,27 @@ function viewFornecedores(){
   const ativos = dadosPorFornecedor.filter(f=>f.diasSemCompra===null || f.diasSemCompra<=90).length;
   const comPendencia = dadosPorFornecedor.filter(f=>f.aPagar>0).length;
   const comAumento = dadosPorFornecedor.filter(f=>f.aumento && f.aumento.variacaoPct>0);
+  const semCNPJ = dadosPorFornecedor.filter(f=>!f.cnpjCpf).length;
+  const cadastroIncompleto = dadosPorFornecedor.filter(f=>!f.telefone && !f.email).length;
+  const qtdInativos = dadosPorFornecedor.filter(f=>f.situacao==='inativo').length;
   const ranking = [...dadosPorFornecedor].filter(f=>f.totalComprado>0).sort((a,b)=>b.totalComprado-a.totalComprado);
   const maior = ranking[0];
   const top3Pct = totalComprado>0 ? ranking.slice(0,3).reduce((s,f)=>s+f.totalComprado,0)/totalComprado*100 : 0;
   const corStatus = { ok:'var(--success)', atencao:'var(--warn)', critico:'var(--danger)' };
   const iconeStatus = { ok:'🟢', atencao:'🟡', critico:'🔴' };
+
+  // Busca (nome, nome oficial da Receita, CNPJ, telefone, e-mail) tolerante a caixa/acento + aba de situação.
+  const buscaAlvo = buscaTolerante(fornecedoresFiltro.busca);
+  const filtrados = dadosPorFornecedor.filter(f=>{
+    if(fornecedoresFiltro.situacao==='ativos' && f.situacao==='inativo') return false;
+    if(fornecedoresFiltro.situacao==='inativos' && f.situacao!=='inativo') return false;
+    if(fornecedoresFiltro.tipo!=='todos' && (f.tipo||'fornecedor')!==fornecedoresFiltro.tipo) return false;
+    if(buscaAlvo){
+      const campo = buscaTolerante([f.nome, f.razaoSocialOriginal, f.cnpjCpf, f.telefone, f.email].filter(Boolean).join(' '));
+      if(!campo.includes(buscaAlvo)) return false;
+    }
+    return true;
+  });
 
   return `
     <div class="topbar">
@@ -38382,7 +38517,22 @@ function viewFornecedores(){
       <div class="card"><div class="label">Total comprado</div><div class="value mono">${brl(totalComprado)}</div></div>
       <div class="card"><div class="label">Total a pagar</div><div class="value mono" style="color:${totalAPagar>0?'var(--danger)':'inherit'};">${brl(totalAPagar)}</div></div>
       <div class="card"><div class="label">Com pendência</div><div class="value mono">${comPendencia}</div></div>
-      <div class="card"><div class="label">Com aumento de preço</div><div class="value mono" style="color:${comAumento.length>0?'var(--warn)':'inherit'};">${comAumento.length}</div></div>
+      <div class="card"><div class="label">Sem CNPJ/CPF</div><div class="value mono">${semCNPJ}</div></div>
+      <div class="card"><div class="label">Cadastro incompleto</div><div class="value mono" style="color:${cadastroIncompleto>0?'var(--warn)':'inherit'};">${cadastroIncompleto}</div></div>
+    </div>
+    <div class="row" style="margin-bottom:10px;gap:8px;flex-wrap:wrap;align-items:center;">
+      <input type="text" id="fornecedorBusca" placeholder="🔎 Buscar por nome, CNPJ, telefone ou e-mail..." value="${escapeHTML(fornecedoresFiltro.busca)}" style="flex:1 1 220px;">
+      <div style="display:flex;gap:6px;">
+        <button type="button" class="graf-chip ${fornecedoresFiltro.situacao==='todos'?'sel':''}" data-situacao-filtro="todos">Todos (${totalFornecedores})</button>
+        <button type="button" class="graf-chip ${fornecedoresFiltro.situacao==='ativos'?'sel':''}" data-situacao-filtro="ativos">Ativos (${totalFornecedores-qtdInativos})</button>
+        <button type="button" class="graf-chip ${fornecedoresFiltro.situacao==='inativos'?'sel':''}" data-situacao-filtro="inativos">Inativos (${qtdInativos})</button>
+      </div>
+      <select id="fornecedorTipoFiltro" style="max-width:190px;">
+        <option value="todos" ${fornecedoresFiltro.tipo==='todos'?'selected':''}>Todos os tipos</option>
+        <option value="fornecedor" ${fornecedoresFiltro.tipo==='fornecedor'?'selected':''}>Só fornecedores</option>
+        <option value="prestador" ${fornecedoresFiltro.tipo==='prestador'?'selected':''}>Só prestadores</option>
+        <option value="ambos" ${fornecedoresFiltro.tipo==='ambos'?'selected':''}>Fornecedor + Prestador</option>
+      </select>
     </div>
     ${maior ? `<div class="note" style="margin-top:0;">Maior fornecedor: <strong>${escapeHTML(normalizarNomeFornecedor(maior.nome))}</strong> (${brl(maior.totalComprado)})${ranking.length>=3?` · Os 3 maiores fornecedores concentram ${top3Pct.toFixed(0)}% das compras.`:''}</div>` : ''}
 
@@ -38396,30 +38546,83 @@ function viewFornecedores(){
       <div class="ledger-row fornecedor-row head">
         <span></span><span>Nome</span><span class="fornecedor-contato">Contato</span><span>Total gasto</span><span></span>
       </div>
-      <div class="panel-body">
-        ${dadosPorFornecedor.length ? dadosPorFornecedor.map(f=>{
-          const aval = mediaAvaliacaoFornecedor(f.id, state.avaliacoesFornecedor);
-          return `
-          <div class="ledger-row fornecedor-row" data-id="${f.id}" style="${f.situacao==='inativo'?'opacity:.55;':''}">
-            ${f.situacao==='inativo' ? `<span class="dot" style="background:var(--text-soft);" title="Inativo"></span>` : `<span class="dot" style="background:${corStatus[f.status]};" title="${iconeStatus[f.status]}"></span>`}
-            <div class="desc-cell" data-action="editar-fornecedor" data-id="${f.id}" style="cursor:pointer;">
-              <div>${escapeHTML(normalizarNomeFornecedor(f.nome))}${f.situacao==='inativo'?' <span style="font-size:10.5px;color:var(--text-soft);">(inativo)</span>':''}</div>
-              <div class="cat">${escapeHTML(f.cnpjCpf||'sem CNPJ/CPF cadastrado')}${f.contratoPrecoFixo ? ` · 📑 contrato ${brl(f.contratoPrecoFixo)}${f.contratoVigenciaFim?' até '+fmtDate(f.contratoVigenciaFim):''}` : ''}${f.aPagar>0?' · a pagar '+brl(f.aPagar):''}${aval?` · ⭐ ${aval.media.toFixed(1)} (${aval.qtd})`:''}</div>
-            </div>
-            <span class="fornecedor-contato" style="font-size:12.5px;color:var(--text-soft);">${escapeHTML(f.telefone||f.email||'—')}</span>
-            <span class="mono" style="font-weight:600;">${brl(f.totalComprado)}</span>
-            <div class="row-actions">
-              <button class="icon-btn" data-action="ver-fornecedor" data-id="${f.id}" title="Ver lançamentos">📋</button>
-              <button class="icon-btn" data-action="avaliar-fornecedor" data-id="${f.id}" title="Avaliar">⭐</button>
-              <button class="icon-btn" data-action="editar-fornecedor" data-id="${f.id}" title="Editar">✎</button>
-              <button class="icon-btn" data-action="${f.situacao==='inativo'?'reativar':'inativar'}-fornecedor" data-id="${f.id}" title="${f.situacao==='inativo'?'Reativar':'Inativar'}">${f.situacao==='inativo'?'✅':'🚫'}</button>
-              <button class="icon-btn" data-action="excluir-fornecedor" data-id="${f.id}" title="Excluir definitivamente">✕</button>
-            </div>
-          </div>
-        `;}).join('') : `<div class="empty">Nenhum fornecedor cadastrado ainda.</div>`}
-      </div>
+      <div class="panel-body" id="fornecedoresListaBody">${htmlListaFornecedores(filtrados, dadosPorFornecedor.length)}</div>
     </div>
   `;
+}
+// Miolo da listagem — função própria pra poder ser redesenhada sozinha (busca/filtro), sem precisar
+// de um render() da tela inteira, que perderia o foco do campo de busca a cada tecla digitada.
+function htmlListaFornecedores(filtrados, totalGeral){
+  const corStatus = { ok:'var(--success)', atencao:'var(--warn)', critico:'var(--danger)' };
+  const iconeStatus = { ok:'🟢', atencao:'🟡', critico:'🔴' };
+  if(!filtrados.length) return `<div class="empty">${totalGeral ? 'Nenhum fornecedor encontrado com esse filtro.' : 'Nenhum fornecedor cadastrado ainda.'}</div>`;
+  return filtrados.map(f=>{
+    const aval = mediaAvaliacaoFornecedor(f.id, state.avaliacoesFornecedor);
+    return `
+    <div class="ledger-row fornecedor-row" data-id="${f.id}" style="${f.situacao==='inativo'?'opacity:.55;':''}">
+      ${f.situacao==='inativo' ? `<span class="dot" style="background:var(--text-soft);" title="Inativo"></span>` : `<span class="dot" style="background:${corStatus[f.status]};" title="${iconeStatus[f.status]}"></span>`}
+      <div class="desc-cell" data-action="editar-fornecedor" data-id="${f.id}" style="cursor:pointer;">
+        <div>${escapeHTML(normalizarNomeFornecedor(f.nome))}${f.situacao==='inativo'?' <span style="font-size:10.5px;color:var(--text-soft);">(inativo)</span>':''} <span style="font-size:9.5px;font-weight:600;padding:1px 6px;border-radius:8px;background:var(--line);color:var(--text-soft);vertical-align:1px;">${{fornecedor:'FORNECEDOR',prestador:'PRESTADOR',ambos:'FORN. + PREST.'}[f.tipo]||'FORNECEDOR'}</span></div>
+        <div class="cat">${escapeHTML(f.cnpjCpf||'sem CNPJ/CPF cadastrado')}${f.contratoPrecoFixo ? ` · 📑 contrato ${brl(f.contratoPrecoFixo)}${f.contratoVigenciaFim?' até '+fmtDate(f.contratoVigenciaFim):''}` : ''}${f.aPagar>0?' · a pagar '+brl(f.aPagar):''}${aval?` · ⭐ ${aval.media.toFixed(1)} (${aval.qtd})`:''}</div>
+      </div>
+      <span class="fornecedor-contato" style="font-size:12.5px;color:var(--text-soft);">${escapeHTML(f.telefone||f.email||'—')}</span>
+      <span class="mono" style="font-weight:600;">${brl(f.totalComprado)}</span>
+      <div class="row-actions">
+        <button class="icon-btn" data-action="ver-fornecedor" data-id="${f.id}" title="Ver lançamentos">📋</button>
+        <button class="icon-btn" data-action="avaliar-fornecedor" data-id="${f.id}" title="Avaliar">⭐</button>
+        <button class="icon-btn" data-action="editar-fornecedor" data-id="${f.id}" title="Editar">✎</button>
+        <button class="icon-btn" data-action="${f.situacao==='inativo'?'reativar':'inativar'}-fornecedor" data-id="${f.id}" title="${f.situacao==='inativo'?'Reativar':'Inativar'}">${f.situacao==='inativo'?'✅':'🚫'}</button>
+        <button class="icon-btn" data-action="excluir-fornecedor" data-id="${f.id}" title="Excluir definitivamente">✕</button>
+      </div>
+    </div>
+  `;}).join('');
+}
+function fornecedoresFiltrados(){
+  const buscaAlvo = buscaTolerante(fornecedoresFiltro.busca);
+  return fornecedoresDadosCache.filter(f=>{
+    if(fornecedoresFiltro.situacao==='ativos' && f.situacao==='inativo') return false;
+    if(fornecedoresFiltro.situacao==='inativos' && f.situacao!=='inativo') return false;
+    if(fornecedoresFiltro.tipo!=='todos' && (f.tipo||'fornecedor')!==fornecedoresFiltro.tipo) return false;
+    if(buscaAlvo){
+      const campo = buscaTolerante([f.nome, f.razaoSocialOriginal, f.cnpjCpf, f.telefone, f.email].filter(Boolean).join(' '));
+      if(!campo.includes(buscaAlvo)) return false;
+    }
+    return true;
+  });
+}
+function religarLinhasFornecedores(){
+  bindDataGoto(document.getElementById('fornecedoresListaBody'));
+  document.querySelectorAll('#fornecedoresListaBody [data-action="ver-fornecedor"]').forEach(btn=>btn.onclick=()=>abrirLancamentosFornecedor(btn.dataset.id));
+  document.querySelectorAll('#fornecedoresListaBody [data-action="avaliar-fornecedor"]').forEach(btn=>btn.onclick=()=>openAvaliarFornecedorModal(btn.dataset.id));
+  document.querySelectorAll('#fornecedoresListaBody [data-action="editar-fornecedor"]').forEach(btn=>btn.onclick=()=>openFornecedorModal(state.fornecedores.find(x=>x.id===btn.dataset.id)));
+  document.querySelectorAll('#fornecedoresListaBody [data-action="inativar-fornecedor"]').forEach(btn=>btn.onclick=()=>acaoInativarFornecedor(btn.dataset.id,'inativo'));
+  document.querySelectorAll('#fornecedoresListaBody [data-action="reativar-fornecedor"]').forEach(btn=>btn.onclick=()=>acaoInativarFornecedor(btn.dataset.id,'ativo'));
+  document.querySelectorAll('#fornecedoresListaBody [data-action="excluir-fornecedor"]').forEach(btn=>btn.onclick=()=>acaoExcluirFornecedor(btn.dataset.id));
+}
+function abrirLancamentosFornecedor(id){
+  const f = (state.fornecedores||[]).find(x=>x.id===id);
+  if(!f) return;
+  lancamentosBuscaPreenchida = f.nome;
+  currentView = 'pagar';
+  document.querySelectorAll('.nav-item, .bottom-nav-item[data-view]').forEach(n=>n.classList.toggle('active', n.dataset.view===navViewAtiva()));
+  render();
+}
+function acaoInativarFornecedor(id, novaSituacao){
+  if(!podeAgora('editar')){ mostrarAlertaPermissaoNegada(`Você não tem permissão pra ${novaSituacao==='inativo'?'inativar':'reativar'} fornecedor.`); return; }
+  const f = (state.fornecedores||[]).find(x=>x.id===id);
+  if(!f) return;
+  f.situacao = novaSituacao;
+  registrarLog(`Fornecedor ${novaSituacao==='inativo'?'inativado':'reativado'}`, normalizarNomeFornecedor(f.nome));
+  persist(); render();
+  showToast(novaSituacao==='inativo' ? 'Fornecedor inativado — continua pesquisável e o histórico dele não muda.' : 'Fornecedor reativado.');
+}
+async function acaoExcluirFornecedor(id){
+  if(!podeAgora('excluir')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra excluir fornecedor. Considere inativar em vez de excluir.'); return; }
+  if(!(await avisoModal({mensagem: 'Excluir este fornecedor DEFINITIVAMENTE? Os lançamentos já feitos com ele não são apagados, mas o cadastro some. Prefira "Inativar" se não tem certeza.', tipo:'perigo', textoConfirmar:'Excluir'}))) return;
+  const f = (state.fornecedores||[]).find(x=>x.id===id);
+  if(f) registrarLog('Fornecedor excluído', normalizarNomeFornecedor(f.nome));
+  state.fornecedores = (state.fornecedores||[]).filter(x=>x.id!==id);
+  persist(); render(); showToast('Fornecedor excluído');
 }
 
 function openAvaliarFornecedorModal(fornecedorId){
@@ -38459,6 +38662,13 @@ function openFornecedorModal(existing){
   modal.innerHTML = `
     <h3>${isEdit ? 'Editar fornecedor' : 'Novo fornecedor'}</h3>
     <div class="field"><label>Nome</label><input type="text" id="fnNome" value="${existing?escapeHTML(existing.nome):''}" placeholder="Ex: Metalúrgica Sul"></div>
+    <div class="field"><label>Tipo</label>
+      <select id="fnTipo">
+        <option value="fornecedor" ${(!existing||existing.tipo==='fornecedor')?'selected':''}>Fornecedor (produtos, insumos)</option>
+        <option value="prestador" ${existing?.tipo==='prestador'?'selected':''}>Prestador de serviço</option>
+        <option value="ambos" ${existing?.tipo==='ambos'?'selected':''}>Fornecedor + Prestador</option>
+      </select>
+    </div>
     <div class="field">
       <label>CNPJ/CPF (opcional)</label>
       <div style="display:flex;gap:6px;">
@@ -38467,11 +38677,16 @@ function openFornecedorModal(existing){
       </div>
     </div>
     <div id="fnBuscaStatus" class="note" style="display:none;margin-top:0;"></div>
+    <div class="field"><label>Nome fantasia (opcional)</label><input type="text" id="fnFantasia" value="${existing?escapeHTML(existing.nomeFantasia||''):''}"></div>
     <div class="field-row">
       <div class="field"><label>Telefone (opcional)</label><input type="text" id="fnTelefone" value="${existing?escapeHTML(existing.telefone||''):''}"></div>
       <div class="field"><label>E-mail (opcional)</label><input type="email" id="fnEmail" value="${existing?escapeHTML(existing.email||''):''}"></div>
     </div>
     <div class="field"><label>Endereço (opcional)</label><input type="text" id="fnEndereco" value="${existing?escapeHTML(existing.endereco||''):''}"></div>
+    <div class="field-row">
+      <div class="field"><label>Cidade (opcional)</label><input type="text" id="fnCidade" value="${existing?escapeHTML(existing.cidade||''):''}"></div>
+      <div class="field"><label>UF (opcional)</label><input type="text" id="fnUf" maxlength="2" style="text-transform:uppercase;" value="${existing?escapeHTML(existing.uf||''):''}"></div>
+    </div>
     <div class="field"><label>Observação (opcional)</label><input type="text" id="fnObs" value="${existing?escapeHTML(existing.observacao||''):''}"></div>
     <div class="field-row" style="margin-top:6px;padding-top:14px;border-top:1px solid var(--line);">
       <div class="field"><label>Contrato — preço combinado (R$, opcional)</label><input type="text" inputmode="decimal" id="fnPrecoContrato" value="${existing?.contratoPrecoFixo!=null ? existing.contratoPrecoFixo : ''}" placeholder="Ex: valor combinado por entrega/insumo"></div>
@@ -38507,6 +38722,12 @@ function openFornecedorModal(existing){
       if(!telAtual && dados.ddd_telefone_1) document.getElementById('fnTelefone').value = dados.ddd_telefone_1;
       const emailAtual = document.getElementById('fnEmail').value.trim();
       if(!emailAtual && dados.email) document.getElementById('fnEmail').value = dados.email;
+      const fantasiaAtual = document.getElementById('fnFantasia').value.trim();
+      if(!fantasiaAtual && dados.nome_fantasia) document.getElementById('fnFantasia').value = normalizarNomeFornecedor(dados.nome_fantasia);
+      const cidadeAtual = document.getElementById('fnCidade').value.trim();
+      if(!cidadeAtual && dados.municipio) document.getElementById('fnCidade').value = normalizarNomeFornecedor(dados.municipio);
+      const ufAtual = document.getElementById('fnUf').value.trim();
+      if(!ufAtual && dados.uf) document.getElementById('fnUf').value = dados.uf;
       const enderecoAtual = document.getElementById('fnEndereco').value.trim();
       if(!enderecoAtual){
         const partes = [dados.logradouro, dados.numero, dados.bairro, dados.municipio, dados.uf].filter(Boolean);
@@ -38542,6 +38763,10 @@ function openFornecedorModal(existing){
     const payload = {
       nome,
       razaoSocialOriginal: document.getElementById('fnNome').dataset.razaoSocialOriginal || (isEdit ? existing?.razaoSocialOriginal : null) || null,
+      tipo: document.getElementById('fnTipo').value,
+      nomeFantasia: document.getElementById('fnFantasia').value.trim(),
+      cidade: document.getElementById('fnCidade').value.trim(),
+      uf: document.getElementById('fnUf').value.trim().toUpperCase(),
       cnpjCpf: document.getElementById('fnDoc').value.trim(),
       telefone: document.getElementById('fnTelefone').value.trim(),
       email: document.getElementById('fnEmail').value.trim(),
