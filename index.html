@@ -335,7 +335,7 @@
   /* Forms */
   .modal-overlay{
     position:fixed;inset:0;background:rgba(11,15,20,0.5);display:none;align-items:flex-start;justify-content:center;
-    padding:60px 20px;z-index:50;overflow-y:auto;
+    padding:60px 20px;z-index:150;overflow-y:auto;
   }
   .modal-overlay.open{display:flex;}
   .modal{background:var(--white);border-radius:12px;width:100%;max-width:460px;padding:24px;}
@@ -12538,8 +12538,8 @@ function abrirPreviaApresentacao(tipo, periodoRef, comparacao, textos){
     closeModal(); render();
   };
   document.getElementById('btnSalvarApres').addEventListener('click', ()=> salvarApresentacao('gerada'));
-  document.getElementById('btnFinalizarApres').addEventListener('click', ()=>{
-    if(!confirm('Finalizar essa apresentação? Depois de finalizada, uma nova geração pro mesmo período cria uma versão separada, sem sobrescrever esta.')) return;
+  document.getElementById('btnFinalizarApres').addEventListener('click', async ()=>{
+    if(!(await avisoModal({ mensagem:'Finalizar essa apresentação? Depois de finalizada, uma nova geração pro mesmo período cria uma versão separada, sem sobrescrever esta.' }))) return;
     salvarApresentacao('finalizada');
   });
 }
@@ -29818,7 +29818,7 @@ function abrirModalGerenciarUsuario(email){
   document.getElementById('btnSalvarPerfilUsuario').addEventListener('click', ()=>{
     const novoPapel = document.getElementById('gerPapel').value;
     if(u.papel==='admin' && novoPapel!=='admin' && totalAdminsAtivos(email)===0){
-      alert('Essa ação deixaria o sistema sem administrador. Cadastre outro admin antes de mudar o papel deste.');
+      avisoOK('Essa ação deixaria o sistema sem administrador. Cadastre outro admin antes de mudar o papel deste.');
       return;
     }
     if(novoPapel!==u.papel) registrarHistoricoPermissao({ usuarioAlvo:email, campo:'papel', de:u.papel, para:novoPapel });
@@ -29833,21 +29833,21 @@ function abrirModalGerenciarUsuario(email){
   });
 
   document.querySelectorAll('[data-status-usuario]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       const novoStatus = btn.dataset.statusUsuario;
       if(u.papel==='admin' && novoStatus!=='ativo' && totalAdminsAtivos(email)===0){
-        alert('Essa ação deixaria o sistema sem administrador. Cadastre outro admin antes de bloquear/suspender este.');
+        avisoOK('Essa ação deixaria o sistema sem administrador. Cadastre outro admin antes de bloquear/suspender este.');
         return;
       }
       if(novoStatus==='suspenso'){
         document.getElementById('campoSuspensaoAte').style.display = '';
         const data = document.getElementById('gerSuspensoAte').value;
         if(!data){ mostrarAvisoValidacao('Escolha a data final da suspensão.'); return; }
-        const motivo = prompt('Motivo da suspensão (opcional):','') || '';
+        const motivo = (await perguntaModal({ titulo:'Motivo da suspensão', placeholder:'opcional' })) || '';
         registrarHistoricoPermissao({ usuarioAlvo:email, campo:'status', de:u.status, para:'suspenso', motivo });
         u.status = 'suspenso'; u.suspensoAte = data;
       } else {
-        const motivo = novoStatus==='bloqueado' ? (prompt('Motivo do bloqueio (opcional):','') || '') : '';
+        const motivo = novoStatus==='bloqueado' ? ((await perguntaModal({ titulo:'Motivo do bloqueio', placeholder:'opcional' })) || '') : '';
         registrarHistoricoPermissao({ usuarioAlvo:email, campo:'status', de:u.status, para:novoStatus, motivo });
         u.status = novoStatus; u.suspensoAte = null;
       }
@@ -29855,12 +29855,12 @@ function abrirModalGerenciarUsuario(email){
     });
   });
 
-  document.getElementById('btnCopiarPermissoes').addEventListener('click', ()=>{
+  document.getElementById('btnCopiarPermissoes').addEventListener('click', async ()=>{
     const origemEmail = document.getElementById('gerCopiarDe').value;
     if(!origemEmail){ mostrarAvisoValidacao('Escolha de quem copiar.'); return; }
     const origem = (state.usuariosPermissao||[]).find(x=>x.email===origemEmail);
     if(!origem) return;
-    if(!confirm(`Copiar as permissões de ${origem.nome||origem.email} para ${u.nome||u.email}?`)) return;
+    if(!(await avisoModal({ mensagem:`Copiar as permissões de ${escapeHTML(origem.nome||origem.email)} para ${escapeHTML(u.nome||u.email)}?` }))) return;
     u.papel = origem.papel;
     u.telasBloqueadas = [...(origem.telasBloqueadas||[])];
     u.acoesExtras = [...(origem.acoesExtras||[])];
@@ -29870,8 +29870,8 @@ function abrirModalGerenciarUsuario(email){
     persist(); showToast('Permissões copiadas.'); closeModal(); render();
   });
 
-  document.getElementById('btnRestaurarPadrao').addEventListener('click', ()=>{
-    if(!confirm('Restaurar as permissões padrão do papel base, removendo todas as exceções individuais?')) return;
+  document.getElementById('btnRestaurarPadrao').addEventListener('click', async ()=>{
+    if(!(await avisoModal({ mensagem:'Restaurar as permissões padrão do papel base, removendo todas as exceções individuais?' }))) return;
     u.telasBloqueadas = []; u.acoesExtras = []; u.acoesRemovidas = [];
     registrarHistoricoPermissao({ usuarioAlvo:email, campo:'permissões restauradas ao padrão', de:'personalizado', para:u.papel });
     persist(); showToast('Restaurado ao padrão do papel.'); closeModal(); render();
@@ -31259,7 +31259,7 @@ function abrirQuitarModal(id){
   document.getElementById('btnUsarCreditoDoQuitar')?.addEventListener('click', (e)=>{
     openUsarCreditoClienteModal(e.target.dataset.cliente);
   });
-  document.getElementById('btnConfirmarQuitar').addEventListener('click', ()=>{
+  document.getElementById('btnConfirmarQuitar').addEventListener('click', async ()=>{
     const btnQuitarClick = document.getElementById('btnConfirmarQuitar');
     if(btnQuitarClick.disabled) return;
     btnQuitarClick.disabled = true;
@@ -31271,7 +31271,7 @@ function abrirQuitarModal(id){
     if(isNaN(valorInformado) || valorInformado<=0){ mostrarAvisoValidacao('Informe um valor válido'); return; }
     // Trava contra pagar/receber MAIS do que falta (ex.: R$ 400 numa fatura de R$ 26,47) — costuma ser lançamento no item errado.
     const faltaAntes = Math.round((l.valor - (l.valorRecebido||0))*100)/100;
-    if(valorInformado > faltaAntes + 0.01 && !confirm(`O valor informado (${brl(valorInformado)}) é MAIOR que o saldo em aberto deste lançamento (${brl(faltaAntes)}).\n\nDiferença: ${brl(valorInformado-faltaAntes)}.\n\nRegistrar mesmo assim?`)) return;
+    if(valorInformado > faltaAntes + 0.01 && !(await avisoModal({ mensagem:`O valor informado (${brl(valorInformado)}) é MAIOR que o saldo em aberto deste lançamento (${brl(faltaAntes)}).<br><br>Diferença: ${brl(valorInformado-faltaAntes)}.<br><br>Registrar mesmo assim?`, tipo:'aviso', textoConfirmar:'Registrar mesmo assim' }))) return;
     if(!l.historicoRecebimentos) l.historicoRecebimentos = [];
     l.historicoRecebimentos.push({ valor: valorInformado, data, contaId, formaRecebimento: formaRecebimento||null });
     const novoRecebido = Math.round(((l.valorRecebido||0) + valorInformado)*100)/100;
@@ -31972,8 +31972,8 @@ function attachViewHandlers(){
     });
   });
   document.querySelectorAll('[data-action="excluir-documento-solar"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      if(!confirm('Excluir esse documento registrado?')) return;
+    btn.addEventListener('click', async ()=>{
+      if(!(await avisoModal({ mensagem:'Excluir esse documento registrado?', tipo:'perigo', textoConfirmar:'Excluir' }))) return;
       state.usinaDocumentos = (state.usinaDocumentos||[]).filter(d=>d.id!==btn.dataset.id);
       persist(); render();
     });
@@ -32009,8 +32009,8 @@ function attachViewHandlers(){
     btn.addEventListener('click', ()=>gerarUsinaSolarPDF(btn.dataset.tema));
   });
   document.querySelectorAll('[data-action="excluir-tarifa-solar"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      if(!confirm('Excluir essa tarifa registrada?')) return;
+    btn.addEventListener('click', async ()=>{
+      if(!(await avisoModal({ mensagem:'Excluir essa tarifa registrada?', tipo:'perigo', textoConfirmar:'Excluir' }))) return;
       state.usinaTarifas = (state.usinaTarifas||[]).filter(t=>t.id!==btn.dataset.id);
       persist(); render();
     });
@@ -32023,8 +32023,8 @@ function attachViewHandlers(){
     btn.addEventListener('click', ()=>openUsarCreditoClienteModal(btn.dataset.cliente));
   });
   document.querySelectorAll('[data-action="excluir-credito-cliente"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      if(!confirm('Excluir esse crédito? O lançamento que ele criou no caixa também será removido.')) return;
+    btn.addEventListener('click', async ()=>{
+      if(!(await avisoModal({ mensagem:'Excluir esse crédito? O lançamento que ele criou no caixa também será removido.', tipo:'perigo', textoConfirmar:'Excluir' }))) return;
       const credito = (state.creditosClientes||[]).find(c=>c.id===btn.dataset.id);
       if(credito?.lancamentoId) state.lancamentos = state.lancamentos.filter(l=>l.id!==credito.lancamentoId);
       state.creditosClientes = (state.creditosClientes||[]).filter(c=>c.id!==btn.dataset.id);
@@ -32086,23 +32086,23 @@ function attachViewHandlers(){
     });
   });
   document.querySelectorAll('[data-action="excluir-leitura-solar"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      if(!confirm('Excluir essa leitura de geração?')) return;
+    btn.addEventListener('click', async ()=>{
+      if(!(await avisoModal({ mensagem:'Excluir essa leitura de geração?', tipo:'perigo', textoConfirmar:'Excluir' }))) return;
       state.usinaLeituras = (state.usinaLeituras||[]).filter(l=>l.id!==btn.dataset.id);
       persist(); render();
     });
   });
   document.querySelectorAll('[data-action="excluir-fatura-solar"]').forEach(btn=>{
-    btn.addEventListener('click', (e)=>{
+    btn.addEventListener('click', async (e)=>{
       e.stopPropagation();
-      if(!confirm('Excluir essa fatura registrada?')) return;
+      if(!(await avisoModal({ mensagem:'Excluir essa fatura registrada?', tipo:'perigo', textoConfirmar:'Excluir' }))) return;
       state.usinaFaturas = (state.usinaFaturas||[]).filter(f=>f.id!==btn.dataset.id);
       persist(); render();
     });
   });
   document.querySelectorAll('[data-action="excluir-manutencao-solar"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      if(!confirm('Excluir essa manutenção?')) return;
+    btn.addEventListener('click', async ()=>{
+      if(!(await avisoModal({ mensagem:'Excluir essa manutenção?', tipo:'perigo', textoConfirmar:'Excluir' }))) return;
       state.usinaManutencoes = (state.usinaManutencoes||[]).filter(m=>m.id!==btn.dataset.id);
       persist(); render();
     });
@@ -32631,8 +32631,8 @@ function attachViewHandlers(){
         showToast('Configuração salva');
         paintConfig();
       });
-      document.getElementById('btnRemoverApiKeyAnthropic')?.addEventListener('click', ()=>{
-        if(!confirm('Remover a chave de API? O leitor automático volta a ficar desativado.')) return;
+      document.getElementById('btnRemoverApiKeyAnthropic')?.addEventListener('click', async ()=>{
+        if(!(await avisoModal({ mensagem:'Remover a chave de API? O leitor automático volta a ficar desativado.' }))) return;
         delete state.configApiKeyAnthropic;
         persist();
         showToast('Chave removida');
@@ -33563,10 +33563,10 @@ function attachViewHandlers(){
           showToast('Previsão excluída');
         });
       });
-      document.getElementById('btnAddSocio')?.addEventListener('click', ()=>{
-        const nome = (prompt('Nome do sócio:')||'').trim();
+      document.getElementById('btnAddSocio')?.addEventListener('click', async ()=>{
+        const nome = (await perguntaModal({ titulo:'Nome do sócio', obrigatorio:true }))||'';
         if(!nome) return;
-        const pctStr = prompt('Percentual de participação (%):','0');
+        const pctStr = await perguntaModal({ titulo:'Percentual de participação (%)', valorInicial:'0', tipoCampo:'text' });
         const pct = numBR(pctStr);
         if(isNaN(pct)){ showToast('Percentual inválido'); return; }
         if(!state.socios) state.socios = [];
@@ -35206,7 +35206,8 @@ function attachViewHandlers(){
       if(p.totalParcelas>1){
         const parcelasGrupo = state.comprasCartao.filter(x=>x.grupoId===p.grupoId);
         const totalGrupo = parcelasGrupo.reduce((s,x)=>s+x.valor,0);
-        const escolha = prompt(`"${p.descricao}" é parcelado em ${p.totalParcelas}x (essa é a parcela ${p.parcela}/${p.totalParcelas}, ${brl(p.valor)}).\n\nDigite:\n1 — excluir só essa parcela (${brl(p.valor)})\n2 — excluir a compra inteira, todas as ${p.totalParcelas} parcelas (${brl(totalGrupo)})\n\nOu cancele pra não fazer nada.`);
+        const escolha = await escolhaModal({ titulo:'Excluir compra parcelada', mensagem:`"${escapeHTML(p.descricao)}" é parcelado em ${p.totalParcelas}x (essa é a parcela ${p.parcela}/${p.totalParcelas}, ${brl(p.valor)}).`,
+          opcoes: [ { valor:'1', rotulo:`Excluir só essa parcela (${brl(p.valor)})` }, { valor:'2', rotulo:`Excluir a compra inteira — todas as ${p.totalParcelas} parcelas (${brl(totalGrupo)})` } ] });
         if(escolha==='1'){
           state.comprasCartao = state.comprasCartao.filter(x=>x.id!==p.id);
           sincronizarLancamentoAbertoFatura(p.cartaoId, p.competencia);
@@ -35318,8 +35319,8 @@ function attachViewHandlers(){
   const btnNovoAtivo = document.getElementById('btnNovoAtivo');
   if(btnNovoAtivo) btnNovoAtivo.addEventListener('click', ()=>openAtivoModal(null, btnNovoAtivo.dataset.conta));
   const btnNovaSubconta = document.getElementById('btnNovaSubconta');
-  if(btnNovaSubconta) btnNovaSubconta.addEventListener('click', ()=>{
-    const nome = (prompt('Nome da nova subconta (ex: LCI, CDB, Tesouro Direto):')||'').trim();
+  if(btnNovaSubconta) btnNovaSubconta.addEventListener('click', async ()=>{
+    const nome = (await perguntaModal({ titulo:'Nome da nova subconta', placeholder:'ex: LCI, CDB, Tesouro Direto', obrigatorio:true }))||'';
     if(!nome) return;
     state.subcontasInvestimento.push({ id: uid(), contaId: btnNovaSubconta.dataset.conta, nome, cor: CONTA_CORES[state.subcontasInvestimento.length % CONTA_CORES.length] });
     registrarLog('Subconta de investimento criada', nome);
@@ -35333,10 +35334,10 @@ function attachViewHandlers(){
     });
   });
   document.querySelectorAll('[data-action="renomear-subconta"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       const s = state.subcontasInvestimento.find(x=>x.id===btn.dataset.id);
       if(!s) return;
-      const novoNome = (prompt('Novo nome da subconta:', s.nome)||'').trim();
+      const novoNome = (await perguntaModal({ titulo:'Novo nome da subconta', valorInicial:s.nome, obrigatorio:true }))||'';
       if(!novoNome) return;
       s.nome = novoNome;
       persist(); render(); showToast('Subconta renomeada');
@@ -35379,12 +35380,10 @@ function attachViewHandlers(){
     btn.addEventListener('click', ()=> openVenderReinvestirModal(btn.dataset.id));
   });
   document.querySelectorAll('[data-action="realocar-ativo-orfao"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       if(!state.contasInvestimento.length){ showToast('Crie uma conta de investimento primeiro'); return; }
-      const opcoes = state.contasInvestimento.map((c,i)=>`${i+1}. ${c.nome}`).join('\n');
-      const escolha = prompt(`Mover esse ativo pra qual conta?\n${opcoes}\n\nDigite o número:`);
-      const idx = parseInt(escolha)-1;
-      const contaEscolhida = state.contasInvestimento[idx];
+      const contaId = await escolhaModal({ titulo:'Mover ativo', mensagem:'Mover esse ativo pra qual conta?', opcoes: state.contasInvestimento.map(c=>({valor:c.id, rotulo:c.nome})) });
+      const contaEscolhida = state.contasInvestimento.find(c=>c.id===contaId);
       if(!contaEscolhida) return;
       const ativo = state.ativosInvestimento.find(a=>a.id===btn.dataset.id);
       if(!ativo) return;
@@ -35404,12 +35403,10 @@ function attachViewHandlers(){
     });
   });
   document.querySelectorAll('[data-action="realocar-subconta-orfa"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       if(!state.contasInvestimento.length){ showToast('Crie uma conta de investimento primeiro'); return; }
-      const opcoes = state.contasInvestimento.map((c,i)=>`${i+1}. ${c.nome}`).join('\n');
-      const escolha = prompt(`Mover essa subconta pra qual conta?\n${opcoes}\n\nDigite o número:`);
-      const idx = parseInt(escolha)-1;
-      const contaEscolhida = state.contasInvestimento[idx];
+      const contaId = await escolhaModal({ titulo:'Mover subconta', mensagem:'Mover essa subconta pra qual conta?', opcoes: state.contasInvestimento.map(c=>({valor:c.id, rotulo:c.nome})) });
+      const contaEscolhida = state.contasInvestimento.find(c=>c.id===contaId);
       if(!contaEscolhida) return;
       const sub = state.subcontasInvestimento.find(s=>s.id===btn.dataset.id);
       if(!sub) return;
@@ -35646,13 +35643,13 @@ function attachViewHandlers(){
     persist(); render(); showToast('Itens antigos removidos de vez.');
   });
   document.querySelectorAll('[data-sangria-caixa]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       if(!podeAgora('criar')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra mexer no caixa físico.'); return; }
-      const valorStr = prompt('Valor da sangria (retirada do caixa físico):');
+      const valorStr = await perguntaModal({ titulo:'Sangria de caixa', mensagem:'Valor da sangria (retirada do caixa físico):' });
       if(valorStr===null) return;
       const valor = numBR(valorStr);
       if(!valor || valor<=0){ showToast('Valor inválido.'); return; }
-      const motivo = (prompt('Motivo da sangria (obrigatório):')||'').trim();
+      const motivo = (await perguntaModal({ titulo:'Motivo da sangria', obrigatorio:true }))||'';
       if(!motivo){ showToast('Sangria cancelada — o motivo é obrigatório.'); return; }
       state.lancamentos.push({ id: uid(), tipo:'saida', categoria:'Sangria de Caixa', descricao:`Sangria de caixa físico — ${motivo}`, valor, contaId: btn.dataset.sangriaCaixa, dataVencimento: todayISO(), status:'pago', dataPagamento: todayISO(), criadoEm: new Date().toISOString(), responsavel: emailLogadoAtual()||null });
       registrarLog('Sangria de caixa físico', `${brl(valor)} — ${motivo} — por ${emailLogadoAtual()||'(sem login)'}`);
@@ -35660,9 +35657,9 @@ function attachViewHandlers(){
     });
   });
   document.querySelectorAll('[data-suprimento-caixa]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       if(!podeAgora('criar')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra mexer no caixa físico.'); return; }
-      const valorStr = prompt('Valor do suprimento (reforço no caixa físico):');
+      const valorStr = await perguntaModal({ titulo:'Suprimento de caixa', mensagem:'Valor do suprimento (reforço no caixa físico):' });
       if(valorStr===null) return;
       const valor = numBR(valorStr);
       if(!valor || valor<=0){ showToast('Valor inválido.'); return; }
@@ -35672,21 +35669,21 @@ function attachViewHandlers(){
     });
   });
   document.querySelectorAll('[data-fechar-caixa]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       if(!podeAgora('criar')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra fechar o caixa físico.'); return; }
       const contaId = btn.dataset.fecharCaixa;
       // Não deixa fechar o mesmo dia duas vezes sem perceber — evita confundir com uma conferência já feita hoje.
       const jaFechouHoje = (state.fechamentosCaixaFisico||[]).some(f=>f.contaId===contaId && f.data===todayISO());
-      if(jaFechouHoje && !confirm('Esse caixa já foi conferido hoje. Registrar uma NOVA conferência mesmo assim (as duas ficam no histórico)?')) return;
+      if(jaFechouHoje && !(await avisoModal({ mensagem:'Esse caixa já foi conferido hoje. Registrar uma NOVA conferência mesmo assim (as duas ficam no histórico)?' }))) return;
       const saldoEsperado = saldoConta(contaId);
-      const valorStr = prompt(`Quanto tem de verdade na gaveta agora? (esperado: ${brl(saldoEsperado)})`);
+      const valorStr = await perguntaModal({ titulo:'Fechar caixa', mensagem:`Quanto tem de verdade na gaveta agora? (esperado: ${brl(saldoEsperado)})` });
       if(valorStr===null) return;
       const valorContado = numBR(valorStr);
       if(isNaN(valorContado)){ showToast('Valor inválido.'); return; }
       const { diferenca, status } = calcularFechamentoCaixa(saldoEsperado, valorContado);
       let motivo = null;
       if(status!=='bateu'){
-        motivo = (prompt(`${status==='sobra'?'Sobrou':'Faltou'} ${brl(Math.abs(diferenca))}. Motivo/observação (obrigatório):`)||'').trim();
+        motivo = (await perguntaModal({ titulo: status==='sobra'?'Sobrou':'Faltou', mensagem:`${status==='sobra'?'Sobrou':'Faltou'} ${brl(Math.abs(diferenca))}. Motivo/observação:`, obrigatorio:true }))||'';
         if(!motivo){ showToast('Fechamento cancelado — com diferença, o motivo é obrigatório.'); return; }
       }
       state.fechamentosCaixaFisico.push({ id: uid(), contaId, data: todayISO(), horaFechamento: new Date().toISOString(), saldoEsperado, valorContado, diferenca, status, motivo, responsavel: emailLogadoAtual()||null });
@@ -35713,14 +35710,14 @@ function attachViewHandlers(){
     sincronizarColecaoPermissoes(antesSync, state.usuariosPermissao);
   });
   document.querySelectorAll('[data-remover-permissao]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       const email = btn.dataset.removerPermissao;
       const alvo = (state.usuariosPermissao||[]).find(u=>u.email===email);
       if(alvo && alvo.papel==='admin' && totalAdminsAtivos(email)===0){
-        alert('Essa ação deixaria o sistema sem administrador. Cadastre outro admin antes de remover este.');
+        avisoOK('Essa ação deixaria o sistema sem administrador. Cadastre outro admin antes de remover este.');
         return;
       }
-      if(!confirm(`Remover o acesso de ${email}?`)) return;
+      if(!(await avisoModal({ mensagem:`Remover o acesso de ${escapeHTML(email)}?`, tipo:'perigo', textoConfirmar:'Remover' }))) return;
       const antesSync = [...(state.usuariosPermissao||[])];
       state.usuariosPermissao = state.usuariosPermissao.filter(u=>u.email!==email);
       registrarHistoricoPermissao({ usuarioAlvo: email, campo:'usuário removido', de: alvo?.papel, para:null });
@@ -35789,7 +35786,7 @@ function attachViewHandlers(){
   document.querySelectorAll('[data-reabrir-mes]').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       if(!podeAgora('fechar_mes')){ showToast('Só usuário admin pode reabrir o mês.'); return; }
-      const motivo = prompt('Por que está reabrindo esse mês? (obrigatório, fica registrado no histórico)');
+      const motivo = await perguntaModal({ titulo:'Reabrir o mês', mensagem:'Por que está reabrindo? Fica registrado no histórico.', obrigatorio:true });
       if(motivo===null) return;
       if(!motivo.trim()){ showToast('Precisa escrever o motivo pra reabrir.'); return; }
       reabrirMes(btn.dataset.reabrirMes, motivo);
@@ -35805,13 +35802,12 @@ function attachViewHandlers(){
     });
   });
   document.querySelectorAll('[data-action="recusar-orcamento-processo"]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       const o = (state.orcamentosProcessos||[]).find(x=>x.id===btn.dataset.id);
       if(!o) return;
       const resposta = (document.getElementById(`resposta-${o.id}`)||{}).value || '';
-      const motivo = prompt('Motivo da recusa (obrigatório):', '');
+      const motivo = await perguntaModal({ titulo:'Motivo da recusa', obrigatorio:true });
       if(motivo === null) return;
-      if(!motivo.trim()){ alert('Precisa informar o motivo da recusa.'); return; }
       decidirOrcamentoProcesso(o.id, 'recusado', { resposta, motivoRecusa: motivo.trim() });
     });
   });
@@ -36608,9 +36604,9 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     });
   }
   const fCentroCusto = document.getElementById('fCentroCusto');
-  if(fCentroCusto) fCentroCusto.addEventListener('change', ()=>{
+  if(fCentroCusto) fCentroCusto.addEventListener('change', async ()=>{
     if(fCentroCusto.value!=='__novo__') return;
-    const nome = (prompt('Nome do novo centro de custo (ex: Produção, Administrativo, Vendas):')||'').trim();
+    const nome = (await perguntaModal({ titulo:'Novo centro de custo', placeholder:'ex: Produção, Administrativo, Vendas', obrigatorio:true }))||'';
     if(!nome){ fCentroCusto.value=''; return; }
     if(!state.centrosCusto.includes(nome)){
       state.centrosCusto.push(nome);
@@ -36623,9 +36619,9 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     fCentroCusto.value = nome;
   });
   const fCanalVenda = document.getElementById('fCanalVenda');
-  if(fCanalVenda) fCanalVenda.addEventListener('change', ()=>{
+  if(fCanalVenda) fCanalVenda.addEventListener('change', async ()=>{
     if(fCanalVenda.value!=='__novo__') return;
-    const nome = (prompt('Nome do novo canal de venda (ex: E-commerce, Loja Física, Marketplace):')||'').trim();
+    const nome = (await perguntaModal({ titulo:'Novo canal de venda', placeholder:'ex: E-commerce, Loja Física, Marketplace', obrigatorio:true }))||'';
     if(!nome){ fCanalVenda.value=''; return; }
     if(!state.canaisVenda.includes(nome)){
       state.canaisVenda.push(nome);
@@ -36669,10 +36665,10 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
         (l.criadoEm||'').slice(0,10)===hojeDupe
       );
       if(possivelDuplicata){
-        const confirmarDuplicata = await avisoModal({
+        const confirmarDuplicata = await avisoModalSobreposto({
           titulo: 'Isso pode já estar lançado',
-          mensagem: `Já existe um lançamento igual criado hoje: "${escapeHTML(possivelDuplicata.descricao)}" — ${brl(possivelDuplicata.valor)}.`,
-          explicacao: 'Se foi sem querer (ex: clicou duas vezes, ou esqueceu que já tinha lançado), cancele. Se são duas coisas diferentes que só coincidem em valor e nome, pode continuar normalmente.',
+          mensagem: `Você já criou hoje um lançamento igual: "${escapeHTML(possivelDuplicata.descricao)}" — ${brl(possivelDuplicata.valor)}, com vencimento em ${fmtDate(possivelDuplicata.dataVencimento)}.`,
+          explicacao: 'A comparação é pelo dia em que você CRIOU o lançamento (hoje), não pelo vencimento — por isso pode aparecer mesmo com vencimentos diferentes. Se foi sem querer (ex: clicou duas vezes), cancele. Se são coisas diferentes que só coincidem em valor e nome, pode continuar normalmente.',
           tipo: 'aviso', textoConfirmar: 'Lançar mesmo assim', textoCancelar: 'Cancelar'
         });
         if(!confirmarDuplicata) return;
@@ -42186,7 +42182,7 @@ function openTransformarContaSubcontaModal(contaId){
   `;
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
-  document.getElementById('btnConfirmarTransformar').addEventListener('click', ()=>{
+  document.getElementById('btnConfirmarTransformar').addEventListener('click', async ()=>{
     const btn_btnConfirmarTransformar_Click = document.getElementById('btnConfirmarTransformar');
     if(btn_btnConfirmarTransformar_Click.disabled) return;
     btn_btnConfirmarTransformar_Click.disabled = true;
@@ -42194,7 +42190,7 @@ function openTransformarContaSubcontaModal(contaId){
     let contaDestinoId = document.getElementById('tcsContaDestino').value;
     const nomeSubconta = document.getElementById('tcsNomeSubconta').value.trim() || conta.nome;
     if(contaDestinoId==='__nova__'){
-      const nomeNovaConta = (prompt('Nome da nova conta (ex: Banco Inter, XP, Rico):')||'').trim();
+      const nomeNovaConta = (await perguntaModal({ titulo:'Nova conta de investimento', placeholder:'ex: Banco Inter, XP, Rico', obrigatorio:true }))||'';
       if(!nomeNovaConta) return;
       const novaConta = { id: uid(), nome: nomeNovaConta, instituicao: conta.instituicao||'', instituicaoDominio: conta.instituicaoDominio||'', tipo: conta.tipo, cor: CONTA_CORES[state.contasInvestimento.length % CONTA_CORES.length] };
       state.contasInvestimento.push(novaConta);
@@ -42623,9 +42619,9 @@ function openImportarNotaModal(contaPreSelecionadaId, notaPendenteId){
     subContaId: (row.querySelector('.op-subconta').value && row.querySelector('.op-subconta').value!=='__nova__') ? row.querySelector('.op-subconta').value : null,
     precoMedioCompra: row.querySelector('.op-preco-medio') ? (row.querySelector('.op-preco-medio').value || null) : null
   }));
-  const criarSubcontaParaLinha = (selectEl)=>{
+  const criarSubcontaParaLinha = async (selectEl)=>{
     if(selectEl.value!=='__nova__') return;
-    const nome = (prompt('Nome da nova subconta (ex: MXRF11, SNEL11, Longo Prazo):')||'').trim();
+    const nome = (await perguntaModal({ titulo:'Nova subconta', placeholder:'ex: MXRF11, SNEL11, Longo Prazo', obrigatorio:true }))||'';
     if(!nome){ selectEl.value=''; return; }
     const contaSelect = document.getElementById('notaContaInvestimento');
     let contaAlvoId = contaSelect?.value || '';
@@ -44283,9 +44279,9 @@ function openInvestirModal(contaBancariaId){
     const subs = state.subcontasInvestimento.filter(s=>s.contaId===contaId);
     invSubcontaSelect.innerHTML = `<option value="">— nenhuma —</option>` + subs.map(s=>`<option value="${s.id}">${escapeHTML(s.nome)}</option>`).join('') + `<option value="__nova__">+ Criar nova subconta…</option>`;
   };
-  invContaSelect.addEventListener('change', ()=>{
+  invContaSelect.addEventListener('change', async ()=>{
     if(invContaSelect.value==='__nova__'){
-      const nome = (prompt('Nome da nova conta de investimento (ex: Banco Inter, XP, Rico):')||'').trim();
+      const nome = (await perguntaModal({ titulo:'Nova conta de investimento', placeholder:'ex: Banco Inter, XP, Rico', obrigatorio:true }))||'';
       if(!nome){ popularContas(); return; }
       const nova = { id: uid(), nome, instituicao:'', instituicaoDominio:'', tipo: tipoContaMap[tipoInv], cor: CONTA_CORES[state.contasInvestimento.length % CONTA_CORES.length] };
       state.contasInvestimento.push(nova);
@@ -44296,9 +44292,9 @@ function openInvestirModal(contaBancariaId){
     }
     popularSubcontas();
   });
-  invSubcontaSelect.addEventListener('change', ()=>{
+  invSubcontaSelect.addEventListener('change', async ()=>{
     if(invSubcontaSelect.value==='__nova__'){
-      const nome = (prompt('Nome da nova subconta (ex: LCI, CDB, Tesouro Direto):')||'').trim();
+      const nome = (await perguntaModal({ titulo:'Nova subconta', placeholder:'ex: LCI, CDB, Tesouro Direto', obrigatorio:true }))||'';
       if(!nome){ invSubcontaSelect.value=''; return; }
       const nova = { id: uid(), contaId: invContaSelect.value, nome, cor: CONTA_CORES[state.subcontasInvestimento.length % CONTA_CORES.length] };
       state.subcontasInvestimento.push(nova);
@@ -44531,9 +44527,9 @@ function openAtivoModal(existing, contaId){
   });
 
   const aiSubconta = document.getElementById('aiSubconta');
-  aiSubconta.addEventListener('change', ()=>{
+  aiSubconta.addEventListener('change', async ()=>{
     if(aiSubconta.value!=='__nova__') return;
-    const nome = (prompt('Nome da nova subconta (ex: LCI, CDB, Tesouro Direto):')||'').trim();
+    const nome = (await perguntaModal({ titulo:'Nova subconta', placeholder:'ex: LCI, CDB, Tesouro Direto', obrigatorio:true }))||'';
     if(!nome){ aiSubconta.value=''; return; }
     const nova = { id: uid(), contaId, nome, cor: CONTA_CORES[state.subcontasInvestimento.length % CONTA_CORES.length] };
     state.subcontasInvestimento.push(nova);
@@ -45490,6 +45486,88 @@ document.getElementById('modalOverlay').addEventListener('click', (e)=>{ if(e.ta
 // sobre o PORQUÊ do aviso, não só o "continuar mesmo assim?" seco. Retorna uma Promise<boolean> —
 // por isso todo lugar que chamar precisa de "await" (e a função em volta precisa ser async).
 //   tipo: 'perigo' (ação destrutiva/irreversível, botão vermelho) | 'aviso' (atenção, mas reversível) | 'info'
+// Pergunta com campo de texto — no lugar do prompt() nativo do navegador. Devolve o texto digitado,
+// ou null se cancelar (mesmo contrato do prompt() nativo, pra facilitar trocar um pelo outro).
+function perguntaModal({ titulo, mensagem, placeholder='', valorInicial='', tipoCampo='text', textoConfirmar='OK', obrigatorio=false }){
+  return new Promise(resolve=>{
+    const modal = document.getElementById('modalContent');
+    modal.innerHTML = `
+      <h3 style="margin:0 0 8px 0;">${escapeHTML(titulo||'')}</h3>
+      ${mensagem ? `<p style="margin:0 0 10px 0;font-size:13.5px;color:var(--ink);line-height:1.45;">${mensagem}</p>` : ''}
+      <div class="field" style="margin:0;"><input type="${tipoCampo}" id="perguntaModalInput" placeholder="${escapeHTML(placeholder)}" value="${escapeHTML(valorInicial)}"></div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="btnPerguntaCancelar">Cancelar</button>
+        <button class="btn" id="btnPerguntaConfirmar">${escapeHTML(textoConfirmar)}</button>
+      </div>
+    `;
+    document.getElementById('modalOverlay').classList.add('open');
+    const input = document.getElementById('perguntaModalInput');
+    input.focus(); if(valorInicial) input.select();
+    const finalizar = (valor)=>{ closeModal(); resolve(valor); };
+    const tentarConfirmar = ()=>{
+      const v = input.value.trim();
+      if(obrigatorio && !v){ input.style.borderColor = 'var(--danger)'; input.focus(); return; }
+      finalizar(v);
+    };
+    document.getElementById('btnPerguntaCancelar').addEventListener('click', ()=>finalizar(null));
+    document.getElementById('btnPerguntaConfirmar').addEventListener('click', tentarConfirmar);
+    input.addEventListener('keydown', e=>{ if(e.key==='Enter') tentarConfirmar(); });
+  });
+}
+// Escolha entre várias opções (um botão por opção) — no lugar de "digite o número" via prompt().
+// opcoes: [{valor, rotulo}]. Devolve o valor escolhido, ou null se cancelar.
+function escolhaModal({ titulo, mensagem, opcoes }){
+  return new Promise(resolve=>{
+    const modal = document.getElementById('modalContent');
+    modal.innerHTML = `
+      <h3 style="margin:0 0 8px 0;">${escapeHTML(titulo||'')}</h3>
+      ${mensagem ? `<p style="margin:0 0 12px 0;font-size:13.5px;color:var(--ink);line-height:1.45;">${mensagem}</p>` : ''}
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        ${opcoes.map((op,i)=>`<button type="button" class="btn ghost" data-escolha-idx="${i}" style="text-align:left;">${escapeHTML(op.rotulo)}</button>`).join('')}
+      </div>
+      <div class="modal-actions"><button class="btn ghost" id="btnEscolhaCancelar">Cancelar</button></div>
+    `;
+    document.getElementById('modalOverlay').classList.add('open');
+    const finalizar = (valor)=>{ closeModal(); resolve(valor); };
+    document.getElementById('btnEscolhaCancelar').addEventListener('click', ()=>finalizar(null));
+    modal.querySelectorAll('[data-escolha-idx]').forEach(btn=>{
+      btn.addEventListener('click', ()=>finalizar(opcoes[+btn.dataset.escolhaIdx].valor));
+    });
+  });
+}
+// Igual ao avisoModal, mas num elemento PRÓPRIO, fora de #modalContent — pra usar no meio de um
+// formulário que já está aberto no modal principal, sem apagar os campos dele. O avisoModal comum
+// reescreve #modalContent (é o mesmo container do formulário), então usá-lo ali some com os campos
+// e quem chamou depois não consegue mais ler o que a pessoa tinha preenchido.
+function avisoModalSobreposto({ titulo, mensagem, explicacao='', tipo='aviso', textoConfirmar='Continuar', textoCancelar='Cancelar' }){
+  return new Promise(resolve=>{
+    const cores = { perigo:'var(--danger)', aviso:'var(--warn)', info:'var(--blue-accent)' };
+    const icones = { perigo:'🗑️', aviso:'⚠️', info:'ℹ️' };
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay open';
+    overlay.style.zIndex = '200'; // acima do modal comum (150) e da tela de login (100)
+    overlay.innerHTML = `
+      <div class="modal">
+        <div style="display:flex;gap:12px;align-items:flex-start;">
+          <div style="font-size:26px;line-height:1;flex-shrink:0;">${icones[tipo]||icones.aviso}</div>
+          <div style="min-width:0;">
+            <h3 style="margin:0 0 8px 0;color:${cores[tipo]||cores.aviso};">${escapeHTML(titulo||'Atenção')}</h3>
+            <p style="margin:0;font-size:14.5px;color:var(--ink);line-height:1.5;">${mensagem}</p>
+            ${explicacao ? `<div class="note" style="margin-top:10px;">${explicacao}</div>` : ''}
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn ghost" data-sobreposto-cancelar>${escapeHTML(textoCancelar)}</button>
+          <button class="btn" data-sobreposto-confirmar style="${tipo==='perigo'?'background:var(--danger);border-color:var(--danger);':''}">${escapeHTML(textoConfirmar)}</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const finalizar = (valor)=>{ overlay.remove(); resolve(valor); };
+    overlay.querySelector('[data-sobreposto-cancelar]').addEventListener('click', ()=>finalizar(false));
+    overlay.querySelector('[data-sobreposto-confirmar]').addEventListener('click', ()=>finalizar(true));
+  });
+}
 function avisoModal({ titulo, mensagem, explicacao='', tipo='aviso', textoConfirmar='Continuar', textoCancelar='Cancelar' }){
   return new Promise(resolve=>{
     const cores = { perigo:'var(--danger)', aviso:'var(--warn)', info:'var(--blue-accent)' };
@@ -45505,15 +45583,20 @@ function avisoModal({ titulo, mensagem, explicacao='', tipo='aviso', textoConfir
         </div>
       </div>
       <div class="modal-actions">
-        <button class="btn ghost" id="btnAvisoCancelar">${escapeHTML(textoCancelar)}</button>
+        ${textoCancelar ? `<button class="btn ghost" id="btnAvisoCancelar">${escapeHTML(textoCancelar)}</button>` : ''}
         <button class="btn" id="btnAvisoConfirmar" style="${tipo==='perigo'?'background:var(--danger);border-color:var(--danger);':''}">${escapeHTML(textoConfirmar)}</button>
       </div>
     `;
     document.getElementById('modalOverlay').classList.add('open');
     const finalizar = (valor)=>{ closeModal(); resolve(valor); };
-    document.getElementById('btnAvisoCancelar').addEventListener('click', ()=>finalizar(false));
+    document.getElementById('btnAvisoCancelar')?.addEventListener('click', ()=>finalizar(false));
     document.getElementById('btnAvisoConfirmar').addEventListener('click', ()=>finalizar(true));
   });
+}
+// Aviso de uma informação só, com um único botão "OK" — no lugar do alert() nativo do navegador
+// (a caixinha preta do sistema), que não combina com o resto da interface do app.
+function avisoOK(mensagem, tipo){
+  return avisoModal({ mensagem, tipo: tipo||'info', textoConfirmar:'OK', textoCancelar:null });
 }
 
 /* Botão flutuante fixo de lançamento rápido (desktop) — visível em qualquer tela, sem precisar
@@ -45741,7 +45824,7 @@ auth.onAuthStateChanged(async user=>{
         const motivo = statusEfetivoUsuario(uAtual)==='bloqueado' ? 'Seu acesso foi bloqueado pelo administrador.' : 'Seu acesso está suspenso temporariamente.';
         dadosCarregados = false;
         await auth.signOut();
-        alert(motivo);
+        await avisoOK(motivo, 'aviso');
         return;
       }
       registrarAcessoSistema();
