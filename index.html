@@ -1315,6 +1315,7 @@ function aplicarMigracoes(s){
   if(!s.socios) s.socios = [];
   if(!s.oportunidadesVenda) s.oportunidadesVenda = [];
   if(!s.estoqueInsumos) s.estoqueInsumos = [];
+  if(!s.estoqueEntradasHistorico) s.estoqueEntradasHistorico = [];
   if(!s.previsoesGastoFuturo) s.previsoesGastoFuturo = [];
   if(!s.recebimentosDinheiroRep) s.recebimentosDinheiroRep = [];
   if(!s.recebimentosPixRep) s.recebimentosPixRep = [];
@@ -4338,28 +4339,37 @@ async function conectarVKParaEscrita(){
   return vkFirebaseApp.firestore();
 }
 async function registrarEntradaEstoqueNoVK(dados){
-  // dados: { insumoId, quantidade, valorUnitario, numeroNF, semNF, fornecedorId, data, observacoes }
+  // dados: { itens:[{insumoId, quantidade, valorUnitario}], numeroNF, semNF, fornecedorId, data, observacoes }
   const db = await conectarVKParaEscrita();
   if(!db) return false;
   const entradaId = 'ent_' + uid();
   const documento = {
     id: entradaId, numeroNF: dados.semNF ? '' : dados.numeroNF, semNF: !!dados.semNF,
     fornecedorId: dados.fornecedorId||null, data: dados.data || todayISO(),
-    itens: [{ produtoId: dados.insumoId, quantidade: dados.quantidade, valorUnitario: dados.valorUnitario }],
+    itens: dados.itens.map(it=>({ produtoId: it.insumoId, quantidade: it.quantidade, valorUnitario: it.valorUnitario })),
     observacoes: (dados.observacoes||'') + ' (lançado pelo Livro Caixa)',
     criadoEm: new Date().toISOString()
   };
-  // MESMA transação do VK Industrial (aplicarMovimentoEstoqueComSaldo): lê saldoAtual, grava a
-  // entrada, atualiza saldoAtual — atômico, senão o estoque do Industrial fica errado.
+  // MESMA transação do VK Industrial (aplicarMovimentoEstoqueComSaldo): lê o saldoAtual de CADA
+  // insumo envolvido, grava a entrada com todos os itens, atualiza o saldo de cada um — tudo
+  // atômico. Uma nota com item em kg e item em unidade entra junto, do mesmo jeito que lá.
   await db.runTransaction(async tx=>{
-    const refInsumo = db.collection('insumos').doc(dados.insumoId);
-    const snap = await tx.get(refInsumo);
-    if(!snap.exists) throw new Error('Esse insumo não existe mais no VK Industrial — sincronize de novo antes de lançar.');
-    const saldoBase = snap.data().saldoAtual || 0;
+    const porInsumo = {}; dados.itens.forEach(it=>{ porInsumo[it.insumoId] = (porInsumo[it.insumoId]||0) + it.quantidade; });
+    const refs = {}, saldosBase = {};
+    for(const insumoId of Object.keys(porInsumo)){
+      const ref = db.collection('insumos').doc(insumoId);
+      refs[insumoId] = ref;
+      const snap = await tx.get(ref);
+      if(!snap.exists) throw new Error(`Um dos insumos não existe mais no VK Industrial (id ${insumoId}) — sincronize de novo antes de lançar.`);
+      saldosBase[insumoId] = snap.data().saldoAtual || 0;
+    }
     tx.set(db.collection('entradas_estoque').doc(entradaId), documento);
-    tx.update(refInsumo, { saldoAtual: saldoBase + dados.quantidade, saldoAtualizadoEm: new Date().toISOString() });
+    const agora = new Date().toISOString();
+    Object.keys(porInsumo).forEach(insumoId=>{
+      tx.update(refs[insumoId], { saldoAtual: saldosBase[insumoId] + porInsumo[insumoId], saldoAtualizadoEm: agora });
+    });
   });
-  registrarLog('Entrada de estoque registrada (VK Industrial)', `${dados.quantidade} un. de insumoId ${dados.insumoId} — NF ${dados.semNF?'(sem NF)':dados.numeroNF}`);
+  registrarLog('Entrada de estoque registrada (VK Industrial)', `${dados.itens.length} item(ns) — NF ${dados.semNF?'(sem NF)':dados.numeroNF}`);
   return true;
 }
 async function buscarFornecedoresVK(){
@@ -4407,25 +4417,65 @@ function viewEstoque(){
     </div>`}
   `;
 }
+let entradaEstoqueContador = 0;
+function htmlLinhaItemEntrada(){
+  const n = ++entradaEstoqueContador;
+  const opcoes = (state.estoqueInsumos||[]).slice().sort((a,b)=>a.nome.localeCompare(b.nome))
+    .map(i=>`<option value="${i.insumoId}" data-unidade="${escapeHTML(i.unidade)}">${escapeHTML(i.nome)} (${escapeHTML(i.unidade)})</option>`).join('');
+  return `<div class="entrada-item-linha" data-linha="${n}" style="display:grid;grid-template-columns:1fr 90px 100px 90px 28px;gap:6px;align-items:end;margin-bottom:8px;">
+    <div class="field" style="margin:0;"><label style="font-size:10.5px;">Insumo</label><select class="ei-insumo">${opcoes}</select></div>
+    <div class="field" style="margin:0;"><label style="font-size:10.5px;">Qtd. (<span class="ei-unidade">—</span>)</label><input type="text" inputmode="decimal" class="ei-qtd" placeholder="0"></div>
+    <div class="field" style="margin:0;"><label style="font-size:10.5px;">Valor unit.</label><input type="text" inputmode="decimal" class="ei-valor" placeholder="0,00"></div>
+    <div style="font-size:11px;color:var(--text-soft);text-align:right;padding-bottom:8px;" class="ei-subtotal">R$ 0,00</div>
+    <button type="button" class="icon-btn ei-remover" title="Remover item" style="margin-bottom:2px;">✕</button>
+  </div>`;
+}
+function ligarLinhaItemEntrada(linha){
+  const selInsumo = linha.querySelector('.ei-insumo'), spanUnidade = linha.querySelector('.ei-unidade');
+  const atualizarUnidade = ()=>{ spanUnidade.textContent = selInsumo.selectedOptions[0]?.dataset.unidade || '—'; };
+  atualizarUnidade(); selInsumo.addEventListener('change', atualizarUnidade);
+  const atualizarSubtotal = ()=>{
+    const q = numBR(linha.querySelector('.ei-qtd').value)||0, v = numBR(linha.querySelector('.ei-valor').value)||0;
+    linha.querySelector('.ei-subtotal').textContent = brl(q*v);
+    atualizarTotalNotaEntrada();
+  };
+  linha.querySelector('.ei-qtd').addEventListener('input', atualizarSubtotal);
+  linha.querySelector('.ei-valor').addEventListener('input', atualizarSubtotal);
+  linha.querySelector('.ei-remover').addEventListener('click', ()=>{
+    if(document.querySelectorAll('.entrada-item-linha').length<=1){ showToast('Precisa de pelo menos um item.'); return; }
+    linha.remove(); atualizarTotalNotaEntrada();
+  });
+}
+function atualizarTotalNotaEntrada(){
+  let total = 0;
+  document.querySelectorAll('.entrada-item-linha').forEach(linha=>{
+    total += (numBR(linha.querySelector('.ei-qtd').value)||0) * (numBR(linha.querySelector('.ei-valor').value)||0);
+  });
+  const el = document.getElementById('entradaTotalNota'); if(el) el.textContent = brl(total);
+}
+function adicionarLinhaItemEntrada(){
+  const container = document.getElementById('entradaItensContainer');
+  container.insertAdjacentHTML('beforeend', htmlLinhaItemEntrada());
+  ligarLinhaItemEntrada(container.lastElementChild);
+}
 async function openNovaEntradaEstoqueModal(){
   if(!podeAgora('criar')){ mostrarAlertaPermissaoNegada('Você não tem permissão pra registrar entrada de estoque.'); return; }
+  if(!(state.estoqueInsumos||[]).length){ showToast('Sincronize o estoque com o VK Industrial antes de lançar uma entrada.'); return; }
+  entradaEstoqueContador = 0;
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
     <h3>+ Entrada de estoque por NF</h3>
-    <div class="note" style="margin-top:0;">Grava direto no VK Industrial — o mesmo lugar onde a entrada apareceria se fosse lançada por lá.</div>
-    <div class="field"><label>Insumo</label>
-      <select id="entInsumo">${(state.estoqueInsumos||[]).slice().sort((a,b)=>a.nome.localeCompare(b.nome)).map(i=>`<option value="${i.insumoId}">${escapeHTML(i.nome)} (${escapeHTML(i.unidade)})</option>`).join('')}</select>
-    </div>
-    <div class="field-row">
-      <div class="field"><label>Quantidade</label><input type="text" inputmode="decimal" id="entQtd" placeholder="Ex: 25"></div>
-      <div class="field"><label>Valor unitário (R$)</label><input type="text" inputmode="decimal" id="entValorUnit" placeholder="Ex: 4,50"></div>
-    </div>
+    <div class="note" style="margin-top:0;">Grava direto no VK Industrial — a mesma nota pode ter itens em kg, litro ou unidade, junto.</div>
     <div class="field-row">
       <div class="field"><label>Data</label><input type="date" id="entData" value="${todayISO()}"></div>
       <div class="field"><label>Nº da NF</label><input type="text" id="entNF" placeholder="Ex: 123456"></div>
     </div>
     <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;margin:2px 0 10px;"><input type="checkbox" id="entSemNF"> Entrada sem nota fiscal</label>
     <div class="field"><label>Fornecedor (opcional)</label><select id="entFornecedor"><option value="">Carregando fornecedores do VK Industrial...</option></select></div>
+    <div class="dash-section-label" style="margin-top:12px;">Itens da nota</div>
+    <div id="entradaItensContainer">${htmlLinhaItemEntrada()}</div>
+    <button type="button" class="btn ghost sm" id="btnAdicionarItemEntrada" style="margin-bottom:10px;">+ Adicionar item</button>
+    <div style="text-align:right;font-size:13px;font-weight:700;margin-bottom:10px;">Total da nota: <span id="entradaTotalNota">R$ 0,00</span></div>
     <div class="field"><label>Observações (opcional)</label><input type="text" id="entObs"></div>
     <div class="modal-actions">
       <button class="btn ghost" id="btnCancelarModal">Cancelar</button>
@@ -4435,6 +4485,8 @@ async function openNovaEntradaEstoqueModal(){
   document.getElementById('modalOverlay').classList.add('open');
   document.getElementById('btnCancelarModal').addEventListener('click', closeModal);
   document.getElementById('entSemNF').addEventListener('change', e=>{ document.getElementById('entNF').disabled = e.target.checked; });
+  ligarLinhaItemEntrada(document.getElementById('entradaItensContainer').firstElementChild);
+  document.getElementById('btnAdicionarItemEntrada').addEventListener('click', adicionarLinhaItemEntrada);
   buscarFornecedoresVK().then(lista=>{
     const sel = document.getElementById('entFornecedor'); if(!sel) return;
     lista.sort((a,b)=>(a.razaoSocial||'').localeCompare(b.razaoSocial||''));
@@ -4443,22 +4495,24 @@ async function openNovaEntradaEstoqueModal(){
   document.getElementById('btnSalvarEntradaEstoque').addEventListener('click', async ()=>{
     const btn = document.getElementById('btnSalvarEntradaEstoque'); if(btn.disabled) return; btn.disabled = true;
     try{
-      const insumoId = document.getElementById('entInsumo').value;
-      const quantidade = numBR(document.getElementById('entQtd').value);
-      const valorUnitario = numBR(document.getElementById('entValorUnit').value);
+      const itens = [...document.querySelectorAll('.entrada-item-linha')].map(linha=>({
+        insumoId: linha.querySelector('.ei-insumo').value,
+        quantidade: numBR(linha.querySelector('.ei-qtd').value),
+        valorUnitario: numBR(linha.querySelector('.ei-valor').value)
+      })).filter(it=>it.insumoId && it.quantidade>0);
       const semNF = document.getElementById('entSemNF').checked;
       const numeroNF = document.getElementById('entNF').value.trim();
-      if(!insumoId || !quantidade || quantidade<=0){ showToast('Escolha o insumo e uma quantidade válida.'); btn.disabled=false; return; }
-      if(isNaN(valorUnitario) || valorUnitario<0){ showToast('Informe o valor unitário.'); btn.disabled=false; return; }
+      if(!itens.length){ showToast('Adicione pelo menos um item com quantidade válida.'); btn.disabled=false; return; }
+      if(itens.some(it=>isNaN(it.valorUnitario) || it.valorUnitario<0)){ showToast('Confira o valor unitário de cada item.'); btn.disabled=false; return; }
       if(!semNF && !numeroNF){ showToast('Informe o número da NF (ou marque "sem nota fiscal").'); btn.disabled=false; return; }
       await registrarEntradaEstoqueNoVK({
-        insumoId, quantidade, valorUnitario, semNF, numeroNF,
+        itens, semNF, numeroNF,
         fornecedorId: document.getElementById('entFornecedor').value || null,
         data: document.getElementById('entData').value || todayISO(),
         observacoes: document.getElementById('entObs').value.trim()
       });
       closeModal();
-      showToast('Entrada registrada no VK Industrial. Sincronizando estoque...');
+      showToast(`Entrada registrada no VK Industrial (${itens.length} item(ns)). Sincronizando estoque...`);
       await sincronizarEstoqueInsumosVK();
     }catch(e){
       console.error('Erro ao registrar entrada de estoque:', e);
@@ -4524,6 +4578,11 @@ async function sincronizarEstoqueInsumosVK(){
     });
 
     state.estoqueInsumos = novoEstoque;
+    // Histórico bruto (insumo, data, valor unitário pago) — o resumo acima só guarda a MÉDIA;
+    // pro gráfico de "variação de preço por insumo" precisa da série real, ponto a ponto.
+    state.estoqueEntradasHistorico = entradasVK.flatMap(ent =>
+      (ent.itens||[]).filter(it=>it.produtoId && it.valorUnitario>0).map(it => ({ insumoId: it.produtoId, data: ent.data, valorUnitario: it.valorUnitario, quantidade: it.quantidade||0 }))
+    ).sort((a,b)=>a.data.localeCompare(b.data));
     cfg.ultimaSincronizacaoEstoqueInsumos = new Date().toISOString();
     persist();
     render();
@@ -13101,7 +13160,51 @@ function viewGraficos(){
     <div class="panel" id="grafComparador" style="margin-bottom:14px;"><div class="panel-body" style="padding:14px 16px;">
       ${htmlComparadorGraficos()}
     </div></div>
+    <div class="panel" id="grafVariacaoPreco" style="margin-bottom:14px;"><div class="panel-body" style="padding:14px 16px;">
+      ${htmlVariacaoPrecoInsumo()}
+    </div></div>
     <div id="grafArea">${htmlAreaGraficos()}</div>`;
+}
+// Variação de preço por insumo — usa o histórico de entradas sincronizado do VK Industrial
+// (state.estoqueEntradasHistorico), ponto a ponto por data, não a média. Sem esse histórico
+// (ainda não sincronizou), avisa em vez de mostrar gráfico vazio.
+let variacaoPrecoInsumoId = '';
+function htmlVariacaoPrecoInsumo(){
+  const insumos = (state.estoqueInsumos||[]).slice().sort((a,b)=>a.nome.localeCompare(b.nome));
+  if(!insumos.length) return `<div style="font-size:11px;font-weight:700;color:var(--text-soft);margin-bottom:8px;">📈 VARIAÇÃO DE PREÇO POR INSUMO</div><div class="empty">Sincronize o estoque com o VK Industrial (tela Estoque) pra ver isso.</div>`;
+  const id = variacaoPrecoInsumoId || insumos[0].insumoId;
+  const pontos = (state.estoqueEntradasHistorico||[]).filter(e=>e.insumoId===id);
+  const insumo = insumos.find(i=>i.insumoId===id);
+  let resumo = '';
+  if(pontos.length>=2){
+    const primeiro = pontos[0].valorUnitario, ultimo = pontos[pontos.length-1].valorUnitario;
+    const variacao = primeiro>0 ? ((ultimo-primeiro)/primeiro*100) : null;
+    resumo = `<div style="font-size:12px;color:var(--text-soft);margin:6px 0 4px;">De ${brl(primeiro)} (${fmtDate(pontos[0].data)}) para ${brl(ultimo)} (${fmtDate(pontos[pontos.length-1].data)})${variacao!=null?` · <strong style="color:${variacao>0?'var(--danger)':'var(--success)'};">${variacao>=0?'+':''}${variacao.toFixed(1)}%</strong>`:''}</div>`;
+  }
+  return `
+    <div style="font-size:11px;font-weight:700;color:var(--text-soft);margin-bottom:8px;">📈 VARIAÇÃO DE PREÇO POR INSUMO</div>
+    <div class="field" style="margin-bottom:6px;"><label>Insumo</label>
+      <select id="varPrecoInsumo">${insumos.map(i=>`<option value="${i.insumoId}" ${i.insumoId===id?'selected':''}>${escapeHTML(i.nome)}</option>`).join('')}</select>
+    </div>
+    ${!pontos.length ? `<div class="empty">Sem entradas registradas desse insumo no histórico sincronizado ainda.</div>` : `
+    ${resumo}
+    <canvas id="grafVariacaoPrecoCanvas" height="170" style="width:100%;"></canvas>
+    `}
+  `;
+}
+function desenharVariacaoPrecoInsumo(){
+  const cv = document.getElementById('grafVariacaoPrecoCanvas'); if(!cv) return;
+  const id = variacaoPrecoInsumoId || (state.estoqueInsumos||[])[0]?.insumoId;
+  const pontos = (state.estoqueEntradasHistorico||[]).filter(e=>e.insumoId===id).map(e=>({ label: fmtDate(e.data).slice(0,5), valor: e.valorUnitario }));
+  if(pontos.length) desenharGraficoLinha('grafVariacaoPrecoCanvas', pontos, '#D9A441');
+}
+function ligarVariacaoPrecoInsumo(){
+  document.getElementById('varPrecoInsumo')?.addEventListener('change', e=>{
+    variacaoPrecoInsumoId = e.target.value;
+    const el = document.getElementById('grafVariacaoPreco'); if(el) el.querySelector('.panel-body').innerHTML = htmlVariacaoPrecoInsumo();
+    ligarVariacaoPrecoInsumo(); desenharVariacaoPrecoInsumo();
+  });
+  desenharVariacaoPrecoInsumo();
 }
 function sincronizarFiltrosGraficos(){
   const g = graficosPrefs(), vis = _graficosVisiveis();
@@ -13141,6 +13244,7 @@ function ligarFiltrosGraficos(){
   });
   sincronizarFiltrosGraficos();
   ligarComparadorGraficos();
+  ligarVariacaoPrecoInsumo();
 }
 function ligarComparadorGraficos(){
   document.getElementById('cmpTipo')?.addEventListener('change', e=>{ comparadorGraficos = { tipo:e.target.value, a:'', b:'' }; const el = document.getElementById('grafComparador'); if(el) el.innerHTML = htmlComparadorGraficos(); ligarComparadorGraficos(); });
