@@ -38808,7 +38808,8 @@ function openFornecedorModal(existing){
     status.textContent = 'Buscando dados públicos do CNPJ...';
     try{
       const resp = await fetch('https://brasilapi.com.br/api/cnpj/v1/'+doc);
-      if(!resp.ok) throw new Error('não encontrado');
+      if(resp.status===404){ status.textContent = 'Esse CNPJ não está nos dados públicos da Receita — confira o número ou preencha manualmente.'; return; }
+      if(!resp.ok) throw new Error('resposta '+resp.status);
       const dados = await resp.json();
       const nomeAtual = document.getElementById('fnNome').value.trim();
       const razaoOriginal = dados.razao_social || dados.nome_fantasia || '';
@@ -38835,7 +38836,10 @@ function openFornecedorModal(existing){
       }
       status.textContent = `Dados encontrados: ${dados.razao_social || dados.nome_fantasia || 'CNPJ ativo'}. Campos em branco foram preenchidos — confira antes de salvar.`;
     }catch(e){
-      status.textContent = 'Não encontrei esse CNPJ nos dados públicos — confira o número ou preencha manualmente.';
+      // Diferencia falha de rede/API de "CNPJ não encontrado" — antes as duas mostravam a mesma
+      // mensagem, e quem via achava que o CNPJ estava errado quando na verdade a busca nem completou.
+      console.error('Busca de CNPJ falhou:', e);
+      status.textContent = 'Não consegui consultar agora (falha na busca, não no CNPJ) — confira sua internet e tente de novo, ou preencha manualmente.';
     }
   });
   document.getElementById('btnSalvarFornecedor').addEventListener('click', ()=>{
