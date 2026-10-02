@@ -1456,6 +1456,84 @@ async function carregarDados(){
   (base.lancamentos||[]).forEach(l=>{ if(l && l.id) __ultimoSnapshotLancamentos[l.id] = JSON.stringify(l); });
   return base;
 }
+function normalizarNFsVKEmLancamentoUnico(){
+  let mudou = false;
+  const grupos = new Map();
+
+  (state.lancamentos||[]).forEach(l=>{
+    if(l.origem!=='vk-estoque' || !l.vkEntradaId || !l.grupoDivisaoId) return;
+    const chave = `${l.vkEntradaId}::${l.grupoDivisaoId}`;
+    if(!grupos.has(chave)) grupos.set(chave, []);
+    grupos.get(chave).push(l);
+  });
+
+  grupos.forEach(grupo=>{
+    if(grupo.length<2) return;
+
+    const estados = new Set(grupo.map(l=>l.status||'pendente'));
+    const datas = new Set(grupo.map(l=>l.dataPagamento||l.dataVencimento||''));
+    const contas = new Set(grupo.map(l=>l.contaId||''));
+    const temHistoricoComplexo = grupo.some(l=>Array.isArray(l.historicoRecebimentos) && l.historicoRecebimentos.length>0);
+
+    // Se já houve pagamentos diferentes/parcelados entre as partes, não juntamos automaticamente.
+    // Se todos estão pendentes, ou todos já estão pagos/recebidos no mesmo dia e mesma conta,
+    // a fusão é segura e mantém a NF como uma única movimentação.
+    const todosPendentes = estados.size===1 && estados.has('pendente');
+    const todosConfirmados = estados.size===1 && [...estados][0]==='pago' && datas.size===1 && contas.size===1 && !temHistoricoComplexo;
+    if(!todosPendentes && !todosConfirmados) return;
+
+    const primeiro = grupo[0];
+    const idsDoGrupo = new Set(grupo.map(l=>l.id));
+    const itens = [];
+
+    grupo.forEach(l=>{
+      if(Array.isArray(l.itens) && l.itens.length){
+        l.itens.forEach(it=>itens.push({ ...it, categoria: it.categoria || l.categoria || null }));
+      } else {
+        itens.push({
+          nome: l.descricao || 'Item da NF',
+          quantidade: 1,
+          valorUnitario: Number(l.valor||0),
+          valor: Number(l.valor||0),
+          categoria: l.categoria || null
+        });
+      }
+    });
+
+    const valorTotal = Math.round(grupo.reduce((s,l)=>s+Number(l.valor||0),0)*100)/100;
+    const categorias = [...new Set(itens.map(it=>it.categoria).filter(Boolean))];
+
+    primeiro.valor = valorTotal;
+    primeiro.categoria = categorias.length===1 ? categorias[0] : 'Múltiplas categorias';
+    primeiro.itens = itens;
+    primeiro.grupoId = null;
+    primeiro.grupoDivisaoId = null;
+    primeiro.nfUnificadaPorItem = true;
+
+    // Mantém a movimentação bancária como uma única saída quando os lançamentos antigos
+    // já estavam confirmados no mesmo dia/conta.
+    if(todosConfirmados){
+      primeiro.status = 'pago';
+      primeiro.dataPagamento = grupo[0].dataPagamento;
+      primeiro.contaId = grupo[0].contaId;
+      primeiro.dataVencimento = grupo[0].dataVencimento || primeiro.dataPagamento;
+      primeiro.valorRecebido = 0;
+      primeiro.historicoRecebimentos = null;
+    }
+
+    const observacoes = grupo.map(l=>l.observacao).filter(Boolean);
+    if(!primeiro.observacao && observacoes.length) primeiro.observacao = observacoes[0];
+
+    state.lancamentos = state.lancamentos.filter(l=>!idsDoGrupo.has(l.id) || l.id===primeiro.id);
+    mudou = true;
+  });
+
+  if(mudou){
+    console.info('[NF VK] Lançamentos antigos por categoria foram unificados em um único lançamento, mantendo a categoria em cada item.');
+  }
+  return mudou;
+}
+
 let state = aplicarMigracoes(null);
 
 // ---- Migração única "fatiar lancamentos" — rodar pelo console do navegador (F12 ou menu do
@@ -4720,8 +4798,12 @@ async function sincronizarEntradasEstoqueVK(){
 
       if(existente){
         jaImportados++;
-        const mudou = Math.abs(existente.valor-montada.valor)>0.005 || existente.fornecedor!==montada.fornecedorNome || existente.dataVencimento!==(e.data||existente.dataVencimento) || existente.observacao!==montada.observacao || existente.semNF!==!!e.semNF;
-        if(mudou){
+        const assinaturaItens = itens => JSON.stringify((itens||[]).map(it=>({
+          nome: it.nome||'', quantidade: Number(it.quantidade||0), valorUnitario: Number(it.valorUnitario||0),
+          valor: Number(it.valor||0), categoria: it.categoria||null
+        })));
+        const itensMudaram = assinaturaItens(existente.itens) !== assinaturaItens(montada.itens);
+        if(Math.abs(existente.valor-montada.valor)>0.005 || existente.fornecedor!==montada.fornecedorNome || existente.dataVencimento!==(e.data||existente.dataVencimento) || existente.observacao!==montada.observacao || existente.semNF!==!!e.semNF || (existente.numeroNF||null)!==(montada.numeroNF||null) || itensMudaram){
           if(existente.status==='pendente'){
             existente.valor = montada.valor;
             existente.fornecedor = montada.fornecedorNome;
@@ -4731,6 +4813,8 @@ async function sincronizarEntradasEstoqueVK(){
             existente.descricao = montada.descricao;
             existente.numeroNF = montada.numeroNF;
             existente.itens = montada.itens;
+            const categoriasMontadas = [...new Set(montada.itens.map(it=>it.categoria).filter(Boolean))];
+            existente.categoria = categoriasMontadas.length===1 ? categoriasMontadas[0] : (categoriasMontadas.length>1 ? 'Múltiplas categorias' : (existente.categoria||'Insumos'));
             atualizados++;
           } else {
             divergentes.push({ tipo:'editada', entradaId: e.id, lancamentoId: existente.id, valorAntigo: existente.valor, valorNovo: montada.valor, status: existente.status });
@@ -7740,21 +7824,47 @@ function movimentosRealizadosImpl(){
   return eventos;
 }
 
+function detalheItensCategorizadosHTML(l, idPrefix='itensDetalhe_'){
+  const itens = Array.isArray(l.itens) ? l.itens.filter(it=>it) : [];
+  const tem = itens.length>1 && itens.some(it=>it.categoria);
+  if(!tem) return '';
+  const categorias = [...new Set(itens.map(it=>it.categoria).filter(Boolean))];
+  const totalItens = itens.reduce((s,it)=>s+Number(it.valor||0),0);
+  return `
+    <div id="${idPrefix}${l.id}" style="display:none;margin:0 0 8px 68px;padding:10px 12px;background:var(--bone);border:1px solid var(--line);border-radius:10px;">
+      <div style="font-size:11px;font-weight:700;color:var(--text-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px;">
+        Detalhamento da NF · ${itens.length} itens · ${categorias.length} categoria(s)
+      </div>
+      ${itens.map((it,idx)=>`
+        <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:7px 0;${idx<itens.length-1?'border-bottom:1px solid var(--line);':''}">
+          <div style="min-width:0;">
+            <div style="font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHTML(it.nome||'Item')}</div>
+            <div style="font-size:11px;color:var(--text-soft);margin-top:2px;">${escapeHTML(it.categoria||l.categoria||'Sem categoria')}${Number(it.quantidade||0)>0 ? ` · ${fmtQtdBR(it.quantidade)}` : ''}</div>
+          </div>
+          <span class="mono" style="font-size:12px;font-weight:700;white-space:nowrap;">${brl(Number(it.valor||0))}</span>
+        </div>
+      `).join('')}
+      <div style="display:flex;justify-content:space-between;margin-top:7px;padding-top:7px;border-top:1px solid var(--line);font-size:11.5px;font-weight:700;">
+        <span>Total dos itens</span><span class="mono">${brl(totalItens)}</span>
+      </div>
+    </div>
+  `;
+}
+
 function rowHTMLEstiloBluecoins(l){
   const cor = l.origem==='transferencia' ? '#3B6FE0' : (l.tipo==='entrada' ? 'var(--success)' : 'var(--danger)');
   const bg = l.origem==='transferencia' ? '#3B6FE022' : (l.tipo==='entrada' ? 'var(--success)22' : 'var(--danger)22');
   const icone = l.origem==='transferencia' ? '🔁' : (iconeCategoriaLancamento(l) || (l.tipo==='entrada' ? '💰' : '💸'));
   const confirmado = l.status==='pago' || l.status==='recebido';
-  // Saldo da conta no fim do dia daquele lançamento (histórico), não o saldo de hoje — mesmo
-  // conceito do Bluecoins, com uma diferença: se houver mais de um lançamento na mesma conta no
-  // mesmo dia, todos mostram o saldo de FIM do dia (não dá pra saber a ordem exata entre eles).
+  const temItensCategorizados = l.itens && l.itens.length>1 && l.itens.some(it=>it.categoria);
   const dataRef = l.dataPagamento || l.dataVencimento;
   const saldoHistorico = (confirmado && l.contaId && dataRef) ? saldoContaEmData(l.contaId, dataRef) : null;
+  const acaoLinha = temItensCategorizados ? 'toggle-itens-detalhe' : 'abrir-lancamento';
   return `
-    <div class="ledger-row" data-id="${l.id}" data-action="abrir-lancamento" style="display:grid;grid-template-columns:40px 1fr auto;gap:12px;align-items:start;padding:10px 16px;cursor:pointer;">
+    <div class="ledger-row" data-id="${l.id}" data-action="${acaoLinha}" style="display:grid;grid-template-columns:40px 1fr auto;gap:12px;align-items:start;padding:10px 16px;cursor:pointer;">
       <div style="width:40px;height:40px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0;">${icone}</div>
       <div style="min-width:0;">
-        <div style="font-weight:600;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHTML(l.descricao)}</div>
+        <div style="font-weight:600;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHTML(l.descricao)}${temItensCategorizados ? ` <span style="font-size:10.5px;color:var(--blue-accent);font-weight:700;">▾ ${l.itens.length} itens</span>` : ''}</div>
         <div style="font-size:12px;color:var(--text-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${l.origem==='transferencia' ? 'Transferência' : escapeHTML(l.categoria||'')}</div>
         ${(l.tags && l.tags.length) ? `<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:5px;">${l.tags.map(t=>`<span style="font-size:10.5px;border:1px solid var(--line);border-radius:20px;padding:2px 8px;color:var(--text-soft);">${escapeHTML(t)}</span>`).join('')}</div>` : ''}
         ${l.processoVinculadoTitulo ? `<div style="margin-top:4px;"><span style="font-size:10.5px;border:1px solid var(--blue-accent);border-radius:20px;padding:2px 8px;color:var(--blue-accent);">🔗 ${escapeHTML(l.processoVinculadoTitulo)}</span></div>` : ''}
@@ -7764,6 +7874,7 @@ function rowHTMLEstiloBluecoins(l){
         <div style="font-size:11px;color:var(--text-soft);margin-top:2px;">${escapeHTML(nomeConta(l.contaId))}${saldoHistorico!==null ? ' '+brl(saldoHistorico) : ''}</div>
       </div>
     </div>
+    ${detalheItensCategorizadosHTML(l)}
   `;
 }
 
@@ -31076,27 +31187,43 @@ function aprovarItemVK(id){
       const contaEstoqueEl = document.getElementById('aprovContaEstoque_'+id);
       const contaEstoqueId = contaEstoqueEl ? (contaEstoqueEl.value || null) : (cfg.contaIdEstoque || null);
       if(temVariosItens){
-        const itensComCategoria = item.itens.map((it,idx)=>({ ...it, categoria: itensSelects[idx]?.value || null }));
-        const grupos = {};
-        itensComCategoria.forEach(it=>{
-          if(!grupos[it.categoria]) grupos[it.categoria] = [];
-          grupos[it.categoria].push(it);
+        // UMA NF = UM ÚNICO LANÇAMENTO FINANCEIRO.
+        // A categoria pertence a cada item da NF e fica guardada em `itens`.
+        // Não criamos um lançamento por categoria, porque isso duplicaria visualmente
+        // a movimentação que no extrato bancário é uma única saída.
+        const itensComCategoria = item.itens.map((it,idx)=>({
+          ...it,
+          categoria: itensSelects[idx]?.value || null
+        }));
+        const categoriasUnicas = [...new Set(itensComCategoria.map(it=>it.categoria).filter(Boolean))];
+        const categoriaRegistro = categoriasUnicas.length===1 ? categoriasUnicas[0] : 'Múltiplas categorias';
+
+        state.lancamentos.push({
+          id: uid(),
+          tipo:'saida',
+          categoria: categoriaRegistro,
+          grupoId: null,
+          grupoDivisaoId: null,
+          descricao: item.descricao,
+          valor: item.valor,
+          fornecedor: item.contraparte,
+          observacao: item.observacao,
+          contaId: contaEstoqueId,
+          dataVencimento: item.dataVencimento,
+          status: 'pendente',
+          dataPagamento: null,
+          origem: 'vk-estoque',
+          vkEntradaId: item.vkEntradaId,
+          semNF: !!item.semNF,
+          numeroNF: item.numeroNF||null,
+          itens: itensComCategoria,
+          criadoEm: new Date().toISOString()
         });
-        const grupoDivisaoId = uid();
-        const categorias = Object.keys(grupos);
-        categorias.forEach(cat=>{
-          const itensCategoria = grupos[cat];
-          const valorCategoria = Math.round(itensCategoria.reduce((s,it)=>s+Number(it.valor||0),0)*100)/100;
-          state.lancamentos.push({
-            id: uid(), tipo:'saida', categoria: cat, grupoId: grupoDivisaoId, grupoDivisaoId,
-            descricao: item.descricao, valor: valorCategoria, fornecedor: item.contraparte,
-            observacao: item.observacao, contaId: contaEstoqueId, dataVencimento: item.dataVencimento,
-            status: 'pendente', dataPagamento: null,
-            origem: 'vk-estoque', vkEntradaId: item.vkEntradaId, semNF: !!item.semNF, numeroNF: item.numeroNF||null,
-            itens: itensCategoria, criadoEm: new Date().toISOString()
-          });
-        });
-        registrarLog('Entrada de estoque VK aprovada com rateio por categoria', `"${item.descricao}" — ${item.itens.length} item(ns), ${categorias.length} categoria(s), total ${brl(item.valor)}`);
+
+        registrarLog(
+          'Entrada de estoque VK aprovada como lançamento único com categorias por item',
+          `"${item.descricao}" — ${item.itens.length} item(ns), ${categoriasUnicas.length} categoria(s), total ${brl(item.valor)}`
+        );
       } else {
         state.lancamentos.push({
           id: uid(), tipo:'saida', categoria, grupoId: uid(),
@@ -32825,11 +32952,17 @@ function attachViewHandlers(){
     });
   });
   document.querySelectorAll('[data-action]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', (e)=>{
       const id = btn.dataset.id;
       const action = btn.dataset.action;
       const l = state.lancamentos.find(x=>x.id===id);
       if(!l) return;
+      if(action==='toggle-itens-detalhe'){
+        e.stopPropagation();
+        const detalhe = document.getElementById('itensDetalhe_'+id);
+        if(detalhe) detalhe.style.display = detalhe.style.display==='none' ? 'block' : 'none';
+        return;
+      }
       if(action==='quitar'){
         abrirQuitarModal(id);
       } else if(action==='editar'){
@@ -45838,6 +45971,8 @@ auth.onAuthStateChanged(async user=>{
     if(dadosCarregados) return; // evita recarregar e sobrescrever dados em memória a cada re-emissão do evento de auth
     try{
       state = await carregarDados();
+      const nfsVKUnificadas = normalizarNFsVKEmLancamentoUnico();
+      if(nfsVKUnificadas) persist();
       dadosCarregados = true;
       // Bloqueio/suspensão precisa impedir o uso de verdade, não só esconder botão — se o
       // e-mail logado está cadastrado com status bloqueado (ou suspenso dentro do período), a
