@@ -4678,9 +4678,14 @@ async function sincronizarEntradasEstoqueVK(){
         const insumo = insumosVK.find(i=>i.id===(it.produtoId||it.insumoId));
         const nomeInsumo = it.insumoNome || it.nome || it.descricao || insumo?.nome || insumo?.nomeInsumo || insumo?.descricao || insumo?.nomeProduto;
         if(!nomeInsumo) itensSemNomeContagem++;
+        const categoriaBruta = it.categoria || it.categoriaFinanceira || it.categoriaNome || it.categoriaDespesa || null;
+        const categoriaId = it.categoriaId || it.categoriaFinanceiraId || it.categoriaDespesaId || null;
+        const categoriaIdObj = categoriaId ? listaCategorias('saida').find(c=>c.id===categoriaId) : null;
+        const categoriaItem = (typeof categoriaBruta === 'string' && categoriaBruta.trim()) ? categoriaBruta.trim() : (categoriaIdObj?.nome || null);
         return {
           nome: nomeInsumo || 'Insumo não identificado', quantidade: Number(it.quantidade)||0, valorUnitario: Number(it.valorUnitario)||0,
-          valor: Math.round((Number(it.quantidade)||0)*(Number(it.valorUnitario)||0)*100)/100
+          valor: Math.round((Number(it.quantidade)||0)*(Number(it.valorUnitario)||0)*100)/100,
+          categoria: categoriaItem
         };
       });
       const valor = itens.reduce((s,it)=>s+it.valor, 0);
@@ -30807,22 +30812,19 @@ function viewVKAprovacoes(){
           ` : ''}
           ${!ehPedido && item.itens && item.itens.length>1 ? `
           <div style="margin-top:14px;">
-            <div class="field" style="max-width:340px;">
-              <label>Categoria</label>
-              <select id="aprovCategoria_${item.id}" style="display:${item.categorizarPorItem?'none':'block'};">${opcoesCategoriaHTML('saida', item.categoria)}</select>
+            <div class="note" style="margin-top:0;border-color:var(--warn);">
+              <strong>NF com múltiplos itens:</strong> cada item precisa manter sua própria categoria. Esta NF não será classificada inteira como "Insumos".
             </div>
-            <label style="display:flex;align-items:center;gap:9px;font-size:12.5px;cursor:pointer;margin-top:10px;color:var(--text-soft);">
-              <input type="checkbox" class="aprov-dividir-itens-toggle" data-id="${item.id}" style="width:16px;height:16px;" ${item.categorizarPorItem?'checked':''}>
-              Categorizar cada item separadamente (gera um lançamento por item — por padrão, entra como uma despesa única)
-            </label>
-            <div id="aprovItensWrap_${item.id}" style="display:${item.categorizarPorItem?'block':'none'};margin-top:10px;">
-              <label style="font-size:12.5px;font-weight:600;color:var(--text-soft);">Categoria de cada item (${item.itens.length} itens)</label>
-              ${item.itens.map((it,idx)=>`
+            <div style="margin-top:10px;">
+              <label style="font-size:12.5px;font-weight:600;color:var(--text-soft);">Categoria de cada item (${item.itens.length} itens) — obrigatório</label>
+              ${item.itens.map((it,idx)=>{
+                const catInicial = it.categoria || item.categoriasItens?.[idx] || '';
+                return `
                 <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
                   <span style="flex:1;min-width:140px;font-size:12.5px;">${escapeHTML(it.nome)} <span class="mono" style="color:var(--text-soft);">${brl(it.valor)}</span></span>
-                  <select class="aprov-item-categoria" data-id="${item.id}" data-idx="${idx}" style="max-width:200px;flex:1;min-width:160px;">${opcoesCategoriaHTML('saida', item.categoriasItens?.[idx] || item.categoria)}</select>
-                </div>
-              `).join('')}
+                  <select class="aprov-item-categoria" data-id="${item.id}" data-idx="${idx}" style="max-width:220px;flex:1;min-width:160px;"><option value="">— Selecione a categoria —</option>${opcoesCategoriaHTML('saida', catInicial)}</select>
+                </div>`;
+              }).join('')}
             </div>
           </div>
           ` : `
@@ -31032,10 +31034,16 @@ function aprovarItemVK(id){
   } else {
     const ehCartaoEl = document.getElementById('aprovCartaoToggle_'+id) || document.querySelector(`.aprov-cartao-toggle[data-id="${id}"]`);
     const ehCartao = ehCartaoEl ? ehCartaoEl.checked : false;
-    const dividirItensEl = document.querySelector(`.aprov-dividir-itens-toggle[data-id="${id}"]`);
-    const quiseDividirPorItem = dividirItensEl ? dividirItensEl.checked : false;
     const itensSelects = [...document.querySelectorAll(`.aprov-item-categoria[data-id="${id}"]`)];
-    const temVariosItens = quiseDividirPorItem && item.itens && item.itens.length>1 && itensSelects.length===item.itens.length;
+    const temVariosItens = !!(item.itens && item.itens.length>1 && itensSelects.length===item.itens.length);
+    if(item.itens && item.itens.length>1){
+      if(!temVariosItens){ mostrarAvisoValidacao('Não foi possível carregar todas as categorias dos itens. Não aprove esta NF até que todos os itens apareçam.'); return; }
+      const categoriasItensSelecionadas = itensSelects.map(s=>s.value.trim());
+      if(categoriasItensSelecionadas.some(c=>!c)){
+        mostrarAvisoValidacao('Selecione a categoria de TODOS os itens da NF antes de aprovar. Uma NF com itens diferentes não pode ser lançada como uma categoria única.');
+        return;
+      }
+    }
 
     if(ehCartao){
       const cartaoId = document.getElementById('aprovCartaoSelect_'+id)?.value;
@@ -31044,15 +31052,16 @@ function aprovarItemVK(id){
       const dataCompra = item.dataVencimento || todayISO();
       const competencia = competenciaFromDate(cartao, dataCompra);
       if(temVariosItens){
-        const itensComCategoria = item.itens.map((it,idx)=>({ ...it, categoria: itensSelects.find(s=>parseInt(s.dataset.idx)===idx)?.value || categoria }));
-        const categoriaDominante = itensComCategoria.reduce((a,b)=>b.valor>a.valor?b:a).categoria;
+        const itensComCategoria = item.itens.map((it,idx)=>({ ...it, categoria: itensSelects[idx]?.value || null }));
+        const categoriasUnicas = [...new Set(itensComCategoria.map(it=>it.categoria).filter(Boolean))];
+        const categoriaRegistro = categoriasUnicas.length===1 ? categoriasUnicas[0] : 'Múltiplas categorias';
         state.comprasCartao.push({
           id: uid(), cartaoId, grupoId: uid(),
-          descricao: item.descricao, categoria: categoriaDominante, valor: item.valor,
+          descricao: item.descricao, categoria: categoriaRegistro, valor: item.valor,
           fornecedor: item.contraparte||'', numeroNF: item.numeroNF||null, itens: itensComCategoria,
           dataCompra, competencia, parcela: 1, totalParcelas: 1
         });
-        registrarLog('Entrada de estoque VK aprovada como compra no cartão (itens categorizados)', `"${item.descricao}" — ${item.itens.length} item(ns), cada um com sua categoria — ${brl(item.valor)} — ${cartao.nome}`);
+        registrarLog('Entrada de estoque VK aprovada como compra no cartão com categorias por item', `"${item.descricao}" — ${item.itens.length} item(ns), cada um com sua categoria — ${brl(item.valor)} — ${cartao.nome}`);
       } else {
         state.comprasCartao.push({
           id: uid(), cartaoId, grupoId: uid(),
@@ -31067,17 +31076,27 @@ function aprovarItemVK(id){
       const contaEstoqueEl = document.getElementById('aprovContaEstoque_'+id);
       const contaEstoqueId = contaEstoqueEl ? (contaEstoqueEl.value || null) : (cfg.contaIdEstoque || null);
       if(temVariosItens){
-        const itensComCategoria = item.itens.map((it,idx)=>({ ...it, categoria: itensSelects.find(s=>parseInt(s.dataset.idx)===idx)?.value || categoria }));
-        const categoriaDominante = itensComCategoria.reduce((a,b)=>b.valor>a.valor?b:a).categoria;
-        state.lancamentos.push({
-          id: uid(), tipo:'saida', categoria: categoriaDominante, grupoId: uid(),
-          descricao: item.descricao, valor: item.valor, fornecedor: item.contraparte,
-          observacao: item.observacao, contaId: contaEstoqueId, dataVencimento: item.dataVencimento,
-          status: 'pendente', dataPagamento: null,
-          origem: 'vk-estoque', vkEntradaId: item.vkEntradaId, semNF: !!item.semNF, numeroNF: item.numeroNF||null, itens: itensComCategoria,
-          criadoEm: new Date().toISOString()
+        const itensComCategoria = item.itens.map((it,idx)=>({ ...it, categoria: itensSelects[idx]?.value || null }));
+        const grupos = {};
+        itensComCategoria.forEach(it=>{
+          if(!grupos[it.categoria]) grupos[it.categoria] = [];
+          grupos[it.categoria].push(it);
         });
-        registrarLog('Entrada de estoque VK aprovada com itens categorizados', `"${item.descricao}" — ${item.itens.length} item(ns), cada um com sua categoria — ${brl(item.valor)}`);
+        const grupoDivisaoId = uid();
+        const categorias = Object.keys(grupos);
+        categorias.forEach(cat=>{
+          const itensCategoria = grupos[cat];
+          const valorCategoria = Math.round(itensCategoria.reduce((s,it)=>s+Number(it.valor||0),0)*100)/100;
+          state.lancamentos.push({
+            id: uid(), tipo:'saida', categoria: cat, grupoId: grupoDivisaoId, grupoDivisaoId,
+            descricao: item.descricao, valor: valorCategoria, fornecedor: item.contraparte,
+            observacao: item.observacao, contaId: contaEstoqueId, dataVencimento: item.dataVencimento,
+            status: 'pendente', dataPagamento: null,
+            origem: 'vk-estoque', vkEntradaId: item.vkEntradaId, semNF: !!item.semNF, numeroNF: item.numeroNF||null,
+            itens: itensCategoria, criadoEm: new Date().toISOString()
+          });
+        });
+        registrarLog('Entrada de estoque VK aprovada com rateio por categoria', `"${item.descricao}" — ${item.itens.length} item(ns), ${categorias.length} categoria(s), total ${brl(item.valor)}`);
       } else {
         state.lancamentos.push({
           id: uid(), tipo:'saida', categoria, grupoId: uid(),
