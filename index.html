@@ -36219,7 +36219,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     <div class="panel" style="margin-bottom:14px;background:var(--bone);">
       <div style="padding:12px 16px;">
         <div style="font-size:10.5px;font-weight:700;color:var(--text-soft);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:6px;">🔗 Origem e Vínculos</div>
-        <div style="font-size:13px;line-height:1.6;">Vinculado manualmente ao processo <span class="mono">${escapeHTML(existing.processoId)}</span> do Livro de Processos.</div>
+        <div style="font-size:13px;line-height:1.6;">Vinculado manualmente ao processo <strong>${escapeHTML(existing.processoTitulo||existing.processoId)}</strong> do Livro de Processos.</div>
       </div>
     </div>
     ` : ''}
@@ -36401,8 +36401,8 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     </div>
     <div class="field">
       <label>Vincular a um processo do Livro de Processos (opcional)</label>
-      <input type="text" id="fProcessoVinculado" placeholder="Número ou identificação do processo" value="${existing?.processoId && existing?.origem!=='processo' ? escapeHTML(existing.processoId) : ''}">
-      <div class="note" style="margin-top:6px;">Só pra referência — não consulta nem altera nada no Livro de Processos, é texto livre pra você achar depois.</div>
+      <select id="fProcessoVinculado"><option value="">${existing?.processoId && existing?.origem!=='processo' ? escapeHTML(existing.processoTitulo||'Carregando...') : 'Clique pra carregar a lista de processos...'}</option></select>
+      <div class="note" style="margin-top:6px;">A lista vem ao vivo do Livro de Processos — comece a digitar pra achar mais rápido.</div>
     </div>
     <div class="field">
       <label>Observação (opcional)</label>
@@ -36441,6 +36441,14 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
   document.getElementById('btnVerOrcamentosDaFicha')?.addEventListener('click', ()=>{
     closeModal(); currentView='orcamentos-processos'; render();
   });
+  if(state.processosConfig?.firebaseConfig){
+    buscarProcessosParaVincular().then(lista=>{
+      const sel = document.getElementById('fProcessoVinculado');
+      if(!sel || !lista) return;
+      const atual = existing?.processoId && existing?.origem!=='processo' ? existing.processoId : '';
+      sel.innerHTML = `<option value="">— nenhum —</option>` + lista.map(p=>`<option value="${p.id}" data-titulo="${escapeHTML(p.titulo)}" ${atual===p.id?'selected':''}>${escapeHTML(p.titulo)}</option>`).join('');
+    });
+  }
   if(tipo==='saida'){
     const atualizarAvisoProvisionamento = ()=>{
       const wrap = document.getElementById('fProvisionamentoAviso');
@@ -36679,7 +36687,17 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
         const porId = (id,v)=>{ const el=document.getElementById(id); if(el && v) el.value = v; };
         porId('fDescricao', rascunho.descricao); porId('fValor', rascunho.valor); porId('fCategoria', rascunho.categoria);
         porId('fVencimento', rascunho.vencimento); porId('fStatus', rascunho.status); porId('fConta', rascunho.conta);
-        porId('fObservacao', rascunho.observacao); porId('fProcessoVinculado', rascunho.processoVinculado);
+        porId('fObservacao', rascunho.observacao);
+        if(rascunho.processoVinculado){
+          let tentativas = 0;
+          const tentarReselecionar = ()=>{
+            tentativas++;
+            const sel = document.getElementById('fProcessoVinculado');
+            if(sel && [...sel.options].some(o=>o.value===rascunho.processoVinculado)) sel.value = rascunho.processoVinculado;
+            else if(tentativas<15) setTimeout(tentarReselecionar, 200); // a lista ainda tá carregando — tenta de novo, até 3s
+          };
+          setTimeout(tentarReselecionar, 200);
+        }
         document.getElementById('fStatus')?.dispatchEvent(new Event('change'));
         const selFornecedor = document.getElementById('fFornecedorSelect');
         if(selFornecedor){ selFornecedor.value = novoFornecedor.nome; selFornecedor.dispatchEvent(new Event('change')); }
@@ -36963,7 +36981,12 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       comprovanteFoto: comprovanteAtual,
       // Vínculo manual com um processo — não mexe no processoId de lançamentos que já vieram
       // automaticamente de um orçamento aprovado (origem 'processo'), esses continuam como estão.
-      ...(existing?.origem!=='processo' ? { processoId: document.getElementById('fProcessoVinculado')?.value.trim() || null } : {}),
+      ...(existing?.origem!=='processo' ? (()=>{
+        const selProc = document.getElementById('fProcessoVinculado');
+        const processoId = selProc?.value || null;
+        const processoTitulo = processoId ? (selProc.options[selProc.selectedIndex]?.dataset.titulo || selProc.options[selProc.selectedIndex]?.textContent) : null;
+        return { processoId, processoTitulo };
+      })() : {}),
       observacao: document.getElementById('fObservacao').value.trim(),
       tags: (document.getElementById('fEtiquetas')?.value||'').split(',').map(s=>s.trim()).filter(Boolean),
       contaId: document.getElementById('fConta').value || null,
