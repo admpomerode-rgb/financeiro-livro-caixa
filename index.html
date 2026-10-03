@@ -36215,6 +36215,13 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
         <button class="btn ghost sm" id="btnVerOrcamentosDaFicha" style="margin-top:8px;">Ver Aprovação de Orçamentos →</button>
       </div>
     </div>
+    ` : existing?.processoId ? `
+    <div class="panel" style="margin-bottom:14px;background:var(--bone);">
+      <div style="padding:12px 16px;">
+        <div style="font-size:10.5px;font-weight:700;color:var(--text-soft);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:6px;">🔗 Origem e Vínculos</div>
+        <div style="font-size:13px;line-height:1.6;">Vinculado manualmente ao processo <span class="mono">${escapeHTML(existing.processoId)}</span> do Livro de Processos.</div>
+      </div>
+    </div>
     ` : ''}
     ${ehFaturaAbertaSombra ? `
     <div class="note" style="margin-top:0;">🔒 Esse valor é a soma das despesas lançadas na fatura ainda aberta — some sozinho conforme você lança mais despesas no cartão. Edite/exclua as despesas dentro da tela da fatura em vez de mudar aqui.</div>
@@ -36276,10 +36283,13 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       <label>${tipo==='saida' ? 'Fornecedor (opcional)' : 'Cliente (opcional)'}</label>
       ${tipo==='saida' ? `
         <input type="hidden" id="fFornecedorSelect" value="${existing?.fornecedor ? ((state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? escapeHTML(existing.fornecedor) : '__outro__') : ''}">
-        <button type="button" id="fFornecedorBtn" class="btn ghost" style="width:100%;display:flex;align-items:center;justify-content:space-between;text-align:left;font-weight:400;">
-          <span id="fFornecedorBtnLabel" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${existing?.fornecedor && (state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? escapeHTML(existing.fornecedor) : '— nenhum —'}</span>
-          <span style="opacity:.5;flex-shrink:0;margin-left:8px;">🔍 Buscar</span>
-        </button>
+        <div style="display:flex;gap:6px;">
+          <button type="button" id="fFornecedorBtn" class="btn ghost" style="flex:1;min-width:0;display:flex;align-items:center;justify-content:space-between;text-align:left;font-weight:400;">
+            <span id="fFornecedorBtnLabel" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${existing?.fornecedor && (state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? escapeHTML(existing.fornecedor) : '— nenhum —'}</span>
+            <span style="opacity:.5;flex-shrink:0;margin-left:8px;">🔍 Buscar</span>
+          </button>
+          <button type="button" id="btnNovoFornecedorRapido" class="btn ghost" title="Cadastrar um fornecedor novo sem sair daqui" style="flex-shrink:0;">+ Novo</button>
+        </div>
         <input type="text" id="fFornecedor" placeholder="Nome do fornecedor" style="margin-top:8px;${existing?.fornecedor && !(state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? '' : 'display:none;'}" value="${existing?.fornecedor && !(state.fornecedores||[]).some(f=>f.nome===existing.fornecedor) ? escapeHTML(existing.fornecedor) : ''}">
         <div class="note" id="fContratoAlerta" style="margin-top:8px;"></div>
       ` : `
@@ -36388,6 +36398,11 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       </div>
       <button type="button" class="btn ghost sm" id="btnAnexarComprovante">${existing?.comprovanteFoto?'Trocar foto':'📎 Anexar foto'}</button>
       <div class="note" style="margin-top:8px;">A foto fica salva no mesmo banco de dados do sistema — evite anexar em todos os lançamentos, só nos que realmente precisam de comprovante guardado.</div>
+    </div>
+    <div class="field">
+      <label>Vincular a um processo do Livro de Processos (opcional)</label>
+      <input type="text" id="fProcessoVinculado" placeholder="Número ou identificação do processo" value="${existing?.processoId && existing?.origem!=='processo' ? escapeHTML(existing.processoId) : ''}">
+      <div class="note" style="margin-top:6px;">Só pra referência — não consulta nem altera nada no Livro de Processos, é texto livre pra você achar depois.</div>
     </div>
     <div class="field">
       <label>Observação (opcional)</label>
@@ -36646,6 +36661,30 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
           fFornecedorSelect.dispatchEvent(new Event('change'));
           document.getElementById('fFornecedorBtnLabel').textContent = valor==='__outro__' ? 'Outro (digitar)' : (valor || '— nenhum —');
         }
+      });
+    });
+    // "+ Novo fornecedor" sem sair do lançamento: o cadastro de fornecedor usa o MESMO espaço na tela
+    // (#modalContent), então abrir ele aqui apagaria o que já foi digitado. Por isso captura um
+    // rascunho dos campos principais antes de trocar de tela, e reaplica no formulário limpo depois.
+    document.getElementById('btnNovoFornecedorRapido')?.addEventListener('click', ()=>{
+      const pegar = id => document.getElementById(id)?.value ?? '';
+      const rascunho = {
+        tipo, contaPreSelecionadaId,
+        descricao: pegar('fDescricao'), valor: pegar('fValor'), categoria: pegar('fCategoria'),
+        vencimento: pegar('fVencimento'), status: pegar('fStatus'), conta: pegar('fConta'),
+        observacao: pegar('fObservacao'), processoVinculado: pegar('fProcessoVinculado')
+      };
+      openFornecedorModal(null, (novoFornecedor)=>{
+        openLancamentoModal(rascunho.tipo, existing||null, rascunho.contaPreSelecionadaId);
+        const porId = (id,v)=>{ const el=document.getElementById(id); if(el && v) el.value = v; };
+        porId('fDescricao', rascunho.descricao); porId('fValor', rascunho.valor); porId('fCategoria', rascunho.categoria);
+        porId('fVencimento', rascunho.vencimento); porId('fStatus', rascunho.status); porId('fConta', rascunho.conta);
+        porId('fObservacao', rascunho.observacao); porId('fProcessoVinculado', rascunho.processoVinculado);
+        document.getElementById('fStatus')?.dispatchEvent(new Event('change'));
+        const selFornecedor = document.getElementById('fFornecedorSelect');
+        if(selFornecedor){ selFornecedor.value = novoFornecedor.nome; selFornecedor.dispatchEvent(new Event('change')); }
+        const label = document.getElementById('fFornecedorBtnLabel'); if(label) label.textContent = novoFornecedor.nome;
+        showToast(`Fornecedor "${normalizarNomeFornecedor(novoFornecedor.nome)}" cadastrado e selecionado.`);
       });
     });
   }
@@ -36922,6 +36961,9 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
       centroCusto: (fCentroCusto && fCentroCusto.value!=='__novo__') ? fCentroCusto.value : (existing?.centroCusto||''),
       canalVenda: (fCanalVenda && fCanalVenda.value!=='__novo__') ? fCanalVenda.value : (existing?.canalVenda||''),
       comprovanteFoto: comprovanteAtual,
+      // Vínculo manual com um processo — não mexe no processoId de lançamentos que já vieram
+      // automaticamente de um orçamento aprovado (origem 'processo'), esses continuam como estão.
+      ...(existing?.origem!=='processo' ? { processoId: document.getElementById('fProcessoVinculado')?.value.trim() || null } : {}),
       observacao: document.getElementById('fObservacao').value.trim(),
       tags: (document.getElementById('fEtiquetas')?.value||'').split(',').map(s=>s.trim()).filter(Boolean),
       contaId: document.getElementById('fConta').value || null,
@@ -38772,8 +38814,8 @@ function viewFornecedores(){
       <div class="card"><div class="label">Sem CNPJ/CPF</div><div class="value mono">${semCNPJ}</div></div>
       <div class="card"><div class="label">Cadastro incompleto</div><div class="value mono" style="color:${cadastroIncompleto>0?'var(--warn)':'inherit'};">${cadastroIncompleto}</div></div>
     </div>
-    <div class="row" style="margin-bottom:10px;gap:8px;flex-wrap:wrap;align-items:center;">
-      <input type="text" id="fornecedorBusca" placeholder="🔎 Buscar por nome, CNPJ, telefone ou e-mail..." value="${escapeHTML(fornecedoresFiltro.busca)}" style="flex:1 1 220px;">
+    <div style="display:flex;margin-bottom:10px;gap:8px;flex-wrap:wrap;align-items:center;">
+      <input type="text" id="fornecedorBusca" placeholder="🔎 Buscar por nome, CNPJ, telefone ou e-mail..." value="${escapeHTML(fornecedoresFiltro.busca)}" style="flex:3 1 320px;min-width:0;">
       <div style="display:flex;gap:6px;">
         <button type="button" class="graf-chip ${fornecedoresFiltro.situacao==='todos'?'sel':''}" data-situacao-filtro="todos">Todos (${totalFornecedores})</button>
         <button type="button" class="graf-chip ${fornecedoresFiltro.situacao==='ativos'?'sel':''}" data-situacao-filtro="ativos">Ativos (${totalFornecedores-qtdInativos})</button>
@@ -38908,7 +38950,7 @@ function openAvaliarFornecedorModal(fornecedorId){
   });
 }
 
-function openFornecedorModal(existing){
+function openFornecedorModal(existing, aoSalvar){
   const isEdit = !!existing;
   const modal = document.getElementById('modalContent');
   modal.innerHTML = `
@@ -39031,6 +39073,7 @@ function openFornecedorModal(existing){
       contratoPrecoFixo: numBR(document.getElementById('fnPrecoContrato').value) || null,
       contratoVigenciaFim: document.getElementById('fnContratoVigencia').value || null
     };
+    let fornecedorSalvo;
     if(isEdit){
       const nomeAntigo = existing.nome;
       Object.assign(existing, payload);
@@ -39038,11 +39081,14 @@ function openFornecedorModal(existing){
         existing.nomeEditadoManualmente = true;
         state.lancamentos.forEach(l=>{ if(l.fornecedor===nomeAntigo) l.fornecedor = nome; });
       }
+      fornecedorSalvo = existing;
     } else {
-      state.fornecedores.push({ id: uid(), ...payload });
+      fornecedorSalvo = { id: uid(), ...payload };
+      state.fornecedores.push(fornecedorSalvo);
     }
-    persist(); closeModal(); render();
+    persist(); closeModal();
     showToast(isEdit ? 'Fornecedor atualizado' : 'Fornecedor cadastrado');
+    if(aoSalvar) aoSalvar(fornecedorSalvo); else render();
   
     }finally{
       const btn_btnSalvarFornecedor_Fim = document.getElementById('btnSalvarFornecedor');
@@ -40388,8 +40434,9 @@ function viewMetasReserva(){
             ${falta>0 ? `<div style="font-size:10px;color:var(--text-soft);margin-top:3px;">Falta ${m.tipoMedicao==='percentual'||m.tipoMedicao==='margem'||m.tipoMedicao==='indice'?falta.toFixed(1)+'%':brl(falta)}${m.automatica?' · calculado automaticamente':''}</div>` : ''}
             ${(()=>{
               if(!m.dataFinal || m.statusCalc==='atingida' || m.statusCalc==='superada') return '';
-              const proj = calcularProjecaoMeta(m.valorAtual, m.dataInicial, m.dataFinal, hoje2);
-              if(!proj) return '';
+              const projResultado = calcularProjecaoMeta(m.valorAtual, m.dataInicial, m.dataFinal, hoje2);
+              if(!projResultado) return '';
+              const proj = projResultado.projecao;
               const diasRestantes = Math.max(0, Math.ceil((new Date(m.dataFinal)-new Date(hoje2))/86400000));
               const ritmoNecessario = diasRestantes>0 ? falta/diasRestantes : falta;
               const fmt = v => m.tipoMedicao==='percentual'||m.tipoMedicao==='margem'||m.tipoMedicao==='indice' ? v.toFixed(1)+'%' : brl(v);
