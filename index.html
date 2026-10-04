@@ -4709,15 +4709,6 @@ async function sincronizarEntradasEstoqueVK(){
     const fornecedoresVK = fornecedoresSnap.docs.map(d=>({ id: d.id, ...d.data() }));
     const soDigitos = v => (v||'').toString().replace(/\D/g,'');
 
-    // Diagnóstico — se os nomes continuarem "não identificado", abra o console do navegador (F12 no
-    // computador, ou "Inspecionar" no celular via cabo/desktop mode) e veja essas linhas: elas mostram
-    // a estrutura EXATA que o VK Industrial está mandando, pra descobrir o nome certo dos campos.
-    if(entradas.length){
-      console.log('[Diagnóstico VK] Exemplo de entrada de estoque crua:', entradas[0]);
-      if(entradas[0].itens && entradas[0].itens.length) console.log('[Diagnóstico VK] Exemplo de item dentro da entrada:', entradas[0].itens[0]);
-    }
-    if(insumosVK.length) console.log('[Diagnóstico VK] Exemplo de insumo cru:', insumosVK[0]);
-    if(fornecedoresVK.length) console.log('[Diagnóstico VK] Exemplo de fornecedor cru:', fornecedoresVK[0]);
 
     function resolverFornecedor(fornecedorId){
       const fVK = fornecedoresVK.find(f=>f.id===fornecedorId);
@@ -45917,7 +45908,11 @@ document.getElementById('btnBackup').addEventListener('click', ()=>{
     // salvo num pendrive, etc. — ela continua funcionando normalmente dentro do app (não mexemos
     // em state.vkConfig de verdade, só numa cópia usada pra gerar o arquivo exportado).
     const estadoParaExportar = JSON.parse(JSON.stringify(state));
+    // S-03 do plano de segurança: nenhuma senha de integração sai num arquivo que pode circular
+    // por e-mail, WhatsApp, pendrive etc. Continuam funcionando normalmente dentro do app — só não
+    // vão nessa cópia específica usada pra gerar o arquivo baixado.
     if(estadoParaExportar.vkConfig) delete estadoParaExportar.vkConfig.senha;
+    if(estadoParaExportar.processosConfig) delete estadoParaExportar.processosConfig.senha;
     const blob = new Blob([JSON.stringify(estadoParaExportar, null, 2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -46026,6 +46021,7 @@ function nomeUsuarioLogado(){
 function exportarBackupAgora(){
   const estadoParaExportar = JSON.parse(JSON.stringify(state));
   if(estadoParaExportar.vkConfig) delete estadoParaExportar.vkConfig.senha;
+  if(estadoParaExportar.processosConfig) delete estadoParaExportar.processosConfig.senha;
   const blob = new Blob([JSON.stringify(estadoParaExportar, null, 2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
