@@ -31654,6 +31654,7 @@ function viewConfiguracoes(){
     { id:'conciliacao', icone:'🔄', nome:'Conciliação Bancária', desc:'Compare o extrato do banco (OFX) com os lançamentos já registrados' },
     { id:'dashboard_widget', icone:'🌤️', nome:'Widget do Dashboard', desc:'Cidade da previsão do tempo e ativos da bolsa mostrados no card do notebook' },
     { id:'leitor_ia', icone:'🤖', nome:'Leitor Automático (IA)', desc:'Chave de API pra ler nota fiscal, print do inversor solar e fatura de energia automaticamente' },
+    { id:'contas', icone:'🏦', nome:'Ordem das Contas', desc:'Organize manualmente a ordem das contas nos seletores do sistema' },
   ];
   return `
     <div class="topbar">
@@ -31676,7 +31677,7 @@ function viewConfiguracoes(){
 const CONFIG_NOMES = {
   aparencia:'Aparência', armazenamento:'Armazenamento no Firestore', codigo:'Código do Sistema',
   aprovacao:'Aprovação de Despesas', firebase:'Firebase', dashboard_widget:'Widget do Dashboard',
-  leitor_ia:'Leitor Automático (IA)'
+  leitor_ia:'Leitor Automático (IA)', contas:'Ordem das Contas'
 };
 
 function viewConfiguracaoDetalhe(){
@@ -31726,6 +31727,25 @@ function renderConfigLeitorIA(){
     </div>`;
 }
 
+function renderConfigContas(){
+  // Reordena o ARRAY state.contas de verdade (mesma lógica do arrastar-e-soltar que já existe na
+  // tela Contas) — como todo seletor de conta do sistema lista na ordem desse array, mudando aqui
+  // muda em todo lugar sozinho, sem precisar tocar em cada tela. Botões ↑↓ em vez de arrastar
+  // porque arrastar (HTML5 drag nativo) não funciona bem em celular.
+  return `
+    <div class="note" style="margin:0 0 14px;">Essa é a mesma ordem usada em toda a tela "Contas" e em todos os seletores de conta do sistema (lançamentos, transferências, relatórios...). Arrastar na tela Contas faz a mesma coisa — isso aqui é só uma forma que funciona bem no celular também.</div>
+    <div style="max-width:460px;">
+      ${state.contas.map((c,i)=>`
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;background:var(--white);">
+          <span style="width:8px;height:8px;border-radius:50%;background:${c.cor||'var(--blue-accent)'};flex-shrink:0;"></span>
+          <span style="flex:1;min-width:0;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHTML(c.nome)}${c.arquivada?' <span style="color:var(--text-soft);font-size:11px;">(arquivada)</span>':''}</span>
+          <button type="button" class="icon-btn" data-subir-conta="${c.id}" ${i===0?'disabled style="opacity:.3;"':''} title="Subir">▲</button>
+          <button type="button" class="icon-btn" data-descer-conta="${c.id}" ${i===state.contas.length-1?'disabled style="opacity:.3;"':''} title="Descer">▼</button>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
 function renderConfigAparencia(){
   const atual = state.temaCor || 'azul';
   const escuro = !!state.modoEscuro;
@@ -32761,6 +32781,22 @@ function attachViewHandlers(){
           showToast(`Tema "${TEMAS_COR[el.dataset.tema].nome}" aplicado`);
         });
       });
+      document.querySelectorAll('[data-subir-conta]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const idx = state.contas.findIndex(c=>c.id===btn.dataset.subirConta);
+          if(idx<=0) return;
+          [state.contas[idx-1], state.contas[idx]] = [state.contas[idx], state.contas[idx-1]];
+          persist(); paintConfig();
+        });
+      });
+      document.querySelectorAll('[data-descer-conta]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const idx = state.contas.findIndex(c=>c.id===btn.dataset.descerConta);
+          if(idx<0 || idx>=state.contas.length-1) return;
+          [state.contas[idx], state.contas[idx+1]] = [state.contas[idx+1], state.contas[idx]];
+          persist(); paintConfig();
+        });
+      });
       if(configAtivo==='codigo') preencherEstatisticasCodigo();
       document.getElementById('btnSalvarApiKeyAnthropic')?.addEventListener('click', ()=>{
         const urlFn = document.getElementById('cfgCloudFunctionLeitorIA').value.trim();
@@ -32794,6 +32830,7 @@ function attachViewHandlers(){
         configAtivo==='firebase' ? renderConfigFirebase() :
         configAtivo==='dashboard_widget' ? renderConfigDashboardWidget() :
         configAtivo==='leitor_ia' ? renderConfigLeitorIA() :
+        configAtivo==='contas' ? renderConfigContas() :
         configAtivo==='aparencia' ? renderConfigAparencia() :
         renderConfigArmazenamento();
       bindConfigInner();
@@ -36331,7 +36368,7 @@ function openLancamentoModal(tipo, existing, contaPreSelecionadaId){
     <div class="field-row" id="wrapVencStatus">
       <div class="field">
         <label id="lblVencimento">Vencimento</label>
-        <input type="date" id="fVencimento" value="${existing?.dataVencimento || todayISO()}">
+        <input type="date" id="fVencimento" value="${existing?.dataVencimento || ''}">
       </div>
       <div class="field" id="wrapStatusDespesa">
         <label>Status</label>
